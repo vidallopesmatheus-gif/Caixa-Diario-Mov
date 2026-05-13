@@ -1,986 +1,946 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Caixa Diário - Login</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.1.0/crypto-js.min.js"></script>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; background: #0d0d0d; color: #fff; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caixa Diário</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d0d0d;color:#fff;min-height:100vh}
 
-        /* ── LOGIN ── */
-        .login-container { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .login-box { background: #1a1a1a; border-radius: 20px; padding: 40px; max-width: 400px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.5); border: 1px solid #333; }
-        .login-header { text-align: center; margin-bottom: 40px; }
-        .login-header h1 { font-size: 32px; margin-bottom: 10px; background: linear-gradient(135deg,#5ac8fa 0%,#34c759 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-        .login-header p { color: #999; font-size: 14px; }
-        .tab-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 30px; }
-        .tab-btn { padding: 12px; border: 2px solid #333; background: #2a2a2a; color: #999; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all .3s; }
-        .tab-btn.active, .tab-btn:hover { border-color: #5ac8fa; color: #5ac8fa; background: #333; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; font-size: 14px; font-weight: 600; color: #bbb; margin-bottom: 8px; }
-        input[type="email"], input[type="password"], input[type="text"], input[type="number"], input[type="date"], select, textarea {
-            width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #2a2a2a; color: #fff; font-size: 14px; transition: all .3s;
-        }
-        input:focus, select:focus, textarea:focus { outline: none; border-color: #5ac8fa; box-shadow: 0 0 0 3px rgba(90,200,250,.1); background: #333; }
-        input::placeholder, textarea::placeholder { color: #666; }
-        .form-section { display: none; }
-        .form-section.active { display: block; }
-        .btn-login, .btn-register { width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all .3s; text-transform: uppercase; letter-spacing: .5px; background: linear-gradient(135deg,#5ac8fa 0%,#34c759 100%); color: #000; margin-bottom: 15px; }
-        .btn-login:hover, .btn-register:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(90,200,250,.3); }
-        .forgot-password { text-align: center; margin-top: 15px; }
-        .forgot-password a, .forgot-password span { color: #5ac8fa; text-decoration: none; font-size: 13px; cursor: pointer; }
-        .error-message { background: #ff3b30; color: white; padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; display: none; }
-        .error-message.show { display: block; }
+/* ── TELA DE LOGIN ── */
+.login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.login-box{background:#1a1a1a;border:1px solid #333;border-radius:20px;padding:40px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.login-logo{text-align:center;margin-bottom:32px}
+.login-logo h1{font-size:30px;background:linear-gradient(135deg,#5ac8fa,#34c759);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.login-logo p{color:#666;font-size:13px;margin-top:4px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:13px;color:#888;font-weight:600;margin-bottom:6px}
+.field input{width:100%;padding:11px 14px;background:#2a2a2a;border:1px solid #333;border-radius:10px;color:#fff;font-size:15px}
+.field input:focus{outline:none;border-color:#5ac8fa}
+.field input::placeholder{color:#555}
+.btn-primary{width:100%;padding:13px;background:linear-gradient(135deg,#5ac8fa,#34c759);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;margin-top:8px}
+.btn-primary:hover{opacity:.9}
+.err-box{background:#2e1010;border:1px solid #ff3b30;color:#ff6b6b;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;display:none}
+.err-box.show{display:block}
 
-        /* ── GIST SETUP BANNER ── */
-        .gist-banner { background: #1a2a1a; border: 1px solid #34c759; border-radius: 12px; padding: 16px 18px; margin-bottom: 20px; font-size: 13px; color: #aaa; display: none; }
-        .gist-banner.show { display: block; }
-        .gist-banner h3 { color: #34c759; font-size: 14px; margin-bottom: 8px; }
-        .gist-banner a { color: #5ac8fa; }
-        .gist-fields { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
-        .gist-fields input { padding: 9px 12px; font-size: 13px; }
-        .btn-gist-save { background: #34c759; color: #000; border: none; border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer; margin-top: 8px; }
-        .sync-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 10px; border-radius: 20px; font-weight: 500; }
-        .sync-ok { background: #1a2a1a; color: #34c759; border: 1px solid #34c759; }
-        .sync-err { background: #2a1a1a; color: #ff3b30; border: 1px solid #ff3b30; }
-        .sync-pending { background: #2a2a1a; color: #ffd60a; border: 1px solid #ffd60a; }
+/* ── LAYOUT PRINCIPAL ── */
+.app{display:none}
+.app.active{display:block}
+.topbar{background:#111;border-bottom:1px solid #222;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.topbar-left{display:flex;align-items:center;gap:16px}
+.topbar-logo{font-size:18px;font-weight:700}
+.badge-role{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600}
+.badge-admin{background:#2a1a3a;color:#bf5fff;border:1px solid #6a2f9a}
+.badge-client{background:#0a2a1a;color:#34c759;border:1px solid #1a6a3a}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.sync-badge{font-size:12px;padding:4px 10px;border-radius:20px;font-weight:500}
+.sync-ok{background:#0a2a1a;color:#34c759;border:1px solid #1a5a2a}
+.sync-err{background:#2a0a0a;color:#ff3b30;border:1px solid #5a1a1a}
+.sync-spin{background:#2a2a0a;color:#ffd60a;border:1px solid #5a5a1a}
+.avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#5ac8fa,#34c759);display:flex;align-items:center;justify-content:center;font-weight:700;color:#000;font-size:14px}
+.btn-sm{padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none}
+.btn-logout{background:#2a1a1a;color:#ff6b6b;border:1px solid #5a2a2a}
+.btn-logout:hover{background:#3a1a1a}
+.btn-sync{background:#1a2a1a;color:#34c759;border:1px solid #2a5a2a}
+.btn-sync:hover{background:#1a3a1a}
 
-        /* ── MAIN APP ── */
-        .app-container { display: none; }
-        .app-container.active { display: block; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { display: flex; justify-content: space-between; align-items: center; padding: 20px; background: #1a1a1a; border-radius: 15px; margin-bottom: 20px; border-bottom: 1px solid #333; flex-wrap: wrap; gap: 12px; }
-        .header-left { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
-        .header-left h1 { font-size: 28px; font-weight: 700; margin: 0; }
-        .store-selector { padding: 10px 15px; background: #2a2a2a; border: 1px solid #444; border-radius: 10px; color: #fff; font-size: 14px; cursor: pointer; }
-        .store-selector:hover { border-color: #666; }
-        .store-selector option { background: #1a1a1a; }
-        .user-menu { display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
-        .user-info { display: flex; gap: 10px; align-items: center; background: #2a2a2a; padding: 10px 15px; border-radius: 12px; }
-        .user-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg,#5ac8fa 0%,#34c759 100%); display: flex; align-items: center; justify-content: center; font-weight: 700; color: #000; font-size: 18px; }
-        .user-name { font-size: 14px; font-weight: 600; }
-        .btn-logout { background: #ff3b30; border: none; color: white; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
-        .btn-logout:hover { background: #ff453a; }
-        .btn-gist-config { background: #2a2a2a; border: 1px solid #444; color: #aaa; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; }
-        .btn-gist-config:hover { border-color: #34c759; color: #34c759; }
+/* ── ABAS ── */
+.tabs-bar{background:#111;border-bottom:1px solid #222;padding:0 24px;display:flex;gap:4px}
+.tab-btn{padding:12px 20px;background:none;border:none;color:#666;font-size:14px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent}
+.tab-btn.active{color:#fff;border-bottom-color:#5ac8fa}
+.tab-btn:hover{color:#aaa}
+.tab-pane{display:none;padding:24px}
+.tab-pane.active{display:block}
 
-        .date-navigation { display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 20px; background: #1a1a1a; padding: 15px; border-radius: 12px; }
-        .date-navigation button { background: #2a2a2a; border: 1px solid #444; color: #fff; width: 40px; height: 40px; border-radius: 10px; cursor: pointer; font-size: 18px; }
-        .date-navigation button:hover { background: #333; }
-        .current-date { font-size: 18px; font-weight: 700; min-width: 120px; text-align: center; }
+/* ── CARDS ESTATÍSTICAS ── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px}
+.stat-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:16px 20px}
+.stat-card .lbl{font-size:12px;color:#666;margin-bottom:6px}
+.stat-card .val{font-size:22px;font-weight:700}
+.val-green{color:#34c759}
+.val-red{color:#ff3b30}
+.val-blue{color:#5ac8fa}
+.val-yellow{color:#ffd60a}
 
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; background: #1a1a1a; padding: 10px; border-radius: 12px; }
-        .tab { flex: 1; padding: 12px; background: transparent; border: none; color: #666; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all .3s; }
-        .tab.active { background: #2a2a2a; color: #fff; }
-        .tab:hover { color: #fff; }
+/* ── PAINEL ADMIN ── */
+.admin-grid{display:grid;grid-template-columns:320px 1fr;gap:20px}
+@media(max-width:900px){.admin-grid{grid-template-columns:1fr}}
+.panel{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:20px}
+.panel-title{font-size:15px;font-weight:700;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;justify-content:space-between}
+.client-list-item{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;cursor:pointer;margin-bottom:6px;border:1px solid transparent;transition:all .2s}
+.client-list-item:hover{background:#222;border-color:#333}
+.client-list-item.selected{background:#1a2a1a;border-color:#34c759}
+.client-name{font-weight:600;font-size:14px}
+.client-store{font-size:12px;color:#666;margin-top:2px}
+.client-saldo{font-size:13px;font-weight:700;color:#34c759}
+.btn-add-client{width:100%;padding:10px;background:#1a2a1a;border:1px dashed #2a5a2a;border-radius:10px;color:#34c759;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px}
+.btn-add-client:hover{background:#1f3a1f}
 
-        .stats { display: grid; grid-template-columns: repeat(5,1fr); gap: 15px; margin-bottom: 20px; }
-        .stat-card { padding: 20px; border-radius: 15px; text-align: center; border: 1px solid #333; }
-        .stat-card.inicio { background: linear-gradient(135deg,#1a1a2e,#16213e); }
-        .stat-card.entradas { background: linear-gradient(135deg,#0a2e1a,#0d3b1f); }
-        .stat-card.saidas { background: linear-gradient(135deg,#2e0a0a,#3b0d0d); }
-        .stat-card.receber { background: linear-gradient(135deg,#1a2a0a,#1f3b0d); }
-        .stat-card.pagar { background: linear-gradient(135deg,#2a1a0a,#3b1f0d); }
-        .stat-label { font-size: 12px; color: #888; margin-bottom: 8px; }
-        .stat-value { font-size: 18px; font-weight: 700; }
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100;display:none}
+.modal-overlay.open{display:flex}
+.modal{background:#1a1a1a;border:1px solid #333;border-radius:16px;padding:28px;width:100%;max-width:400px}
+.modal-title{font-size:17px;font-weight:700;margin-bottom:20px}
+.modal-footer{display:flex;gap:10px;margin-top:20px;justify-content:flex-end}
+.btn-cancel{padding:10px 20px;background:#2a2a2a;border:none;border-radius:8px;color:#aaa;font-size:14px;cursor:pointer}
+.btn-confirm{padding:10px 20px;background:#34c759;border:none;border-radius:8px;color:#000;font-size:14px;font-weight:700;cursor:pointer}
+.btn-danger{padding:10px 20px;background:#ff3b30;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer}
 
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        .main-content { background: #1a1a1a; border-radius: 15px; padding: 25px; margin-bottom: 20px; }
-        .section-title { font-size: 18px; font-weight: 700; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #333; }
+/* ── CAIXA DIÁRIO (cliente) ── */
+.day-nav{display:flex;align-items:center;justify-content:space-between;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:14px 20px;margin-bottom:20px}
+.day-nav button{background:#2a2a2a;border:none;color:#fff;width:36px;height:36px;border-radius:8px;cursor:pointer;font-size:16px}
+.day-nav button:hover{background:#333}
+.day-label{font-size:17px;font-weight:700;text-align:center}
+.day-sub{font-size:12px;color:#666;text-align:center;margin-top:2px}
+.form-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:20px;margin-bottom:16px}
+.form-card h3{font-size:14px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px}
+.inp-group{margin-bottom:14px}
+.inp-group label{display:block;font-size:13px;color:#888;margin-bottom:5px;font-weight:500}
+.inp-group input{width:100%;padding:10px 13px;background:#111;border:1px solid #2a2a2a;border-radius:8px;color:#fff;font-size:15px}
+.inp-group input:focus{outline:none;border-color:#5ac8fa}
+.inp-group input[readonly]{color:#555;cursor:not-allowed}
+.saida-row{display:grid;grid-template-columns:1fr 110px 32px;gap:8px;margin-bottom:8px;align-items:center}
+.saida-row input{padding:9px 12px;background:#111;border:1px solid #2a2a2a;border-radius:8px;color:#fff;font-size:14px;width:100%}
+.saida-row input:focus{outline:none;border-color:#ff3b30}
+.btn-rm{background:#2a1010;border:1px solid #5a2020;color:#ff6b6b;width:32px;height:36px;border-radius:8px;cursor:pointer;font-size:14px}
+.btn-rm:hover{background:#3a1010}
+.btn-add-saida{width:100%;padding:9px;background:#1a1010;border:1px dashed #5a2020;border-radius:8px;color:#ff6b6b;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px}
+.btn-add-saida:hover{background:#201010}
+.saldo-box{background:#0a1a0a;border:1px solid #1a4a1a;border-radius:12px;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;margin:16px 0}
+.saldo-calc-lbl{font-size:13px;color:#666}
+.saldo-calc-val{font-size:24px;font-weight:800;color:#34c759}
+.dif-msg{font-size:13px;font-weight:600;margin-top:8px;min-height:18px}
+.dif-ok{color:#34c759} .dif-err{color:#ff3b30}
+.btn-save{width:100%;padding:14px;background:linear-gradient(135deg,#34c759,#30d158);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-save:hover{opacity:.9}
+.btn-save:disabled{opacity:.5;cursor:not-allowed}
 
-        .saidas-container { margin-bottom: 10px; }
-        .saida-item { display: flex; align-items: center; gap: 10px; background: #2a2a2a; padding: 12px 15px; border-radius: 10px; margin-bottom: 8px; border: 1px solid #333; }
-        .saida-item input { background: transparent; border: none; color: #fff; font-size: 14px; flex: 1; padding: 0; }
-        .saida-item input:focus { outline: none; }
-        .saida-valor { font-weight: 700; color: #ff3b30; white-space: nowrap; }
-        .btn-remove-saida { background: #ff3b30; border: none; color: white; width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .btn-add-saida { width: 100%; padding: 12px; background: #2a2a2a; border: 2px dashed #444; border-radius: 10px; color: #666; cursor: pointer; font-size: 14px; transition: all .3s; }
-        .btn-add-saida:hover { border-color: #5ac8fa; color: #5ac8fa; }
+/* ── HISTÓRICO ── */
+.hist-item{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;margin-bottom:8px;overflow:hidden}
+.hist-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;transition:background .2s}
+.hist-head:hover{background:#222}
+.hist-date{font-weight:600;font-size:14px}
+.hist-meta{font-size:12px;color:#666;margin-top:2px}
+.hist-saldo{font-size:15px;font-weight:700;color:#34c759}
+.hist-body{padding:12px 16px;border-top:1px solid #222;display:none}
+.hist-body.open{display:block}
+.hist-row{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid #1a1a1a}
+.hist-row:last-child{border:none;font-weight:700}
+.hist-in{color:#34c759} .hist-out{color:#ff3b30}
+.tag{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600}
+.tag-in{background:#0a2a1a;color:#34c759}
+.tag-out{background:#2a0a0a;color:#ff3b30}
+.btn-del-rec{background:none;border:1px solid #333;border-radius:6px;color:#ff6b6b;font-size:12px;padding:3px 10px;cursor:pointer;margin-top:8px}
 
-        .calculation-section { background: #222; padding: 20px; border-radius: 12px; margin: 20px 0; }
-        .calculation-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #333; }
-        .calculation-row:last-child { border-bottom: none; }
-        .calculation-label { color: #888; font-size: 14px; }
-        .calculation-value { font-weight: 700; font-size: 16px; }
-        .final-balance { background: linear-gradient(135deg,#0a2e1a,#0d3b1f); border: 1px solid #34c759; border-radius: 15px; padding: 20px; text-align: center; margin: 20px 0; }
-        .final-balance-label { font-size: 14px; color: #888; margin-bottom: 8px; }
-        .final-balance-value { font-size: 32px; font-weight: 800; color: #34c759; }
+/* ── PAINEL ADMIN: VISÃO GERAL CLIENTES ── */
+.overview-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:20px}
+.ov-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:18px;cursor:pointer;transition:all .2s}
+.ov-card:hover{border-color:#5ac8fa;background:#1a1f2a}
+.ov-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.ov-name{font-weight:700;font-size:15px}
+.ov-store{font-size:12px;color:#666}
+.ov-saldo{font-size:22px;font-weight:800;color:#34c759}
+.ov-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.ov-stat{background:#111;border-radius:8px;padding:8px 10px}
+.ov-stat-lbl{font-size:11px;color:#555}
+.ov-stat-val{font-size:14px;font-weight:600;margin-top:2px}
+.btn-view-client{margin-top:12px;width:100%;padding:8px;background:#1a2a3a;border:1px solid #2a4a5a;border-radius:8px;color:#5ac8fa;font-size:13px;font-weight:600;cursor:pointer}
+.btn-view-client:hover{background:#1a3a4a}
 
-        .button-group { display: grid; grid-template-columns: auto auto 1fr; gap: 10px; margin-top: 20px; }
-        .btn-submit, .btn-export, .btn-clear { padding: 14px 20px; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all .3s; }
-        .btn-submit { background: linear-gradient(135deg,#34c759,#30d158); color: #000; }
-        .btn-submit:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(52,199,89,.3); }
-        .btn-export { background: #5ac8fa; color: #000; }
-        .btn-export:hover { background: #5fd3ff; }
-        .btn-clear { background: #ff3b30; color: white; }
-        .btn-clear:hover { background: #ff453a; }
+/* GIST CONFIG */
+.gist-cfg{background:#111;border:1px solid #1a3a1a;border-radius:12px;padding:16px;margin-bottom:20px;font-size:13px;color:#888}
+.gist-cfg h3{color:#34c759;font-size:14px;margin-bottom:10px}
+.gist-cfg input{width:100%;padding:9px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;color:#fff;font-size:13px;margin-bottom:8px}
+.gist-cfg input:focus{outline:none;border-color:#34c759}
+.btn-gist{padding:9px 18px;background:#34c759;border:none;border-radius:8px;color:#000;font-size:13px;font-weight:700;cursor:pointer}
+.gist-toggle{font-size:12px;color:#34c759;cursor:pointer;text-decoration:underline}
 
-        .records-section { background: #1a1a1a; border-radius: 15px; padding: 25px; margin-bottom: 20px; }
-        .records-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        .records-table th { background: #2a2a2a; padding: 12px 15px; text-align: left; font-weight: 600; color: #888; border-bottom: 1px solid #333; }
-        .records-table td { padding: 12px 15px; border-bottom: 1px solid #222; }
-        .records-table tr:hover td { background: #222; }
-        .btn-delete-record { background: #ff3b30; border: none; color: white; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-        .btn-delete-record:hover { transform: scale(1.05); }
-        .empty-state { text-align: center; padding: 40px 20px; color: #666; }
-        .empty-icon { font-size: 48px; margin-bottom: 10px; }
-
-        .chart-container { background: #222; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-        .chart-wrapper { position: relative; height: 300px; }
-
-        .provisioning-item { display: flex; justify-content: space-between; align-items: center; background: #2a2a2a; padding: 15px 20px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #333; }
-        .prov-tipo { font-size: 12px; padding: 4px 10px; border-radius: 20px; font-weight: 600; }
-        .prov-receber { background: #0a2e1a; color: #34c759; }
-        .prov-pagar { background: #2e0a0a; color: #ff3b30; }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
-
-        textarea { min-height: 80px; resize: vertical; }
-
-        .iphone-keyboard { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; padding: 15px; background: #2a2a2a; border-radius: 12px; }
-        .iphone-key { padding: 15px; background: #3a3a3a; border: none; border-radius: 8px; color: #fff; font-size: 18px; font-weight: 600; cursor: pointer; text-align: center; transition: all .2s; }
-        .iphone-key:hover { background: #5ac8fa; color: #000; }
-        .iphone-key.delete { background: #ff3b30; color: white; }
-        .iphone-key.delete:hover { background: #ff453a; }
-
-        @media(max-width:768px) {
-            .stats { grid-template-columns: 1fr 1fr; }
-            .form-row { grid-template-columns: 1fr; }
-            .button-group { grid-template-columns: 1fr; }
-            .header-left { width: 100%; flex-direction: column; }
-            .store-selector { width: 100%; }
-            .user-menu { justify-content: center; width: 100%; }
-        }
-    </style>
+/* RESPONSIVO */
+@media(max-width:600px){
+  .tabs-bar{overflow-x:auto;padding:0 12px}
+  .tab-pane{padding:14px}
+  .topbar{padding:10px 14px}
+  .stats-grid{grid-template-columns:1fr 1fr}
+}
+</style>
 </head>
 <body>
 
-<!-- LOGIN PAGE -->
-<div id="loginPage" class="login-container">
-    <div class="login-box">
-        <div class="login-header">
-            <h1>💰 Caixa</h1>
-            <p>Controle financeiro por loja</p>
-        </div>
-        <div class="tab-buttons">
-            <button class="tab-btn active" onclick="switchLoginTab('login',this)">🔐 Login</button>
-            <button class="tab-btn" onclick="switchLoginTab('register',this)">📝 Registrar</button>
-        </div>
-        <div id="errorMsg" class="error-message"></div>
-
-        <!-- LOGIN FORM -->
-        <div id="loginForm" class="form-section active">
-            <div class="gist-banner" id="gistBanner">
-                <h3>☁️ Conectar ao GitHub Gist (sincronização na nuvem)</h3>
-                <p>Para que os dados fiquem salvos online e você possa consultar de qualquer lugar, configure abaixo. <a href="https://gist.github.com" target="_blank">Criar Gist</a> · <a href="https://github.com/settings/tokens" target="_blank">Gerar Token</a></p>
-                <div class="gist-fields">
-                    <input type="text" id="gistIdInput" placeholder="ID do Gist (ex: a1b2c3d4...)">
-                    <input type="password" id="gistTokenInput" placeholder="Token GitHub (ghp_...)">
-                    <button class="btn-gist-save" onclick="saveGistConfig()">💾 Salvar configuração do Gist</button>
-                </div>
-            </div>
-            <form onsubmit="handleLogin(event)">
-                <div class="form-group">
-                    <label for="loginEmail">Email</label>
-                    <input type="email" id="loginEmail" placeholder="seu@email.com" required>
-                </div>
-                <div class="form-group">
-                    <label for="loginPassword">Senha</label>
-                    <input type="password" id="loginPassword" placeholder="Sua senha" required>
-                </div>
-                <button type="submit" class="btn-login">Entrar</button>
-            </form>
-            <div class="forgot-password">
-                <span onclick="switchLoginTab('forgot',null)">Esqueceu a senha?</span>
-                &nbsp;·&nbsp;
-                <span onclick="toggleGistBanner()" style="color:#34c759">☁️ Configurar Gist</span>
-            </div>
-        </div>
-
-        <!-- REGISTER FORM -->
-        <div id="registerForm" class="form-section">
-            <form onsubmit="handleRegister(event)">
-                <div class="form-group">
-                    <label for="registerName">Nome Completo</label>
-                    <input type="text" id="registerName" placeholder="Seu nome" required>
-                </div>
-                <div class="form-group">
-                    <label for="registerEmail">Email</label>
-                    <input type="email" id="registerEmail" placeholder="seu@email.com" required>
-                </div>
-                <div class="form-group">
-                    <label for="registerPassword">Senha</label>
-                    <input type="password" id="registerPassword" placeholder="Mínimo 6 caracteres" required minlength="6">
-                </div>
-                <div class="form-group">
-                    <label for="registerConfirm">Confirmar Senha</label>
-                    <input type="password" id="registerConfirm" placeholder="Confirme a senha" required minlength="6">
-                </div>
-                <button type="submit" class="btn-register">Criar Conta</button>
-            </form>
-        </div>
-
-        <!-- FORGOT FORM -->
-        <div id="forgotForm" class="form-section">
-            <form onsubmit="handleForgotPassword(event)">
-                <div class="form-group">
-                    <label for="forgotEmail">Email</label>
-                    <input type="email" id="forgotEmail" placeholder="seu@email.com" required>
-                </div>
-                <p style="font-size:12px;color:#999;margin-bottom:20px">Uma nova senha será enviada para seu email. (Simulação local)</p>
-                <button type="submit" class="btn-login">Recuperar Senha</button>
-            </form>
-            <div style="text-align:center;margin-top:15px">
-                <span onclick="switchLoginTab('login',null)" style="cursor:pointer;color:#5ac8fa;font-size:13px">Voltar ao login</span>
-            </div>
-        </div>
+<!-- ══ LOGIN ══ -->
+<div class="login-wrap" id="loginWrap">
+  <div class="login-box">
+    <div class="login-logo">
+      <h1>💰 Caixa Diário</h1>
+      <p>Sistema de controle financeiro</p>
     </div>
+    <div class="err-box" id="loginErr"></div>
+    <div class="field"><label>Usuário</label><input type="text" id="loginUser" placeholder="seu usuário" autocomplete="username"></div>
+    <div class="field"><label>Senha</label><input type="password" id="loginPass" placeholder="sua senha" autocomplete="current-password"></div>
+    <button class="btn-primary" onclick="doLogin()">Entrar</button>
+    <div style="margin-top:16px;text-align:center">
+      <span class="gist-toggle" onclick="toggleGistPanel()">☁️ Configurar sincronização (Gist)</span>
+    </div>
+    <div id="gistPanel" class="gist-cfg" style="margin-top:14px;display:none">
+      <h3>GitHub Gist — Armazenamento em nuvem</h3>
+      <p style="margin-bottom:10px">Os dados ficam salvos online. <a href="https://gist.github.com" target="_blank" style="color:#5ac8fa">Criar Gist</a> · <a href="https://github.com/settings/tokens" target="_blank" style="color:#5ac8fa">Gerar Token</a></p>
+      <input type="text" id="cfgGistId" placeholder="ID do Gist (ex: a1b2c3...)">
+      <input type="password" id="cfgGistToken" placeholder="Token GitHub (ghp_...)">
+      <button class="btn-gist" onclick="saveGistCfg()">💾 Salvar</button>
+    </div>
+  </div>
 </div>
 
-<!-- MAIN APP -->
-<div id="appContainer" class="app-container">
-    <div class="container">
-        <div class="header">
-            <div class="header-left">
-                <h1>💰 Caixa diário</h1>
-                <select id="storeSelect" class="store-selector" onchange="carregarDados()">
-                    <option value="loja1">🏪 Loja 1 - Malubiju</option>
-                    <option value="loja2">🏪 Loja 2</option>
-                    <option value="loja3">🏪 Loja 3</option>
-                </select>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                <span class="sync-indicator sync-ok" id="syncBadge">✓ Sincronizado</span>
-                <button class="btn-gist-config" onclick="syncNow()" title="Sincronizar agora">🔄 Sync</button>
-                <div class="date-navigation" style="margin:0;padding:10px 15px">
-                    <button onclick="previousDay()">←</button>
-                    <div class="current-date" id="currentDate">13 Mai</div>
-                    <button onclick="nextDay()">→</button>
-                </div>
-                <div class="user-menu">
-                    <div class="user-info">
-                        <div class="user-avatar" id="userAvatar">U</div>
-                        <div class="user-name" id="userName">Usuário</div>
-                    </div>
-                    <button class="btn-logout" onclick="handleLogout()">Sair</button>
-                </div>
-            </div>
-        </div>
+<!-- ══ APP ══ -->
+<div class="app" id="appWrap">
 
-        <div class="tabs">
-            <button class="tab active" onclick="switchTab('diario')">📊 Diário</button>
-            <button class="tab" onclick="switchTab('provisionamento')">📝 Provisionamento</button>
-            <button class="tab" onclick="switchTab('graficos')">📈 Gráficos</button>
-        </div>
-
-        <div class="stats">
-            <div class="stat-card inicio"><div class="stat-label">📥 Início do dia</div><div class="stat-value" id="statInicio">R$ 0,00</div></div>
-            <div class="stat-card entradas"><div class="stat-label">📤 Entradas</div><div class="stat-value" id="statEntradas">R$ 0,00</div></div>
-            <div class="stat-card saidas"><div class="stat-label">💸 Saídas</div><div class="stat-value" id="statSaidas">R$ 0,00</div></div>
-            <div class="stat-card receber"><div class="stat-label">💳 A Receber</div><div class="stat-value" id="statReceber">R$ 0,00</div></div>
-            <div class="stat-card pagar"><div class="stat-label">💰 A Pagar</div><div class="stat-value" id="statPagar">R$ 0,00</div></div>
-        </div>
-
-        <!-- TAB: Diário -->
-        <div id="diario" class="tab-content active">
-            <div class="main-content">
-                <div class="section-title">📋 Registro do dia — <span id="dayTitle">dia 13</span></div>
-                <form id="caixaForm" onsubmit="confirmarRegistro(event)">
-                    <div class="form-group">
-                        <label for="saldoInicio">Saldo início do dia (R$)</label>
-                        <input type="number" id="saldoInicio" step="0.01" min="0" value="0.00" readonly style="background:#1a1a1a;color:#999;cursor:not-allowed;">
-                    </div>
-                    <div class="form-group">
-                        <label for="entradas">Dinheiro que entrou hoje (R$)</label>
-                        <input type="number" id="entradas" step="0.01" min="0" placeholder="0,00" oninput="calcularSaldoAutomatico()">
-                        <div class="iphone-keyboard" id="keyboard-entradas"></div>
-                    </div>
-                    <div class="form-group">
-                        <label>Saídas do dia</label>
-                        <div class="saidas-container" id="saidasContainer"></div>
-                        <button type="button" class="btn-add-saida" onclick="adicionarSaida()">+ Adicionar saída</button>
-                    </div>
-                    <div class="calculation-section">
-                        <div class="calculation-row">
-                            <span class="calculation-label">Saldo calculado (automático)</span>
-                            <span class="calculation-value" id="saldoCalculado">R$ 0,00</span>
-                        </div>
-                    </div>
-                    <div class="final-balance">
-                        <div class="final-balance-label">💰 Saldo Final do Dia</div>
-                        <div class="final-balance-value" id="saldoFinal">R$ 0,00</div>
-                    </div>
-                    <div class="button-group">
-                        <button type="button" class="btn-export" onclick="exportarCSV()">📥 Exportar</button>
-                        <button type="button" class="btn-clear" onclick="limparFormulario()">🗑️ Limpar</button>
-                        <button type="submit" class="btn-submit">✅ Confirmar e Salvar na Nuvem</button>
-                    </div>
-                </form>
-            </div>
-            <div class="records-section">
-                <div class="section-title">📈 Histórico de movimentações</div>
-                <div id="recordsContainer"></div>
-            </div>
-        </div>
-
-        <!-- TAB: Provisionamento -->
-        <div id="provisionamento" class="tab-content">
-            <div class="main-content">
-                <div class="section-title">📝 Contas a Receber e Pagar</div>
-                <form id="provisioningForm" onsubmit="adicionarProvisao(event)">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="provTipo">Tipo</label>
-                            <select id="provTipo" required>
-                                <option value="">Selecione...</option>
-                                <option value="receber">Contas a Receber</option>
-                                <option value="pagar">Contas a Pagar</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="provValor">Valor (R$)</label>
-                            <input type="number" id="provValor" step="0.01" min="0" placeholder="0,00" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="provVencimento">Data de Vencimento</label>
-                            <input type="date" id="provVencimento" required>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="provDescricao">Descrição</label>
-                        <textarea id="provDescricao" placeholder="Descreva a conta..." required></textarea>
-                    </div>
-                    <div class="button-group" style="margin-top:20px">
-                        <button type="submit" class="btn-submit" style="grid-column:1/-1">➕ Adicionar Provisão</button>
-                    </div>
-                </form>
-            </div>
-            <div class="records-section">
-                <div class="section-title">📋 Provisões Registradas</div>
-                <div id="provisioningRecords"></div>
-            </div>
-        </div>
-
-        <!-- TAB: Gráficos -->
-        <div id="graficos" class="tab-content">
-            <div class="main-content">
-                <div class="section-title">📊 Evolução de Saldo - Últimos 12 Meses</div>
-                <div class="chart-container">
-                    <div class="chart-wrapper"><canvas id="balanceChart"></canvas></div>
-                </div>
-            </div>
-            <div class="records-section">
-                <div class="section-title">💹 Resumo Mensal</div>
-                <div id="monthlySummary"></div>
-            </div>
-        </div>
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-logo">💰 Caixa Diário</span>
+      <span class="badge-role" id="roleBadge">—</span>
     </div>
+    <div class="topbar-right">
+      <span class="sync-badge sync-ok" id="syncBadge">✓ Sync</span>
+      <button class="btn-sm btn-sync" onclick="syncNow()">🔄</button>
+      <div class="avatar" id="topAvatar">?</div>
+      <span style="font-size:14px;font-weight:600" id="topName">—</span>
+      <button class="btn-sm btn-logout" onclick="doLogout()">Sair</button>
+    </div>
+  </div>
+
+  <!-- Abas Admin -->
+  <div class="tabs-bar" id="adminTabs" style="display:none">
+    <button class="tab-btn active" onclick="switchTab('adminOverview',this)">🏠 Visão Geral</button>
+    <button class="tab-btn" onclick="switchTab('adminClients',this)">👥 Clientes</button>
+    <button class="tab-btn" onclick="switchTab('adminCaixa',this)">📋 Ver Caixa</button>
+  </div>
+
+  <!-- Abas Cliente -->
+  <div class="tabs-bar" id="clientTabs" style="display:none">
+    <button class="tab-btn active" onclick="switchTab('clientCaixa',this)">📋 Caixa Diário</button>
+    <button class="tab-btn" onclick="switchTab('clientHist',this)">📈 Histórico</button>
+  </div>
+
+  <!-- ── TAB: Visão Geral Admin ── -->
+  <div class="tab-pane active" id="tab-adminOverview">
+    <div class="stats-grid" id="adminStatsGrid"></div>
+    <h3 style="font-size:15px;font-weight:700;margin-bottom:14px;color:#888">Clientes — Último saldo registrado</h3>
+    <div class="overview-cards" id="overviewCards"></div>
+  </div>
+
+  <!-- ── TAB: Gerenciar Clientes ── -->
+  <div class="tab-pane" id="tab-adminClients">
+    <div class="admin-grid">
+      <div class="panel">
+        <div class="panel-title">
+          <span>👥 Clientes</span>
+          <span style="font-size:12px;color:#666" id="clientCount">0 clientes</span>
+        </div>
+        <div id="clientListEl"></div>
+        <button class="btn-add-client" onclick="openAddClient()">＋ Novo cliente</button>
+      </div>
+      <div class="panel" id="clientDetailPanel">
+        <div class="panel-title">Selecione um cliente</div>
+        <p style="color:#666;font-size:14px">Clique em um cliente para ver ou editar.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: Ver Caixa (admin visualizando cliente) ── -->
+  <div class="tab-pane" id="tab-adminCaixa">
+    <div id="adminCaixaContent">
+      <p style="color:#666">Selecione um cliente na aba Visão Geral ou Clientes.</p>
+    </div>
+  </div>
+
+  <!-- ── TAB: Caixa Cliente ── -->
+  <div class="tab-pane" id="tab-clientCaixa">
+    <div class="day-nav">
+      <button onclick="changeDay(-1)">←</button>
+      <div>
+        <div class="day-label" id="dayLabel">—</div>
+        <div class="day-sub" id="daySub">—</div>
+      </div>
+      <button onclick="changeDay(1)">→</button>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="lbl">📥 Início</div><div class="val" id="sInicio">R$ 0,00</div></div>
+      <div class="stat-card"><div class="lbl">📤 Entrada</div><div class="val val-green" id="sEntrada">R$ 0,00</div></div>
+      <div class="stat-card"><div class="lbl">💸 Saídas</div><div class="val val-red" id="sSaidas">R$ 0,00</div></div>
+      <div class="stat-card"><div class="lbl">💰 Saldo</div><div class="val val-green" id="sSaldo">R$ 0,00</div></div>
+    </div>
+    <div class="form-card">
+      <h3>📋 Registro do dia</h3>
+      <div class="inp-group">
+        <label>Saldo início (preenchido automaticamente)</label>
+        <input type="number" id="inpInicio" readonly>
+      </div>
+      <div class="inp-group">
+        <label>Dinheiro que entrou hoje (R$)</label>
+        <input type="number" id="inpEntrada" placeholder="0,00" step="0.01" min="0" oninput="recalc()">
+      </div>
+      <div class="inp-group">
+        <label>Saídas do dia</label>
+        <div id="saidasList"></div>
+        <button class="btn-add-saida" onclick="addSaida()">＋ Adicionar saída</button>
+      </div>
+      <div class="saldo-box">
+        <div>
+          <div class="saldo-calc-lbl">Saldo calculado</div>
+          <div class="saldo-calc-val" id="calcVal">R$ 0,00</div>
+        </div>
+        <div style="text-align:right">
+          <div class="saldo-calc-lbl">Confirmar saldo (R$)</div>
+          <input type="number" id="inpConfirm" placeholder="0,00" step="0.01"
+            style="width:140px;padding:8px 12px;background:#111;border:2px solid #34c759;border-radius:8px;color:#fff;font-size:17px;font-weight:700;text-align:right"
+            oninput="checkDif()">
+        </div>
+      </div>
+      <div class="dif-msg" id="difMsg"></div>
+      <button class="btn-save" id="btnSave" onclick="saveDay()">☁️ Salvar e sincronizar</button>
+    </div>
+  </div>
+
+  <!-- ── TAB: Histórico Cliente ── -->
+  <div class="tab-pane" id="tab-clientHist">
+    <div class="stats-grid">
+      <div class="stat-card"><div class="lbl">📅 Mês atual</div><div class="val val-blue" id="hMes">—</div></div>
+      <div class="stat-card"><div class="lbl">📤 Total entradas</div><div class="val val-green" id="hEnt">R$ 0,00</div></div>
+      <div class="stat-card"><div class="lbl">💸 Total saídas</div><div class="val val-red" id="hSai">R$ 0,00</div></div>
+      <div class="stat-card"><div class="lbl">💰 Último saldo</div><div class="val val-green" id="hUlt">R$ 0,00</div></div>
+    </div>
+    <div id="histList"></div>
+  </div>
+
+</div>
+
+<!-- ── MODAL NOVO/EDITAR CLIENTE ── -->
+<div class="modal-overlay" id="modalClient">
+  <div class="modal">
+    <div class="modal-title" id="modalClientTitle">Novo Cliente</div>
+    <div class="field"><label>Nome completo</label><input type="text" id="mClientName" placeholder="Ex: João Silva"></div>
+    <div class="field"><label>Usuário (login)</label><input type="text" id="mClientUser" placeholder="Ex: joao"></div>
+    <div class="field"><label>Senha</label><input type="password" id="mClientPass" placeholder="Mínimo 4 caracteres"></div>
+    <div class="field"><label>Loja / Empresa</label><input type="text" id="mClientStore" placeholder="Ex: Mallubiju"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('modalClient')">Cancelar</button>
+      <button class="btn-confirm" onclick="saveClient()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL CONFIRMAR DELETE ── -->
+<div class="modal-overlay" id="modalDel">
+  <div class="modal">
+    <div class="modal-title">⚠️ Excluir cliente?</div>
+    <p style="color:#888;font-size:14px">Isso apagará o usuário e todos os registros dele.</p>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('modalDel')">Cancelar</button>
+      <button class="btn-danger" onclick="confirmDelClient()">Excluir</button>
+    </div>
+  </div>
 </div>
 
 <script>
-// ════════════════════════════════════════════════
-//  STATE
-// ════════════════════════════════════════════════
-let currentUser = null;
-let currentDate = new Date(2026, 4, 13);
-let balanceChart = null;
-// Gist cloud data — all records stored here
-let cloudData = {};   // { userId_store_date: record, ... }
-let cloudProvisioning = {}; // { userId_store: [...] }
-let gistId = '';
-let gistToken = '';
+// ══════════════════════════════════════════
+//  ESTADO GLOBAL
+// ══════════════════════════════════════════
+let session = null;      // { user, role, name, store }
+let cloud   = {};        // { users:{}, records:{}, provisioning:{} }
+let gistId  = '';
+let gistTok = '';
+let currentDay, currentMonth, currentYear;
+let saidaCount = 0;
+let selectedClientId = null;
+let pendingDelId = null;
+let adminViewingClient = null; // quando admin visualiza caixa de um cliente
 
-// ════════════════════════════════════════════════
-//  GIST CONFIG
-// ════════════════════════════════════════════════
-function loadGistConfig() {
-    gistId    = localStorage.getItem('gist_id')    || '';
-    gistToken = localStorage.getItem('gist_token') || '';
+const ADMIN_USER = 'admin';
+const ADMIN_PASS = 'admin123'; // ← troque aqui
+
+const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const MONTHS_S = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+
+// ══════════════════════════════════════════
+//  UTILITÁRIOS
+// ══════════════════════════════════════════
+const fmt = v => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v||0);
+const dayKey = (d,m,y) => `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+
+function dayLabelFull(d,m,y){
+  const t=new Date(); const today=t.getDate(),tm=t.getMonth()+1,ty=t.getFullYear();
+  if(d===today&&m===tm&&y===ty) return 'Hoje';
+  return `${String(d).padStart(2,'0')} de ${MONTHS_S[m-1]} de ${y}`;
 }
 
-function saveGistConfig() {
-    const id  = document.getElementById('gistIdInput').value.trim();
-    const tok = document.getElementById('gistTokenInput').value.trim();
-    if (!id || !tok) { alert('Preencha o ID do Gist e o Token.'); return; }
-    localStorage.setItem('gist_id', id);
-    localStorage.setItem('gist_token', tok);
-    gistId = id; gistToken = tok;
-    document.getElementById('gistBanner').classList.remove('show');
-    alert('✅ Configuração salva! Os dados serão sincronizados com o Gist.');
+// ══════════════════════════════════════════
+//  GIST
+// ══════════════════════════════════════════
+function loadGistCfg(){
+  gistId  = localStorage.getItem('gist_id')  || '';
+  gistTok = localStorage.getItem('gist_tok') || '';
+  if(gistId)  document.getElementById('cfgGistId').value   = gistId;
 }
 
-function toggleGistBanner() {
-    const b = document.getElementById('gistBanner');
-    b.classList.toggle('show');
-    if (b.classList.contains('show')) {
-        document.getElementById('gistIdInput').value    = gistId;
-        document.getElementById('gistTokenInput').value = '';
-    }
+function saveGistCfg(){
+  const id  = document.getElementById('cfgGistId').value.trim();
+  const tok = document.getElementById('cfgGistToken').value.trim();
+  if(!id||!tok){alert('Preencha o ID e o Token.');return;}
+  localStorage.setItem('gist_id', id);
+  localStorage.setItem('gist_tok', tok);
+  gistId=id; gistTok=tok;
+  document.getElementById('gistPanel').style.display='none';
+  alert('✅ Configuração salva!');
 }
 
-// ════════════════════════════════════════════════
-//  GIST SYNC
-// ════════════════════════════════════════════════
-function setSyncBadge(state) {
-    const el = document.getElementById('syncBadge');
-    if (!el) return;
-    if (state === 'ok')      { el.textContent = '✓ Sincronizado';     el.className = 'sync-indicator sync-ok'; }
-    else if (state === 'err'){ el.textContent = '✗ Erro de sync';     el.className = 'sync-indicator sync-err'; }
-    else                     { el.textContent = '⟳ Sincronizando...'; el.className = 'sync-indicator sync-pending'; }
+function toggleGistPanel(){
+  const p=document.getElementById('gistPanel');
+  p.style.display = p.style.display==='none'?'block':'none';
 }
 
-async function gistLoad() {
-    if (!gistId || !gistToken) return false;
-    setSyncBadge('pending');
-    try {
-        const r = await fetch(`https://api.github.com/gists/${gistId}`, {
-            headers: { 'Authorization': `token ${gistToken}`, 'Accept': 'application/vnd.github+json' }
-        });
-        if (!r.ok) throw new Error(r.status);
-        const json = await r.json();
-        const raw  = json.files['caixa.json']?.content || '{}';
-        const parsed = JSON.parse(raw);
-        cloudData         = parsed.records       || {};
-        cloudProvisioning = parsed.provisioning  || {};
-        setSyncBadge('ok');
-        return true;
-    } catch(e) {
-        setSyncBadge('err');
-        return false;
-    }
+function setSyncBadge(s){
+  const el=document.getElementById('syncBadge');
+  if(!el)return;
+  if(s==='ok')   {el.textContent='✓ Sync';   el.className='sync-badge sync-ok';}
+  else if(s==='err'){el.textContent='✗ Erro'; el.className='sync-badge sync-err';}
+  else           {el.textContent='⟳ ...';    el.className='sync-badge sync-spin';}
 }
 
-async function gistSave() {
-    if (!gistId || !gistToken) return false;
-    setSyncBadge('pending');
-    try {
-        const payload = { records: cloudData, provisioning: cloudProvisioning };
-        const r = await fetch(`https://api.github.com/gists/${gistId}`, {
-            method: 'PATCH',
-            headers: { 'Authorization': `token ${gistToken}`, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files: { 'caixa.json': { content: JSON.stringify(payload, null, 2) } } })
-        });
-        if (!r.ok) throw new Error(r.status);
-        setSyncBadge('ok');
-        return true;
-    } catch(e) {
-        setSyncBadge('err');
-        return false;
-    }
+async function gistLoad(){
+  if(!gistId||!gistTok){cloud=loadLocalCloud();return false;}
+  setSyncBadge('spin');
+  try{
+    const r=await fetch(`https://api.github.com/gists/${gistId}`,{
+      headers:{'Authorization':`token ${gistTok}`,'Accept':'application/vnd.github+json'}
+    });
+    if(!r.ok)throw new Error(r.status);
+    const j=await r.json();
+    const raw=j.files['caixa.json']?.content||'{}';
+    cloud=JSON.parse(raw);
+    if(!cloud.users)   cloud.users={};
+    if(!cloud.records) cloud.records={};
+    saveLocalCloud();
+    setSyncBadge('ok');
+    return true;
+  }catch(e){
+    setSyncBadge('err');
+    cloud=loadLocalCloud();
+    return false;
+  }
 }
 
-async function syncNow() {
-    await gistLoad();
-    carregarDados();
-    carregarRegistros();
-    carregarProvisionamento();
-    atualizarStatsProv();
-    alert('✅ Dados atualizados do Gist!');
+async function gistSave(){
+  if(!gistId||!gistTok){saveLocalCloud();return false;}
+  setSyncBadge('spin');
+  try{
+    const r=await fetch(`https://api.github.com/gists/${gistId}`,{
+      method:'PATCH',
+      headers:{'Authorization':`token ${gistTok}`,'Accept':'application/vnd.github+json','Content-Type':'application/json'},
+      body:JSON.stringify({files:{'caixa.json':{content:JSON.stringify(cloud,null,2)}}})
+    });
+    if(!r.ok)throw new Error(r.status);
+    saveLocalCloud();
+    setSyncBadge('ok');
+    return true;
+  }catch(e){
+    setSyncBadge('err');
+    saveLocalCloud();
+    return false;
+  }
 }
 
-// ════════════════════════════════════════════════
+async function syncNow(){
+  await gistLoad();
+  refreshCurrentView();
+  alert('✅ Dados atualizados!');
+}
+
+function loadLocalCloud(){
+  try{return JSON.parse(localStorage.getItem('caixa_cloud'))||{users:{},records:{}};}
+  catch(e){return{users:{},records:{}};}
+}
+function saveLocalCloud(){
+  localStorage.setItem('caixa_cloud',JSON.stringify(cloud));
+}
+
+// ══════════════════════════════════════════
 //  AUTH
-// ════════════════════════════════════════════════
-function switchLoginTab(tab, btn) {
-    document.querySelectorAll('.form-section').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    document.getElementById(tab + 'Form').classList.add('active');
-    if (btn) btn.classList.add('active');
+// ══════════════════════════════════════════
+function showLoginErr(msg){
+  const el=document.getElementById('loginErr');
+  el.textContent=msg; el.classList.add('show');
 }
 
-function showError(msg) {
-    const el = document.getElementById('errorMsg');
-    el.textContent = msg; el.classList.add('show');
-    setTimeout(() => el.classList.remove('show'), 5000);
+async function doLogin(){
+  const u=document.getElementById('loginUser').value.trim();
+  const p=document.getElementById('loginPass').value;
+  if(!u||!p){showLoginErr('Preencha usuário e senha.');return;}
+
+  await gistLoad();
+
+  // Admin
+  if(u===ADMIN_USER && p===ADMIN_PASS){
+    session={user:ADMIN_USER,role:'admin',name:'Administrador',store:null};
+    startApp();
+    return;
+  }
+
+  // Cliente
+  const clients=cloud.users||{};
+  const clientId=Object.keys(clients).find(id=>clients[id].username===u && clients[id].password===p);
+  if(!clientId){showLoginErr('❌ Usuário ou senha incorretos.');return;}
+  const c=clients[clientId];
+  session={user:clientId,role:'client',name:c.name,store:c.store};
+  startApp();
 }
 
-function hashPassword(p) { return CryptoJS.SHA256(p).toString(); }
-
-function handleLogin(e) {
-    e.preventDefault();
-    const email = document.getElementById('loginEmail').value;
-    const pass  = document.getElementById('loginPassword').value;
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    const user  = users.find(u => u.email === email && u.password === hashPassword(pass));
-    if (!user) { showError('❌ Email ou senha incorretos!'); return; }
-    currentUser = user;
-    localStorage.setItem('currentUser', JSON.stringify(user));
-    loginSuccess();
+function doLogout(){
+  if(!confirm('Sair?'))return;
+  session=null;
+  document.getElementById('appWrap').classList.remove('active');
+  document.getElementById('loginWrap').style.display='flex';
+  document.getElementById('loginUser').value='';
+  document.getElementById('loginPass').value='';
+  document.getElementById('loginErr').classList.remove('show');
 }
 
-function handleRegister(e) {
-    e.preventDefault();
-    const name    = document.getElementById('registerName').value;
-    const email   = document.getElementById('registerEmail').value;
-    const pass    = document.getElementById('registerPassword').value;
-    const confirm = document.getElementById('registerConfirm').value;
-    if (pass !== confirm) { showError('❌ As senhas não coincidem!'); return; }
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    if (users.some(u => u.email === email)) { showError('❌ Este email já está registrado!'); return; }
-    const newUser = { id: Date.now(), name, email, password: hashPassword(pass), createdAt: new Date().toISOString() };
-    users.push(newUser);
-    localStorage.setItem('users', JSON.stringify(users));
-    alert('✅ Conta criada com sucesso! Faça login agora.');
-    switchLoginTab('login', null);
-    document.getElementById('loginEmail').value = email;
+function startApp(){
+  document.getElementById('loginWrap').style.display='none';
+  document.getElementById('appWrap').classList.add('active');
+  // badge
+  const rb=document.getElementById('roleBadge');
+  if(session.role==='admin'){rb.textContent='👑 Admin';rb.className='badge-role badge-admin';}
+  else{rb.textContent='👤 Cliente';rb.className='badge-role badge-client';}
+  document.getElementById('topAvatar').textContent=session.name[0].toUpperCase();
+  document.getElementById('topName').textContent=session.name;
+  // mostrar abas certas
+  document.getElementById('adminTabs').style.display  = session.role==='admin'?'flex':'none';
+  document.getElementById('clientTabs').style.display = session.role==='client'?'flex':'none';
+  // mostrar tab inicial
+  if(session.role==='admin'){
+    showOnlyTab('adminOverview');
+    renderAdminOverview();
+    renderClientList();
+  } else {
+    showOnlyTab('clientCaixa');
+    const now=new Date();
+    currentDay=now.getDate();currentMonth=now.getMonth()+1;currentYear=now.getFullYear();
+    loadDay();
+  }
 }
 
-function handleForgotPassword(e) {
-    e.preventDefault();
-    const email = document.getElementById('forgotEmail').value;
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    const user  = users.find(u => u.email === email);
-    if (!user) { showError('❌ Email não encontrado!'); return; }
-    const newPass = Math.random().toString(36).slice(2,10);
-    user.password = hashPassword(newPass);
-    localStorage.setItem('users', JSON.stringify(users));
-    alert(`✅ Nova senha gerada: ${newPass}\n\n(Simulação — em produção enviaria por email)`);
-    switchLoginTab('login', null);
+// ══════════════════════════════════════════
+//  TABS
+// ══════════════════════════════════════════
+function showOnlyTab(id){
+  document.querySelectorAll('.tab-pane').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
 }
 
-async function loginSuccess() {
-    document.getElementById('loginPage').style.display = 'none';
-    document.getElementById('appContainer').classList.add('active');
-    updateUserDisplay();
-    await gistLoad();
-    carregarDados();
-    carregarProvisionamento();
-    updateDateDisplay();
+function switchTab(id,btn){
+  showOnlyTab(id);
+  const bar = session.role==='admin'?document.getElementById('adminTabs'):document.getElementById('clientTabs');
+  bar.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  if(id==='clientHist')renderHist();
+  if(id==='adminOverview')renderAdminOverview();
+  if(id==='adminClients')renderClientList();
 }
 
-function handleLogout() {
-    if (!confirm('Tem certeza que deseja sair?')) return;
-    localStorage.removeItem('currentUser');
-    currentUser = null;
-    document.getElementById('appContainer').classList.remove('active');
-    document.getElementById('loginPage').style.display = 'flex';
-    document.getElementById('loginEmail').value = '';
-    document.getElementById('loginPassword').value = '';
-    switchLoginTab('login', null);
+// ══════════════════════════════════════════
+//  ADMIN — VISÃO GERAL
+// ══════════════════════════════════════════
+function renderAdminOverview(){
+  const clients=cloud.users||{};
+  const ids=Object.keys(clients);
+  // stats gerais
+  let totalClients=ids.length, totalEnt=0, totalSai=0, totalSaldo=0;
+  ids.forEach(id=>{
+    const recs=getClientRecords(id);
+    recs.forEach(r=>{totalEnt+=r.entrada||0;totalSai+=(r.saidas||[]).reduce((a,s)=>a+s.val,0);});
+    if(recs.length)totalSaldo+=recs[recs.length-1].saldoFinal||0;
+  });
+  document.getElementById('adminStatsGrid').innerHTML=`
+    <div class="stat-card"><div class="lbl">👥 Clientes</div><div class="val val-blue">${totalClients}</div></div>
+    <div class="stat-card"><div class="lbl">📤 Entradas totais</div><div class="val val-green">${fmt(totalEnt)}</div></div>
+    <div class="stat-card"><div class="lbl">💸 Saídas totais</div><div class="val val-red">${fmt(totalSai)}</div></div>
+    <div class="stat-card"><div class="lbl">💰 Saldo consolidado</div><div class="val val-green">${fmt(totalSaldo)}</div></div>`;
+
+  // cards de clientes
+  const cont=document.getElementById('overviewCards');
+  if(!ids.length){cont.innerHTML='<p style="color:#666;font-size:14px">Nenhum cliente cadastrado ainda.</p>';return;}
+  cont.innerHTML=ids.map(id=>{
+    const c=clients[id];
+    const recs=getClientRecords(id).sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const last=recs[0];
+    const mesEnt=recs.filter(r=>r.date&&r.date.startsWith(new Date().toISOString().slice(0,7))).reduce((a,r)=>a+(r.entrada||0),0);
+    const mesSai=recs.filter(r=>r.date&&r.date.startsWith(new Date().toISOString().slice(0,7))).reduce((a,r)=>a+(r.saidas||[]).reduce((x,s)=>x+s.val,0),0);
+    return `<div class="ov-card">
+      <div class="ov-card-header">
+        <div><div class="ov-name">${c.name}</div><div class="ov-store">${c.store||'—'}</div></div>
+        <div style="font-size:11px;color:#555">${recs.length} registros</div>
+      </div>
+      <div class="ov-saldo">${last?fmt(last.saldoFinal):'Sem registros'}</div>
+      ${last?`<div style="font-size:11px;color:#555;margin-top:4px">Último: ${last.date}</div>`:''}
+      <div class="ov-stats">
+        <div class="ov-stat"><div class="ov-stat-lbl">Entradas (mês)</div><div class="ov-stat-val val-green">${fmt(mesEnt)}</div></div>
+        <div class="ov-stat"><div class="ov-stat-lbl">Saídas (mês)</div><div class="ov-stat-val val-red">${fmt(mesSai)}</div></div>
+      </div>
+      <button class="btn-view-client" onclick="adminViewClient('${id}')">📋 Ver caixa completo</button>
+    </div>`;
+  }).join('');
 }
 
-function updateUserDisplay() {
-    if (!currentUser) return;
-    const initials = currentUser.name.split(' ').map(n=>n[0]).join('').toUpperCase();
-    document.getElementById('userAvatar').textContent = initials;
-    document.getElementById('userName').textContent   = currentUser.name;
+function adminViewClient(id){
+  adminViewingClient=id;
+  const c=(cloud.users||{})[id];
+  const now=new Date();
+  currentDay=now.getDate();currentMonth=now.getMonth()+1;currentYear=now.getFullYear();
+  // switch to tab
+  showOnlyTab('adminCaixa');
+  document.querySelectorAll('#adminTabs .tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('#adminTabs .tab-btn')[2].classList.add('active');
+  renderAdminCaixa(id);
 }
 
-// ════════════════════════════════════════════════
-//  STORAGE KEYS  (cloud keys use userId prefix)
-// ════════════════════════════════════════════════
-function getRecordKey(store, date) {
-    return `${currentUser.id}_${store}_${date.toISOString().split('T')[0]}`;
-}
-function getProvKey(store) {
-    return `${currentUser.id}_${store}`;
-}
+function renderAdminCaixa(clientId){
+  const c=(cloud.users||{})[clientId];
+  const cont=document.getElementById('adminCaixaContent');
+  const recs=getClientRecords(clientId).sort((a,b)=>new Date(b.date)-new Date(a.date));
 
-// Read/write helpers — cloud first, fallback to localStorage
-function getRecord(store, date) {
-    const k = getRecordKey(store, date);
-    if (cloudData[k])            return cloudData[k];
-    const local = localStorage.getItem(`caixa_${k}`);
-    return local ? JSON.parse(local) : null;
-}
+  let histHtml='';
+  if(!recs.length){histHtml='<p style="color:#666;font-size:14px;padding:20px">Nenhum registro ainda.</p>';}
+  else{
+    histHtml=recs.map(r=>{
+      const totSai=(r.saidas||[]).reduce((a,s)=>a+s.val,0);
+      const bid='ah'+r.date.replace(/-/g,'');
+      return `<div class="hist-item">
+        <div class="hist-head" onclick="toggleHist('${bid}')">
+          <div><div class="hist-date">${r.date}</div><div class="hist-meta">Entrada ${fmt(r.entrada)} · Saída ${fmt(totSai)}</div></div>
+          <div class="hist-saldo">${fmt(r.saldoFinal)}</div>
+        </div>
+        <div class="hist-body" id="${bid}">
+          <div class="hist-row"><span>Início do caixa</span><span>${fmt(r.inicio)}</span></div>
+          <div class="hist-row"><span><span class="tag tag-in">Entrada</span></span><span class="hist-in">+${fmt(r.entrada)}</span></div>
+          ${(r.saidas||[]).map(s=>`<div class="hist-row"><span><span class="tag tag-out">${s.desc||'Saída'}</span></span><span class="hist-out">-${fmt(s.val)}</span></div>`).join('')}
+          <div class="hist-row"><span>Saldo final</span><span class="hist-in">${fmt(r.saldoFinal)}</span></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
 
-function setRecord(store, date, rec) {
-    const k = getRecordKey(store, date);
-    cloudData[k] = rec;
-    localStorage.setItem(`caixa_${k}`, JSON.stringify(rec)); // keep local backup
-}
+  cont.innerHTML=`
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <button class="btn-sm" style="background:#2a2a2a;border:1px solid #333;color:#aaa" onclick="showOnlyTab('adminOverview');document.querySelectorAll('#adminTabs .tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('#adminTabs .tab-btn')[0].classList.add('active');renderAdminOverview()">← Voltar</button>
+      <div>
+        <div style="font-size:17px;font-weight:700">${c.name}</div>
+        <div style="font-size:13px;color:#666">${c.store||'—'} · @${c.username}</div>
+      </div>
+    </div>
+    <div class="stats-grid" style="margin-bottom:20px" id="adminCaixaStats"></div>
+    ${histHtml}`;
 
-function deleteRecord(store, dateStr) {
-    // dateStr = "YYYY-MM-DD"
-    const k = `${currentUser.id}_${store}_${dateStr}`;
-    delete cloudData[k];
-    localStorage.removeItem(`caixa_${k}`);
-}
-
-function getProvisioning(store) {
-    const k = getProvKey(store);
-    if (cloudProvisioning[k]) return cloudProvisioning[k];
-    const local = localStorage.getItem(`provisioning_${k}`);
-    return local ? JSON.parse(local) : [];
-}
-
-function setProvisioning(store, arr) {
-    const k = getProvKey(store);
-    cloudProvisioning[k] = arr;
-    localStorage.setItem(`provisioning_${k}`, JSON.stringify(arr));
-}
-
-// ════════════════════════════════════════════════
-//  UTILITIES
-// ════════════════════════════════════════════════
-function formatCurrency(v) {
-    return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v||0);
+  // stats do cliente
+  const totEnt=recs.reduce((a,r)=>a+(r.entrada||0),0);
+  const totSai=recs.reduce((a,r)=>a+(r.saidas||[]).reduce((x,s)=>x+s.val,0),0);
+  const lastSaldo=recs[0]?recs[0].saldoFinal:0;
+  document.getElementById('adminCaixaStats').innerHTML=`
+    <div class="stat-card"><div class="lbl">📊 Registros</div><div class="val val-blue">${recs.length}</div></div>
+    <div class="stat-card"><div class="lbl">📤 Entradas totais</div><div class="val val-green">${fmt(totEnt)}</div></div>
+    <div class="stat-card"><div class="lbl">💸 Saídas totais</div><div class="val val-red">${fmt(totSai)}</div></div>
+    <div class="stat-card"><div class="lbl">💰 Último saldo</div><div class="val val-green">${fmt(lastSaldo)}</div></div>`;
 }
 
-function switchTab(tab) {
-    document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    document.getElementById(tab).classList.add('active');
-    event.target.classList.add('active');
-    if (tab==='graficos') setTimeout(renderGraficos, 100);
+// ══════════════════════════════════════════
+//  ADMIN — CLIENTES
+// ══════════════════════════════════════════
+function renderClientList(){
+  const clients=cloud.users||{};
+  const ids=Object.keys(clients);
+  document.getElementById('clientCount').textContent=`${ids.length} cliente${ids.length!==1?'s':''}`;
+  const cont=document.getElementById('clientListEl');
+  if(!ids.length){cont.innerHTML='<p style="color:#666;font-size:13px">Nenhum cliente cadastrado.</p>';return;}
+  cont.innerHTML=ids.map(id=>{
+    const c=clients[id];
+    const sel=selectedClientId===id?'selected':'';
+    return `<div class="client-list-item ${sel}" onclick="selectClient('${id}')">
+      <div>
+        <div class="client-name">${c.name}</div>
+        <div class="client-store">@${c.username} · ${c.store||'—'}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-function updateDateDisplay() {
-    const months = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-    document.getElementById('currentDate').textContent = `${currentDate.getDate()} ${months[currentDate.getMonth()]}`;
-    document.getElementById('dayTitle').textContent    = `dia ${currentDate.getDate()}`;
+function selectClient(id){
+  selectedClientId=id;
+  renderClientList();
+  const c=(cloud.users||{})[id];
+  const recs=getClientRecords(id);
+  const last=recs.sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+  document.getElementById('clientDetailPanel').innerHTML=`
+    <div class="panel-title">
+      <span>${c.name}</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn-sm" style="background:#1a2a3a;border:1px solid #2a4a5a;color:#5ac8fa" onclick="openEditClient('${id}')">✏️ Editar</button>
+        <button class="btn-sm" style="background:#2a1010;border:1px solid #5a2020;color:#ff6b6b" onclick="openDelClient('${id}')">🗑️ Excluir</button>
+      </div>
+    </div>
+    <div style="font-size:14px;color:#888;margin-bottom:16px">
+      <div>👤 Usuário: <strong style="color:#fff">${c.username}</strong></div>
+      <div style="margin-top:6px">🏪 Loja: <strong style="color:#fff">${c.store||'—'}</strong></div>
+      <div style="margin-top:6px">📊 Registros: <strong style="color:#fff">${recs.length}</strong></div>
+      ${last?`<div style="margin-top:6px">💰 Último saldo: <strong style="color:#34c759">${fmt(last.saldoFinal)}</strong></div>`:''}
+    </div>
+    <button class="btn-view-client" onclick="adminViewClient('${id}')">📋 Ver caixa completo</button>`;
 }
 
-function previousDay() { currentDate.setDate(currentDate.getDate()-1); updateDateDisplay(); carregarDados(); }
-function nextDay()     { currentDate.setDate(currentDate.getDate()+1); updateDateDisplay(); carregarDados(); }
-
-// ════════════════════════════════════════════════
-//  SAÍDA ITEMS
-// ════════════════════════════════════════════════
-function adicionarSaida(desc='', val='') {
-    const id   = Date.now();
-    const cont = document.getElementById('saidasContainer');
-    const div  = document.createElement('div');
-    div.className = 'saida-item'; div.id = `saida-${id}`;
-    div.innerHTML = `
-        <input type="text"   class="saida-desc"  placeholder="Descrição da saída" value="${desc}" oninput="calcularSaldoAutomatico()">
-        <input type="number" class="saida-valor-input" placeholder="0,00" step="0.01" min="0" value="${val}" oninput="calcularSaldoAutomatico()">
-        <span class="saida-valor">${val ? formatCurrency(parseFloat(val)) : 'R$ 0,00'}</span>
-        <button type="button" class="btn-remove-saida" onclick="removerSaida('saida-${id}')">✕</button>`;
-    // update display on input
-    div.querySelector('.saida-valor-input').addEventListener('input', function(){
-        div.querySelector('.saida-valor').textContent = formatCurrency(parseFloat(this.value)||0);
-    });
-    cont.appendChild(div);
-    calcularSaldoAutomatico();
+let editingClientId=null;
+function openAddClient(){
+  editingClientId=null;
+  document.getElementById('modalClientTitle').textContent='Novo Cliente';
+  document.getElementById('mClientName').value='';
+  document.getElementById('mClientUser').value='';
+  document.getElementById('mClientPass').value='';
+  document.getElementById('mClientStore').value='';
+  document.getElementById('mClientPass').placeholder='Mínimo 4 caracteres';
+  document.getElementById('modalClient').classList.add('open');
 }
 
-function removerSaida(id) { document.getElementById(id)?.remove(); calcularSaldoAutomatico(); }
-
-function getSaidasFromDOM() {
-    return [...document.querySelectorAll('.saida-item')].map(el => ({
-        descricao: el.querySelector('.saida-desc').value.trim(),
-        valor:     parseFloat(el.querySelector('.saida-valor-input').value)||0
-    })).filter(s => s.descricao || s.valor);
+function openEditClient(id){
+  editingClientId=id;
+  const c=(cloud.users||{})[id];
+  document.getElementById('modalClientTitle').textContent='Editar Cliente';
+  document.getElementById('mClientName').value=c.name||'';
+  document.getElementById('mClientUser').value=c.username||'';
+  document.getElementById('mClientPass').value='';
+  document.getElementById('mClientPass').placeholder='Deixe em branco para não alterar';
+  document.getElementById('mClientStore').value=c.store||'';
+  document.getElementById('modalClient').classList.add('open');
 }
 
-// ════════════════════════════════════════════════
-//  CÁLCULO
-// ════════════════════════════════════════════════
-function calcularSaldoAutomatico() {
-    const inicio  = parseFloat(document.getElementById('saldoInicio').value)||0;
-    const entrada = parseFloat(document.getElementById('entradas').value)||0;
-    const saidas  = getSaidasFromDOM();
-    const totSai  = saidas.reduce((a,s)=>a+s.valor,0);
-    const calc    = inicio + entrada - totSai;
-    document.getElementById('saldoCalculado').textContent = formatCurrency(calc);
-    document.getElementById('saldoFinal').textContent     = formatCurrency(calc);
-    document.getElementById('statInicio').textContent  = formatCurrency(inicio);
-    document.getElementById('statEntradas').textContent= formatCurrency(entrada);
-    document.getElementById('statSaidas').textContent  = formatCurrency(totSai);
+async function saveClient(){
+  const name  = document.getElementById('mClientName').value.trim();
+  const user  = document.getElementById('mClientUser').value.trim().toLowerCase();
+  const pass  = document.getElementById('mClientPass').value;
+  const store = document.getElementById('mClientStore').value.trim();
+  if(!name||!user){alert('Nome e usuário são obrigatórios.');return;}
+
+  if(!cloud.users)cloud.users={};
+
+  if(editingClientId){
+    const c=cloud.users[editingClientId];
+    c.name=name; c.username=user; c.store=store;
+    if(pass.length>=4)c.password=pass;
+    else if(pass.length>0&&pass.length<4){alert('Senha mínima: 4 caracteres.');return;}
+  } else {
+    if(!pass||pass.length<4){alert('Senha mínima: 4 caracteres.');return;}
+    // check duplicate username
+    if(Object.values(cloud.users).some(c=>c.username===user)){alert('Esse usuário já existe.');return;}
+    const id='u'+Date.now();
+    cloud.users[id]={name,username:user,password:pass,store,createdAt:new Date().toISOString()};
+  }
+
+  closeModal('modalClient');
+  await gistSave();
+  renderClientList();
+  renderAdminOverview();
+  if(selectedClientId)selectClient(selectedClientId);
+  alert('✅ Cliente salvo!');
 }
 
-// ════════════════════════════════════════════════
-//  CARREGAR DADOS DO DIA
-// ════════════════════════════════════════════════
-function carregarDados() {
-    if (!currentUser) return;
-    const store = document.getElementById('storeSelect').value;
-    const rec   = getRecord(store, currentDate);
-
-    // Auto-fill saldo início from previous day
-    let prevSaldo = 0;
-    const prev = new Date(currentDate); prev.setDate(prev.getDate()-1);
-    const prevRec = getRecord(store, prev);
-    if (prevRec) prevSaldo = prevRec.saldoFinal || 0;
-    document.getElementById('saldoInicio').value = prevSaldo.toFixed(2);
-
-    document.getElementById('saidasContainer').innerHTML = '';
-    document.getElementById('entradas').value = '';
-
-    if (rec) {
-        document.getElementById('entradas').value = rec.entradas || '';
-        (rec.saidas||[]).forEach(s => adicionarSaida(s.descricao, s.valor));
-    }
-    calcularSaldoAutomatico();
-    carregarRegistros();
+function openDelClient(id){
+  pendingDelId=id;
+  document.getElementById('modalDel').classList.add('open');
 }
 
-// ════════════════════════════════════════════════
-//  CONFIRMAR / SALVAR
-// ════════════════════════════════════════════════
-async function confirmarRegistro(e) {
-    e.preventDefault();
-    const store   = document.getElementById('storeSelect').value;
-    const inicio  = parseFloat(document.getElementById('saldoInicio').value)||0;
-    const entrada = parseFloat(document.getElementById('entradas').value)||0;
-    const saidas  = getSaidasFromDOM();
-    const totSai  = saidas.reduce((a,s)=>a+s.valor,0);
-    const final   = inicio + entrada - totSai;
-    const storeNames = { loja1:'Loja 1 - Malubiju', loja2:'Loja 2', loja3:'Loja 3' };
-    const rec = {
-        data: currentDate.toISOString().split('T')[0],
-        loja: store, lojaNome: storeNames[store],
-        saldoInicio: inicio, entradas: entrada, saidas, saldoFinal: final,
-        usuario: currentUser.name, userId: currentUser.id,
-        savedAt: new Date().toISOString()
-    };
-    setRecord(store, currentDate, rec);
-    const btnEl = document.querySelector('#caixaForm .btn-submit');
-    btnEl.textContent = '⏳ Salvando na nuvem...'; btnEl.disabled = true;
-    const ok = await gistSave();
-    btnEl.textContent = '✅ Confirmar e Salvar na Nuvem'; btnEl.disabled = false;
-    alert(ok ? `✅ Registro salvo e sincronizado!\nSaldo Final: ${formatCurrency(final)}` : `✅ Salvo localmente.\n⚠️ Falha ao sincronizar com o Gist. Verifique a configuração.`);
-    carregarRegistros();
-    atualizarStatsProv();
+async function confirmDelClient(){
+  if(!pendingDelId)return;
+  delete cloud.users[pendingDelId];
+  // remove records
+  Object.keys(cloud.records||{}).forEach(k=>{if(k.startsWith(pendingDelId+'_'))delete cloud.records[k];});
+  closeModal('modalDel');
+  selectedClientId=null;
+  await gistSave();
+  renderClientList();
+  renderAdminOverview();
+  document.getElementById('clientDetailPanel').innerHTML='<div class="panel-title">Selecione um cliente</div><p style="color:#666;font-size:14px">Clique em um cliente para ver ou editar.</p>';
 }
 
-function limparFormulario() {
-    if (!confirm('Limpar o formulário?')) return;
-    document.getElementById('entradas').value = '';
-    document.getElementById('saidasContainer').innerHTML = '';
-    calcularSaldoAutomatico();
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+// ══════════════════════════════════════════
+//  CAIXA CLIENTE
+// ══════════════════════════════════════════
+function getClientRecords(clientId){
+  const recs=cloud.records||{};
+  return Object.keys(recs).filter(k=>k.startsWith(clientId+'_')).map(k=>recs[k]);
 }
 
-// ════════════════════════════════════════════════
-//  HISTÓRICO
-// ════════════════════════════════════════════════
-function carregarRegistros() {
-    if (!currentUser) return;
-    const store   = document.getElementById('storeSelect').value;
-    const prefix  = `${currentUser.id}_${store}_`;
-    const records = [];
+function getRecKey(clientId,date){return `${clientId}_${date}`;}
 
-    // from cloud
-    Object.keys(cloudData).forEach(k => {
-        if (k.startsWith(prefix)) records.push(cloudData[k]);
-    });
-    // from localStorage (fallback / extra)
-    for (let k in localStorage) {
-        if (k.startsWith(`caixa_${prefix}`) && !cloudData[k.replace('caixa_','')]) {
-            try { records.push(JSON.parse(localStorage.getItem(k))); } catch(e){}
-        }
-    }
+function loadDay(){
+  const k=dayKey(currentDay,currentMonth,currentYear);
+  document.getElementById('dayLabel').textContent=dayLabelFull(currentDay,currentMonth,currentYear);
+  document.getElementById('daySub').textContent=`${String(currentDay).padStart(2,'0')}/${String(currentMonth).padStart(2,'0')}/${currentYear}`;
+  document.getElementById('saidasList').innerHTML='';
+  saidaCount=0;
+  document.getElementById('inpEntrada').value='';
+  document.getElementById('inpConfirm').value='';
+  document.getElementById('difMsg').textContent='';
 
-    records.sort((a,b) => new Date(b.data)-new Date(a.data));
-    const cont = document.getElementById('recordsContainer');
-    if (!records.length) { cont.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>Nenhuma movimentação registrada</p></div>'; return; }
+  // saldo inicio = saldo final do dia anterior
+  const prev=new Date(currentYear,currentMonth-1,currentDay-1);
+  const prevKey=getRecKey(session.user,dayKey(prev.getDate(),prev.getMonth()+1,prev.getFullYear()));
+  const prevRec=(cloud.records||{})[prevKey];
+  document.getElementById('inpInicio').value=prevRec?prevRec.saldoFinal.toFixed(2):'0.00';
 
-    let html = `<table class="records-table"><thead><tr>
-        <th>Data</th><th>Início</th><th>Entradas</th><th>Saídas</th><th>Detalhes</th><th>Saldo Final</th><th>Ação</th>
-    </tr></thead><tbody>`;
-    records.forEach(r => {
-        const [y,m,d] = r.data.split('-');
-        const dateStr = `${d}/${m}/${y}`;
-        const saiDesc = (r.saidas||[]).map(s=>`${s.descricao}: ${formatCurrency(s.valor)}`).join('<br>') || '—';
-        const totSai  = (r.saidas||[]).reduce((a,s)=>a+s.valor,0);
-        html += `<tr>
-            <td>${dateStr}</td>
-            <td>${formatCurrency(r.saldoInicio)}</td>
-            <td style="color:#34c759">+${formatCurrency(r.entradas)}</td>
-            <td style="color:#ff3b30">-${formatCurrency(totSai)}</td>
-            <td style="font-size:12px;color:#888">${saiDesc}</td>
-            <td style="color:#34c759;font-weight:700">${formatCurrency(r.saldoFinal)}</td>
-            <td><button class="btn-delete-record" onclick="deletarRegistro('${r.data}','${store}')">🗑️</button></td>
-        </tr>`;
-    });
-    html += '</tbody></table>';
-    cont.innerHTML = html;
+  // carregar dia atual se existir
+  const rec=(cloud.records||{})[getRecKey(session.user,k)];
+  if(rec){
+    document.getElementById('inpEntrada').value=rec.entrada||'';
+    document.getElementById('inpConfirm').value=rec.saldoFinal||'';
+    (rec.saidas||[]).forEach(s=>addSaida(s.desc,s.val));
+  }
+  recalc();
 }
 
-async function deletarRegistro(dateStr, store) {
-    if (!confirm('⚠️ Tem certeza que deseja deletar este lançamento?')) return;
-    deleteRecord(store, dateStr);
-    const ok = await gistSave();
-    carregarRegistros(); carregarDados();
-    if (!ok) alert('Excluído localmente, mas falha ao sincronizar com o Gist.');
+function changeDay(n){
+  const dt=new Date(currentYear,currentMonth-1,currentDay+n);
+  currentDay=dt.getDate();currentMonth=dt.getMonth()+1;currentYear=dt.getFullYear();
+  loadDay();
 }
 
-// ════════════════════════════════════════════════
-//  EXPORT CSV
-// ════════════════════════════════════════════════
-function exportarCSV() {
-    const store  = document.getElementById('storeSelect').value;
-    const prefix = `${currentUser.id}_${store}_`;
-    const records = Object.keys(cloudData).filter(k=>k.startsWith(prefix)).map(k=>cloudData[k]);
-    records.sort((a,b)=>new Date(a.data)-new Date(b.data));
-    const storeNames = { loja1:'Loja 1 - Malubiju', loja2:'Loja 2', loja3:'Loja 3' };
-    let csv = `Caixa Diário - ${storeNames[store]}\nUsuário: ${currentUser.name}\nData de Exportação: ${new Date().toLocaleDateString('pt-BR')}\n\n`;
-    csv += `Data,Saldo Inicial,Entradas,Saídas,Descrição,Saldo Final\n`;
-    records.forEach(r => {
-        const totSai = (r.saidas||[]).reduce((a,s)=>a+s.valor,0);
-        const desc   = (r.saidas||[]).map(s=>`${s.descricao}(${s.valor})`).join('; ');
-        csv += `${r.data},${r.saldoInicio},${r.entradas},${totSai},"${desc}",${r.saldoFinal}\n`;
-    });
-    const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a'); a.href=url; a.download=`caixa_${store}_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click(); URL.revokeObjectURL(url);
+function addSaida(desc='',val=''){
+  saidaCount++;
+  const id='sr'+saidaCount;
+  const div=document.createElement('div');
+  div.className='saida-row';div.id=id;
+  div.innerHTML=`<input type="text" placeholder="O que saiu?" value="${desc}" oninput="recalc()">
+<input type="number" placeholder="0,00" step="0.01" min="0" value="${val}" oninput="recalc()">
+<button class="btn-rm" onclick="document.getElementById('${id}').remove();recalc()">✕</button>`;
+  document.getElementById('saidasList').appendChild(div);
+  recalc();
 }
 
-// ════════════════════════════════════════════════
-//  PROVISIONAMENTO
-// ════════════════════════════════════════════════
-function adicionarProvisao(e) {
-    e.preventDefault();
-    const store = document.getElementById('storeSelect').value;
-    const item  = {
-        id: Date.now(),
-        tipo: document.getElementById('provTipo').value,
-        valor: parseFloat(document.getElementById('provValor').value)||0,
-        vencimento: document.getElementById('provVencimento').value,
-        descricao: document.getElementById('provDescricao').value,
-        criadoEm: new Date().toISOString()
-    };
-    const arr = getProvisioning(store);
-    arr.push(item);
-    setProvisioning(store, arr);
-    gistSave();
-    document.getElementById('provisioningForm').reset();
-    carregarProvisionamento(); atualizarStatsProv();
+function getSaidas(){
+  return [...document.querySelectorAll('.saida-row')].map(r=>({
+    desc:r.querySelectorAll('input')[0].value.trim(),
+    val:parseFloat(r.querySelectorAll('input')[1].value)||0
+  })).filter(s=>s.desc||s.val);
 }
 
-function carregarProvisionamento() {
-    if (!currentUser) return;
-    const store = document.getElementById('storeSelect').value;
-    const arr   = getProvisioning(store);
-    const cont  = document.getElementById('provisioningRecords');
-    if (!arr.length) { cont.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>Nenhuma provisão registrada</p></div>'; return; }
-    cont.innerHTML = arr.map(p => `
-        <div class="provisioning-item">
-            <div>
-                <span class="prov-tipo ${p.tipo==='receber'?'prov-receber':'prov-pagar'}">${p.tipo==='receber'?'A Receber':'A Pagar'}</span>
-                <strong style="margin-left:10px">${p.descricao}</strong>
-                <div style="font-size:12px;color:#888;margin-top:4px">Vencimento: ${new Date(p.vencimento+'T12:00:00').toLocaleDateString('pt-BR')}</div>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px">
-                <span style="font-size:18px;font-weight:700;color:${p.tipo==='receber'?'#34c759':'#ff3b30'}">${formatCurrency(p.valor)}</span>
-                <button class="btn-delete-record" onclick="deletarProvisao(${p.id})">🗑️</button>
-            </div>
-        </div>`).join('');
+function recalc(){
+  const ini=parseFloat(document.getElementById('inpInicio').value)||0;
+  const ent=parseFloat(document.getElementById('inpEntrada').value)||0;
+  const saidas=getSaidas();
+  const totSai=saidas.reduce((a,s)=>a+s.val,0);
+  const calc=ini+ent-totSai;
+  document.getElementById('calcVal').textContent=fmt(calc);
+  document.getElementById('sInicio').textContent=fmt(ini);
+  document.getElementById('sEntrada').textContent=fmt(ent);
+  document.getElementById('sSaidas').textContent=fmt(totSai);
+  document.getElementById('sSaldo').textContent=fmt(calc);
+  checkDif();
 }
 
-function deletarProvisao(id) {
-    if (!confirm('Excluir esta provisão?')) return;
-    const store = document.getElementById('storeSelect').value;
-    const arr   = getProvisioning(store).filter(p=>p.id!==id);
-    setProvisioning(store, arr);
-    gistSave();
-    carregarProvisionamento(); atualizarStatsProv();
+function checkDif(){
+  const ini=parseFloat(document.getElementById('inpInicio').value)||0;
+  const ent=parseFloat(document.getElementById('inpEntrada').value)||0;
+  const totSai=getSaidas().reduce((a,s)=>a+s.val,0);
+  const calc=ini+ent-totSai;
+  const conf=parseFloat(document.getElementById('inpConfirm').value);
+  const el=document.getElementById('difMsg');
+  if(isNaN(conf)){el.textContent='';return;}
+  const dif=conf-calc;
+  if(Math.abs(dif)<0.01){el.textContent='✓ Saldo confere';el.className='dif-msg dif-ok';}
+  else{el.textContent=`⚠ Diferença de ${fmt(Math.abs(dif))}`;el.className='dif-msg dif-err';}
 }
 
-function atualizarStatsProv() {
-    if (!currentUser) return;
-    const store = document.getElementById('storeSelect').value;
-    const arr   = getProvisioning(store);
-    const rec   = arr.filter(p=>p.tipo==='receber').reduce((a,p)=>a+p.valor,0);
-    const pag   = arr.filter(p=>p.tipo==='pagar').reduce((a,p)=>a+p.valor,0);
-    document.getElementById('statReceber').textContent = formatCurrency(rec);
-    document.getElementById('statPagar').textContent   = formatCurrency(pag);
+async function saveDay(){
+  const btn=document.getElementById('btnSave');
+  btn.disabled=true;btn.textContent='⏳ Salvando...';
+  const k=dayKey(currentDay,currentMonth,currentYear);
+  const ini=parseFloat(document.getElementById('inpInicio').value)||0;
+  const ent=parseFloat(document.getElementById('inpEntrada').value)||0;
+  const saidas=getSaidas();
+  const totSai=saidas.reduce((a,s)=>a+s.val,0);
+  const saldoFinal=ini+ent-totSai;
+  if(!cloud.records)cloud.records={};
+  cloud.records[getRecKey(session.user,k)]={
+    date:k,inicio:ini,entrada:ent,saidas,saldoFinal,
+    clientId:session.user,store:session.store,savedAt:new Date().toISOString()
+  };
+  const ok=await gistSave();
+  btn.disabled=false;btn.innerHTML='☁️ Salvar e sincronizar';
+  alert(ok?`✅ Salvo! Saldo final: ${fmt(saldoFinal)}`:`✅ Salvo localmente.\n⚠️ Não foi possível sincronizar com o Gist.`);
+  recalc();
 }
 
-// ════════════════════════════════════════════════
-//  GRÁFICOS
-// ════════════════════════════════════════════════
-function renderGraficos() {
-    if (!currentUser) return;
-    const store  = document.getElementById('storeSelect').value;
-    const prefix = `${currentUser.id}_${store}_`;
-    const records = Object.keys(cloudData).filter(k=>k.startsWith(prefix)).map(k=>cloudData[k]);
-    records.sort((a,b)=>new Date(a.data)-new Date(b.data));
-
-    const meses = {}; const hoje = new Date();
-    for (let i=11;i>=0;i--) {
-        const d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
-        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        meses[k] = { entradas:0, saidas:0, saldoFinal:0, count:0 };
-    }
-    records.forEach(r => {
-        const mk = r.data.substring(0,7);
-        if (meses[mk]) {
-            meses[mk].entradas  += r.entradas||0;
-            meses[mk].saidas    += (r.saidas||[]).reduce((a,s)=>a+s.valor,0);
-            meses[mk].saldoFinal = r.saldoFinal;
-            meses[mk].count++;
-        }
-    });
-
-    const labels = Object.keys(meses).map(k=>{ const [y,m]=k.split('-'); return ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][+m-1]+'/'+y.slice(2); });
-    const saldos   = Object.values(meses).map(m=>m.saldoFinal);
-    const entradas = Object.values(meses).map(m=>m.entradas);
-    const saidas   = Object.values(meses).map(m=>m.saidas);
-
-    if (balanceChart) balanceChart.destroy();
-    const ctx = document.getElementById('balanceChart').getContext('2d');
-    balanceChart = new Chart(ctx, {
-        type:'line',
-        data:{ labels,
-            datasets:[
-                { label:'Saldo Final', data:saldos,   borderColor:'#34c759', backgroundColor:'rgba(52,199,89,.1)', fill:true, tension:.4 },
-                { label:'Entradas',    data:entradas,  borderColor:'#5ac8fa', backgroundColor:'rgba(90,200,250,.1)', fill:false, tension:.4 },
-                { label:'Saídas',      data:saidas,    borderColor:'#ff3b30', backgroundColor:'rgba(255,59,48,.1)',  fill:false, tension:.4 }
-            ]
-        },
-        options:{ responsive:true, maintainAspectRatio:false,
-            plugins:{ legend:{ labels:{ color:'#fff' } } },
-            scales:{ x:{ ticks:{ color:'#888' }, grid:{ color:'#333' } }, y:{ ticks:{ color:'#888', callback:v=>formatCurrency(v) }, grid:{ color:'#333' } } }
-        }
-    });
-
-    // Monthly summary table
-    const mEntries = Object.entries(meses).reverse();
-    let html = `<table class="records-table"><thead><tr><th>Mês</th><th>Entradas</th><th>Saídas</th><th>Saldo Final</th><th>Dias</th></tr></thead><tbody>`;
-    mEntries.forEach(([k,m]) => {
-        const [y,mo]=k.split('-');
-        const mName=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][+mo-1];
-        html += `<tr>
-            <td>${mName}/${y}</td>
-            <td style="color:#34c759">+${formatCurrency(m.entradas)}</td>
-            <td style="color:#ff3b30">-${formatCurrency(m.saidas)}</td>
-            <td style="font-weight:700;color:#34c759">${formatCurrency(m.saldoFinal)}</td>
-            <td>${m.count}</td>
-        </tr>`;
-    });
-    html += '</tbody></table>';
-    document.getElementById('monthlySummary').innerHTML = html;
+// ══════════════════════════════════════════
+//  HISTÓRICO CLIENTE
+// ══════════════════════════════════════════
+function renderHist(){
+  const recs=getClientRecords(session.user).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const mesKey=new Date().toISOString().slice(0,7);
+  const mesRecs=recs.filter(r=>r.date&&r.date.startsWith(mesKey));
+  const mesEnt=mesRecs.reduce((a,r)=>a+(r.entrada||0),0);
+  const mesSai=mesRecs.reduce((a,r)=>a+(r.saidas||[]).reduce((x,s)=>x+s.val,0),0);
+  const last=recs[0];
+  document.getElementById('hMes').textContent=MONTHS_S[new Date().getMonth()]+'/'+new Date().getFullYear();
+  document.getElementById('hEnt').textContent=fmt(mesEnt);
+  document.getElementById('hSai').textContent=fmt(mesSai);
+  document.getElementById('hUlt').textContent=last?fmt(last.saldoFinal):'—';
+  const cont=document.getElementById('histList');
+  if(!recs.length){cont.innerHTML='<p style="color:#666;font-size:14px;text-align:center;padding:30px">Nenhum registro ainda.</p>';return;}
+  cont.innerHTML=recs.map(r=>{
+    const totSai=(r.saidas||[]).reduce((a,s)=>a+s.val,0);
+    const bid='h'+r.date.replace(/-/g,'');
+    return `<div class="hist-item">
+      <div class="hist-head" onclick="toggleHist('${bid}')">
+        <div><div class="hist-date">${r.date}</div><div class="hist-meta">Entrada ${fmt(r.entrada)} · Saída ${fmt(totSai)}</div></div>
+        <div class="hist-saldo">${fmt(r.saldoFinal)}</div>
+      </div>
+      <div class="hist-body" id="${bid}">
+        <div class="hist-row"><span>Início</span><span>${fmt(r.inicio)}</span></div>
+        <div class="hist-row"><span><span class="tag tag-in">Entrada</span></span><span class="hist-in">+${fmt(r.entrada)}</span></div>
+        ${(r.saidas||[]).map(s=>`<div class="hist-row"><span><span class="tag tag-out">${s.desc||'Saída'}</span></span><span class="hist-out">-${fmt(s.val)}</span></div>`).join('')}
+        <div class="hist-row"><span><strong>Saldo final</strong></span><span class="hist-in"><strong>${fmt(r.saldoFinal)}</strong></span></div>
+        <button class="btn-del-rec" onclick="delRecord('${r.date}')">🗑️ Excluir este dia</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-// ════════════════════════════════════════════════
-//  TECLADO NUMÉRICO
-// ════════════════════════════════════════════════
-(function buildKeyboard() {
-    const kb = document.getElementById('keyboard-entradas');
-    if (!kb) return;
-    ['1','2','3','4','5','6','7','8','9','0','.','Del'].forEach(n => {
-        const k = document.createElement('div');
-        k.className = `iphone-key${n==='Del'?' delete':''}`;
-        k.textContent = n;
-        k.addEventListener('click', () => {
-            const inp = document.getElementById('entradas');
-            if (n==='Del') inp.value = inp.value.slice(0,-1);
-            else if (n==='.' && inp.value.includes('.')) return;
-            else inp.value += n;
-            inp.focus(); calcularSaldoAutomatico();
-        });
-        kb.appendChild(k);
-    });
-})();
+async function delRecord(date){
+  if(!confirm('Excluir o registro deste dia?'))return;
+  const k=getRecKey(session.user,date);
+  delete cloud.records[k];
+  await gistSave();
+  renderHist();
+}
 
-// ════════════════════════════════════════════════
+function toggleHist(id){document.getElementById(id)?.classList.toggle('open');}
+
+// ══════════════════════════════════════════
+//  REFRESH
+// ══════════════════════════════════════════
+function refreshCurrentView(){
+  if(!session)return;
+  if(session.role==='admin'){renderAdminOverview();renderClientList();}
+  else{loadDay();}
+}
+
+// ══════════════════════════════════════════
 //  INIT
-// ════════════════════════════════════════════════
-window.addEventListener('load', () => {
-    loadGistConfig();
-    const saved = localStorage.getItem('currentUser');
-    if (saved) {
-        currentUser = JSON.parse(saved);
-        loginSuccess();
-    } else {
-        updateDateDisplay();
-    }
+// ══════════════════════════════════════════
+window.addEventListener('load',()=>{
+  loadGistCfg();
+  // enter no login
+  document.getElementById('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+  document.getElementById('loginUser').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 });
 </script>
 </body>
