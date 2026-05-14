@@ -78,7 +78,7 @@ Supabase (PostgreSQL)   ← dados dos usuários e registros de caixa
 
 | Status | Código | Situação |
 |---|---|---|
-| 200 | — | Login válido, retorna token JWT + dados do usuário |
+| 200 | `SUCESSO` | Login válido, retorna token JWT + dados do usuário |
 | 400 | `DADOS_INVALIDOS` | Body inválido ou campos em branco |
 | 401 | `CREDENCIAIS_INVALIDAS` | Usuário ou senha incorretos |
 | 403 | `USUARIO_INATIVO` | Usuário inativo (`ativo = false`) |
@@ -100,8 +100,8 @@ Supabase (PostgreSQL)   ← dados dos usuários e registros de caixa
 
 | Status | Código | Situação |
 |---|---|---|
-| 200 | — | Sucesso (GET, PUT, DELETE) |
-| 201 | — | Cliente criado (POST) |
+| 200 | `SUCESSO` | Sucesso (GET, PUT, DELETE) |
+| 201 | `SUCESSO` | Cliente criado (POST) |
 | 400 | `DADOS_INVALIDOS` | Campos obrigatórios ausentes ou inválidos |
 | 400 | `SENHA_MUITO_CURTA` | Senha com menos de 4 caracteres |
 | 401 | `TOKEN_INVALIDO` | JWT ausente, expirado ou malformado |
@@ -125,8 +125,8 @@ Supabase (PostgreSQL)   ← dados dos usuários e registros de caixa
 
 | Status | Código | Situação |
 |---|---|---|
-| 200 | — | Sucesso (GET, POST atualização, DELETE) |
-| 201 | — | Registro criado (POST novo) |
+| 200 | `SUCESSO` | Sucesso (GET, POST atualização, DELETE) |
+| 201 | `SUCESSO` | Registro criado (POST novo) |
 | 400 | `DADOS_INVALIDOS` | Campos obrigatórios ausentes ou inválidos |
 | 400 | `DATA_FUTURA` | Tentativa de registrar data futura |
 | 400 | `MOTIVO_OBRIGATORIO` | Delete sem motivo informado |
