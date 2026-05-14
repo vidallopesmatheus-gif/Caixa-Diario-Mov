@@ -209,6 +209,54 @@ CaixaDiario.API/
 
 ---
 
+## README do Backend
+
+O projeto C# terá um `README.md` detalhado na raiz de `CaixaDiario.API/` cobrindo:
+
+**Seções obrigatórias:**
+
+- **Visão geral** — o que é o sistema, para quem é, qual problema resolve
+- **Pré-requisitos** — .NET 8 SDK, PostgreSQL (ou conta Supabase), variáveis de ambiente necessárias
+- **Configuração local** — passo a passo para rodar localmente:
+  1. Clonar o repositório
+  2. Configurar `appsettings.Development.json` com a connection string do banco
+  3. Rodar as migrations (`dotnet ef database update`)
+  4. Iniciar a API (`dotnet run`)
+- **Variáveis de ambiente** — tabela com todas as variáveis, descrição e exemplo de valor
+- **Endpoints** — resumo das rotas disponíveis com link para o spec completo
+- **Testes** — como rodar os testes unitários (`dotnet test`)
+- **Deploy** — passo a passo para publicar no Railway
+- **Estrutura do projeto** — árvore de pastas com descrição de cada camada
+
+---
+
+## Testes Unitários
+
+Testes unitários serão implementados **apenas no backend**. O frontend HTML puro não terá testes — a configuração de Jest para um único `index.html` tem custo alto e retorno baixo neste estágio. Quando o frontend migrar para Blazor, testes serão adicionados.
+
+**Projeto de testes:** `CaixaDiario.Tests/` (xUnit + Moq)
+
+```
+CaixaDiario.Tests/
+├── Services/
+│   ├── AuthServiceTests.cs
+│   ├── UsuarioServiceTests.cs
+│   └── RegistroServiceTests.cs
+└── CaixaDiario.Tests.csproj
+```
+
+**O que será testado (Services):**
+
+| Teste | Cenários cobertos |
+|---|---|
+| `AuthServiceTests` | Login válido, senha errada, usuário inativo, usuário inexistente |
+| `UsuarioServiceTests` | Criar cliente, usuário duplicado, senha curta, desativar, atualizar |
+| `RegistroServiceTests` | Criar registro, atualizar registro, data futura, soft delete sem motivo, acesso negado |
+
+Controllers e banco de dados não são testados unitariamente — Controllers são finos (só delegam ao Service) e o banco é coberto por testes de integração futuros se necessário.
+
+---
+
 ## Integração Frontend → API
 
 **Header de autenticação em todas as requisições autenticadas:**
