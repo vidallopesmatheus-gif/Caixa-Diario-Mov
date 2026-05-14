@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="CaixaDiario.API/CaixaDiario.API.csproj" />
+  <Project Path="CaixaDiario.Tests/CaixaDiario.Tests.csproj" />
+</Solution>
