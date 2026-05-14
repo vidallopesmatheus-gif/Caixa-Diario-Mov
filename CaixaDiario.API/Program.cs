@@ -64,13 +64,15 @@ builder.Services.AddScoped<RegistroService>();
 var app = builder.Build();
 
 app.MapOpenApi();
-app.MapGet("/", () => Results.Redirect("/scalar/v1"));
 app.MapScalarApiReference(options =>
 {
     options.Title = "Caixa Diário API";
     options.Theme = ScalarTheme.DeepSpace;
     options.DefaultHttpClient = new(ScalarTarget.Http, ScalarClient.HttpClient);
 });
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
