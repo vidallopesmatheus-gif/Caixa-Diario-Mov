@@ -154,6 +154,16 @@ O campo `campo` é opcional — aparece apenas em erros de validação de campo 
 
 ---
 
+## Arquitetura
+
+O projeto segue **Arquitetura em Camadas com Repository Pattern**. O fluxo de uma requisição é:
+
+```
+Controller → Service → Repository → DbContext (Entity Framework) → PostgreSQL
+```
+
+Cada camada tem responsabilidade única e só conhece a camada imediatamente abaixo. Os Services nunca acessam o DbContext diretamente — isso passa pelo Repository, o que facilita os testes unitários (o Repository é mockado em vez do banco).
+
 ## Estrutura do Projeto C#
 
 ```
@@ -182,6 +192,12 @@ CaixaDiario.API/
 │   └── RegistroDiario.cs
 ├── Enums/
 │   └── CodigoRetorno.cs
+├── Repositories/
+│   ├── Interfaces/
+│   │   ├── IUsuarioRepository.cs
+│   │   └── IRegistroRepository.cs
+│   ├── UsuarioRepository.cs
+│   └── RegistroRepository.cs
 ├── Services/
 │   ├── AuthService.cs
 │   ├── TokenService.cs
@@ -199,7 +215,9 @@ CaixaDiario.API/
 | Camada | Responsabilidade |
 |---|---|
 | `Controllers` | Recebe requisição, valida autenticação, chama Service, retorna resposta |
-| `Services` | Regras de negócio (validações, cálculos, acesso ao banco) |
+| `Services` | Regras de negócio (validações, cálculos, permissões) |
+| `Repositories` | Acesso ao banco via Entity Framework — isola o DbContext dos Services |
+| `Repositories/Interfaces` | Contratos dos Repositories — usados nos testes para mockar o banco |
 | `Models` | Entidades do banco (mapeadas pelo Entity Framework) |
 | `DTOs` | Dados que trafegam entre frontend e API |
 | `Enums` | `CodigoRetorno` com todos os códigos de erro |
@@ -226,6 +244,7 @@ O projeto C# terá um `README.md` detalhado na raiz de `CaixaDiario.API/` cobrin
 - **Endpoints** — resumo das rotas disponíveis com link para o spec completo
 - **Testes** — como rodar os testes unitários (`dotnet test`)
 - **Deploy** — passo a passo para publicar no Railway
+- **Arquitetura** — explicação do padrão adotado (Camadas + Repository Pattern) e o fluxo `Controller → Service → Repository → DbContext`
 - **Estrutura do projeto** — árvore de pastas com descrição de cada camada
 
 ---
@@ -253,7 +272,7 @@ CaixaDiario.Tests/
 | `UsuarioServiceTests` | Criar cliente, usuário duplicado, senha curta, desativar, atualizar |
 | `RegistroServiceTests` | Criar registro, atualizar registro, data futura, soft delete sem motivo, acesso negado |
 
-Controllers e banco de dados não são testados unitariamente — Controllers são finos (só delegam ao Service) e o banco é coberto por testes de integração futuros se necessário.
+Os testes mockam os Repositories via suas interfaces (`IUsuarioRepository`, `IRegistroRepository`), isolando completamente o banco. Controllers não são testados unitariamente — são finos e só delegam ao Service.
 
 ---
 
