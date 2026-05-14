@@ -7,12 +7,14 @@ using CaixaDiario.API.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Scalar.AspNetCore;
 
 DotNetEnv.Env.Load();
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddOpenApi();
 
 // Banco de dados
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -60,6 +62,14 @@ builder.Services.AddScoped<UsuarioService>();
 builder.Services.AddScoped<RegistroService>();
 
 var app = builder.Build();
+
+app.MapOpenApi();
+app.MapScalarApiReference(options =>
+{
+    options.Title = "Caixa Diário API";
+    options.Theme = ScalarTheme.DeepSpace;
+    options.DefaultHttpClient = new(ScalarTarget.Http, ScalarClient.HttpClient);
+});
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
