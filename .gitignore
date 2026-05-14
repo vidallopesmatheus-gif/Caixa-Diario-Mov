@@ -4,3 +4,6 @@ CaixaDiario.API/.env
 # Build artifacts
 **/bin/
 **/obj/
+
+# Claude Code
+.claude/
