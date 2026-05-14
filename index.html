@@ -31,16 +31,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .badge-admin{background:#2a1a3a;color:#bf5fff;border:1px solid #6a2f9a}
 .badge-client{background:#0a2a1a;color:#34c759;border:1px solid #1a6a3a}
 .topbar-right{display:flex;align-items:center;gap:10px}
-.sync-badge{font-size:12px;padding:4px 10px;border-radius:20px;font-weight:500}
-.sync-ok{background:#0a2a1a;color:#34c759;border:1px solid #1a5a2a}
-.sync-err{background:#2a0a0a;color:#ff3b30;border:1px solid #5a1a1a}
-.sync-spin{background:#2a2a0a;color:#ffd60a;border:1px solid #5a5a1a}
 .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#5ac8fa,#34c759);display:flex;align-items:center;justify-content:center;font-weight:700;color:#000;font-size:14px}
 .btn-sm{padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none}
 .btn-logout{background:#2a1a1a;color:#ff6b6b;border:1px solid #5a2a2a}
 .btn-logout:hover{background:#3a1a1a}
-.btn-sync{background:#1a2a1a;color:#34c759;border:1px solid #2a5a2a}
-.btn-sync:hover{background:#1a3a1a}
 .tabs-bar{background:#111;border-bottom:1px solid #222;padding:0 24px;display:flex;gap:4px;overflow-x:auto}
 .tab-btn{padding:12px 20px;background:none;border:none;color:#666;font-size:14px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
 .tab-btn.active{color:#fff;border-bottom-color:#5ac8fa}
@@ -140,12 +134,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn-view-client{margin-top:12px;width:100%;padding:8px;background:#1a2a3a;border:1px solid #2a4a5a;border-radius:8px;color:#5ac8fa;font-size:13px;font-weight:600;cursor:pointer}
 .btn-view-client:hover{background:#1a3a4a}
 .chart-container{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:20px;margin-bottom:24px;position:relative;height:350px}
-.gist-cfg{background:#111;border:1px solid #1a3a1a;border-radius:12px;padding:16px;margin-bottom:20px;font-size:13px;color:#888}
-.gist-cfg h3{color:#34c759;font-size:14px;margin-bottom:10px}
-.gist-cfg input{width:100%;padding:9px 12px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;color:#fff;font-size:13px;margin-bottom:8px}
-.gist-cfg input:focus{outline:none;border-color:#34c759}
-.btn-gist{padding:9px 18px;background:#34c759;border:none;border-radius:8px;color:#000;font-size:13px;font-weight:700;cursor:pointer}
-.gist-toggle{font-size:12px;color:#34c759;cursor:pointer;text-decoration:underline}
 @media(max-width:600px){
   .tabs-bar{overflow-x:auto;padding:0 12px}
   .tab-pane{padding:14px}
@@ -168,16 +156,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div class="field"><label>Usuário</label><input type="text" id="loginUser" placeholder="seu usuário" autocomplete="username"></div>
     <div class="field"><label>Senha</label><input type="password" id="loginPass" placeholder="sua senha" autocomplete="current-password"></div>
     <button class="btn-primary" onclick="doLogin()">Entrar</button>
-    <div style="margin-top:16px;text-align:center">
-      <span class="gist-toggle" onclick="toggleGistPanel()">☁️ Configurar sincronização (Gist)</span>
-    </div>
-    <div id="gistPanel" class="gist-cfg" style="margin-top:14px;display:none">
-      <h3>GitHub Gist — Armazenamento em nuvem</h3>
-      <p style="margin-bottom:10px">Os dados ficam salvos online. <a href="https://gist.github.com" target="_blank" style="color:#5ac8fa">Criar Gist</a> · <a href="https://github.com/settings/tokens" target="_blank" style="color:#5ac8fa">Token</a></p>
-      <input type="text" id="cfgGistId" placeholder="ID do Gist">
-      <input type="password" id="cfgGistToken" placeholder="Token GitHub (ghp_...)">
-      <button class="btn-gist" onclick="saveGistCfg()">💾 Salvar</button>
-    </div>
   </div>
 </div>
 
@@ -188,9 +166,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <span class="badge-role" id="roleBadge">—</span>
     </div>
     <div class="topbar-right">
-      <span class="sync-badge sync-ok" id="syncBadge">✓ Sync</span>
-      <button class="btn-sm btn-sync" onclick="syncNow()">🔄</button>
-      <div class="avatar" id="topAvatar">?</div>
+<div class="avatar" id="topAvatar">?</div>
       <span style="font-size:14px;font-weight:600" id="topName">—</span>
       <button class="btn-sm btn-logout" onclick="doLogout()">Sair</button>
     </div>
@@ -351,56 +327,91 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 
 <script>
-let session=null,cloud={},gistId='',gistTok='';
+const API_URL = 'http://localhost:5000';
+let session = null;
+let cloud = {};
 let currentDay,currentMonth,currentYear;
 let saidaCount=0,provReceberCount=0,provPagarCount=0;
 let selectedClientId=null,pendingDelId=null,adminViewingClient=null;
 let pendingDelRecordDate=null,balanceChart=null;
-const ADMIN_USER='admin',ADMIN_PASS='admin123';
 const MONTHS_S=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const fmt=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v||0);
 const dayKey=(d,m,y)=>`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 function dayLabelFull(d,m,y){const t=new Date();if(d===t.getDate()&&m===t.getMonth()+1&&y===t.getFullYear())return'Hoje';return`${String(d).padStart(2,'0')} de ${MONTHS_S[m-1]} de ${y}`;}
 
-// ── GIST — credenciais fixas embutidas ──
-function loadGistCfg(){
-  const FIXED_ID='5c19d1de807af96166859ce86d38308a';
-  const FIXED_TOK='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';
-  gistId=localStorage.getItem('gist_id')||FIXED_ID;
-  gistTok=localStorage.getItem('gist_tok')||FIXED_TOK;
-  if(gistId)document.getElementById('cfgGistId').value=gistId;
+// ── API HELPERS ──
+function getAuthHeaders() {
+  const token = localStorage.getItem('caixa_token');
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
 }
-function saveGistCfg(){
-  const id=document.getElementById('cfgGistId').value.trim();
-  const tok=document.getElementById('cfgGistToken').value.trim();
-  if(!id||!tok){alert('Preencha o ID e o Token.');return;}
-  localStorage.setItem('gist_id',id);localStorage.setItem('gist_tok',tok);
-  gistId=id;gistTok=tok;
-  document.getElementById('gistPanel').style.display='none';
-  alert('✅ Configuração salva!');
+
+async function apiGet(path) {
+  const r = await fetch(`${API_URL}${path}`, { headers: getAuthHeaders() });
+  if (r.status === 401) { doLogout(); return null; }
+  return r.json();
 }
-function toggleGistPanel(){const p=document.getElementById('gistPanel');p.style.display=p.style.display==='none'?'block':'none';}
-function setSyncBadge(s){const el=document.getElementById('syncBadge');if(!el)return;if(s==='ok'){el.textContent='✓ Sync';el.className='sync-badge sync-ok';}else if(s==='err'){el.textContent='✗ Erro';el.className='sync-badge sync-err';}else{el.textContent='⟳ ...';el.className='sync-badge sync-spin';}}
-async function gistLoad(){if(!gistId||!gistTok){cloud=loadLocalCloud();return false;}setSyncBadge('spin');try{const r=await fetch(`https://api.github.com/gists/${gistId}`,{headers:{'Authorization':`token ${gistTok}`,'Accept':'application/vnd.github+json'}});if(!r.ok)throw new Error(r.status);const j=await r.json();const raw=j.files['caixa.json']?.content||'{}';cloud=JSON.parse(raw);if(!cloud.users)cloud.users={};if(!cloud.records)cloud.records={};saveLocalCloud();setSyncBadge('ok');return true;}catch(e){setSyncBadge('err');cloud=loadLocalCloud();return false;}}
-async function gistSave(){if(!gistId||!gistTok){saveLocalCloud();return false;}setSyncBadge('spin');try{const r=await fetch(`https://api.github.com/gists/${gistId}`,{method:'PATCH',headers:{'Authorization':`token ${gistTok}`,'Accept':'application/vnd.github+json','Content-Type':'application/json'},body:JSON.stringify({files:{'caixa.json':{content:JSON.stringify(cloud,null,2)}}})});if(!r.ok)throw new Error(r.status);saveLocalCloud();setSyncBadge('ok');return true;}catch(e){setSyncBadge('err');saveLocalCloud();return false;}}
-async function syncNow(){await gistLoad();refreshCurrentView();alert('✅ Dados atualizados!');}
-function loadLocalCloud(){try{return JSON.parse(localStorage.getItem('caixa_cloud'))||{users:{},records:{}};}catch(e){return{users:{},records:{}};}}
-function saveLocalCloud(){localStorage.setItem('caixa_cloud',JSON.stringify(cloud));}
+
+async function apiPost(path, body) {
+  const r = await fetch(`${API_URL}${path}`, {
+    method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(body)
+  });
+  return { status: r.status, data: await r.json() };
+}
+
+async function apiPut(path, body) {
+  const r = await fetch(`${API_URL}${path}`, {
+    method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(body)
+  });
+  return { status: r.status, data: await r.json() };
+}
+
+async function apiDelete(path, body = null) {
+  const r = await fetch(`${API_URL}${path}`, {
+    method: 'DELETE', headers: getAuthHeaders(),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  return { status: r.status, data: await r.json() };
+}
 
 // ── AUTH ──
 function showLoginErr(msg){const el=document.getElementById('loginErr');el.textContent=msg;el.classList.add('show');}
-async function doLogin(){
-  const u=document.getElementById('loginUser').value.trim();
-  const p=document.getElementById('loginPass').value;
-  if(!u||!p){showLoginErr('Preencha usuário e senha.');return;}
-  await gistLoad();
-  if(u===ADMIN_USER&&p===ADMIN_PASS){session={user:ADMIN_USER,role:'admin',name:'Administrador',store:null};startApp();return;}
-  const clients=cloud.users||{};
-  const clientId=Object.keys(clients).find(id=>clients[id].username===u&&clients[id].password===p);
-  if(!clientId){showLoginErr('❌ Usuário ou senha incorretos.');return;}
-  const c=clients[clientId];session={user:clientId,role:'client',name:c.name,store:c.store};startApp();
+async function doLogin() {
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  if (!u || !p) { showLoginErr('Preencha usuário e senha.'); return; }
+
+  const r = await fetch(`${API_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nomeUsuario: u, senha: p })
+  });
+  const json = await r.json();
+
+  if (!r.ok) {
+    const msgs = {
+      CREDENCIAIS_INVALIDAS: '❌ Usuário ou senha incorretos.',
+      USUARIO_INATIVO: '❌ Usuário inativo. Entre em contato com o administrador.',
+      DADOS_INVALIDOS: '❌ Preencha todos os campos.'
+    };
+    showLoginErr(msgs[json.codigo] || '❌ Erro ao fazer login.');
+    return;
+  }
+
+  const { id, token, nome, perfil } = json.dados;
+  localStorage.setItem('caixa_token', token);
+  session = { id, user: id, role: perfil, name: nome };
+  startApp();
 }
-function doLogout(){if(!confirm('Sair?'))return;session=null;document.getElementById('appWrap').classList.remove('active');document.getElementById('loginWrap').style.display='flex';document.getElementById('loginUser').value='';document.getElementById('loginPass').value='';document.getElementById('loginErr').classList.remove('show');}
+function doLogout() {
+  if (!confirm('Sair?')) return;
+  session = null;
+  localStorage.removeItem('caixa_token');
+  document.getElementById('appWrap').classList.remove('active');
+  document.getElementById('loginWrap').style.display = 'flex';
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginErr').classList.remove('show');
+}
 function startApp(){
   document.getElementById('loginWrap').style.display='none';
   document.getElementById('appWrap').classList.add('active');
@@ -460,16 +471,55 @@ function selectClient(id){
 let editingClientId=null;
 function openAddClient(){editingClientId=null;document.getElementById('modalClientTitle').textContent='Novo Cliente';['mClientName','mClientUser','mClientPass','mClientStore'].forEach(id=>document.getElementById(id).value='');document.getElementById('mClientPass').placeholder='Mínimo 4 caracteres';document.getElementById('modalClient').classList.add('open');}
 function openEditClient(id){editingClientId=id;const c=(cloud.users||{})[id];document.getElementById('modalClientTitle').textContent='Editar Cliente';document.getElementById('mClientName').value=c.name||'';document.getElementById('mClientUser').value=c.username||'';document.getElementById('mClientPass').value='';document.getElementById('mClientPass').placeholder='Deixe em branco para não alterar';document.getElementById('mClientStore').value=c.store||'';document.getElementById('modalClient').classList.add('open');}
-async function saveClient(){
-  const name=document.getElementById('mClientName').value.trim();const user=document.getElementById('mClientUser').value.trim().toLowerCase();const pass=document.getElementById('mClientPass').value;const store=document.getElementById('mClientStore').value.trim();
-  if(!name||!user){alert('Nome e usuário são obrigatórios.');return;}
-  if(!cloud.users)cloud.users={};
-  if(editingClientId){const c=cloud.users[editingClientId];c.name=name;c.username=user;c.store=store;if(pass.length>=4)c.password=pass;else if(pass.length>0&&pass.length<4){alert('Senha mínima: 4 caracteres.');return;}}
-  else{if(!pass||pass.length<4){alert('Senha mínima: 4 caracteres.');return;}if(Object.values(cloud.users).some(c=>c.username===user)){alert('Esse usuário já existe.');return;}cloud.users['u'+Date.now()]={name,username:user,password:pass,store,createdAt:new Date().toISOString()};}
-  closeModal('modalClient');await gistSave();renderClientList();renderAdminOverview();if(selectedClientId)selectClient(selectedClientId);alert('✅ Cliente salvo!');
+async function saveClient() {
+  const name = document.getElementById('mClientName').value.trim();
+  const user = document.getElementById('mClientUser').value.trim().toLowerCase();
+  const pass = document.getElementById('mClientPass').value;
+  const store = document.getElementById('mClientStore').value.trim();
+  if (!name || !user) { alert('Nome e usuário são obrigatórios.'); return; }
+
+  if (editingClientId) {
+    const body = { nomeUsuario: user, nome: name, loja: store };
+    if (pass) body.senha = pass;
+    const { status, data } = await apiPut(`/api/usuarios/${editingClientId}`, body);
+    if (!status.toString().startsWith('2')) { alert(data.mensagem || 'Erro ao atualizar.'); return; }
+  } else {
+    if (!pass || pass.length < 4) { alert('Senha mínima: 4 caracteres.'); return; }
+    const { status, data } = await apiPost('/api/usuarios', { nomeUsuario: user, senha: pass, nome: name, loja: store });
+    if (!status.toString().startsWith('2')) { alert(data.mensagem || 'Erro ao criar cliente.'); return; }
+  }
+
+  closeModal('modalClient');
+  await carregarClientes();
+  renderAdminOverview();
+  alert('✅ Cliente salvo!');
+}
+
+async function carregarClientes() {
+  const json = await apiGet('/api/usuarios');
+  if (!json) return;
+  cloud.users = {};
+  (json.dados || []).forEach(u => { cloud.users[u.id] = { ...u, username: u.nomeUsuario }; });
+  renderClientList();
+}
+
+async function carregarRegistros(clienteId) {
+  const json = await apiGet(`/api/registros/${clienteId}`);
+  if (!json) return [];
+  return json.dados || [];
 }
 function openDelClient(id){pendingDelId=id;document.getElementById('modalDel').classList.add('open');}
-async function confirmDelClient(){if(!pendingDelId)return;delete cloud.users[pendingDelId];Object.keys(cloud.records||{}).forEach(k=>{if(k.startsWith(pendingDelId+'_'))delete cloud.records[k];});closeModal('modalDel');selectedClientId=null;await gistSave();renderClientList();renderAdminOverview();document.getElementById('clientDetailPanel').innerHTML='<div class="panel-title">Selecione um cliente</div><p style="color:#666;font-size:14px">Clique em um cliente para ver ou editar.</p>';}
+async function confirmDelClient() {
+  if (!pendingDelId) return;
+  const { status, data } = await apiDelete(`/api/usuarios/${pendingDelId}`);
+  if (!status.toString().startsWith('2')) { alert(data.mensagem || 'Erro ao excluir.'); return; }
+  closeModal('modalDel');
+  selectedClientId = null;
+  await carregarClientes();
+  renderAdminOverview();
+  document.getElementById('clientDetailPanel').innerHTML =
+    '<div class="panel-title">Selecione um cliente</div><p style="color:#666;font-size:14px">Clique em um cliente para ver ou editar.</p>';
+}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 
 // ── CAIXA CLIENTE ──
@@ -496,7 +546,36 @@ function getSaidas(){return[...document.querySelectorAll('.saida-row')].map(r=>(
 function getProvisioning(){const receber=[...document.querySelectorAll('#contasReceberList .prov-row')].map(r=>({desc:r.querySelectorAll('input')[0].value.trim(),val:parseFloat(r.querySelectorAll('input')[1].value)||0})).filter(s=>s.desc||s.val);const pagar=[...document.querySelectorAll('#contasPagarList .prov-row')].map(r=>({desc:r.querySelectorAll('input')[0].value.trim(),val:parseFloat(r.querySelectorAll('input')[1].value)||0})).filter(s=>s.desc||s.val);return{receber,pagar};}
 function recalc(){const ini=parseFloat(document.getElementById('inpInicio').value)||0;const ent=parseFloat(document.getElementById('inpEntrada').value)||0;const saidas=getSaidas();const totSai=saidas.reduce((a,s)=>a+s.val,0);const calc=ini+ent-totSai;document.getElementById('calcVal').textContent=fmt(calc);document.getElementById('sInicio').textContent=fmt(ini);document.getElementById('sEntrada').textContent=fmt(ent);document.getElementById('sSaidas').textContent=fmt(totSai);document.getElementById('sSaldo').textContent=fmt(calc);checkDif();}
 function checkDif(){const ini=parseFloat(document.getElementById('inpInicio').value)||0;const ent=parseFloat(document.getElementById('inpEntrada').value)||0;const totSai=getSaidas().reduce((a,s)=>a+s.val,0);const calc=ini+ent-totSai;const conf=parseFloat(document.getElementById('inpConfirm').value);const el=document.getElementById('difMsg');if(isNaN(conf)){el.textContent='';return;}const dif=conf-calc;if(Math.abs(dif)<0.01){el.textContent='✓ Saldo confere';el.className='dif-msg dif-ok';}else{el.textContent=`⚠ Diferença de ${fmt(Math.abs(dif))}`;el.className='dif-msg dif-err';}}
-async function saveDay(){const btn=document.getElementById('btnSave');btn.disabled=true;btn.textContent='⏳ Salvando...';const k=dayKey(currentDay,currentMonth,currentYear);const ini=parseFloat(document.getElementById('inpInicio').value)||0;const ent=parseFloat(document.getElementById('inpEntrada').value)||0;const saidas=getSaidas();const prov=getProvisioning();const totSai=saidas.reduce((a,s)=>a+s.val,0);const saldoFinal=ini+ent-totSai;if(!cloud.records)cloud.records={};cloud.records[getRecKey(session.user,k)]={date:k,inicio:ini,entrada:ent,saidas,contasReceber:prov.receber,contasPagar:prov.pagar,saldoFinal,clientId:session.user,store:session.store,savedAt:new Date().toISOString()};const ok=await gistSave();btn.disabled=false;btn.innerHTML='☁️ Salvar e sincronizar';alert(ok?`✅ Salvo! Saldo final: ${fmt(saldoFinal)}`:`✅ Salvo localmente.\n⚠️ Não sincronizou com o Gist.`);recalc();}
+async function saveDay() {
+  const btn = document.getElementById('btnSave');
+  btn.disabled = true; btn.textContent = '⏳ Salvando...';
+  const k = dayKey(currentDay, currentMonth, currentYear);
+  const ini = parseFloat(document.getElementById('inpInicio').value) || 0;
+  const ent = parseFloat(document.getElementById('inpEntrada').value) || 0;
+  const saidas = getSaidas();
+  const prov = getProvisioning();
+  const saldoFinal = ini + ent - saidas.reduce((a, s) => a + s.val, 0);
+
+  const body = {
+    clienteId: session.id,
+    data: k,
+    inicio: ini,
+    entrada: ent,
+    saidas: saidas.map(s => ({ descricao: s.desc, valor: s.val })),
+    contasReceber: prov.receber.map(s => ({ descricao: s.desc, valor: s.val })),
+    contasPagar: prov.pagar.map(s => ({ descricao: s.desc, valor: s.val })),
+    saldoFinal
+  };
+
+  const { status, data } = await apiPost('/api/registros', body);
+  btn.disabled = false; btn.innerHTML = '☁️ Salvar e sincronizar';
+  if (status === 200 || status === 201) {
+    alert(`✅ Salvo! Saldo final: ${fmt(saldoFinal)}`);
+  } else {
+    alert(`❌ Erro ao salvar: ${data.mensagem || 'tente novamente.'}`);
+  }
+  recalc();
+}
 
 // ── HISTÓRICO ──
 function renderHist(){
@@ -511,7 +590,15 @@ function renderHist(){
   cont.innerHTML=recs.map(r=>{const totSai=(r.saidas||[]).reduce((a,s)=>a+s.val,0);const receber=(r.contasReceber||[]).reduce((a,c)=>a+c.val,0);const pagar=(r.contasPagar||[]).reduce((a,c)=>a+c.val,0);const bid='h'+r.date.replace(/-/g,'');return`<div class="hist-item"><div class="hist-head" onclick="toggleHist('${bid}')"><div><div class="hist-date">${r.date}</div><div class="hist-meta">Entrada ${fmt(r.entrada)} · Saída ${fmt(totSai)}${receber?' · Receber '+fmt(receber):''}${pagar?' · Pagar '+fmt(pagar):''}</div></div><div class="hist-saldo">${fmt(r.saldoFinal)}</div></div><div class="hist-body" id="${bid}"><div class="hist-row"><span>Início</span><span>${fmt(r.inicio)}</span></div><div class="hist-row"><span><span class="tag tag-in">Entrada</span></span><span class="hist-in">+${fmt(r.entrada)}</span></div>${(r.saidas||[]).map(s=>`<div class="hist-row"><span><span class="tag tag-out">${s.desc||'Saída'}</span></span><span class="hist-out">-${fmt(s.val)}</span></div>`).join('')}${(r.contasReceber||[]).map(c=>`<div class="hist-row"><span><span class="tag tag-prov-rec">A Receber</span> ${c.desc}</span><span style="color:#5ac8fa">+${fmt(c.val)}</span></div>`).join('')}${(r.contasPagar||[]).map(c=>`<div class="hist-row"><span><span class="tag tag-prov-pag">A Pagar</span> ${c.desc}</span><span style="color:#ff6b6b">-${fmt(c.val)}</span></div>`).join('')}<div class="hist-row"><span><strong>Saldo final</strong></span><span class="hist-in"><strong>${fmt(r.saldoFinal)}</strong></span></div><button class="btn-del-rec" onclick="openDelRecord('${r.date}')">🗑️ Excluir este dia</button></div></div>`;}).join('');
 }
 function openDelRecord(date){pendingDelRecordDate=date;document.getElementById('delRecMsg').textContent=`Excluir o registro de ${date}?`;document.getElementById('modalDelRec').classList.add('open');}
-async function confirmDelRecord(){if(!pendingDelRecordDate)return;delete cloud.records[getRecKey(session.user,pendingDelRecordDate)];await gistSave();closeModal('modalDelRec');renderHist();}
+async function confirmDelRecord() {
+  if (!pendingDelRecordDate) return;
+  const motivo = prompt('Informe o motivo da exclusão:');
+  if (!motivo) return;
+  const { status, data } = await apiDelete(`/api/registros/${session.id}/${pendingDelRecordDate}`, { motivoExclusao: motivo });
+  if (!status.toString().startsWith('2')) { alert(data.mensagem || 'Erro ao excluir.'); return; }
+  closeModal('modalDelRec');
+  renderHist();
+}
 function toggleHist(id){document.getElementById(id)?.classList.toggle('open');}
 
 // ── GRÁFICO ──
@@ -526,10 +613,9 @@ function renderGraph(){
 
 function refreshCurrentView(){if(!session)return;if(session.role==='admin'){renderAdminOverview();renderClientList();}else{loadDay();}}
 
-window.addEventListener('load',()=>{
-  loadGistCfg();
-  document.getElementById('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
-  document.getElementById('loginUser').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+window.addEventListener('load', () => {
+  document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  document.getElementById('loginUser').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 });
 </script>
 </body>
