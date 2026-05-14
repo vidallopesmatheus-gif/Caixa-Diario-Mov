@@ -64,6 +64,7 @@ builder.Services.AddScoped<RegistroService>();
 var app = builder.Build();
 
 app.MapOpenApi();
+app.MapGet("/", () => Results.Redirect("/scalar/v1"));
 app.MapScalarApiReference(options =>
 {
     options.Title = "Caixa Diário API";
