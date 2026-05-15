@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
@@ -28,27 +28,31 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const calculado = inicio + (Number(entrada) || 0) - totalSaidas
   const dif = confirmado !== '' ? calculado - Number(confirmado) : null
 
-  const carregarDia = useCallback(async (d: string) => {
-    const reg = await buscarPorData(d)
-    if (reg) {
-      setInicio(reg.saldoInicio)
-      setEntrada(String(reg.entrada))
-      setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0 }])
-      setAReceber(reg.contasAReceber)
-      setAPagar(reg.contasAPagar)
-      setConfirmado(String(reg.saldoConfirmado))
-    } else {
-      const prev = registros.find(r => r.data < d)
-      setInicio(prev?.saldoConfirmado ?? 0)
-      setEntrada('')
-      setSaidas([{ descricao: '', valor: 0 }])
-      setAReceber([])
-      setAPagar([])
-      setConfirmado('')
+  useEffect(() => {
+    let ignore = false
+    const load = async () => {
+      const reg = await buscarPorData(data)
+      if (ignore) return
+      if (reg) {
+        setInicio(reg.saldoInicio)
+        setEntrada(String(reg.entrada))
+        setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0 }])
+        setAReceber(reg.contasAReceber)
+        setAPagar(reg.contasAPagar)
+        setConfirmado(String(reg.saldoConfirmado))
+      } else {
+        const prev = registros.find(r => r.data < data)
+        setInicio(prev?.saldoConfirmado ?? 0)
+        setEntrada('')
+        setSaidas([{ descricao: '', valor: 0 }])
+        setAReceber([])
+        setAPagar([])
+        setConfirmado('')
+      }
     }
-  }, [buscarPorData, registros])
-
-  useEffect(() => { carregarDia(data) }, [data])
+    load()
+    return () => { ignore = true }
+  }, [data, buscarPorData, registros])
 
   async function handleSave() {
     if (!clienteId) return
@@ -63,7 +67,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         saidas: saidas.filter(s => s.descricao || s.valor),
         contasAReceber: aReceber.filter(s => s.descricao || s.valor),
         contasAPagar: aPagar.filter(s => s.descricao || s.valor),
-        saldoConfirmado: Number(confirmado) || calculado,
+        saldoConfirmado: confirmado === '' ? calculado : Number(confirmado),
       })
       setMsg('✅ Salvo com sucesso!')
     } catch (e: any) {
@@ -106,7 +110,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
             <div key={i} className="saida-row">
               <input placeholder="Descrição" value={s.descricao} onChange={e => updateSaida(i, 'descricao', e.target.value)} />
               <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateSaida(i, 'valor', e.target.value)} step="0.01" min="0" />
-              <button className="btn-rm" onClick={() => setSaidas(s => s.filter((_, j) => j !== i))}>✕</button>
+              <button className="btn-rm" onClick={() => setSaidas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
           <button className="btn-add-saida" onClick={() => setSaidas(s => [...s, { descricao: '', valor: 0 }])}>＋ Adicionar saída</button>
