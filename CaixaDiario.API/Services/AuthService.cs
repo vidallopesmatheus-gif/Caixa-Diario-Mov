@@ -5,7 +5,7 @@ using CaixaDiario.API.Repositories.Interfaces;
 
 namespace CaixaDiario.API.Services;
 
-public class AuthService
+public class AuthService : IAuthService
 {
     private readonly IUsuarioRepository _usuarioRepository;
     private readonly ITokenService _tokenService;

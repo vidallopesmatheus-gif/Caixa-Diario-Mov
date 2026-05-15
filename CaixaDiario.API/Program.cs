@@ -53,9 +53,9 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
 builder.Services.AddScoped<IRegistroRepository, RegistroRepository>();
 builder.Services.AddScoped<ITokenService, TokenService>();
-builder.Services.AddScoped<AuthService>();
-builder.Services.AddScoped<UsuarioService>();
-builder.Services.AddScoped<RegistroService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IUsuarioService, UsuarioService>();
+builder.Services.AddScoped<IRegistroService, RegistroService>();
 
 var app = builder.Build();
 
