@@ -47,15 +47,15 @@ test('abre modal ao clicar em Novo cliente', () => {
   mockHook()
   render(<AdminClientsPage />)
   fireEvent.click(screen.getByText(/Novo cliente/))
-  expect(screen.getByText('Novo cliente', { selector: 'h2, h3, div' })).toBeInTheDocument()
+  expect(screen.getByLabelText(/Nome completo/)).toBeInTheDocument()
 })
 
 test('exibe mensagem de erro ao submeter modal vazio', async () => {
   mockHook()
   render(<AdminClientsPage />)
   fireEvent.click(screen.getByText(/Novo cliente/))
-  const form = document.querySelector('.modal form')!
-  fireEvent.submit(form)
+  const salvarBtn = screen.getByRole('button', { name: 'Salvar' })
+  fireEvent.submit(salvarBtn.closest('form')!)
   await waitFor(() =>
     expect(screen.getByText(/Preencha todos os campos/)).toBeInTheDocument()
   )
@@ -92,12 +92,12 @@ test('exibe erro quando criar falha', async () => {
   mockHook({ criar })
   render(<AdminClientsPage />)
   fireEvent.click(screen.getByText(/Novo cliente/))
-  const inputs = screen.getAllByRole('textbox')
-  fireEvent.change(inputs[0], { target: { value: 'Novo Cliente' } })
-  fireEvent.change(inputs[2], { target: { value: 'novouser' } })
+  fireEvent.change(screen.getByLabelText(/Nome completo/), { target: { value: 'Novo Cliente' } })
+  fireEvent.change(screen.getByLabelText(/Usuário/), { target: { value: 'novouser' } })
   const senhaInput = document.querySelector('input[type="password"]')!
   fireEvent.change(senhaInput, { target: { value: '1234' } })
-  fireEvent.click(screen.getByText('Salvar'))
+  const salvarBtn = screen.getByRole('button', { name: 'Salvar' })
+  fireEvent.submit(salvarBtn.closest('form')!)
   await waitFor(() =>
     expect(screen.getByText('Usuário já existe')).toBeInTheDocument()
   )

@@ -4,9 +4,17 @@ import Modal from '../../components/shared/Modal'
 import type { Usuario } from '../../types'
 import './Admin.css'
 
+interface ClientFormData {
+  nomeCompleto: string
+  nomeEstabelecimento: string
+  nomeUsuario?: string
+  senha?: string
+  perfil?: string
+}
+
 function ClientForm({ initial, onSave, onCancel }: {
   initial?: Partial<Usuario>
-  onSave: (d: any) => void
+  onSave: (d: ClientFormData) => void
   onCancel: () => void
 }) {
   const [nomeCompleto, setNomeCompleto] = useState(initial?.nomeCompleto ?? '')
@@ -24,12 +32,12 @@ function ClientForm({ initial, onSave, onCancel }: {
   return (
     <form onSubmit={handleSubmit}>
       {erro && <div style={{ color: '#ff6b6b', marginBottom: 12, fontSize: 13 }}>{erro}</div>}
-      <div className="inp-group"><label>Nome completo *</label><input value={nomeCompleto} onChange={e => setNomeCompleto(e.target.value)} required /></div>
-      <div className="inp-group"><label>Estabelecimento</label><input value={nomeEstabelecimento} onChange={e => setNomeEstabelecimento(e.target.value)} /></div>
-      {!initial && <div className="inp-group"><label>Usuário *</label><input value={nomeUsuario} onChange={e => setNomeUsuario(e.target.value)} required /></div>}
+      <div className="inp-group"><label htmlFor="cf-nome">Nome completo *</label><input id="cf-nome" value={nomeCompleto} onChange={e => setNomeCompleto(e.target.value)} required /></div>
+      <div className="inp-group"><label htmlFor="cf-estab">Estabelecimento</label><input id="cf-estab" value={nomeEstabelecimento} onChange={e => setNomeEstabelecimento(e.target.value)} /></div>
+      {!initial && <div className="inp-group"><label htmlFor="cf-usuario">Usuário *</label><input id="cf-usuario" value={nomeUsuario} onChange={e => setNomeUsuario(e.target.value)} required /></div>}
       <div className="inp-group">
-        <label>Senha {initial ? '(deixe em branco para manter)' : '*'}</label>
-        <input type="password" value={senha} onChange={e => setSenha(e.target.value)} required={!initial} />
+        <label htmlFor="cf-senha">Senha {initial ? '(deixe em branco para manter)' : '*'}</label>
+        <input id="cf-senha" type="password" value={senha} onChange={e => setSenha(e.target.value)} required={!initial} />
       </div>
       <div className="modal-footer">
         <button type="button" className="btn-cancel" onClick={onCancel}>Cancelar</button>
@@ -47,21 +55,21 @@ export default function AdminClientsPage() {
   const [showDelete, setShowDelete] = useState(false)
   const [erro, setErro] = useState('')
 
-  async function handleCriar(dto: any) {
-    try { await criar(dto); setShowAdd(false) }
-    catch (e: any) { setErro(e.message) }
+  async function handleCriar(dto: ClientFormData) {
+    try { await criar({ nomeCompleto: dto.nomeCompleto, nomeEstabelecimento: dto.nomeEstabelecimento, nomeUsuario: dto.nomeUsuario!, senha: dto.senha!, perfil: dto.perfil! }); setShowAdd(false) }
+    catch (e: unknown) { setErro(e instanceof Error ? e.message : String(e)) }
   }
 
-  async function handleAtualizar(dto: any) {
+  async function handleAtualizar(dto: ClientFormData) {
     if (!selected) return
-    try { await atualizar(selected.id, dto); setSelected(null) }
-    catch (e: any) { setErro(e.message) }
+    try { await atualizar(selected.id, { nomeCompleto: dto.nomeCompleto, nomeEstabelecimento: dto.nomeEstabelecimento, senha: dto.senha }); setSelected(null) }
+    catch (e: unknown) { setErro(e instanceof Error ? e.message : String(e)) }
   }
 
   async function handleDesativar() {
     if (!selected) return
     try { await desativar(selected.id); setSelected(null); setShowDelete(false) }
-    catch (e: any) { setErro(e.message) }
+    catch (e: unknown) { setErro(e instanceof Error ? e.message : String(e)) }
   }
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
