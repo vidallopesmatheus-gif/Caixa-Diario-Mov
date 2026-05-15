@@ -1,0 +1,47 @@
+.admin-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 20px;
+}
+@media (max-width: 900px) { .admin-grid { grid-template-columns: 1fr; } }
+
+.client-list-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-radius: 10px; cursor: pointer;
+  margin-bottom: 6px; border: 1px solid transparent; transition: all .2s;
+}
+.client-list-item:hover  { background: var(--bg-hover); border-color: var(--bd-str); }
+.client-list-item.selected { background: #1a2a1a; border-color: #34c759; }
+.client-name  { font-weight: 600; font-size: 14px; }
+.client-store { font-size: 12px; color: var(--tx3); margin-top: 2px; }
+
+.btn-add-client {
+  width: 100%; padding: 10px;
+  background: #1a2a1a; border: 1px dashed #2a5a2a;
+  border-radius: 10px; color: #34c759; font-size: 13px; font-weight: 600; margin-top: 8px;
+}
+.btn-add-client:hover { background: #1f3a1f; }
+
+.overview-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px; margin-bottom: 20px;
+}
+.ov-card {
+  background: var(--bg-card); border: 1px solid var(--bd);
+  border-radius: 14px; padding: 18px; transition: all .2s;
+}
+.ov-card:hover { border-color: #5ac8fa; background: var(--ov-hv); }
+.ov-name  { font-weight: 700; font-size: 15px; }
+.ov-store { font-size: 12px; color: var(--tx3); }
+.ov-saldo { font-size: 22px; font-weight: 800; color: #34c759; margin: 8px 0; }
+.ov-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.ov-stat  { background: var(--ov-stat); border-radius: 8px; padding: 8px 10px; }
+.ov-stat-lbl { font-size: 11px; color: var(--tx4); }
+.ov-stat-val { font-size: 14px; font-weight: 600; margin-top: 2px; }
+.btn-view-client {
+  margin-top: 12px; width: 100%; padding: 8px;
+  background: var(--vc-bg); border: 1px solid var(--vc-bd);
+  border-radius: 8px; color: #5ac8fa; font-size: 13px; font-weight: 600;
+}
+.btn-view-client:hover { background: #1a3a4a; }
