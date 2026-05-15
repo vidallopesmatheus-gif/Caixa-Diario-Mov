@@ -35,7 +35,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
             <XAxis dataKey="dia" stroke="var(--tx3)" tick={{ fontSize: 12 }} />
             <YAxis stroke="var(--tx3)" tick={{ fontSize: 12 }} tickFormatter={v => fmtBRL(v).replace('R$ ', 'R$')} />
-            <Tooltip formatter={(v: number) => fmtBRL(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
+            <Tooltip formatter={(v) => typeof v === 'number' ? fmtBRL(v) : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
             <Line type="monotone" dataKey="saldo" stroke="#34c759" strokeWidth={2} dot={{ fill: '#34c759' }} />
           </LineChart>
         </ResponsiveContainer>
