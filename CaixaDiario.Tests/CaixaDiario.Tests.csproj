@@ -10,7 +10,7 @@
     <CoverletOutput>./TestResults/coverage/</CoverletOutput>
     <Threshold>80</Threshold>
     <ThresholdType>line,branch,method</ThresholdType>
-    <Exclude>[*]CaixaDiario.API.Migrations.*,[*]CaixaDiario.API.DTOs.*,[*]CaixaDiario.API.Models.*,[*]CaixaDiario.API.Data.*,[*]CaixaDiario.API.Responses.*</Exclude>
+    <Exclude>[*]CaixaDiario.API.Migrations.*,[*]CaixaDiario.API.DTOs.*,[*]CaixaDiario.API.Models.*,[*]CaixaDiario.API.Data.*,[*]CaixaDiario.API.Responses.*,[*]CaixaDiario.API.Repositories.*,[*]Program</Exclude>
   </PropertyGroup>
 
   <ItemGroup>

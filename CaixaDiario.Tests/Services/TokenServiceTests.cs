@@ -64,4 +64,23 @@ public class TokenServiceTests
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
         Assert.Equal("cliente", jwt.Claims.First(c => c.Type == "perfil").Value);
     }
+
+    [Fact]
+    public void GerarToken_SemExpiresInHours_UsaDefault24h()
+    {
+        var configMock = new Mock<IConfiguration>();
+        configMock.Setup(c => c["Jwt:SecretKey"]).Returns("chave-super-secreta-testes-1234567890abcdef");
+        configMock.Setup(c => c["Jwt:Issuer"]).Returns("CaixaDiario");
+        configMock.Setup(c => c["Jwt:Audience"]).Returns("CaixaDiarioApp");
+        configMock.Setup(c => c["Jwt:ExpiresInHours"]).Returns((string?)null);
+        var sut = new TokenService(configMock.Object);
+
+        var usuario = CriarUsuario();
+        var token = sut.GerarToken(usuario);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        var expectedExpiry = DateTime.UtcNow.AddHours(24);
+        Assert.True(jwt.ValidTo <= expectedExpiry.AddMinutes(1));
+        Assert.True(jwt.ValidTo >= expectedExpiry.AddMinutes(-1));
+    }
 }

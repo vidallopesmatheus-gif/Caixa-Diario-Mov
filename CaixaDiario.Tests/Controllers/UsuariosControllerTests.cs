@@ -129,4 +129,55 @@ public class UsuariosControllerTests
 
         Assert.Equal(403, ex.StatusCode);
     }
+
+    [Fact]
+    public async Task Listar_SemClaimPerfil_LancaSemPermissao()
+    {
+        // Create controller with no claims at all (FindFirst returns null)
+        var controller = new UsuariosController(_serviceMock.Object);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal() }
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => controller.Listar());
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.SEM_PERMISSAO, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task ObterPorId_NaoAdmin_LancaSemPermissao()
+    {
+        var sut = CriarController("cliente");
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => sut.ObterPorId(Guid.NewGuid()));
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.SEM_PERMISSAO, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task Criar_NaoAdmin_LancaSemPermissao()
+    {
+        var sut = CriarController("cliente");
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            sut.Criar(new CriarUsuarioDto { NomeUsuario = "x", Nome = "y", Senha = "1234" }));
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.SEM_PERMISSAO, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task Atualizar_NaoAdmin_LancaSemPermissao()
+    {
+        var sut = CriarController("cliente");
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            sut.Atualizar(Guid.NewGuid(), new AtualizarUsuarioDto { NomeUsuario = "x", Nome = "y" }));
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.SEM_PERMISSAO, ex.Codigo);
+    }
 }
