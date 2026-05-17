@@ -1,5 +1,5 @@
 // frontend/src/pages/client/ClientHistoricoPage.test.tsx
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import ClientHistoricoPage from './ClientHistoricoPage'
 import * as AuthContextModule from '../../contexts/AuthContext'
 import * as useRegistrosHook from '../../hooks/useRegistros'
@@ -54,7 +54,8 @@ test('renderiza StatCards com totais do mês', () => {
 test('renderiza item de histórico com data e saldo', () => {
   mockHooks()
   render(<ClientHistoricoPage />)
-  expect(screen.getAllByText(/R\$/).length).toBeGreaterThan(0)
+  const histItem = document.querySelector('.hist-item')!
+  expect(within(histItem as HTMLElement).getByText('R$ 400,00')).toBeInTheDocument()
 })
 
 test('expande detalhes ao clicar no item de histórico', async () => {
