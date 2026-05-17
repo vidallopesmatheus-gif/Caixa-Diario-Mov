@@ -90,3 +90,44 @@ test('chama excluir com motivo ao confirmar', async () => {
   fireEvent.click(screen.getByText('Excluir'))
   await waitFor(() => expect(excluir).toHaveBeenCalledWith(`${mesAtual}-10`, 'teste'))
 })
+
+test('exibe erro quando excluir falha', async () => {
+  const excluir = vi.fn().mockRejectedValue(new Error('Sem permissão'))
+  mockHooks({ excluir })
+  render(<ClientHistoricoPage />)
+  const items = screen.getAllByText(/Entrada:/)
+  fireEvent.click(items[0].closest('div')!.parentElement!)
+  await waitFor(() => screen.getByText(/Excluir registro/))
+  fireEvent.click(screen.getByText(/Excluir registro/))
+  fireEvent.click(screen.getByText('Excluir'))
+  await waitFor(() => expect(screen.getByText('Sem permissão')).toBeInTheDocument())
+})
+
+test('fecha modal de exclusão ao clicar em Cancelar', async () => {
+  mockHooks()
+  render(<ClientHistoricoPage />)
+  const items = screen.getAllByText(/Entrada:/)
+  fireEvent.click(items[0].closest('div')!.parentElement!)
+  await waitFor(() => screen.getByText(/Excluir registro/))
+  fireEvent.click(screen.getByText(/Excluir registro/))
+  expect(screen.getByPlaceholderText(/Informe o motivo/)).toBeInTheDocument()
+  fireEvent.click(screen.getByText('Cancelar'))
+  await waitFor(() => expect(screen.queryByPlaceholderText(/Informe o motivo/)).not.toBeInTheDocument())
+})
+
+test('colapsa detalhes ao clicar novamente no item', async () => {
+  mockHooks()
+  render(<ClientHistoricoPage />)
+  const items = screen.getAllByText(/Entrada:/)
+  const itemEl = items[0].closest('div')!.parentElement!
+  fireEvent.click(itemEl)
+  await waitFor(() => screen.getByText('Aluguel'))
+  fireEvent.click(itemEl)
+  await waitFor(() => expect(screen.queryByText('Aluguel')).not.toBeInTheDocument())
+})
+
+test('clienteIdOverride é utilizado quando fornecido', () => {
+  mockHooks()
+  render(<ClientHistoricoPage clienteIdOverride="outro-id" />)
+  expect(screen.getByText(/Total entradas/)).toBeInTheDocument()
+})

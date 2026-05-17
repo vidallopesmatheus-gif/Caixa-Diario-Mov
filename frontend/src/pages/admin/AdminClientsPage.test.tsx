@@ -102,3 +102,85 @@ test('exibe erro quando criar falha', async () => {
     expect(screen.getByText('Usuário já existe')).toBeInTheDocument()
   )
 })
+
+test('exibe formulário de edição ao selecionar cliente (sem campo Usuário)', () => {
+  mockHook()
+  render(<AdminClientsPage />)
+  fireEvent.click(screen.getByText('Cliente Um'))
+  // no edit mode, Usuário field should not be present
+  expect(screen.queryByLabelText(/Usuário/)).not.toBeInTheDocument()
+  expect(screen.getByLabelText(/Nome completo/)).toBeInTheDocument()
+})
+
+test('chama atualizar ao salvar formulário de edição', async () => {
+  const atualizar = vi.fn().mockResolvedValue({})
+  mockHook({ atualizar })
+  render(<AdminClientsPage />)
+  fireEvent.click(screen.getByText('Cliente Um'))
+  const nomeInput = screen.getByLabelText(/Nome completo/)
+  fireEvent.change(nomeInput, { target: { value: 'Cliente Atualizado' } })
+  const salvarBtn = screen.getByRole('button', { name: 'Salvar' })
+  fireEvent.submit(salvarBtn.closest('form')!)
+  await waitFor(() => expect(atualizar).toHaveBeenCalledWith('u1', expect.objectContaining({ nomeCompleto: 'Cliente Atualizado' })))
+})
+
+test('exibe erro quando atualizar falha', async () => {
+  const atualizar = vi.fn().mockRejectedValue(new Error('Falha ao atualizar'))
+  mockHook({ atualizar })
+  render(<AdminClientsPage />)
+  fireEvent.click(screen.getByText('Cliente Um'))
+  const salvarBtn = screen.getByRole('button', { name: 'Salvar' })
+  fireEvent.submit(salvarBtn.closest('form')!)
+  await waitFor(() => expect(screen.getByText('Falha ao atualizar')).toBeInTheDocument())
+})
+
+test('exibe erro quando desativar falha', async () => {
+  const desativar = vi.fn().mockRejectedValue(new Error('Falha ao desativar'))
+  mockHook({ desativar })
+  render(<AdminClientsPage />)
+  fireEvent.click(screen.getByText('Cliente Um'))
+  fireEvent.click(screen.getByText('Excluir'))
+  const botoesExcluir = screen.getAllByText('Excluir')
+  fireEvent.click(botoesExcluir[botoesExcluir.length - 1])
+  await waitFor(() => expect(screen.getByText('Falha ao desativar')).toBeInTheDocument())
+})
+
+test('fecha modal de adição ao clicar em Cancelar', () => {
+  mockHook()
+  render(<AdminClientsPage />)
+  fireEvent.click(screen.getByText(/Novo cliente/))
+  expect(screen.getByLabelText(/Nome completo/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+  expect(screen.queryByLabelText(/Usuário/)).not.toBeInTheDocument()
+})
+
+test('cancela edição ao clicar em Cancelar no formulário de edição', () => {
+  mockHook()
+  render(<AdminClientsPage />)
+  fireEvent.click(screen.getByText('Cliente Um'))
+  expect(screen.getByLabelText(/Nome completo/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+  expect(screen.getByText(/Selecione um cliente/)).toBeInTheDocument()
+})
+
+test('fecha modal de exclusão ao clicar em Cancelar', () => {
+  mockHook()
+  render(<AdminClientsPage />)
+  fireEvent.click(screen.getByText('Cliente Um'))
+  fireEvent.click(screen.getByText('Excluir'))
+  expect(screen.getByText(/Confirmar exclusão/)).toBeInTheDocument()
+  // há dois botões Cancelar: um no formulário de edição e um no modal de exclusão
+  const cancelarBtns = screen.getAllByRole('button', { name: 'Cancelar' })
+  fireEvent.click(cancelarBtns[cancelarBtns.length - 1])
+  expect(screen.queryByText(/Confirmar exclusão/)).not.toBeInTheDocument()
+})
+
+test('exibe indicador de inativo para cliente inativo', () => {
+  const comInativo = [
+    ...mockClientes,
+    { id: 'u3', nomeUsuario: 'inat', nomeCompleto: 'Cliente Inativo', nomeEstabelecimento: 'Loja Inativa', perfil: 'cliente' as const, ativo: false, criadoEm: '', criadoPor: '' },
+  ]
+  mockHook({ usuarios: comInativo })
+  render(<AdminClientsPage />)
+  expect(screen.getByText('Inativo')).toBeInTheDocument()
+})

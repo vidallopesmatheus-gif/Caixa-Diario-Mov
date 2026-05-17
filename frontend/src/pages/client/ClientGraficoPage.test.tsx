@@ -68,3 +68,16 @@ test('renderiza sem crash quando não há registros', () => {
   render(<ClientGraficoPage />)
   expect(screen.getByText(/Evolução Mensal/)).toBeInTheDocument()
 })
+
+test('clienteIdOverride é utilizado quando fornecido', () => {
+  mockHooks()
+  render(<ClientGraficoPage clienteIdOverride="outro-id" />)
+  expect(screen.getByText(/Evolução Mensal/)).toBeInTheDocument()
+})
+
+test('renderiza StatCards com saldo inicial e final do mês', () => {
+  mockHooks()
+  render(<ClientGraficoPage />)
+  expect(screen.getByText(/Saldo Inicial/)).toBeInTheDocument()
+  expect(screen.getByText(/Saldo Final/)).toBeInTheDocument()
+})

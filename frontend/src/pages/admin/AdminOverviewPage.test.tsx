@@ -76,3 +76,38 @@ test('não renderiza clientes inativos', () => {
   renderPage()
   expect(screen.queryByText('Inativo')).not.toBeInTheDocument()
 })
+
+test('botão Ver caixa está presente para cada cliente', () => {
+  mockHooks()
+  renderPage()
+  const btns = screen.getAllByText(/Ver caixa/)
+  expect(btns).toHaveLength(2)
+})
+
+test('exibe saldo R$ 0,00 quando não há registros', () => {
+  mockHooks()
+  renderPage()
+  const saldos = screen.getAllByText('R$ 0,00')
+  expect(saldos.length).toBeGreaterThanOrEqual(2)
+})
+
+test('exibe saldo do último registro quando há registros no mês', () => {
+  const mesAtual = new Date().toISOString().slice(0, 7)
+  const regDoMes = {
+    id: 'r1', clienteId: 'u1', data: `${mesAtual}-05`,
+    saldoInicio: 0, entrada: 500,
+    saidas: [{ descricao: 'Despesa', valor: 100 }],
+    contasAReceber: [], contasAPagar: [],
+    saldoConfirmado: 400, saldoCalculado: 400, criadoEm: '',
+  }
+  vi.mocked(useUsuariosHook.useUsuarios).mockReturnValue({
+    usuarios: mockClientes, loading: false, erro: '',
+    criar: vi.fn(), atualizar: vi.fn(), desativar: vi.fn(), recarregar: vi.fn(),
+  } as ReturnType<typeof useUsuariosHook.useUsuarios>)
+  vi.mocked(useRegistrosHook.useRegistros).mockReturnValue({
+    registros: [regDoMes], loading: false, erro: '',
+    salvar: vi.fn(), excluir: vi.fn(), buscarPorData: vi.fn(), recarregar: vi.fn(),
+  } as ReturnType<typeof useRegistrosHook.useRegistros>)
+  renderPage()
+  expect(screen.getAllByText('R$ 400,00').length).toBeGreaterThanOrEqual(1)
+})
