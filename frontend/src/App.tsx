@@ -19,7 +19,7 @@ function ProtectedRoutes() {
         <Routes>
           <Route path="/admin/overview" element={<AdminOverviewPage />} />
           <Route path="/admin/clientes" element={<AdminClientsPage />} />
-          <Route path="/admin/caixa" element={<AdminCaixaPage />} />
+          <Route path="/admin/caixa/:clienteId" element={<AdminCaixaPage />} />
           <Route path="*" element={<Navigate to="/admin/overview" replace />} />
         </Routes>
       </Layout>

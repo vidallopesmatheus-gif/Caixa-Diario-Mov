@@ -1,11 +1,10 @@
-import { useLocation } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import ClientCaixaPage from '../client/ClientCaixaPage'
 import ClientHistoricoPage from '../client/ClientHistoricoPage'
 import { useState } from 'react'
 
 export default function AdminCaixaPage() {
-  const location = useLocation()
-  const clienteId = (location.state as any)?.clienteId ?? null
+  const { clienteId } = useParams<{ clienteId: string }>()
   const [tab, setTab] = useState<'caixa' | 'hist'>('caixa')
 
   if (!clienteId) return <p style={{ color: 'var(--tx3)' }}>Selecione um cliente na Visão Geral.</p>
@@ -22,3 +21,4 @@ export default function AdminCaixaPage() {
     </>
   )
 }
+

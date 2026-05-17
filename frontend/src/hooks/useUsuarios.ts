@@ -12,8 +12,8 @@ export function useUsuarios() {
     try {
       const res = await listarUsuarios()
       setUsuarios(res.dados)
-    } catch (e: any) {
-      setErro(e.message)
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }

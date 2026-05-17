@@ -22,7 +22,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const primeiro = doMes[0]?.saldoInicio ?? 0
   const ultimo = doMes[doMes.length - 1]?.saldoConfirmado ?? 0
   const totalEnt = doMes.reduce((s, r) => s + r.entrada, 0)
-  const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a: number, x: any) => a + x.valor, 0), 0)
+  const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a, x) => a + x.valor, 0), 0)
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 

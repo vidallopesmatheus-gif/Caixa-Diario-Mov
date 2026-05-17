@@ -33,7 +33,7 @@ function ClientCard({ usuario }: { usuario: Usuario }) {
         </div>
       </div>
       <button className="btn-view-client"
-        onClick={() => navigate('/admin/caixa', { state: { clienteId: usuario.id } })}>
+        onClick={() => navigate(`/admin/caixa/${usuario.id}`)}>
         Ver caixa →
       </button>
     </div>

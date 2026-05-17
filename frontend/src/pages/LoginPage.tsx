@@ -20,8 +20,8 @@ export default function LoginPage() {
       const res = await apiLogin(usuario, senha)
       login(res.dados)
       navigate(res.dados.perfil === 'admin' ? '/admin/overview' : '/caixa')
-    } catch (e: any) {
-      setErro(e.message ?? 'Erro ao fazer login')
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : 'Erro ao fazer login')
     } finally {
       setLoading(false)
     }

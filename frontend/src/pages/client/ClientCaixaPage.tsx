@@ -70,8 +70,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         saldoConfirmado: confirmado === '' ? calculado : Number(confirmado),
       })
       setMsg('✅ Salvo com sucesso!')
-    } catch (e: any) {
-      setMsg(`❌ ${e.message}`)
+    } catch (e: unknown) {
+      setMsg(`❌ ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setSaving(false)
     }

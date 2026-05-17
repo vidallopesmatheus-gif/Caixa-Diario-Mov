@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 import type { LoginResponse } from '../types'
 
-interface AuthUser extends LoginResponse {}
+type AuthUser = LoginResponse
 
 interface AuthContextValue {
   user: AuthUser | null
