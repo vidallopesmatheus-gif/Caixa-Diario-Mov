@@ -36,7 +36,7 @@ public class UsuariosControllerTests
     {
         Id = Guid.NewGuid(),
         NomeUsuario = "cli1",
-        Nome = "Cliente Um",
+        NomeCompleto = "Cliente Um",
         Perfil = "cliente",
         Ativo = true,
         CriadoEm = DateTime.UtcNow
@@ -86,7 +86,7 @@ public class UsuariosControllerTests
     {
         var sut = CriarController("admin");
         var dto = CriarUsuarioDto();
-        var criarDto = new CriarUsuarioDto { NomeUsuario = "cli1", Nome = "Cliente Um", Senha = "1234" };
+        var criarDto = new CriarUsuarioDto { NomeUsuario = "cli1", NomeCompleto = "Cliente Um", Senha = "1234" };
         _serviceMock.Setup(s => s.CriarAsync(criarDto, "adminuser")).ReturnsAsync(dto);
 
         var result = await sut.Criar(criarDto);
@@ -100,7 +100,7 @@ public class UsuariosControllerTests
         var sut = CriarController("admin");
         var id = Guid.NewGuid();
         var dto = CriarUsuarioDto();
-        var atualizarDto = new AtualizarUsuarioDto { NomeUsuario = "cli1", Nome = "Cliente Um" };
+        var atualizarDto = new AtualizarUsuarioDto { NomeCompleto = "Cliente Um" };
         _serviceMock.Setup(s => s.AtualizarAsync(id, atualizarDto, "adminuser")).ReturnsAsync(dto);
 
         var result = await sut.Atualizar(id, atualizarDto);
@@ -133,7 +133,6 @@ public class UsuariosControllerTests
     [Fact]
     public async Task Listar_SemClaimPerfil_LancaSemPermissao()
     {
-        // Create controller with no claims at all (FindFirst returns null)
         var controller = new UsuariosController(_serviceMock.Object);
         controller.ControllerContext = new ControllerContext
         {
@@ -163,7 +162,7 @@ public class UsuariosControllerTests
         var sut = CriarController("cliente");
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            sut.Criar(new CriarUsuarioDto { NomeUsuario = "x", Nome = "y", Senha = "1234" }));
+            sut.Criar(new CriarUsuarioDto { NomeUsuario = "x", NomeCompleto = "y", Senha = "1234" }));
 
         Assert.Equal(403, ex.StatusCode);
         Assert.Equal(CodigoRetorno.SEM_PERMISSAO, ex.Codigo);
@@ -175,7 +174,7 @@ public class UsuariosControllerTests
         var sut = CriarController("cliente");
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            sut.Atualizar(Guid.NewGuid(), new AtualizarUsuarioDto { NomeUsuario = "x", Nome = "y" }));
+            sut.Atualizar(Guid.NewGuid(), new AtualizarUsuarioDto { NomeCompleto = "y" }));
 
         Assert.Equal(403, ex.StatusCode);
         Assert.Equal(CodigoRetorno.SEM_PERMISSAO, ex.Codigo);

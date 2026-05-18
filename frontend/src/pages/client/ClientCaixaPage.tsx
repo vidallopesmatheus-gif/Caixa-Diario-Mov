@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
@@ -14,6 +14,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, salvar, buscarPorData } = useRegistros(clienteId)
 
+  const registrosRef = useRef(registros)
+  useEffect(() => { registrosRef.current = registros }, [registros])
+
   const [data, setData] = useState(todayISO())
   const [inicio, setInicio] = useState(0)
   const [entrada, setEntrada] = useState('')
@@ -28,7 +31,11 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const calculado = inicio + (Number(entrada) || 0) - totalSaidas
   const dif = confirmado !== '' ? calculado - Number(confirmado) : null
 
+  // Deps: apenas primitivos (data e clienteId). buscarPorData muda só quando
+  // clienteId muda, que já está nas deps — logo sem instabilidade de referência.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (!clienteId) return
     let ignore = false
     const load = async () => {
       const reg = await buscarPorData(data)
@@ -41,7 +48,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setAPagar(reg.contasAPagar)
         setConfirmado(String(reg.saldoConfirmado))
       } else {
-        const prev = registros.find(r => r.data < data)
+        const prev = registrosRef.current.find(r => r.data < data)
         setInicio(prev?.saldoConfirmado ?? 0)
         setEntrada('')
         setSaidas([{ descricao: '', valor: 0 }])
@@ -52,7 +59,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     }
     load()
     return () => { ignore = true }
-  }, [data, buscarPorData, registros])
+  }, [data, clienteId])
 
   async function handleSave() {
     if (!clienteId) return

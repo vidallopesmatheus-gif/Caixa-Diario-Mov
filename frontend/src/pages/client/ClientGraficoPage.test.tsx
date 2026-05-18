@@ -12,7 +12,7 @@ vi.mock('../../contexts/AuthContext', async (importOriginal) => {
 vi.mock('../../hooks/useRegistros')
 
 // Recharts usa ResizeObserver; precisamos de um stub
-global.ResizeObserver = class {
+window.ResizeObserver = class {
   observe() {}
   unobserve() {}
   disconnect() {}

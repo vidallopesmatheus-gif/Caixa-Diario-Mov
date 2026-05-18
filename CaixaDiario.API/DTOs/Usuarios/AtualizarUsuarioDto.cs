@@ -4,8 +4,7 @@ namespace CaixaDiario.API.DTOs.Usuarios;
 
 public class AtualizarUsuarioDto
 {
-    [Required] public string NomeUsuario { get; set; } = string.Empty;
+    [Required] public string NomeCompleto { get; set; } = string.Empty;
+    public string? NomeEstabelecimento { get; set; }
     public string? Senha { get; set; }
-    [Required] public string Nome { get; set; } = string.Empty;
-    public string? Loja { get; set; }
 }

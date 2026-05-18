@@ -34,7 +34,7 @@ export function useRegistros(clienteId: string | null) {
     await carregar()
   }
 
-  const buscarPorData = async (data: string) => {
+  const buscarPorData = useCallback(async (data: string) => {
     if (!clienteId) return null
     try {
       const res = await obterRegistroPorData(clienteId, data)
@@ -42,7 +42,7 @@ export function useRegistros(clienteId: string | null) {
     } catch {
       return null
     }
-  }
+  }, [clienteId])
 
   return { registros, loading, erro, salvar, excluir, buscarPorData, recarregar: carregar }
 }

@@ -35,11 +35,11 @@ public class UsuarioServiceTests
         _repoMock.Setup(r => r.ExisteNomeUsuarioAsync("novocliente", null)).ReturnsAsync(false);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<Usuario>())).ReturnsAsync((Usuario u) => u);
 
-        var dto = new CriarUsuarioDto { NomeUsuario = "novocliente", Senha = "senha1", Nome = "Novo Cliente", Loja = "Loja X" };
+        var dto = new CriarUsuarioDto { NomeUsuario = "novocliente", Senha = "senha1", NomeCompleto = "Novo Cliente", NomeEstabelecimento = "Loja X" };
         var resultado = await _sut.CriarAsync(dto, "admin");
 
         Assert.Equal("novocliente", resultado.NomeUsuario);
-        Assert.Equal("Novo Cliente", resultado.Nome);
+        Assert.Equal("Novo Cliente", resultado.NomeCompleto);
         Assert.Equal("cliente", resultado.Perfil);
         Assert.True(resultado.Ativo);
     }
@@ -50,7 +50,7 @@ public class UsuarioServiceTests
         _repoMock.Setup(r => r.ExisteNomeUsuarioAsync("duplicado", null)).ReturnsAsync(true);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.CriarAsync(new CriarUsuarioDto { NomeUsuario = "duplicado", Senha = "senha1", Nome = "Teste" }, "admin"));
+            _sut.CriarAsync(new CriarUsuarioDto { NomeUsuario = "duplicado", Senha = "senha1", NomeCompleto = "Teste" }, "admin"));
 
         Assert.Equal(409, ex.StatusCode);
         Assert.Equal(CodigoRetorno.NOME_USUARIO_DUPLICADO, ex.Codigo);
@@ -60,7 +60,7 @@ public class UsuarioServiceTests
     public async Task Criar_SenhaCurta_LancaSenhaMuitoCurta()
     {
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.CriarAsync(new CriarUsuarioDto { NomeUsuario = "user", Senha = "abc", Nome = "Teste" }, "admin"));
+            _sut.CriarAsync(new CriarUsuarioDto { NomeUsuario = "user", Senha = "abc", NomeCompleto = "Teste" }, "admin"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.SENHA_MUITO_CURTA, ex.Codigo);
@@ -69,10 +69,10 @@ public class UsuarioServiceTests
     [Theory]
     [InlineData("", "senha1", "Nome")]
     [InlineData("user", "senha1", "")]
-    public async Task Criar_CamposObrigatoriosVazios_LancaDadosInvalidos(string nomeUsuario, string senha, string nome)
+    public async Task Criar_CamposObrigatoriosVazios_LancaDadosInvalidos(string nomeUsuario, string senha, string nomeCompleto)
     {
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.CriarAsync(new CriarUsuarioDto { NomeUsuario = nomeUsuario, Senha = senha, Nome = nome }, "admin"));
+            _sut.CriarAsync(new CriarUsuarioDto { NomeUsuario = nomeUsuario, Senha = senha, NomeCompleto = nomeCompleto }, "admin"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
@@ -143,33 +143,20 @@ public class UsuarioServiceTests
         _repoMock.Setup(r => r.ObterPorIdAsync(It.IsAny<Guid>())).ReturnsAsync((Usuario?)null);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.AtualizarAsync(Guid.NewGuid(), new AtualizarUsuarioDto { NomeUsuario = "x", Nome = "Y" }, "admin"));
+            _sut.AtualizarAsync(Guid.NewGuid(), new AtualizarUsuarioDto { NomeCompleto = "Y" }, "admin"));
 
         Assert.Equal(404, ex.StatusCode);
         Assert.Equal(CodigoRetorno.USUARIO_NAO_ENCONTRADO, ex.Codigo);
     }
 
     [Fact]
-    public async Task Atualizar_CamposObrigatoriosVazios_LancaDadosInvalidos()
+    public async Task Atualizar_NomeCompletoVazio_LancaDadosInvalidos()
     {
         var usuario = CriarUsuario();
         _repoMock.Setup(r => r.ObterPorIdAsync(usuario.Id)).ReturnsAsync(usuario);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.AtualizarAsync(usuario.Id, new AtualizarUsuarioDto { NomeUsuario = "", Nome = "Y" }, "admin"));
-
-        Assert.Equal(400, ex.StatusCode);
-        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
-    }
-
-    [Fact]
-    public async Task Atualizar_NomeCamposVazios_LancaDadosInvalidos()
-    {
-        var usuario = CriarUsuario();
-        _repoMock.Setup(r => r.ObterPorIdAsync(usuario.Id)).ReturnsAsync(usuario);
-
-        var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.AtualizarAsync(usuario.Id, new AtualizarUsuarioDto { NomeUsuario = "user", Nome = "" }, "admin"));
+            _sut.AtualizarAsync(usuario.Id, new AtualizarUsuarioDto { NomeCompleto = "" }, "admin"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
@@ -182,24 +169,10 @@ public class UsuarioServiceTests
         _repoMock.Setup(r => r.ObterPorIdAsync(usuario.Id)).ReturnsAsync(usuario);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.AtualizarAsync(usuario.Id, new AtualizarUsuarioDto { NomeUsuario = "user", Nome = "Nome", Senha = "abc" }, "admin"));
+            _sut.AtualizarAsync(usuario.Id, new AtualizarUsuarioDto { NomeCompleto = "Nome", Senha = "abc" }, "admin"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.SENHA_MUITO_CURTA, ex.Codigo);
-    }
-
-    [Fact]
-    public async Task Atualizar_NomeUsuarioDuplicado_LancaNomeUsuarioDuplicado()
-    {
-        var usuario = CriarUsuario();
-        _repoMock.Setup(r => r.ObterPorIdAsync(usuario.Id)).ReturnsAsync(usuario);
-        _repoMock.Setup(r => r.ExisteNomeUsuarioAsync("duplicado", usuario.Id)).ReturnsAsync(true);
-
-        var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.AtualizarAsync(usuario.Id, new AtualizarUsuarioDto { NomeUsuario = "duplicado", Nome = "Nome" }, "admin"));
-
-        Assert.Equal(409, ex.StatusCode);
-        Assert.Equal(CodigoRetorno.NOME_USUARIO_DUPLICADO, ex.Codigo);
     }
 
     [Fact]
@@ -207,13 +180,13 @@ public class UsuarioServiceTests
     {
         var usuario = CriarUsuario();
         _repoMock.Setup(r => r.ObterPorIdAsync(usuario.Id)).ReturnsAsync(usuario);
-        _repoMock.Setup(r => r.ExisteNomeUsuarioAsync("novouser", usuario.Id)).ReturnsAsync(false);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<Usuario>())).ReturnsAsync((Usuario u) => u);
 
         var resultado = await _sut.AtualizarAsync(usuario.Id,
-            new AtualizarUsuarioDto { NomeUsuario = "novouser", Nome = "Novo Nome", Loja = "Loja Y" }, "admin");
+            new AtualizarUsuarioDto { NomeCompleto = "Novo Nome", NomeEstabelecimento = "Loja Y" }, "admin");
 
-        Assert.Equal("novouser", resultado.NomeUsuario);
+        Assert.Equal("Novo Nome", resultado.NomeCompleto);
+        Assert.Equal("Loja Y", resultado.NomeEstabelecimento);
     }
 
     [Fact]
@@ -222,11 +195,10 @@ public class UsuarioServiceTests
         var usuario = CriarUsuario();
         var senhaHashOriginal = usuario.SenhaHash;
         _repoMock.Setup(r => r.ObterPorIdAsync(usuario.Id)).ReturnsAsync(usuario);
-        _repoMock.Setup(r => r.ExisteNomeUsuarioAsync("novouser", usuario.Id)).ReturnsAsync(false);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<Usuario>())).ReturnsAsync((Usuario u) => u);
 
         await _sut.AtualizarAsync(usuario.Id,
-            new AtualizarUsuarioDto { NomeUsuario = "novouser", Nome = "Novo Nome", Senha = "nova1234" }, "admin");
+            new AtualizarUsuarioDto { NomeCompleto = "Novo Nome", Senha = "nova1234" }, "admin");
 
         _repoMock.Verify(r => r.AtualizarAsync(It.Is<Usuario>(u => u.SenhaHash != senhaHashOriginal)), Times.Once);
     }
