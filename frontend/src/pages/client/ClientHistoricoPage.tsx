@@ -1,0 +1,85 @@
+import { useAuth } from '../../contexts/AuthContext'
+import { useRegistros } from '../../hooks/useRegistros'
+import { fmtBRL, fmtDate, monthLabel } from '../../utils/format'
+import StatCard from '../../components/shared/StatCard'
+import Modal from '../../components/shared/Modal'
+import { useState } from 'react'
+
+interface Props { clienteIdOverride?: string }
+
+export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
+  const { user } = useAuth()
+  const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
+  const { registros, loading, excluir } = useRegistros(clienteId)
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [delData, setDelData] = useState<string | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [erroDelete, setErroDelete] = useState('')
+
+  const mesAtual = new Date().toISOString().slice(0, 7)
+  const doMes = registros.filter(r => r.data.startsWith(mesAtual))
+  const totalEnt = doMes.reduce((s, r) => s + r.entrada, 0)
+  const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a, x) => a + x.valor, 0), 0)
+  const ultimo = doMes[0]?.saldoConfirmado ?? 0
+
+  async function handleDelete() {
+    if (!delData) return
+    setErroDelete('')
+    try { await excluir(delData, motivo); setDelData(null); setMotivo('') }
+    catch (e: unknown) { setErroDelete(e instanceof Error ? e.message : String(e)) }
+  }
+
+  if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
+
+  return (
+    <>
+      <div className="stats-grid">
+        <StatCard label="📅 Mês atual" value={monthLabel(mesAtual)} className="val-blue" />
+        <StatCard label="📤 Total entradas" value={fmtBRL(totalEnt)} className="val-green" />
+        <StatCard label="💸 Total saídas" value={fmtBRL(totalSai)} className="val-red" />
+        <StatCard label="💰 Último saldo" value={fmtBRL(ultimo)} className="val-green" />
+      </div>
+
+      {registros.map(r => (
+        <div key={r.id} className="hist-item" style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 10, marginBottom: 8, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer' }}
+            onClick={() => setOpenId(openId === r.id ? null : r.id)}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtDate(r.data)}</div>
+              <div style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 2 }}>
+                Entrada: {fmtBRL(r.entrada)} · Saídas: {fmtBRL(r.saidas.reduce((a, x) => a + x.valor, 0))}
+              </div>
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#34c759' }}>{fmtBRL(r.saldoConfirmado)}</div>
+          </div>
+          {openId === r.id && (
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--bd-sub)' }}>
+              {r.saidas.map((s, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', borderBottom: '1px solid var(--bg-card)' }}>
+                  <span>{s.descricao}</span><span style={{ color: '#ff3b30' }}>-{fmtBRL(s.valor)}</span>
+                </div>
+              ))}
+              <button style={{ marginTop: 8, background: 'none', border: '1px solid var(--bd)', borderRadius: 6, color: '#ff6b6b', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}
+                onClick={() => setDelData(r.data)}>🗑 Excluir registro</button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      <Modal
+        open={!!delData}
+        title={`Excluir registro de ${delData}?`}
+        onClose={() => setDelData(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setDelData(null)}>Cancelar</button>
+            <button className="btn-danger" onClick={handleDelete}>Excluir</button>
+          </>
+        }
+      >
+        {erroDelete && <div style={{ color: '#ff6b6b', fontSize: 13, marginBottom: 12, background: 'var(--err-bg)', border: '1px solid #ff3b30', padding: '8px 12px', borderRadius: 8 }}>{erroDelete}</div>}
+        <div className="inp-group"><label>Motivo</label><input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Informe o motivo" /></div>
+      </Modal>
+    </>
+  )
+}

@@ -13,9 +13,9 @@ namespace CaixaDiario.API.Controllers;
 [Authorize]
 public class UsuariosController : ControllerBase
 {
-    private readonly UsuarioService _usuarioService;
+    private readonly IUsuarioService _usuarioService;
 
-    public UsuariosController(UsuarioService usuarioService) => _usuarioService = usuarioService;
+    public UsuariosController(IUsuarioService usuarioService) => _usuarioService = usuarioService;
 
     private void VerificarAdmin()
     {

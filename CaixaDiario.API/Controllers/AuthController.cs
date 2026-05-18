@@ -9,9 +9,9 @@ namespace CaixaDiario.API.Controllers;
 [Route("api/auth")]
 public class AuthController : ControllerBase
 {
-    private readonly AuthService _authService;
+    private readonly IAuthService _authService;
 
-    public AuthController(AuthService authService) => _authService = authService;
+    public AuthController(IAuthService authService) => _authService = authService;
 
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequestDto dto)

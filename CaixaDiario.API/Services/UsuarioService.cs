@@ -6,7 +6,7 @@ using CaixaDiario.API.Repositories.Interfaces;
 
 namespace CaixaDiario.API.Services;
 
-public class UsuarioService
+public class UsuarioService : IUsuarioService
 {
     private readonly IUsuarioRepository _usuarioRepository;
 
@@ -27,7 +27,7 @@ public class UsuarioService
 
     public async Task<UsuarioDto> CriarAsync(CriarUsuarioDto dto, string nomeUsuarioLogado)
     {
-        if (string.IsNullOrWhiteSpace(dto.NomeUsuario) || string.IsNullOrWhiteSpace(dto.Nome))
+        if (string.IsNullOrWhiteSpace(dto.NomeUsuario) || string.IsNullOrWhiteSpace(dto.NomeCompleto))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Nome e usuário são obrigatórios.");
 
         if (dto.Senha.Length < 4)
@@ -41,8 +41,8 @@ public class UsuarioService
             Id = Guid.NewGuid(),
             NomeUsuario = dto.NomeUsuario.ToLower(),
             SenhaHash = BCrypt.Net.BCrypt.HashPassword(dto.Senha),
-            Nome = dto.Nome,
-            Loja = dto.Loja,
+            Nome = dto.NomeCompleto,
+            Loja = dto.NomeEstabelecimento,
             Perfil = "cliente",
             Ativo = true,
             CriadoEm = DateTime.UtcNow,
@@ -58,18 +58,14 @@ public class UsuarioService
         var usuario = await _usuarioRepository.ObterPorIdAsync(id)
             ?? throw new ApiException(404, CodigoRetorno.USUARIO_NAO_ENCONTRADO, "Usuário não encontrado.");
 
-        if (string.IsNullOrWhiteSpace(dto.NomeUsuario) || string.IsNullOrWhiteSpace(dto.Nome))
-            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Nome e usuário são obrigatórios.");
+        if (string.IsNullOrWhiteSpace(dto.NomeCompleto))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Nome é obrigatório.");
 
         if (!string.IsNullOrWhiteSpace(dto.Senha) && dto.Senha.Length < 4)
             throw new ApiException(400, CodigoRetorno.SENHA_MUITO_CURTA, "Senha deve ter no mínimo 4 caracteres.", "senha");
 
-        if (await _usuarioRepository.ExisteNomeUsuarioAsync(dto.NomeUsuario, id))
-            throw new ApiException(409, CodigoRetorno.NOME_USUARIO_DUPLICADO, "Nome de usuário já existe.", "nome_usuario");
-
-        usuario.NomeUsuario = dto.NomeUsuario.ToLower();
-        usuario.Nome = dto.Nome;
-        usuario.Loja = dto.Loja;
+        usuario.Nome = dto.NomeCompleto;
+        usuario.Loja = dto.NomeEstabelecimento;
         usuario.AtualizadoEm = DateTime.UtcNow;
         usuario.UsuarioAtualizacao = nomeUsuarioLogado;
 
@@ -96,8 +92,8 @@ public class UsuarioService
     {
         Id = u.Id,
         NomeUsuario = u.NomeUsuario,
-        Nome = u.Nome,
-        Loja = u.Loja,
+        NomeCompleto = u.Nome,
+        NomeEstabelecimento = u.Loja,
         Perfil = u.Perfil,
         Ativo = u.Ativo,
         CriadoEm = u.CriadoEm

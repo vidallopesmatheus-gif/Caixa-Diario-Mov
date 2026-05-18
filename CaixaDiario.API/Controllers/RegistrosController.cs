@@ -11,9 +11,9 @@ namespace CaixaDiario.API.Controllers;
 [Authorize]
 public class RegistrosController : ControllerBase
 {
-    private readonly RegistroService _registroService;
+    private readonly IRegistroService _registroService;
 
-    public RegistrosController(RegistroService registroService) => _registroService = registroService;
+    public RegistrosController(IRegistroService registroService) => _registroService = registroService;
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
     private string ObterPerfil() => User.FindFirst("perfil")!.Value;

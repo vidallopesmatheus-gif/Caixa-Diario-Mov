@@ -1,0 +1,61 @@
+.saida-row, .prov-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 32px;
+  gap: 8px; margin-bottom: 8px; align-items: center;
+}
+.saida-row input, .prov-row input {
+  padding: 9px 12px; background: var(--bg-input);
+  border: 1px solid var(--bd); border-radius: 8px;
+  color: var(--tx); font-size: 14px; width: 100%;
+}
+.saida-row input:focus { border-color: #ff3b30; outline: none; }
+.prov-row input:focus  { border-color: #5ac8fa; outline: none; }
+
+.btn-rm {
+  background: var(--rm-bg); border: 1px solid var(--rm-bd);
+  color: #ff6b6b; width: 32px; height: 36px; border-radius: 8px; font-size: 14px;
+}
+.btn-rm:hover { background: #3a1010; }
+.btn-rm-prov {
+  background: var(--rmp-bg); border: 1px solid var(--rmp-bd);
+  color: #5ac8fa; width: 32px; height: 36px; border-radius: 8px; font-size: 14px;
+}
+.btn-rm-prov:hover { background: #1a3a4a; }
+
+.btn-add-saida {
+  width: 100%; padding: 9px;
+  background: var(--rm-bg); border: 1px dashed var(--rm-bd);
+  border-radius: 8px; color: #ff6b6b; font-size: 13px; font-weight: 600; margin-top: 4px;
+}
+.btn-add-saida:hover { background: #201010; }
+.btn-add-receber {
+  width: 100%; padding: 9px; border: 1px dashed;
+  border-radius: 8px; font-size: 13px; font-weight: 600; margin-top: 4px;
+  background: var(--ov-hv); border-color: var(--rmp-bd); color: #5ac8fa;
+}
+.btn-add-receber:hover { background: #0a2a3a; }
+.btn-add-pagar {
+  width: 100%; padding: 9px; border: 1px dashed;
+  border-radius: 8px; font-size: 13px; font-weight: 600; margin-top: 4px;
+  background: var(--rm-bg); border-color: var(--rm-bd); color: #ff6b6b;
+}
+.btn-add-pagar:hover { background: #1a1010; }
+
+.saldo-box {
+  background: var(--sl-bg, #0a1a0a); border: 1px solid var(--sl-bd, #1a4a1a);
+  border-radius: 12px; padding: 16px 20px;
+  display: flex; align-items: center; justify-content: space-between; margin: 16px 0;
+}
+.saldo-calc-lbl { font-size: 13px; color: var(--tx3); }
+.saldo-calc-val { font-size: 24px; font-weight: 800; color: #34c759; }
+.dif-msg { font-size: 13px; font-weight: 600; margin-top: 8px; min-height: 18px; }
+
+.btn-save {
+  width: 100%; padding: 14px;
+  background: linear-gradient(135deg, #34c759, #30d158);
+  color: #000; border: none; border-radius: 10px;
+  font-size: 15px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px;
+}
+.btn-save:hover { opacity: .9; }
+.btn-save:disabled { opacity: .5; cursor: not-allowed; }

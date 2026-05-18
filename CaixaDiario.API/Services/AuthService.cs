@@ -5,7 +5,7 @@ using CaixaDiario.API.Repositories.Interfaces;
 
 namespace CaixaDiario.API.Services;
 
-public class AuthService
+public class AuthService : IAuthService
 {
     private readonly IUsuarioRepository _usuarioRepository;
     private readonly ITokenService _tokenService;
@@ -21,7 +21,7 @@ public class AuthService
         if (string.IsNullOrWhiteSpace(dto.NomeUsuario) || string.IsNullOrWhiteSpace(dto.Senha))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Nome de usuário e senha são obrigatórios.");
 
-        var usuario = await _usuarioRepository.ObterPorNomeUsuarioAsync(dto.NomeUsuario);
+        var usuario = await _usuarioRepository.ObterPorNomeUsuarioAsync(dto.NomeUsuario.ToLower());
 
         if (usuario == null || !BCrypt.Net.BCrypt.Verify(dto.Senha, usuario.SenhaHash))
             throw new ApiException(401, CodigoRetorno.CREDENCIAIS_INVALIDAS, "Usuário ou senha incorretos.");
@@ -31,9 +31,11 @@ public class AuthService
 
         return new LoginResponseDto
         {
-            Id = usuario.Id,
+            UsuarioId = usuario.Id,
             Token = _tokenService.GerarToken(usuario),
-            Nome = usuario.Nome,
+            NomeCompleto = usuario.Nome,
+            NomeUsuario = usuario.NomeUsuario,
+            NomeEstabelecimento = usuario.Loja ?? string.Empty,
             Perfil = usuario.Perfil
         };
     }

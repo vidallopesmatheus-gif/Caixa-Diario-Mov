@@ -12,6 +12,52 @@ Este sistema permite que você:
 ✅ **Visualize o histórico** - Todos os registros em uma tabela organizada  
 ✅ **Exporte dados** - Baixe um arquivo CSV para usar em Excel ou Google Sheets  
 
+## 🛠️ Setup de Desenvolvimento
+
+Este projeto usa um frontend React (Vite) servido pelo backend .NET. O `wwwroot/` é populado pelo build do frontend — **é necessário buildá-lo antes de rodar o backend**.
+
+### Pré-requisitos
+- .NET 8 SDK
+- Node.js 18+
+
+### Primeira vez (ou após limpar o repositório)
+
+```bash
+# 1. Build do frontend → gera CaixaDiario.API/wwwroot/
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 2. Rodar o backend (já serve o frontend buildado)
+cd CaixaDiario.API
+dotnet run
+```
+
+### Desenvolvimento do frontend com hot-reload
+
+```bash
+# Terminal 1: backend .NET
+cd CaixaDiario.API && dotnet run
+
+# Terminal 2: Vite dev server (proxy para o backend)
+cd frontend && npm run dev
+```
+
+> **Atenção:** Se pular o `npm run build`, o backend sobe mas retorna 404 em todas as rotas do frontend. Sempre rode o build ao clonar o repositório ou após `git clean`.
+
+### Testes
+
+```bash
+# Backend (.NET)
+cd CaixaDiario.Tests && dotnet test
+
+# Frontend (Vitest)
+cd frontend && npm test
+```
+
+---
+
 ## 📱 Como usar
 
 ### 1. Abrir o formulário

@@ -6,7 +6,7 @@ using CaixaDiario.API.Repositories.Interfaces;
 
 namespace CaixaDiario.API.Services;
 
-public class RegistroService
+public class RegistroService : IRegistroService
 {
     private readonly IRegistroRepository _registroRepository;
 
