@@ -24,9 +24,9 @@ public class AuthControllerTests
         var response = new LoginResponseDto
         {
             Token = "jwt-token",
-            Nome = "João",
+            NomeCompleto = "João",
             Perfil = "cliente",
-            Id = Guid.NewGuid()
+            UsuarioId = Guid.NewGuid()
         };
         _serviceMock.Setup(s => s.LoginAsync(It.IsAny<LoginRequestDto>())).ReturnsAsync(response);
 
@@ -35,7 +35,7 @@ public class AuthControllerTests
         var ok = Assert.IsType<OkObjectResult>(result);
         var body = Assert.IsType<ApiResponse<LoginResponseDto>>(ok.Value);
         Assert.Equal("jwt-token", body.Dados!.Token);
-        Assert.Equal("João", body.Dados.Nome);
+        Assert.Equal("João", body.Dados.NomeCompleto);
     }
 
     [Fact]

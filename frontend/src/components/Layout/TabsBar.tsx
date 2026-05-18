@@ -9,7 +9,6 @@ export default function TabsBar() {
   const adminTabs = [
     { to: '/admin/overview', label: '🏠 Visão Geral' },
     { to: '/admin/clientes', label: '👥 Clientes' },
-    { to: '/admin/caixa',    label: '📋 Ver Caixa' },
   ]
   const clientTabs = [
     { to: '/caixa',     label: '📋 Caixa Diário' },

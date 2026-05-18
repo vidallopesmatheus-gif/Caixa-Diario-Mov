@@ -94,8 +94,7 @@ test('exibe erro quando criar falha', async () => {
   fireEvent.click(screen.getByText(/Novo cliente/))
   fireEvent.change(screen.getByLabelText(/Nome completo/), { target: { value: 'Novo Cliente' } })
   fireEvent.change(screen.getByLabelText(/Usuário/), { target: { value: 'novouser' } })
-  const senhaInput = document.querySelector('input[type="password"]')!
-  fireEvent.change(senhaInput, { target: { value: '1234' } })
+  fireEvent.change(screen.getByLabelText(/Senha/), { target: { value: '1234' } })
   const salvarBtn = screen.getByRole('button', { name: 'Salvar' })
   fireEvent.submit(salvarBtn.closest('form')!)
   await waitFor(() =>

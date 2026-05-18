@@ -9,6 +9,7 @@ export function useRegistros(clienteId: string | null) {
 
   const carregar = useCallback(async () => {
     if (!clienteId) return
+    setErro('')
     setLoading(true)
     try {
       const res = await listarRegistros(clienteId)

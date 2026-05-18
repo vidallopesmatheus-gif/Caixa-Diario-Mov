@@ -9,8 +9,8 @@ export async function apiFetch<T>(
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   })
   if (res.status === 401) {

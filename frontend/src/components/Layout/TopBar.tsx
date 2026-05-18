@@ -11,7 +11,8 @@ export default function TopBar() {
   }, [light])
 
   if (!user) return null
-  const initials = user.nomeCompleto.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
+  const displayName = user.nomeCompleto ?? user.nomeUsuario ?? ''
+  const initials = displayName.split(' ').filter(Boolean).map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
 
   return (
     <div className="topbar">
@@ -26,7 +27,7 @@ export default function TopBar() {
           {light ? '🌙' : '☀️'}
         </button>
         <div className="avatar">{initials}</div>
-        <span style={{ fontSize: 14, fontWeight: 600 }}>{user.nomeCompleto}</span>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>{displayName}</span>
         <button className="btn-sm btn-logout" onClick={logout}>Sair</button>
       </div>
     </div>

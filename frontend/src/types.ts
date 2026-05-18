@@ -6,7 +6,7 @@ export interface Usuario {
   perfil: 'admin' | 'cliente'
   ativo: boolean
   criadoEm: string
-  criadoPor: string
+  criadoPor?: string
 }
 
 export interface Saida {

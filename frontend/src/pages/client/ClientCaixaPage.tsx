@@ -26,6 +26,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const [confirmado, setConfirmado] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [saveSuccess, setSaveSuccess] = useState(false)
 
   const totalSaidas = saidas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
   const calculado = inicio + (Number(entrada) || 0) - totalSaidas
@@ -76,9 +77,11 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         contasAPagar: aPagar.filter(s => s.descricao || s.valor),
         saldoConfirmado: confirmado === '' ? calculado : Number(confirmado),
       })
-      setMsg('✅ Salvo com sucesso!')
+      setSaveSuccess(true)
+      setMsg('Salvo com sucesso!')
     } catch (e: unknown) {
-      setMsg(`❌ ${e instanceof Error ? e.message : String(e)}`)
+      setSaveSuccess(false)
+      setMsg(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
@@ -164,7 +167,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
           {Math.abs(dif) < 0.01 ? '✅ Saldo conferido!' : `⚠️ Diferença: ${fmtBRL(Math.abs(dif))}`}
         </div>
       )}
-      {msg && <div style={{ marginTop: 8, fontWeight: 600, color: msg.startsWith('✅') ? '#34c759' : '#ff6b6b' }}>{msg}</div>}
+      {msg && <div style={{ marginTop: 8, fontWeight: 600, color: saveSuccess ? '#34c759' : '#ff6b6b' }}>{msg}</div>}
       <button className="btn-save" onClick={handleSave} disabled={saving}>
         {saving ? 'Salvando...' : '☁️ Salvar e sincronizar'}
       </button>

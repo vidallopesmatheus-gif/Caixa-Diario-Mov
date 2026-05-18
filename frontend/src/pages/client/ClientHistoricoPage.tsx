@@ -2,6 +2,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtDate, monthLabel } from '../../utils/format'
 import StatCard from '../../components/shared/StatCard'
+import Modal from '../../components/shared/Modal'
 import { useState } from 'react'
 
 interface Props { clienteIdOverride?: string }
@@ -65,19 +66,20 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
         </div>
       ))}
 
-      {delData && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ background: 'var(--bg-card)', borderRadius: 16, padding: 28, maxWidth: 400, width: '100%' }}>
-            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 16 }}>Excluir registro de {delData}?</div>
-            {erroDelete && <div style={{ color: '#ff6b6b', fontSize: 13, marginBottom: 12, background: 'var(--err-bg)', border: '1px solid #ff3b30', padding: '8px 12px', borderRadius: 8 }}>{erroDelete}</div>}
-            <div className="inp-group"><label>Motivo</label><input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Informe o motivo" /></div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
-              <button className="btn-cancel" onClick={() => setDelData(null)}>Cancelar</button>
-              <button className="btn-danger" onClick={handleDelete}>Excluir</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={!!delData}
+        title={`Excluir registro de ${delData}?`}
+        onClose={() => setDelData(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setDelData(null)}>Cancelar</button>
+            <button className="btn-danger" onClick={handleDelete}>Excluir</button>
+          </>
+        }
+      >
+        {erroDelete && <div style={{ color: '#ff6b6b', fontSize: 13, marginBottom: 12, background: 'var(--err-bg)', border: '1px solid #ff3b30', padding: '8px 12px', borderRadius: 8 }}>{erroDelete}</div>}
+        <div className="inp-group"><label>Motivo</label><input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Informe o motivo" /></div>
+      </Modal>
     </>
   )
 }

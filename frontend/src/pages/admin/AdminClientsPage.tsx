@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useUsuarios } from '../../hooks/useUsuarios'
 import Modal from '../../components/shared/Modal'
 import type { Usuario } from '../../types'
@@ -48,6 +49,7 @@ function ClientForm({ initial, onSave, onCancel }: {
 }
 
 export default function AdminClientsPage() {
+  const navigate = useNavigate()
   const { usuarios, loading, criar, atualizar, desativar } = useUsuarios()
   const clientes = usuarios.filter(u => u.perfil === 'cliente')
   const [selected, setSelected] = useState<Usuario | null>(null)
@@ -91,7 +93,16 @@ export default function AdminClientsPage() {
                 <div className="client-name">{u.nomeCompleto}</div>
                 <div className="client-store">{u.nomeEstabelecimento}</div>
               </div>
-              {!u.ativo && <span style={{ fontSize: 11, color: '#ff6b6b' }}>Inativo</span>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {!u.ativo && <span style={{ fontSize: 11, color: '#ff6b6b' }}>Inativo</span>}
+                <button
+                  className="btn-sm"
+                  onClick={e => { e.stopPropagation(); navigate(`/admin/caixa/${u.id}`) }}
+                  title="Ver caixa deste cliente"
+                >
+                  📋 Ver Caixa
+                </button>
+              </div>
             </div>
           ))}
           <button className="btn-add-client" onClick={() => setShowAdd(true)}>＋ Novo cliente</button>
