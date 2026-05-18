@@ -2,10 +2,10 @@
 cmds = ["curl -fsSL https://deb.nodesource.com/setup_20.x | bash -", "apt-get install -y nodejs"]
 
 [phases.install]
-cmds = ["npm --prefix frontend install", "dotnet restore"]
+cmds = ["npm --prefix ../frontend install", "dotnet restore"]
 
 [phases.build]
-cmds = ["npm --prefix frontend run build", "dotnet publish -c Release -o out"]
+cmds = ["npm --prefix ../frontend run build", "dotnet publish -c Release -o out"]
 
 [start]
 cmd = "dotnet out/CaixaDiario.API.dll"
