@@ -8,3 +8,9 @@ CaixaDiario.API/wwwroot/
 
 # Claude Code
 .claude/
+
+# Docker
+CaixaDiario.API/Dockerfile
+
+# Test artifacts
+**/TestResults/
