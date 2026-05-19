@@ -6,10 +6,10 @@ public class RegistroDiario
     public Guid ClienteId { get; set; }
     public DateOnly Data { get; set; }
     public decimal Inicio { get; set; }
-    public decimal Entrada { get; set; }
+    public List<ItemFinanceiro> Entradas { get; set; } = new();
     public List<ItemFinanceiro> Saidas { get; set; } = new();
-    public List<ItemFinanceiro> ContasReceber { get; set; } = new();
-    public List<ItemFinanceiro> ContasPagar { get; set; } = new();
+    public List<ContaProvisionada> ContasReceber { get; set; } = new();
+    public List<ContaProvisionada> ContasPagar { get; set; } = new();
     public decimal SaldoFinal { get; set; }
     public bool Excluido { get; set; } = false;
     public string? MotivoExclusao { get; set; }
