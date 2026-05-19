@@ -7,6 +7,9 @@ import AdminCaixaPage from './pages/admin/AdminCaixaPage'
 import ClientCaixaPage from './pages/client/ClientCaixaPage'
 import ClientHistoricoPage from './pages/client/ClientHistoricoPage'
 import ClientGraficoPage from './pages/client/ClientGraficoPage'
+import ClientContasPage from './pages/client/ClientContasPage'
+import ClientDashboardPage from './pages/client/ClientDashboardPage'
+import ClientExportacaoPage from './pages/client/ClientExportacaoPage'
 import Layout from './components/Layout/Layout'
 
 function ProtectedRoutes() {
@@ -29,10 +32,13 @@ function ProtectedRoutes() {
   return (
     <Layout>
       <Routes>
-        <Route path="/caixa" element={<ClientCaixaPage />} />
-        <Route path="/historico" element={<ClientHistoricoPage />} />
-        <Route path="/grafico" element={<ClientGraficoPage />} />
-        <Route path="*" element={<Navigate to="/caixa" replace />} />
+        <Route path="/dashboard"  element={<ClientDashboardPage />} />
+        <Route path="/caixa"      element={<ClientCaixaPage />} />
+        <Route path="/contas"     element={<ClientContasPage />} />
+        <Route path="/historico"  element={<ClientHistoricoPage />} />
+        <Route path="/grafico"    element={<ClientGraficoPage />} />
+        <Route path="/exportar"   element={<ClientExportacaoPage />} />
+        <Route path="*"           element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Layout>
   )
