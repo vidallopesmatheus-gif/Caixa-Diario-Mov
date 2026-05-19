@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
 
     public DbSet<Usuario> Usuarios { get; set; }
     public DbSet<RegistroDiario> RegistrosDiarios { get; set; }
+    public DbSet<MetaAnual> MetasAnuais { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,7 +41,10 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
             entity.Property(e => e.Data).HasColumnName("data");
             entity.Property(e => e.Inicio).HasColumnName("inicio").HasColumnType("decimal(18,2)");
-            entity.Property(e => e.Entrada).HasColumnName("entrada").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Entradas).HasColumnName("entradas").HasColumnType("jsonb")
+                .HasConversion(
+                    v => JsonSerializer.Serialize(v, _jsonOptions),
+                    v => JsonSerializer.Deserialize<List<ItemFinanceiro>>(v, _jsonOptions) ?? new());
             entity.Property(e => e.Saidas).HasColumnName("saidas").HasColumnType("jsonb")
                 .HasConversion(
                     v => JsonSerializer.Serialize(v, _jsonOptions),
@@ -48,11 +52,11 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ContasReceber).HasColumnName("contas_receber").HasColumnType("jsonb")
                 .HasConversion(
                     v => JsonSerializer.Serialize(v, _jsonOptions),
-                    v => JsonSerializer.Deserialize<List<ItemFinanceiro>>(v, _jsonOptions) ?? new());
+                    v => JsonSerializer.Deserialize<List<ContaProvisionada>>(v, _jsonOptions) ?? new());
             entity.Property(e => e.ContasPagar).HasColumnName("contas_pagar").HasColumnType("jsonb")
                 .HasConversion(
                     v => JsonSerializer.Serialize(v, _jsonOptions),
-                    v => JsonSerializer.Deserialize<List<ItemFinanceiro>>(v, _jsonOptions) ?? new());
+                    v => JsonSerializer.Deserialize<List<ContaProvisionada>>(v, _jsonOptions) ?? new());
             entity.Property(e => e.SaldoFinal).HasColumnName("saldo_final").HasColumnType("decimal(18,2)");
             entity.Property(e => e.Excluido).HasColumnName("excluido").HasDefaultValue(false);
             entity.Property(e => e.MotivoExclusao).HasColumnName("motivo_exclusao");
@@ -66,6 +70,25 @@ public class AppDbContext : DbContext
                 .HasForeignKey(e => e.ClienteId);
 
             entity.HasIndex(e => new { e.ClienteId, e.Data }).IsUnique();
+        });
+
+        modelBuilder.Entity<MetaAnual>(entity =>
+        {
+            entity.ToTable("metas_anuais");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.Ano).HasColumnName("ano");
+            entity.Property(e => e.MetaReceita).HasColumnName("meta_receita").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.MetaLucro).HasColumnName("meta_lucro").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em");
+            entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
+
+            entity.HasOne(e => e.Cliente)
+                .WithMany(u => u.MetasAnuais)
+                .HasForeignKey(e => e.ClienteId);
+
+            entity.HasIndex(e => new { e.ClienteId, e.Ano }).IsUnique();
         });
     }
 }
