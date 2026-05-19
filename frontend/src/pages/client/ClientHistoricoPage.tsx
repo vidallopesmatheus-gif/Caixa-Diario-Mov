@@ -18,7 +18,7 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
 
   const mesAtual = new Date().toISOString().slice(0, 7)
   const doMes = registros.filter(r => r.data.startsWith(mesAtual))
-  const totalEnt = doMes.reduce((s, r) => s + r.entrada, 0)
+  const totalEnt = doMes.reduce((s, r) => s + r.entradas.reduce((a, x) => a + x.valor, 0), 0)
   const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a, x) => a + x.valor, 0), 0)
   const ultimo = doMes[0]?.saldoConfirmado ?? 0
 
@@ -47,7 +47,7 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
             <div>
               <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtDate(r.data)}</div>
               <div style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 2 }}>
-                Entrada: {fmtBRL(r.entrada)} · Saídas: {fmtBRL(r.saidas.reduce((a, x) => a + x.valor, 0))}
+                Entradas: {fmtBRL(r.entradas.reduce((a, x) => a + x.valor, 0))} · Saídas: {fmtBRL(r.saidas.reduce((a, x) => a + x.valor, 0))}
               </div>
             </div>
             <div style={{ fontSize: 15, fontWeight: 700, color: '#34c759' }}>{fmtBRL(r.saldoConfirmado)}</div>

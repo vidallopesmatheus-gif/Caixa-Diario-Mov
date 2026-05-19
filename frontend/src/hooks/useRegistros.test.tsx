@@ -5,7 +5,7 @@ import * as api from '../api/registros'
 vi.mock('../api/registros')
 
 const mockRegistros = [
-  { id: 'r1', clienteId: 'c1', data: '2026-05-15', saldoInicio: 100, entrada: 200,
+  { id: 'r1', clienteId: 'c1', data: '2026-05-15', saldoInicio: 100, entradas: [{ descricao: 'Caixa', valor: 200 }],
     saidas: [{ descricao: 'Despesa', valor: 50 }], contasAReceber: [], contasAPagar: [],
     saldoConfirmado: 250, saldoCalculado: 250, criadoEm: '' }
 ]
@@ -50,7 +50,7 @@ test('buscarPorData retorna null quando clienteId é null', async () => {
 
 test('salvar chama salvarRegistro e recarrega', async () => {
   vi.mocked(api.listarRegistros).mockResolvedValue({ dados: [], codigoRetorno: 'OK', mensagem: '' })
-  const dto = { clienteId: 'c1', data: '2026-05-15', saldoInicio: 0, entrada: 0, saidas: [], contasAReceber: [], contasAPagar: [], saldoConfirmado: 0 }
+  const dto = { clienteId: 'c1', data: '2026-05-15', saldoInicio: 0, entradas: [], saidas: [], contasAReceber: [], contasAPagar: [], saldoConfirmado: 0 }
   vi.mocked(api.salvarRegistro).mockResolvedValue({ dados: mockRegistros[0], codigoRetorno: 'OK', mensagem: '' })
   const { result } = renderHook(() => useRegistros('c1'))
   await waitFor(() => expect(result.current.loading).toBe(false))

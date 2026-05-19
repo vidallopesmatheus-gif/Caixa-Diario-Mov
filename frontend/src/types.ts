@@ -9,7 +9,7 @@ export interface Usuario {
   criadoPor?: string
 }
 
-export interface Saida {
+export interface ItemFinanceiro {
   descricao: string
   valor: number
 }
@@ -17,6 +17,8 @@ export interface Saida {
 export interface ContaProvisionada {
   descricao: string
   valor: number
+  dataVencimento?: string
+  pago: boolean
 }
 
 export interface Registro {
@@ -24,13 +26,21 @@ export interface Registro {
   clienteId: string
   data: string
   saldoInicio: number
-  entrada: number
-  saidas: Saida[]
+  entradas: ItemFinanceiro[]
+  saidas: ItemFinanceiro[]
   contasAReceber: ContaProvisionada[]
   contasAPagar: ContaProvisionada[]
   saldoConfirmado: number
   saldoCalculado: number
   criadoEm: string
+}
+
+export interface MetaAnual {
+  id: string
+  clienteId: string
+  ano: number
+  metaReceita: number
+  metaLucro: number
 }
 
 export interface LoginResponse {

@@ -24,7 +24,7 @@ test('salvarRegistro faz POST em /api/registros', async () => {
   mockOk({ dados: {} })
   await salvarRegistro({
     clienteId: 'c1', data: '2026-05-15', saldoInicio: 0,
-    entrada: 0, saidas: [], contasAReceber: [], contasAPagar: [], saldoConfirmado: 0,
+    entradas: [], saidas: [], contasAReceber: [], contasAPagar: [], saldoConfirmado: 0,
   })
   expect(vi.mocked(fetch)).toHaveBeenCalledWith(
     '/api/registros',
@@ -38,4 +38,17 @@ test('excluirRegistro faz DELETE com motivoExclusao no body', async () => {
   const call = vi.mocked(fetch).mock.calls[0][1] as RequestInit
   expect(call.method).toBe('DELETE')
   expect(JSON.parse(call.body as string)).toEqual({ motivoExclusao: 'erro de digitação' })
+})
+
+test('salvarRegistro envia entradas[] no payload', async () => {
+  mockOk({ dados: {} })
+  await salvarRegistro({
+    clienteId: 'c1', data: '2026-05-15', saldoInicio: 0,
+    entradas: [{ descricao: 'Caixa', valor: 500 }],
+    saidas: [], contasAReceber: [], contasAPagar: [], saldoConfirmado: 0,
+  })
+  const call = vi.mocked(fetch).mock.calls[0][1] as RequestInit
+  const body = JSON.parse(call.body as string)
+  expect(body.entradas).toHaveLength(1)
+  expect(body.entradas[0].Valor).toBe(500)
 })

@@ -41,7 +41,7 @@ test('exibe StatCards com labels corretos', () => {
   mockHooks()
   render(<ClientCaixaPage />)
   expect(screen.getByText('📥 Início')).toBeInTheDocument()
-  expect(screen.getByText('📤 Entrada')).toBeInTheDocument()
+  expect(screen.getByText('📤 Entradas')).toBeInTheDocument()
   expect(screen.getByText('💸 Saídas')).toBeInTheDocument()
   expect(screen.getByText('💰 Saldo')).toBeInTheDocument()
 })
@@ -142,10 +142,10 @@ test('exibe diferença de saldo quando confirmado é preenchido', () => {
 test('carrega dados do registro existente quando buscarPorData retorna resultado', async () => {
   const reg = {
     id: 'r1', clienteId: 'u1', data: '2026-05-15',
-    saldoInicio: 500, entrada: 200,
+    saldoInicio: 500, entradas: [{ descricao: 'Caixa', valor: 200 }],
     saidas: [{ descricao: 'Aluguel', valor: 100 }],
-    contasAReceber: [{ descricao: 'Mensalidade', valor: 300 }],
-    contasAPagar: [{ descricao: 'Fornecedor', valor: 50 }],
+    contasAReceber: [{ descricao: 'Mensalidade', valor: 300, pago: false }],
+    contasAPagar: [{ descricao: 'Fornecedor', valor: 50, pago: false }],
     saldoConfirmado: 600, saldoCalculado: 600, criadoEm: '',
   }
   const buscarPorData = vi.fn().mockResolvedValue(reg)
@@ -157,7 +157,7 @@ test('carrega dados do registro existente quando buscarPorData retorna resultado
 test('carrega saldo anterior quando buscarPorData retorna null e há registros anteriores', async () => {
   const registros = [{
     id: 'r0', clienteId: 'u1', data: '2026-04-01',
-    saldoInicio: 100, entrada: 0, saidas: [], contasAReceber: [], contasAPagar: [],
+    saldoInicio: 100, entradas: [], saidas: [], contasAReceber: [], contasAPagar: [],
     saldoConfirmado: 300, saldoCalculado: 300, criadoEm: '',
   }]
   const buscarPorData = vi.fn().mockResolvedValue(null)
