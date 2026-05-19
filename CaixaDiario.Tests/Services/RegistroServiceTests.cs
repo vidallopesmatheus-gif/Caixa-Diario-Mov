@@ -25,7 +25,7 @@ public class RegistroServiceTests
             ClienteId = Guid.NewGuid(),
             Data = data ?? DateOnly.FromDateTime(DateTime.UtcNow),
             Inicio = 100m,
-            Entrada = 500m,
+            Entradas = new List<ItemFinanceiroDto> { new() { Descricao = "Caixa", Valor = 500m } },
             Saidas = new List<ItemFinanceiroDto> { new() { Descricao = "Aluguel", Valor = 200m } },
             ContasReceber = new(),
             ContasPagar = new(),
@@ -65,7 +65,7 @@ public class RegistroServiceTests
         var existente = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = dto.ClienteId, Data = dto.Data,
-            SaldoFinal = 0, Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 0, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data)).ReturnsAsync(existente);
@@ -127,7 +127,7 @@ public class RegistroServiceTests
             {
                 Id = Guid.NewGuid(), ClienteId = clienteId,
                 Data = DateOnly.FromDateTime(DateTime.UtcNow),
-                Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+                Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
                 CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
             }
         };
@@ -148,7 +148,7 @@ public class RegistroServiceTests
             {
                 Id = Guid.NewGuid(), ClienteId = clienteId,
                 Data = DateOnly.FromDateTime(DateTime.UtcNow),
-                Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+                Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
                 CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
             }
         };
@@ -167,9 +167,10 @@ public class RegistroServiceTests
         var registro = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = data,
+            Entradas = new List<ItemFinanceiro> { new() { Descricao = "Caixa", Valor = 10m } },
             Saidas = new List<ItemFinanceiro> { new() { Descricao = "Saida", Valor = 10m } },
-            ContasReceber = new List<ItemFinanceiro> { new() { Descricao = "CR", Valor = 5m } },
-            ContasPagar = new List<ItemFinanceiro> { new() { Descricao = "CP", Valor = 3m } },
+            ContasReceber = new List<ContaProvisionada> { new() { Descricao = "CR", Valor = 5m } },
+            ContasPagar = new List<ContaProvisionada> { new() { Descricao = "CP", Valor = 3m } },
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync(registro);
@@ -187,7 +188,7 @@ public class RegistroServiceTests
         var registro = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = data,
-            Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync(registro);
@@ -247,7 +248,7 @@ public class RegistroServiceTests
         var registro = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = data,
-            Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync(registro);
@@ -266,10 +267,10 @@ public class RegistroServiceTests
             ClienteId = Guid.NewGuid(),
             Data = DateOnly.FromDateTime(DateTime.UtcNow),
             Inicio = 100m,
-            Entrada = 500m,
+            Entradas = new List<ItemFinanceiroDto> { new() { Descricao = "Caixa", Valor = 500m } },
             Saidas = new(),
-            ContasReceber = new List<ItemFinanceiroDto> { new() { Descricao = "CR", Valor = 50m } },
-            ContasPagar = new List<ItemFinanceiroDto> { new() { Descricao = "CP", Valor = 30m } },
+            ContasReceber = new List<ContaProvisionadaDto> { new() { Descricao = "CR", Valor = 50m, DataVencimento = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5)), Pago = false } },
+            ContasPagar = new List<ContaProvisionadaDto> { new() { Descricao = "CP", Valor = 30m, Pago = true } },
             SaldoFinal = 520m
         };
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data)).ReturnsAsync((RegistroDiario?)null);
@@ -280,5 +281,7 @@ public class RegistroServiceTests
         Assert.True(criado);
         Assert.Single(resultado.ContasReceber);
         Assert.Single(resultado.ContasPagar);
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5)), resultado.ContasReceber[0].DataVencimento);
+        Assert.True(resultado.ContasPagar[0].Pago);
     }
 }
