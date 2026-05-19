@@ -17,7 +17,7 @@ const mesAtual = new Date().toISOString().slice(0, 7)
 const mockRegistros: Registro[] = [
   {
     id: 'r1', clienteId: 'u1', data: `${mesAtual}-10`,
-    saldoInicio: 100, entrada: 500,
+    saldoInicio: 100, entradas: [{ descricao: 'Caixa', valor: 500 }],
     saidas: [{ descricao: 'Aluguel', valor: 200 }],
     contasAReceber: [], contasAPagar: [],
     saldoConfirmado: 400, saldoCalculado: 400, criadoEm: '',
@@ -61,7 +61,7 @@ test('renderiza item de histórico com data e saldo', () => {
 test('expande detalhes ao clicar no item de histórico', async () => {
   mockHooks()
   render(<ClientHistoricoPage />)
-  const items = screen.getAllByText(/Entrada:/)
+  const items = screen.getAllByText(/Entradas:/)
   fireEvent.click(items[0].closest('div')!.parentElement!)
   await waitFor(() =>
     expect(screen.getByText('Aluguel')).toBeInTheDocument()
@@ -71,7 +71,7 @@ test('expande detalhes ao clicar no item de histórico', async () => {
 test('abre modal de exclusão ao clicar em Excluir registro', async () => {
   mockHooks()
   render(<ClientHistoricoPage />)
-  const items = screen.getAllByText(/Entrada:/)
+  const items = screen.getAllByText(/Entradas:/)
   fireEvent.click(items[0].closest('div')!.parentElement!)
   await waitFor(() => screen.getByText(/Excluir registro/))
   fireEvent.click(screen.getByText(/Excluir registro/))
@@ -82,7 +82,7 @@ test('chama excluir com motivo ao confirmar', async () => {
   const excluir = vi.fn().mockResolvedValue(undefined)
   mockHooks({ excluir })
   render(<ClientHistoricoPage />)
-  const items = screen.getAllByText(/Entrada:/)
+  const items = screen.getAllByText(/Entradas:/)
   fireEvent.click(items[0].closest('div')!.parentElement!)
   await waitFor(() => screen.getByText(/Excluir registro/))
   fireEvent.click(screen.getByText(/Excluir registro/))
@@ -95,7 +95,7 @@ test('exibe erro quando excluir falha', async () => {
   const excluir = vi.fn().mockRejectedValue(new Error('Sem permissão'))
   mockHooks({ excluir })
   render(<ClientHistoricoPage />)
-  const items = screen.getAllByText(/Entrada:/)
+  const items = screen.getAllByText(/Entradas:/)
   fireEvent.click(items[0].closest('div')!.parentElement!)
   await waitFor(() => screen.getByText(/Excluir registro/))
   fireEvent.click(screen.getByText(/Excluir registro/))
@@ -106,7 +106,7 @@ test('exibe erro quando excluir falha', async () => {
 test('fecha modal de exclusão ao clicar em Cancelar', async () => {
   mockHooks()
   render(<ClientHistoricoPage />)
-  const items = screen.getAllByText(/Entrada:/)
+  const items = screen.getAllByText(/Entradas:/)
   fireEvent.click(items[0].closest('div')!.parentElement!)
   await waitFor(() => screen.getByText(/Excluir registro/))
   fireEvent.click(screen.getByText(/Excluir registro/))
@@ -118,7 +118,7 @@ test('fecha modal de exclusão ao clicar em Cancelar', async () => {
 test('colapsa detalhes ao clicar novamente no item', async () => {
   mockHooks()
   render(<ClientHistoricoPage />)
-  const items = screen.getAllByText(/Entrada:/)
+  const items = screen.getAllByText(/Entradas:/)
   const itemEl = items[0].closest('div')!.parentElement!
   fireEvent.click(itemEl)
   await waitFor(() => screen.getByText('Aluguel'))
