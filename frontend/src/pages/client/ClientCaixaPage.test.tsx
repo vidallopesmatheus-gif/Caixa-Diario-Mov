@@ -110,22 +110,11 @@ test('remove linha de saída ao clicar em ✕', () => {
   expect(screen.getAllByPlaceholderText('Descrição')).toHaveLength(contaAntes - 1)
 })
 
-test('adiciona e remove conta a receber', () => {
+test('não exibe seções de contas a receber e contas a pagar', () => {
   mockHooks()
   render(<ClientCaixaPage />)
-  fireEvent.click(screen.getByText(/Adicionar a Receber/))
-  const botoesRm = screen.getAllByText('✕')
-  expect(botoesRm.length).toBeGreaterThan(0)
-  fireEvent.click(botoesRm[botoesRm.length - 1])
-})
-
-test('adiciona e remove conta a pagar', () => {
-  mockHooks()
-  render(<ClientCaixaPage />)
-  fireEvent.click(screen.getByText(/Adicionar a Pagar/))
-  const botoesRm = screen.getAllByText('✕')
-  expect(botoesRm.length).toBeGreaterThan(0)
-  fireEvent.click(botoesRm[botoesRm.length - 1])
+  expect(screen.queryByText(/Adicionar a Receber/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Adicionar a Pagar/)).not.toBeInTheDocument()
 })
 
 test('exibe diferença de saldo quando confirmado é preenchido', () => {
