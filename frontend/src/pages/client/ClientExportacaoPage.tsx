@@ -26,6 +26,12 @@ export default function ClientExportacaoPage({ clienteIdOverride }: Props) {
       const res = await fetch(`/api/export/${clienteId}?de=${de}&ate=${ate}`, {
         headers: { Authorization: `Bearer ${token}` }
       })
+      if (res.status === 401) {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        window.location.href = '/login'
+        return
+      }
       if (!res.ok) {
         const json = await res.json().catch(() => ({}))
         throw new Error((json as { mensagem?: string })?.mensagem ?? `Erro ${res.status}`)

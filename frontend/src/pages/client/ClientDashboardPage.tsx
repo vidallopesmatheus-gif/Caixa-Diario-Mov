@@ -33,10 +33,12 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   useEffect(() => {
     if (!clienteId) return
-    obterMeta(clienteId, anoAtual).then(m => {
-      setMeta(m)
-      if (m) { setEditReceita(String(m.metaReceita)); setEditLucro(String(m.metaLucro)) }
-    })
+    obterMeta(clienteId, anoAtual)
+      .then(m => {
+        setMeta(m)
+        if (m) { setEditReceita(String(m.metaReceita)); setEditLucro(String(m.metaLucro)) }
+      })
+      .catch(console.error)
   }, [clienteId, anoAtual])
 
   const doPeriodo = useMemo(() =>

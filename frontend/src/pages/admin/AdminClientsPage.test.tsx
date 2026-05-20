@@ -1,5 +1,6 @@
 // frontend/src/pages/admin/AdminClientsPage.test.tsx
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import AdminClientsPage from './AdminClientsPage'
 import * as useUsuariosHook from '../../hooks/useUsuarios'
 import type { Usuario } from '../../types'
@@ -26,33 +27,33 @@ function mockHook(overrides: Partial<ReturnType<typeof useUsuariosHook.useUsuari
 
 test('exibe loading enquanto carrega', () => {
   mockHook({ loading: true, usuarios: [] })
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   expect(screen.getByText(/Carregando/)).toBeInTheDocument()
 })
 
 test('renderiza lista de clientes filtrados por perfil cliente', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   expect(screen.getByText('Cliente Um')).toBeInTheDocument()
   expect(screen.getByText('Cliente Dois')).toBeInTheDocument()
 })
 
 test('exibe contagem de clientes no painel', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   expect(screen.getByText(/2 clientes/)).toBeInTheDocument()
 })
 
 test('abre modal ao clicar em Novo cliente', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText(/Novo cliente/))
   expect(screen.getByLabelText(/Nome completo/)).toBeInTheDocument()
 })
 
 test('exibe mensagem de erro ao submeter modal vazio', async () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText(/Novo cliente/))
   const salvarBtn = screen.getByRole('button', { name: 'Salvar' })
   fireEvent.submit(salvarBtn.closest('form')!)
@@ -63,14 +64,14 @@ test('exibe mensagem de erro ao submeter modal vazio', async () => {
 
 test('exibe painel de edição ao clicar em cliente', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   expect(screen.getByText('Excluir')).toBeInTheDocument()
 })
 
 test('abre modal de confirmação ao clicar em Excluir', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   fireEvent.click(screen.getByText('Excluir'))
   expect(screen.getByText(/Confirmar exclusão/)).toBeInTheDocument()
@@ -79,7 +80,7 @@ test('abre modal de confirmação ao clicar em Excluir', () => {
 test('chama desativar ao confirmar exclusão', async () => {
   const desativar = vi.fn().mockResolvedValue(undefined)
   mockHook({ desativar })
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   fireEvent.click(screen.getByText('Excluir'))
   const botoesExcluir = screen.getAllByText('Excluir')
@@ -90,7 +91,7 @@ test('chama desativar ao confirmar exclusão', async () => {
 test('exibe erro quando criar falha', async () => {
   const criar = vi.fn().mockRejectedValue(new Error('Usuário já existe'))
   mockHook({ criar })
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText(/Novo cliente/))
   fireEvent.change(screen.getByLabelText(/Nome completo/), { target: { value: 'Novo Cliente' } })
   fireEvent.change(screen.getByLabelText(/Usuário/), { target: { value: 'novouser' } })
@@ -104,7 +105,7 @@ test('exibe erro quando criar falha', async () => {
 
 test('exibe formulário de edição ao selecionar cliente (sem campo Usuário)', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   // no edit mode, Usuário field should not be present
   expect(screen.queryByLabelText(/Usuário/)).not.toBeInTheDocument()
@@ -114,7 +115,7 @@ test('exibe formulário de edição ao selecionar cliente (sem campo Usuário)',
 test('chama atualizar ao salvar formulário de edição', async () => {
   const atualizar = vi.fn().mockResolvedValue({})
   mockHook({ atualizar })
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   const nomeInput = screen.getByLabelText(/Nome completo/)
   fireEvent.change(nomeInput, { target: { value: 'Cliente Atualizado' } })
@@ -126,7 +127,7 @@ test('chama atualizar ao salvar formulário de edição', async () => {
 test('exibe erro quando atualizar falha', async () => {
   const atualizar = vi.fn().mockRejectedValue(new Error('Falha ao atualizar'))
   mockHook({ atualizar })
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   const salvarBtn = screen.getByRole('button', { name: 'Salvar' })
   fireEvent.submit(salvarBtn.closest('form')!)
@@ -136,7 +137,7 @@ test('exibe erro quando atualizar falha', async () => {
 test('exibe erro quando desativar falha', async () => {
   const desativar = vi.fn().mockRejectedValue(new Error('Falha ao desativar'))
   mockHook({ desativar })
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   fireEvent.click(screen.getByText('Excluir'))
   const botoesExcluir = screen.getAllByText('Excluir')
@@ -146,7 +147,7 @@ test('exibe erro quando desativar falha', async () => {
 
 test('fecha modal de adição ao clicar em Cancelar', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText(/Novo cliente/))
   expect(screen.getByLabelText(/Nome completo/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
@@ -155,7 +156,7 @@ test('fecha modal de adição ao clicar em Cancelar', () => {
 
 test('cancela edição ao clicar em Cancelar no formulário de edição', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   expect(screen.getByLabelText(/Nome completo/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
@@ -164,7 +165,7 @@ test('cancela edição ao clicar em Cancelar no formulário de edição', () => 
 
 test('fecha modal de exclusão ao clicar em Cancelar', () => {
   mockHook()
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
   fireEvent.click(screen.getByText('Excluir'))
   expect(screen.getByText(/Confirmar exclusão/)).toBeInTheDocument()
@@ -180,6 +181,6 @@ test('exibe indicador de inativo para cliente inativo', () => {
     { id: 'u3', nomeUsuario: 'inat', nomeCompleto: 'Cliente Inativo', nomeEstabelecimento: 'Loja Inativa', perfil: 'cliente' as const, ativo: false, criadoEm: '', criadoPor: '' },
   ]
   mockHook({ usuarios: comInativo })
-  render(<AdminClientsPage />)
+  render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   expect(screen.getByText('Inativo')).toBeInTheDocument()
 })
