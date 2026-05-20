@@ -40,9 +40,9 @@ public class AuthServiceTests
         var resultado = await _sut.LoginAsync(new LoginRequestDto { NomeUsuario = "joao", Senha = "senha123" });
 
         Assert.Equal("token-gerado", resultado.Token);
-        Assert.Equal(usuario.Nome, resultado.Nome);
+        Assert.Equal(usuario.Nome, resultado.NomeCompleto);
         Assert.Equal(usuario.Perfil, resultado.Perfil);
-        Assert.Equal(usuario.Id, resultado.Id);
+        Assert.Equal(usuario.Id, resultado.UsuarioId);
     }
 
     [Fact]

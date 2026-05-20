@@ -12,7 +12,7 @@ function ClientCard({ usuario }: { usuario: Usuario }) {
   const mesAtual = new Date().toISOString().slice(0, 7)
   const doMes = registros.filter(r => r.data.startsWith(mesAtual))
   const ultimo = registros[0]
-  const totalEnt = doMes.reduce((s, r) => s + r.entrada, 0)
+  const totalEnt = doMes.reduce((s, r) => s + r.entradas.reduce((a, x) => a + x.valor, 0), 0)
   const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a, x) => a + x.valor, 0), 0)
 
   return (
