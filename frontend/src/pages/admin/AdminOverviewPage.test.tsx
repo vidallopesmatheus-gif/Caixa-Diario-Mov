@@ -95,7 +95,7 @@ test('exibe saldo do último registro quando há registros no mês', () => {
   const mesAtual = new Date().toISOString().slice(0, 7)
   const regDoMes = {
     id: 'r1', clienteId: 'u1', data: `${mesAtual}-05`,
-    saldoInicio: 0, entrada: 500,
+    saldoInicio: 0, entradas: [{ descricao: 'Caixa', valor: 500 }],
     saidas: [{ descricao: 'Despesa', valor: 100 }],
     contasAReceber: [], contasAPagar: [],
     saldoConfirmado: 400, saldoCalculado: 400, criadoEm: '',

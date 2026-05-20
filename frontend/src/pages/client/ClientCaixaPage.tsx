@@ -4,7 +4,7 @@ import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
 import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
-import type { Saida, ContaProvisionada } from '../../types'
+import type { ItemFinanceiro } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
@@ -19,21 +19,18 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
 
   const [data, setData] = useState(todayISO())
   const [inicio, setInicio] = useState(0)
-  const [entrada, setEntrada] = useState('')
-  const [saidas, setSaidas] = useState<Saida[]>([{ descricao: '', valor: 0 }])
-  const [aReceber, setAReceber] = useState<ContaProvisionada[]>([])
-  const [aPagar, setAPagar] = useState<ContaProvisionada[]>([])
+  const [entradas, setEntradas] = useState<ItemFinanceiro[]>([{ descricao: '', valor: 0 }])
+  const [saidas, setSaidas] = useState<ItemFinanceiro[]>([{ descricao: '', valor: 0 }])
   const [confirmado, setConfirmado] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [saveSuccess, setSaveSuccess] = useState(false)
 
+  const totalEntradas = entradas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
   const totalSaidas = saidas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
-  const calculado = inicio + (Number(entrada) || 0) - totalSaidas
+  const calculado = inicio + totalEntradas - totalSaidas
   const dif = confirmado !== '' ? calculado - Number(confirmado) : null
 
-  // Deps: apenas primitivos (data e clienteId). buscarPorData muda só quando
-  // clienteId muda, que já está nas deps — logo sem instabilidade de referência.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!clienteId) return
@@ -43,18 +40,14 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       if (ignore) return
       if (reg) {
         setInicio(reg.saldoInicio)
-        setEntrada(String(reg.entrada))
+        setEntradas(reg.entradas.length ? reg.entradas : [{ descricao: '', valor: 0 }])
         setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0 }])
-        setAReceber(reg.contasAReceber)
-        setAPagar(reg.contasAPagar)
         setConfirmado(String(reg.saldoConfirmado))
       } else {
         const prev = registrosRef.current.find(r => r.data < data)
         setInicio(prev?.saldoConfirmado ?? 0)
-        setEntrada('')
+        setEntradas([{ descricao: '', valor: 0 }])
         setSaidas([{ descricao: '', valor: 0 }])
-        setAReceber([])
-        setAPagar([])
         setConfirmado('')
       }
     }
@@ -67,14 +60,15 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSaving(true)
     setMsg('')
     try {
+      const regAtual = registrosRef.current.find(r => r.data === data)
       await salvar({
         clienteId,
         data,
         saldoInicio: inicio,
-        entrada: Number(entrada) || 0,
+        entradas: entradas.filter(e => e.descricao || e.valor),
         saidas: saidas.filter(s => s.descricao || s.valor),
-        contasAReceber: aReceber.filter(s => s.descricao || s.valor),
-        contasAPagar: aPagar.filter(s => s.descricao || s.valor),
+        contasAReceber: regAtual?.contasAReceber ?? [],
+        contasAPagar: regAtual?.contasAPagar ?? [],
         saldoConfirmado: confirmado === '' ? calculado : Number(confirmado),
       })
       setSaveSuccess(true)
@@ -87,10 +81,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     }
   }
 
-  function updateSaida(i: number, field: keyof Saida, val: string) {
-    setSaidas(s => s.map((x, j) => j === i ? { ...x, [field]: field === 'valor' ? Number(val) : val } : x))
-  }
-  function updateProv(list: ContaProvisionada[], setList: (v: ContaProvisionada[]) => void, i: number, field: keyof ContaProvisionada, val: string) {
+  function updateItem(list: ItemFinanceiro[], setList: (v: ItemFinanceiro[]) => void, i: number, field: keyof ItemFinanceiro, val: string) {
     setList(list.map((x, j) => j === i ? { ...x, [field]: field === 'valor' ? Number(val) : val } : x))
   }
 
@@ -99,7 +90,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       <DayNav date={data} onPrev={() => setData(d => addDays(d, -1))} onNext={() => setData(d => addDays(d, 1))} />
       <div className="stats-grid">
         <StatCard label="📥 Início" value={fmtBRL(inicio)} />
-        <StatCard label="📤 Entrada" value={fmtBRL(Number(entrada) || 0)} className="val-green" />
+        <StatCard label="📤 Entradas" value={fmtBRL(totalEntradas)} className="val-green" />
         <StatCard label="💸 Saídas" value={fmtBRL(totalSaidas)} className="val-red" />
         <StatCard label="💰 Saldo" value={fmtBRL(calculado)} className="val-green" />
       </div>
@@ -110,45 +101,30 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
           <label>Saldo início (preenchido automaticamente)</label>
           <input type="number" value={inicio} readOnly style={{ color: 'var(--tx4)', cursor: 'not-allowed' }} />
         </div>
+
         <div className="inp-group">
-          <label>💵 Dinheiro que entrou hoje (R$)</label>
-          <input type="number" value={entrada} onChange={e => setEntrada(e.target.value)} placeholder="0,00" step="0.01" min="0" />
+          <label>💵 Entradas do dia (dinheiro)</label>
+          {entradas.map((e, i) => (
+            <div key={i} className="saida-row">
+              <input placeholder="Descrição" value={e.descricao} onChange={ev => updateItem(entradas, setEntradas, i, 'descricao', ev.target.value)} />
+              <input type="number" placeholder="R$" value={e.valor || ''} onChange={ev => updateItem(entradas, setEntradas, i, 'valor', ev.target.value)} step="0.01" min="0" />
+              <button className="btn-rm" onClick={() => setEntradas(prev => prev.filter((_, j) => j !== i))}>✕</button>
+            </div>
+          ))}
+          <button className="btn-add-saida" onClick={() => setEntradas(e => [...e, { descricao: '', valor: 0 }])}>＋ Adicionar entrada</button>
         </div>
+
         <div className="inp-group">
           <label>💸 Saídas do dia</label>
           {saidas.map((s, i) => (
             <div key={i} className="saida-row">
-              <input placeholder="Descrição" value={s.descricao} onChange={e => updateSaida(i, 'descricao', e.target.value)} />
-              <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateSaida(i, 'valor', e.target.value)} step="0.01" min="0" />
+              <input placeholder="Descrição" value={s.descricao} onChange={e => updateItem(saidas, setSaidas, i, 'descricao', e.target.value)} />
+              <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateItem(saidas, setSaidas, i, 'valor', e.target.value)} step="0.01" min="0" />
               <button className="btn-rm" onClick={() => setSaidas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
           <button className="btn-add-saida" onClick={() => setSaidas(s => [...s, { descricao: '', valor: 0 }])}>＋ Adicionar saída</button>
         </div>
-      </div>
-
-      <div className="form-card">
-        <h3>📥 Contas a Receber (Provisionamento)</h3>
-        {aReceber.map((s, i) => (
-          <div key={i} className="prov-row">
-            <input placeholder="Descrição" value={s.descricao} onChange={e => updateProv(aReceber, setAReceber, i, 'descricao', e.target.value)} />
-            <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateProv(aReceber, setAReceber, i, 'valor', e.target.value)} step="0.01" min="0" />
-            <button className="btn-rm-prov" onClick={() => setAReceber(a => a.filter((_, j) => j !== i))}>✕</button>
-          </div>
-        ))}
-        <button className="btn-add-receber" onClick={() => setAReceber(a => [...a, { descricao: '', valor: 0 }])}>＋ Adicionar a Receber</button>
-      </div>
-
-      <div className="form-card">
-        <h3>📤 Contas a Pagar (Provisionamento)</h3>
-        {aPagar.map((s, i) => (
-          <div key={i} className="prov-row">
-            <input placeholder="Descrição" value={s.descricao} onChange={e => updateProv(aPagar, setAPagar, i, 'descricao', e.target.value)} />
-            <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateProv(aPagar, setAPagar, i, 'valor', e.target.value)} step="0.01" min="0" />
-            <button className="btn-rm-prov" onClick={() => setAPagar(a => a.filter((_, j) => j !== i))}>✕</button>
-          </div>
-        ))}
-        <button className="btn-add-pagar" onClick={() => setAPagar(a => [...a, { descricao: '', valor: 0 }])}>＋ Adicionar a Pagar</button>
       </div>
 
       <div className="saldo-box">

@@ -11,9 +11,11 @@ export default function TabsBar() {
     { to: '/admin/clientes', label: '👥 Clientes' },
   ]
   const clientTabs = [
-    { to: '/caixa',     label: '📋 Caixa Diário' },
-    { to: '/historico', label: '📈 Histórico' },
-    { to: '/grafico',   label: '📊 Evolução' },
+    { to: '/dashboard',  label: '📊 Dashboard' },
+    { to: '/caixa',      label: '💵 Caixa Diária' },
+    { to: '/contas',     label: '📋 Contas' },
+    { to: '/historico',  label: '📈 Histórico' },
+    { to: '/exportar',   label: '⬇️ Exportar' },
   ]
   const tabs = user.perfil === 'admin' ? adminTabs : clientTabs
 

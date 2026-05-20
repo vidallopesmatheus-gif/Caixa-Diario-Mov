@@ -34,4 +34,10 @@ public class RegistroRepository : IRegistroRepository
         await _context.SaveChangesAsync();
         return registro;
     }
+
+    public async Task<List<RegistroDiario>> ListarPorPeriodoAsync(Guid clienteId, DateOnly de, DateOnly ate) =>
+        await _context.RegistrosDiarios
+            .Where(r => r.ClienteId == clienteId && !r.Excluido && r.Data >= de && r.Data <= ate)
+            .OrderBy(r => r.Data)
+            .ToListAsync();
 }

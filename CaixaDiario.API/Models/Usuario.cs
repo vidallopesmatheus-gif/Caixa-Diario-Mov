@@ -14,4 +14,5 @@ public class Usuario
     public string? UsuarioAtualizacao { get; set; }
 
     public ICollection<RegistroDiario> Registros { get; set; } = new List<RegistroDiario>();
+    public List<MetaAnual> MetasAnuais { get; set; } = new();
 }

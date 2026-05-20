@@ -1,8 +1,21 @@
 import { apiFetch } from './client'
-import type { ApiResponse, Registro, Saida, ContaProvisionada } from '../types'
+import type { ApiResponse, Registro, ItemFinanceiro, ContaProvisionada } from '../types'
 
-// A API usa nomes de campos diferentes dos tipos internos. Este mapeamento
-// centraliza a conversão para não poluir os componentes.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapContaProvisionada(raw: any): ContaProvisionada {
+  return {
+    descricao: raw.Descricao ?? raw.descricao ?? '',
+    valor: raw.Valor ?? raw.valor ?? 0,
+    dataVencimento: raw.DataVencimento ?? raw.dataVencimento,
+    pago: raw.Pago ?? raw.pago ?? false,
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapItemFinanceiro(raw: any): ItemFinanceiro {
+  return { descricao: raw.Descricao ?? raw.descricao ?? '', valor: raw.Valor ?? raw.valor ?? 0 }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRegistro(raw: any): Registro {
   return {
@@ -10,10 +23,10 @@ function mapRegistro(raw: any): Registro {
     clienteId: raw.clienteId,
     data: raw.data,
     saldoInicio: raw.inicio ?? 0,
-    entrada: raw.entrada ?? 0,
-    saidas: raw.saidas ?? [],
-    contasAReceber: raw.contasReceber ?? [],
-    contasAPagar: raw.contasPagar ?? [],
+    entradas: (raw.entradas ?? []).map(mapItemFinanceiro),
+    saidas: (raw.saidas ?? []).map(mapItemFinanceiro),
+    contasAReceber: (raw.contasReceber ?? []).map(mapContaProvisionada),
+    contasAPagar: (raw.contasPagar ?? []).map(mapContaProvisionada),
     saldoConfirmado: raw.saldoFinal ?? 0,
     saldoCalculado: raw.saldoCalculado ?? 0,
     criadoEm: raw.salvoEm ?? '',
@@ -34,8 +47,8 @@ export const salvarRegistro = async (dto: {
   clienteId: string
   data: string
   saldoInicio: number
-  entrada: number
-  saidas: Saida[]
+  entradas: ItemFinanceiro[]
+  saidas: ItemFinanceiro[]
   contasAReceber: ContaProvisionada[]
   contasAPagar: ContaProvisionada[]
   saldoConfirmado: number
@@ -44,10 +57,10 @@ export const salvarRegistro = async (dto: {
     clienteId: dto.clienteId,
     data: dto.data,
     inicio: dto.saldoInicio,
-    entrada: dto.entrada,
-    saidas: dto.saidas,
-    contasReceber: dto.contasAReceber,
-    contasPagar: dto.contasAPagar,
+    entradas: dto.entradas.map(e => ({ Descricao: e.descricao, Valor: e.valor })),
+    saidas: dto.saidas.map(s => ({ Descricao: s.descricao, Valor: s.valor })),
+    contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago })),
+    contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago })),
     saldoFinal: dto.saldoConfirmado,
   }
   const res = await apiFetch<ApiResponse<unknown>>('/api/registros', {
@@ -57,11 +70,7 @@ export const salvarRegistro = async (dto: {
   return { ...res, dados: res.dados ? mapRegistro(res.dados) : res.dados as Registro }
 }
 
-export const excluirRegistro = (
-  clienteId: string,
-  data: string,
-  motivoExclusao: string
-) =>
+export const excluirRegistro = (clienteId: string, data: string, motivoExclusao: string) =>
   apiFetch<ApiResponse<null>>(`/api/registros/${clienteId}/${data}`, {
     method: 'DELETE',
     body: JSON.stringify({ motivoExclusao }),

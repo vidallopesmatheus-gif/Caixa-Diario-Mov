@@ -41,7 +41,7 @@ public class RegistrosControllerTests
         ClienteId = clienteId,
         Data = DateOnly.FromDateTime(DateTime.UtcNow),
         Inicio = 100m,
-        Entrada = 200m,
+        Entradas = new(),
         Saidas = new(),
         ContasReceber = new(),
         ContasPagar = new(),
