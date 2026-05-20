@@ -7,12 +7,8 @@ function mapMeta(raw: any): MetaAnual {
 }
 
 export const obterMeta = async (clienteId: string, ano: number): Promise<MetaAnual | null> => {
-  try {
-    const res = await apiFetch<ApiResponse<unknown>>(`/api/metas/${clienteId}/${ano}`)
-    return res.dados ? mapMeta(res.dados) : null
-  } catch {
-    return null
-  }
+  const res = await apiFetch<ApiResponse<unknown>>(`/api/metas/${clienteId}/${ano}`)
+  return res.dados ? mapMeta(res.dados) : null
 }
 
 export const salvarMeta = async (dto: { clienteId: string; ano: number; metaReceita: number; metaLucro: number }): Promise<MetaAnual> => {

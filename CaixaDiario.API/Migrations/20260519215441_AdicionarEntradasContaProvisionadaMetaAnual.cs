@@ -68,16 +68,21 @@ namespace CaixaDiario.API.Migrations
             migrationBuilder.DropTable(
                 name: "metas_anuais");
 
-            migrationBuilder.DropColumn(
-                name: "entradas",
-                table: "registros_diarios");
-
             migrationBuilder.AddColumn<decimal>(
                 name: "entrada",
                 table: "registros_diarios",
                 type: "numeric(18,2)",
                 nullable: false,
                 defaultValue: 0m);
+
+            migrationBuilder.Sql(@"
+                UPDATE registros_diarios
+                SET entrada = COALESCE((entradas::jsonb->0->>'Valor')::numeric, 0);
+            ");
+
+            migrationBuilder.DropColumn(
+                name: "entradas",
+                table: "registros_diarios");
         }
     }
 }

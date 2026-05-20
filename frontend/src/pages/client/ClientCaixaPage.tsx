@@ -60,7 +60,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSaving(true)
     setMsg('')
     try {
-      const regAtual = registrosRef.current.find(r => r.data === data)
+      const regAtual = await buscarPorData(data)
       await salvar({
         clienteId,
         data,
