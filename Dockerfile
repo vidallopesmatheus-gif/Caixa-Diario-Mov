@@ -20,6 +20,7 @@ RUN dotnet publish -c Release -o /app/out
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/out .
+COPY --from=frontend-build /app/CaixaDiario.API/wwwroot ./wwwroot
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 ENTRYPOINT ["dotnet", "CaixaDiario.API.dll"]
