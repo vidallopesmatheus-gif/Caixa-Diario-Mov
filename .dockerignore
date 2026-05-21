@@ -1,0 +1,18 @@
+# .NET
+**/bin/
+**/obj/
+
+# Node
+frontend/node_modules/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Claude
+.claude/
