@@ -59,6 +59,16 @@ builder.Services.AddScoped<IRegistroService, RegistroService>();
 builder.Services.AddScoped<IMetaRepository, MetaRepository>();
 builder.Services.AddScoped<IMetaService, MetaService>();
 
+// Chat IA
+var anthropicApiKey = builder.Configuration["Anthropic:ApiKey"]
+    ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")
+    ?? throw new InvalidOperationException("ANTHROPIC_API_KEY não configurada.");
+var anthropicModel = builder.Configuration["Anthropic:Model"] ?? "claude-haiku-4-5-20251001";
+var anthropicMaxTokens = int.TryParse(builder.Configuration["Anthropic:MaxTokens"], out var mt) ? mt : 1024;
+builder.Services.AddSingleton<IAnthropicClient>(
+    new AnthropicClientWrapper(anthropicApiKey, anthropicModel, anthropicMaxTokens));
+builder.Services.AddScoped<IChatService, ChatService>();
+
 var app = builder.Build();
 
 app.UseDefaultFiles();

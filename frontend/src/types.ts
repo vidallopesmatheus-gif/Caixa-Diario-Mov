@@ -57,3 +57,17 @@ export interface ApiResponse<T> {
   codigoRetorno: string
   mensagem: string
 }
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatResponse {
+  dados: {
+    reply: string
+    wasBlocked: boolean
+  }
+  codigoRetorno: string
+  mensagem: string
+}
