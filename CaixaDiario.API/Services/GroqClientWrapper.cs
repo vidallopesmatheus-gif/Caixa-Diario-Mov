@@ -10,14 +10,14 @@ public class GroqClientWrapper : IAnthropicClient
     private const string ApiUrl = "https://api.groq.com/openai/v1/chat/completions";
 
     private readonly HttpClient _http;
+    private readonly string _apiKey;
     private readonly string _model;
     private readonly int _maxTokens;
 
     public GroqClientWrapper(HttpClient http, string apiKey, string model, int maxTokens)
     {
         _http = http;
-        _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", apiKey);
+        _apiKey = apiKey;
         _model = model;
         _maxTokens = maxTokens;
     }
@@ -42,8 +42,12 @@ public class GroqClientWrapper : IAnthropicClient
             messages
         });
 
-        var response = await _http.PostAsync(ApiUrl,
-            new StringContent(body, Encoding.UTF8, "application/json"));
+        using var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        var response = await _http.SendAsync(request);
 
         if (!response.IsSuccessStatusCode)
         {
