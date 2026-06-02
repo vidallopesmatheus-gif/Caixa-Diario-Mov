@@ -7,7 +7,7 @@ public class RegistroDiario
     public DateOnly Data { get; set; }
     public decimal Inicio { get; set; }
     public List<ItemFinanceiro> Entradas { get; set; } = new();
-    public List<ItemFinanceiro> Saidas { get; set; } = new();
+    public List<ItemFinanceiroSaida> Saidas { get; set; } = new();
     public List<ContaProvisionada> ContasReceber { get; set; } = new();
     public List<ContaProvisionada> ContasPagar { get; set; } = new();
     public decimal SaldoFinal { get; set; }

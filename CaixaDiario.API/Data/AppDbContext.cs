@@ -48,7 +48,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Saidas).HasColumnName("saidas").HasColumnType("jsonb")
                 .HasConversion(
                     v => JsonSerializer.Serialize(v, _jsonOptions),
-                    v => JsonSerializer.Deserialize<List<ItemFinanceiro>>(v, _jsonOptions) ?? new());
+                    v => JsonSerializer.Deserialize<List<ItemFinanceiroSaida>>(v, _jsonOptions) ?? new());
             entity.Property(e => e.ContasReceber).HasColumnName("contas_receber").HasColumnType("jsonb")
                 .HasConversion(
                     v => JsonSerializer.Serialize(v, _jsonOptions),

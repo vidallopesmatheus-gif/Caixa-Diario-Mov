@@ -43,7 +43,13 @@ public class RegistroService : IRegistroService
         {
             existente.Inicio = dto.Inicio;
             existente.Entradas = dto.Entradas.Select(s => new ItemFinanceiro { Descricao = s.Descricao, Valor = s.Valor }).ToList();
-            existente.Saidas = dto.Saidas.Select(s => new ItemFinanceiro { Descricao = s.Descricao, Valor = s.Valor }).ToList();
+            existente.Saidas = dto.Saidas.Select(s => new ItemFinanceiroSaida
+            {
+                Descricao = s.Descricao,
+                Valor = s.Valor,
+                Categoria = s.Categoria,
+                Subcategoria = s.Subcategoria
+            }).ToList();
             existente.ContasReceber = dto.ContasReceber.Select(s => new ContaProvisionada { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList();
             existente.ContasPagar = dto.ContasPagar.Select(s => new ContaProvisionada { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList();
             existente.SaldoFinal = dto.SaldoFinal;
@@ -62,7 +68,13 @@ public class RegistroService : IRegistroService
             Data = dto.Data,
             Inicio = dto.Inicio,
             Entradas = dto.Entradas.Select(s => new ItemFinanceiro { Descricao = s.Descricao, Valor = s.Valor }).ToList(),
-            Saidas = dto.Saidas.Select(s => new ItemFinanceiro { Descricao = s.Descricao, Valor = s.Valor }).ToList(),
+            Saidas = dto.Saidas.Select(s => new ItemFinanceiroSaida
+            {
+                Descricao = s.Descricao,
+                Valor = s.Valor,
+                Categoria = s.Categoria,
+                Subcategoria = s.Subcategoria
+            }).ToList(),
             ContasReceber = dto.ContasReceber.Select(s => new ContaProvisionada { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList(),
             ContasPagar = dto.ContasPagar.Select(s => new ContaProvisionada { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList(),
             SaldoFinal = dto.SaldoFinal,
@@ -101,7 +113,13 @@ public class RegistroService : IRegistroService
         Data = r.Data,
         Inicio = r.Inicio,
         Entradas = r.Entradas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor }).ToList(),
-        Saidas = r.Saidas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor }).ToList(),
+        Saidas = r.Saidas.Select(s => new ItemFinanceiroSaidaDto
+        {
+            Descricao = s.Descricao,
+            Valor = s.Valor,
+            Categoria = s.Categoria,
+            Subcategoria = s.Subcategoria
+        }).ToList(),
         ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList(),
         ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList(),
         SaldoFinal = r.SaldoFinal,
