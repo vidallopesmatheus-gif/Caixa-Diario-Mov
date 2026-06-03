@@ -6,7 +6,7 @@ vi.mock('../api/registros')
 
 const mockRegistros = [
   { id: 'r1', clienteId: 'c1', data: '2026-05-15', saldoInicio: 100, entradas: [{ descricao: 'Caixa', valor: 200 }],
-    saidas: [{ descricao: 'Despesa', valor: 50 }], contasAReceber: [], contasAPagar: [],
+    saidas: [{ descricao: 'Despesa', valor: 50, categoria: 'Administrativas' }], contasAReceber: [], contasAPagar: [],
     saldoConfirmado: 250, saldoCalculado: 250, criadoEm: '' }
 ]
 
