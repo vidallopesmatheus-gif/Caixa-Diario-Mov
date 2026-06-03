@@ -6,6 +6,7 @@ import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import type { ItemFinanceiro, ItemFinanceiroSaida } from '../../types'
 import { CATEGORIAS, LISTA_CATEGORIAS } from '../../config/categorias'
+import RelatorioCategoriasCard from '../../components/shared/RelatorioCategoriasCard'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
@@ -178,6 +179,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       <button className="btn-save" onClick={handleSave} disabled={saving}>
         {saving ? 'Salvando...' : '☁️ Salvar e sincronizar'}
       </button>
+      <RelatorioCategoriasCard registros={registros} />
     </>
   )
 }
