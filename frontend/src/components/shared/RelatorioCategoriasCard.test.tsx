@@ -41,5 +41,6 @@ test('exibe inputs de período', () => {
 test('não exibe registros fora do período', () => {
   const registroAntigo: Registro = { ...registroBase, data: '2020-01-15' }
   render(<RelatorioCategoriasCard registros={[registroAntigo]} />)
-  expect(screen.getByText('Total')).toBeInTheDocument()
+  expect(screen.queryByText('R$ 1.200,00')).not.toBeInTheDocument()
+  expect(screen.queryByText('R$ 3.000,00')).not.toBeInTheDocument()
 })

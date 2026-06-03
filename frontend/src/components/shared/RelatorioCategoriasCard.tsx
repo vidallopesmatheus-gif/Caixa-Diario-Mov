@@ -9,12 +9,14 @@ interface Props {
 }
 
 export default function RelatorioCategoriasCard({ registros }: Props) {
-  const hoje = new Date()
-  const primeiroDiaMes = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`
-  const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).toISOString().slice(0, 10)
-
-  const [de, setDe] = useState(primeiroDiaMes)
-  const [ate, setAte] = useState(ultimoDiaMes)
+  const [de, setDe] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  })
+  const [ate, setAte] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10)
+  })
 
   const totais = useMemo(() => {
     const acc: Record<string, number> = {}
@@ -23,6 +25,7 @@ export default function RelatorioCategoriasCard({ registros }: Props) {
       if (reg.data < de || reg.data > ate) continue
       for (const s of reg.saidas) {
         const cat = s.categoria ?? 'Administrativas'
+        // categories not in LISTA_CATEGORIAS (e.g. future or legacy values) are intentionally excluded
         if (cat in acc) acc[cat] += s.valor
       }
     }
