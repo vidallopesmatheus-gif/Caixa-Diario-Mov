@@ -4,7 +4,8 @@ import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
 import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
-import type { ItemFinanceiro } from '../../types'
+import type { ItemFinanceiro, ItemFinanceiroSaida } from '../../types'
+import { CATEGORIAS, LISTA_CATEGORIAS } from '../../config/categorias'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
@@ -20,7 +21,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const [data, setData] = useState(todayISO())
   const [inicio, setInicio] = useState(0)
   const [entradas, setEntradas] = useState<ItemFinanceiro[]>([{ descricao: '', valor: 0 }])
-  const [saidas, setSaidas] = useState<ItemFinanceiro[]>([{ descricao: '', valor: 0 }])
+  const [saidas, setSaidas] = useState<ItemFinanceiroSaida[]>([{ descricao: '', valor: 0, categoria: 'Administrativas', subcategoria: '' }])
   const [confirmado, setConfirmado] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -41,13 +42,13 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       if (reg) {
         setInicio(reg.saldoInicio)
         setEntradas(reg.entradas.length ? reg.entradas : [{ descricao: '', valor: 0 }])
-        setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0 }])
+        setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0, categoria: 'Administrativas', subcategoria: '' }])
         setConfirmado(String(reg.saldoConfirmado))
       } else {
         const prev = registrosRef.current.find(r => r.data < data)
         setInicio(prev?.saldoConfirmado ?? 0)
         setEntradas([{ descricao: '', valor: 0 }])
-        setSaidas([{ descricao: '', valor: 0 }])
+        setSaidas([{ descricao: '', valor: 0, categoria: 'Administrativas', subcategoria: '' }])
         setConfirmado('')
       }
     }
@@ -81,8 +82,17 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     }
   }
 
-  function updateItem(list: ItemFinanceiro[], setList: (v: ItemFinanceiro[]) => void, i: number, field: keyof ItemFinanceiro, val: string) {
-    setList(list.map((x, j) => j === i ? { ...x, [field]: field === 'valor' ? Number(val) : val } : x))
+  function updateEntrada(i: number, field: keyof ItemFinanceiro, val: string) {
+    setEntradas(prev => prev.map((x, j) => j !== i ? x : { ...x, [field]: field === 'valor' ? Number(val) : val }))
+  }
+
+  function updateSaida(i: number, field: keyof ItemFinanceiroSaida, val: string) {
+    setSaidas(prev => prev.map((x, j) => {
+      if (j !== i) return x
+      const updated = { ...x, [field]: field === 'valor' ? Number(val) : val }
+      if (field === 'categoria') updated.subcategoria = ''
+      return updated
+    }))
   }
 
   return (
@@ -106,24 +116,43 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
           <label>💵 Entradas do dia (dinheiro)</label>
           {entradas.map((e, i) => (
             <div key={i} className="saida-row">
-              <input placeholder="Descrição" value={e.descricao} onChange={ev => updateItem(entradas, setEntradas, i, 'descricao', ev.target.value)} />
-              <input type="number" placeholder="R$" value={e.valor || ''} onChange={ev => updateItem(entradas, setEntradas, i, 'valor', ev.target.value)} step="0.01" min="0" />
+              <input placeholder="Descrição" value={e.descricao}
+                onChange={ev => updateEntrada(i, 'descricao', ev.target.value)} />
+              <input type="number" placeholder="R$" value={e.valor || ''}
+                onChange={ev => updateEntrada(i, 'valor', ev.target.value)} step="0.01" min="0" />
               <button className="btn-rm" onClick={() => setEntradas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
-          <button className="btn-add-saida" onClick={() => setEntradas(e => [...e, { descricao: '', valor: 0 }])}>＋ Adicionar entrada</button>
+          <button className="btn-add-entrada"
+            onClick={() => setEntradas(e => [...e, { descricao: '', valor: 0 }])}>
+            ＋ Adicionar entrada
+          </button>
         </div>
 
         <div className="inp-group">
           <label>💸 Saídas do dia</label>
           {saidas.map((s, i) => (
             <div key={i} className="saida-row">
-              <input placeholder="Descrição" value={s.descricao} onChange={e => updateItem(saidas, setSaidas, i, 'descricao', e.target.value)} />
-              <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateItem(saidas, setSaidas, i, 'valor', e.target.value)} step="0.01" min="0" />
+              <input placeholder="Descrição" value={s.descricao}
+                onChange={ev => updateSaida(i, 'descricao', ev.target.value)} />
+              <input type="number" placeholder="R$" value={s.valor || ''}
+                onChange={ev => updateSaida(i, 'valor', ev.target.value)} step="0.01" min="0" />
+              <select value={s.categoria} onChange={ev => updateSaida(i, 'categoria', ev.target.value)}
+                className="saida-select">
+                {LISTA_CATEGORIAS.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+              <select value={s.subcategoria ?? ''} onChange={ev => updateSaida(i, 'subcategoria', ev.target.value)}
+                className="saida-select">
+                <option value="">— subcategoria —</option>
+                {(CATEGORIAS[s.categoria] ?? []).map(sub => <option key={sub} value={sub}>{sub}</option>)}
+              </select>
               <button className="btn-rm" onClick={() => setSaidas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
-          <button className="btn-add-saida" onClick={() => setSaidas(s => [...s, { descricao: '', valor: 0 }])}>＋ Adicionar saída</button>
+          <button className="btn-add-saida"
+            onClick={() => setSaidas(s => [...s, { descricao: '', valor: 0, categoria: 'Administrativas', subcategoria: '' }])}>
+            ＋ Adicionar saída
+          </button>
         </div>
       </div>
 
