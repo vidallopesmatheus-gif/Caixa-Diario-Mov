@@ -181,3 +181,26 @@ test('atualiza campo de valor de saída', () => {
   fireEvent.change(valorInputs[0], { target: { value: '150' } })
   expect((valorInputs[0] as HTMLInputElement).value).toBe('150')
 })
+
+test('mudança de categoria reseta subcategoria para vazio', () => {
+  mockHooks()
+  render(<ClientCaixaPage />)
+
+  // Select a subcategoria first so it's not empty
+  const subcatSelects = document.querySelectorAll<HTMLSelectElement>('select.saida-select:nth-of-type(2)')
+  // Use all saida-selects: even-indexed are categoria, odd-indexed are subcategoria
+  const allSelects = document.querySelectorAll<HTMLSelectElement>('select.saida-select')
+  // First row: allSelects[0] = categoria, allSelects[1] = subcategoria
+  const categoriaSelect = allSelects[0]
+  const subcategoriaSelect = allSelects[1]
+
+  // Set a subcategoria value first (Administrativas → Aluguel)
+  fireEvent.change(subcategoriaSelect, { target: { value: 'Aluguel' } })
+  expect((subcategoriaSelect as HTMLSelectElement).value).toBe('Aluguel')
+
+  // Now change categoria — subcategoria should reset to ''
+  fireEvent.change(categoriaSelect, { target: { value: 'Pessoas' } })
+
+  // subcategoria must be reset to '' (the placeholder option is selected)
+  expect((subcategoriaSelect as HTMLSelectElement).value).toBe('')
+})

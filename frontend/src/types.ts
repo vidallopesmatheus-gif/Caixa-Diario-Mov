@@ -18,7 +18,7 @@ export interface ItemFinanceiroSaida {
   descricao: string
   valor: number
   categoria: string
-  subcategoria?: string
+  subcategoria: string
 }
 
 export interface ContaProvisionada {

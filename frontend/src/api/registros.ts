@@ -22,7 +22,7 @@ function mapItemFinanceiroSaida(raw: any): ItemFinanceiroSaida {
     descricao: raw.Descricao ?? raw.descricao ?? '',
     valor: raw.Valor ?? raw.valor ?? 0,
     categoria: raw.Categoria ?? raw.categoria ?? 'Administrativas',
-    subcategoria: raw.Subcategoria ?? raw.subcategoria ?? undefined,
+    subcategoria: raw.Subcategoria ?? raw.subcategoria ?? '',
   }
 }
 

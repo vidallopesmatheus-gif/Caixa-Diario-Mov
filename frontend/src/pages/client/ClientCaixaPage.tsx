@@ -143,7 +143,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                 className="saida-select">
                 {LISTA_CATEGORIAS.map(cat => <option key={cat} value={cat}>{cat}</option>)}
               </select>
-              <select value={s.subcategoria ?? ''} onChange={ev => updateSaida(i, 'subcategoria', ev.target.value)}
+              <select value={s.subcategoria} onChange={ev => updateSaida(i, 'subcategoria', ev.target.value)}
                 className="saida-select">
                 <option value="">— subcategoria —</option>
                 {(CATEGORIAS[s.categoria] ?? []).map(sub => <option key={sub} value={sub}>{sub}</option>)}
