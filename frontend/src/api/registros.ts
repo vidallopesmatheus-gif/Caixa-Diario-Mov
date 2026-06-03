@@ -72,7 +72,7 @@ export const salvarRegistro = async (dto: {
       Descricao: s.descricao,
       Valor: s.valor,
       Categoria: s.categoria,
-      Subcategoria: s.subcategoria,
+      Subcategoria: s.subcategoria || undefined,
     })),
     contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago })),
     contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago })),

@@ -141,6 +141,10 @@ test('carrega dados do registro existente quando buscarPorData retorna resultado
   mockHooks({ buscarPorData })
   render(<ClientCaixaPage />)
   await waitFor(() => expect(buscarPorData).toHaveBeenCalled())
+  await waitFor(() => {
+    const categoriaSelects = screen.getAllByRole('combobox')
+    expect(categoriaSelects.some(s => (s as HTMLSelectElement).value === 'Administrativas')).toBe(true)
+  })
 })
 
 test('carrega saldo anterior quando buscarPorData retorna null e há registros anteriores', async () => {
