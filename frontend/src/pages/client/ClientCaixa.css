@@ -67,6 +67,18 @@
 }
 .btn-add-entrada:hover { background: #002a55; }
 
+.entrada-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 32px;
+  gap: 8px; margin-bottom: 8px; align-items: center;
+}
+.entrada-row input {
+  padding: 9px 12px; background: var(--bg-input);
+  border: 1px solid var(--bd); border-radius: 8px;
+  color: var(--tx); font-size: 14px; width: 100%;
+}
+.entrada-row input:focus { border-color: #007aff; outline: none; }
+
 .saida-select {
   padding: 9px 8px; background: var(--bg-input);
   border: 1px solid var(--bd); border-radius: 8px;

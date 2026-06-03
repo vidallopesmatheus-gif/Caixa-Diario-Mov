@@ -42,7 +42,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       if (reg) {
         setInicio(reg.saldoInicio)
         setEntradas(reg.entradas.length ? reg.entradas : [{ descricao: '', valor: 0 }])
-        setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0, categoria: 'Administrativas', subcategoria: '' }])
+        setSaidas(reg.saidas.length
+          ? reg.saidas.map(s => ({ categoria: 'Administrativas', subcategoria: '', ...s }))
+          : [{ descricao: '', valor: 0, categoria: 'Administrativas', subcategoria: '' }])
         setConfirmado(String(reg.saldoConfirmado))
       } else {
         const prev = registrosRef.current.find(r => r.data < data)
@@ -115,7 +117,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         <div className="inp-group">
           <label>💵 Entradas do dia (dinheiro)</label>
           {entradas.map((e, i) => (
-            <div key={i} className="saida-row">
+            <div key={i} className="entrada-row">
               <input placeholder="Descrição" value={e.descricao}
                 onChange={ev => updateEntrada(i, 'descricao', ev.target.value)} />
               <input type="number" placeholder="R$" value={e.valor || ''}
