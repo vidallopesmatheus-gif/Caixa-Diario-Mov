@@ -14,6 +14,13 @@ export interface ItemFinanceiro {
   valor: number
 }
 
+export interface ItemFinanceiroSaida {
+  descricao: string
+  valor: number
+  categoria: string
+  subcategoria?: string
+}
+
 export interface ContaProvisionada {
   descricao: string
   valor: number
@@ -27,7 +34,7 @@ export interface Registro {
   data: string
   saldoInicio: number
   entradas: ItemFinanceiro[]
-  saidas: ItemFinanceiro[]
+  saidas: ItemFinanceiroSaida[]
   contasAReceber: ContaProvisionada[]
   contasAPagar: ContaProvisionada[]
   saldoConfirmado: number
