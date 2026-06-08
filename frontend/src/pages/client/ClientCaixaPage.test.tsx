@@ -132,7 +132,7 @@ test('carrega dados do registro existente quando buscarPorData retorna resultado
   const reg = {
     id: 'r1', clienteId: 'u1', data: '2026-05-15',
     saldoInicio: 500, entradas: [{ descricao: 'Caixa', valor: 200 }],
-    saidas: [{ descricao: 'Aluguel', valor: 100 }],
+    saidas: [{ descricao: 'Aluguel', valor: 100, categoria: 'Administrativas', subcategoria: '' }],
     contasAReceber: [{ descricao: 'Mensalidade', valor: 300, pago: false }],
     contasAPagar: [{ descricao: 'Fornecedor', valor: 50, pago: false }],
     saldoConfirmado: 600, saldoCalculado: 600, criadoEm: '',
@@ -141,6 +141,10 @@ test('carrega dados do registro existente quando buscarPorData retorna resultado
   mockHooks({ buscarPorData })
   render(<ClientCaixaPage />)
   await waitFor(() => expect(buscarPorData).toHaveBeenCalled())
+  await waitFor(() => {
+    const categoriaSelects = screen.getAllByRole('combobox')
+    expect(categoriaSelects.some(s => (s as HTMLSelectElement).value === 'Administrativas')).toBe(true)
+  })
 })
 
 test('carrega saldo anterior quando buscarPorData retorna null e há registros anteriores', async () => {
@@ -180,4 +184,26 @@ test('atualiza campo de valor de saída', () => {
   const valorInputs = screen.getAllByPlaceholderText('R$')
   fireEvent.change(valorInputs[0], { target: { value: '150' } })
   expect((valorInputs[0] as HTMLInputElement).value).toBe('150')
+})
+
+test('mudança de categoria reseta subcategoria para vazio', () => {
+  mockHooks()
+  render(<ClientCaixaPage />)
+
+  // Select a subcategoria first so it's not empty
+  // Use all saida-selects: even-indexed are categoria, odd-indexed are subcategoria
+  const allSelects = document.querySelectorAll<HTMLSelectElement>('select.saida-select')
+  // First row: allSelects[0] = categoria, allSelects[1] = subcategoria
+  const categoriaSelect = allSelects[0]
+  const subcategoriaSelect = allSelects[1]
+
+  // Set a subcategoria value first (Administrativas → Aluguel)
+  fireEvent.change(subcategoriaSelect, { target: { value: 'Aluguel' } })
+  expect((subcategoriaSelect as HTMLSelectElement).value).toBe('Aluguel')
+
+  // Now change categoria — subcategoria should reset to ''
+  fireEvent.change(categoriaSelect, { target: { value: 'Pessoas' } })
+
+  // subcategoria must be reset to '' (the placeholder option is selected)
+  expect((subcategoriaSelect as HTMLSelectElement).value).toBe('')
 })

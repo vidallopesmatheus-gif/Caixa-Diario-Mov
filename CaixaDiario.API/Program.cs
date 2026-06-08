@@ -59,6 +59,20 @@ builder.Services.AddScoped<IRegistroService, RegistroService>();
 builder.Services.AddScoped<IMetaRepository, MetaRepository>();
 builder.Services.AddScoped<IMetaService, MetaService>();
 
+// Chat IA
+var groqApiKey = builder.Configuration["Groq:ApiKey"]
+    ?? throw new InvalidOperationException("Groq:ApiKey não configurada.");
+var groqModel = builder.Configuration["Groq:Model"] ?? "llama-3.3-70b-versatile";
+var groqMaxTokens = int.TryParse(builder.Configuration["Groq:MaxTokens"], out var mt) ? mt : 1024;
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<IAnthropicClient>(sp =>
+{
+    var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
+    return new GroqClientWrapper(http, groqApiKey, groqModel, groqMaxTokens);
+});
+builder.Services.AddScoped<IChatService, ChatService>();
+
+
 var app = builder.Build();
 
 app.UseDefaultFiles();

@@ -26,7 +26,7 @@ public class RegistroServiceTests
             Data = data ?? DateOnly.FromDateTime(DateTime.UtcNow),
             Inicio = 100m,
             Entradas = new List<ItemFinanceiroDto> { new() { Descricao = "Caixa", Valor = 500m } },
-            Saidas = new List<ItemFinanceiroDto> { new() { Descricao = "Aluguel", Valor = 200m } },
+            Saidas = new List<ItemFinanceiroSaidaDto> { new() { Descricao = "Aluguel", Valor = 200m, Categoria = "Administrativas" } },
             ContasReceber = new(),
             ContasPagar = new(),
             SaldoFinal = 400m
@@ -168,7 +168,7 @@ public class RegistroServiceTests
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = data,
             Entradas = new List<ItemFinanceiro> { new() { Descricao = "Caixa", Valor = 10m } },
-            Saidas = new List<ItemFinanceiro> { new() { Descricao = "Saida", Valor = 10m } },
+            Saidas = new List<ItemFinanceiroSaida> { new() { Descricao = "Saida", Valor = 10m } },
             ContasReceber = new List<ContaProvisionada> { new() { Descricao = "CR", Valor = 5m } },
             ContasPagar = new List<ContaProvisionada> { new() { Descricao = "CP", Valor = 3m } },
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
@@ -283,5 +283,34 @@ public class RegistroServiceTests
         Assert.Single(resultado.ContasPagar);
         Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5)), resultado.ContasReceber[0].DataVencimento);
         Assert.True(resultado.ContasPagar[0].Pago);
+    }
+
+    [Fact]
+    public async Task Salvar_ComCategoriaNaSaida_MapeiaCorretamente()
+    {
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = Guid.NewGuid(),
+            Data = DateOnly.FromDateTime(DateTime.UtcNow),
+            Inicio = 0m,
+            Entradas = new(),
+            Saidas = new List<ItemFinanceiroSaidaDto>
+            {
+                new() { Descricao = "Aluguel", Valor = 1200m, Categoria = "Administrativas", Subcategoria = "Aluguel" }
+            },
+            ContasReceber = new(),
+            ContasPagar = new(),
+            SaldoFinal = 0m
+        };
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data))
+                 .ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+                 .ReturnsAsync((RegistroDiario r) => r);
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "joao");
+
+        Assert.Single(resultado.Saidas);
+        Assert.Equal("Administrativas", resultado.Saidas[0].Categoria);
+        Assert.Equal("Aluguel", resultado.Saidas[0].Subcategoria);
     }
 }

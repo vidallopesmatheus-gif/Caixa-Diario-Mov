@@ -56,7 +56,8 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
             <div style={{ padding: '12px 16px', borderTop: '1px solid var(--bd-sub)' }}>
               {r.saidas.map((s, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', borderBottom: '1px solid var(--bg-card)' }}>
-                  <span>{s.descricao}</span><span style={{ color: '#ff3b30' }}>-{fmtBRL(s.valor)}</span>
+                  <span>{s.descricao}{s.categoria ? <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--tx3)', background: 'var(--bd)', borderRadius: 4, padding: '1px 6px' }}>{s.categoria}</span> : null}</span>
+                  <span style={{ color: '#ff3b30' }}>-{fmtBRL(s.valor)}</span>
                 </div>
               ))}
               <button style={{ marginTop: 8, background: 'none', border: '1px solid var(--bd)', borderRadius: 6, color: '#ff6b6b', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}

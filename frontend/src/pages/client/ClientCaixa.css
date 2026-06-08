@@ -1,6 +1,6 @@
 .saida-row, .prov-row {
   display: grid;
-  grid-template-columns: 1fr 110px 32px;
+  grid-template-columns: 1fr 90px 130px 130px 32px;
   gap: 8px; margin-bottom: 8px; align-items: center;
 }
 .saida-row input, .prov-row input {
@@ -59,3 +59,29 @@
 }
 .btn-save:hover { opacity: .9; }
 .btn-save:disabled { opacity: .5; cursor: not-allowed; }
+
+.btn-add-entrada {
+  width: 100%; padding: 9px;
+  background: #001a33; border: 1px dashed #007aff;
+  border-radius: 8px; color: #007aff; font-size: 13px; font-weight: 600; margin-top: 4px;
+}
+.btn-add-entrada:hover { background: #002a55; }
+
+.entrada-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 32px;
+  gap: 8px; margin-bottom: 8px; align-items: center;
+}
+.entrada-row input {
+  padding: 9px 12px; background: var(--bg-input);
+  border: 1px solid var(--bd); border-radius: 8px;
+  color: var(--tx); font-size: 14px; width: 100%;
+}
+.entrada-row input:focus { border-color: #007aff; outline: none; }
+
+.saida-select {
+  padding: 9px 8px; background: var(--bg-input);
+  border: 1px solid var(--bd); border-radius: 8px;
+  color: var(--tx); font-size: 13px; width: 100%;
+}
+.saida-select:focus { border-color: #ff3b30; outline: none; }
