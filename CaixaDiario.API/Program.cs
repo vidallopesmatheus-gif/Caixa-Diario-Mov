@@ -72,6 +72,7 @@ builder.Services.AddSingleton<IAnthropicClient>(sp =>
 });
 builder.Services.AddScoped<IChatService, ChatService>();
 
+
 var app = builder.Build();
 
 app.UseDefaultFiles();
