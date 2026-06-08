@@ -43,9 +43,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       if (reg) {
         setInicio(reg.saldoInicio)
         setEntradas(reg.entradas.length ? reg.entradas : [{ descricao: '', valor: 0 }])
-        setSaidas(reg.saidas.length
-          ? reg.saidas.map(s => ({ categoria: 'Administrativas', subcategoria: '', ...s }))
-          : [{ descricao: '', valor: 0, categoria: 'Administrativas', subcategoria: '' }])
+        setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0, categoria: 'Administrativas', subcategoria: '' }])
         setConfirmado(String(reg.saldoConfirmado))
       } else {
         const prev = registrosRef.current.find(r => r.data < data)

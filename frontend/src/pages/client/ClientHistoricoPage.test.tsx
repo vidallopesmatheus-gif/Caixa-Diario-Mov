@@ -18,7 +18,7 @@ const mockRegistros: Registro[] = [
   {
     id: 'r1', clienteId: 'u1', data: `${mesAtual}-10`,
     saldoInicio: 100, entradas: [{ descricao: 'Caixa', valor: 500 }],
-    saidas: [{ descricao: 'Aluguel', valor: 200 }],
+    saidas: [{ descricao: 'Aluguel', valor: 200, categoria: 'Administrativas', subcategoria: '' }],
     contasAReceber: [], contasAPagar: [],
     saldoConfirmado: 400, saldoCalculado: 400, criadoEm: '',
   },
