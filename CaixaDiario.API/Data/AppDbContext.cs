@@ -13,6 +13,8 @@ public class AppDbContext : DbContext
     public DbSet<Usuario> Usuarios { get; set; }
     public DbSet<RegistroDiario> RegistrosDiarios { get; set; }
     public DbSet<MetaAnual> MetasAnuais { get; set; }
+    public DbSet<ContaRecorrente> ContasRecorrentes { get; set; }
+    public DbSet<AuditLog> AuditLogs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -89,6 +91,37 @@ public class AppDbContext : DbContext
                 .HasForeignKey(e => e.ClienteId);
 
             entity.HasIndex(e => new { e.ClienteId, e.Ano }).IsUnique();
+        });
+
+        modelBuilder.Entity<ContaRecorrente>(entity =>
+        {
+            entity.ToTable("contas_recorrentes");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Descricao).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Categoria).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Valor).HasPrecision(18, 2);
+            entity.Property(e => e.DiaVencimento).IsRequired();
+            entity.Property(e => e.CriadaEm).HasDefaultValueSql("NOW()");
+            entity.HasOne(e => e.Usuario)
+                  .WithMany(u => u.ContasRecorrentes)
+                  .HasForeignKey(e => e.UsuarioId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.ToTable("audit_logs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Acao).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Entidade).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.EntidadeId).HasMaxLength(100);
+            entity.Property(e => e.CriadoEm).HasDefaultValueSql("NOW()");
+            entity.HasOne(e => e.Usuario)
+                  .WithMany(u => u.AuditLogs)
+                  .HasForeignKey(e => e.UsuarioId)
+                  .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
