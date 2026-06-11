@@ -2,5 +2,12 @@ namespace CaixaDiario.API.Services;
 
 public interface IAuditService
 {
-    Task LogAsync(Guid usuarioId, string acao, string entidade, string? entidadeId = null, string? detalhes = null);
+    Task LogAsync(
+        Guid clienteId,
+        Guid usuarioId,
+        string entidade,
+        string acaoTipo,
+        string entidadeId,
+        string? dadosAntes,
+        string? dadosDepois);
 }

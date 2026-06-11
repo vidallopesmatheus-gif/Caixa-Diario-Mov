@@ -4,9 +4,8 @@ namespace CaixaDiario.API.Repositories.Interfaces;
 
 public interface IContaRecorrenteRepository
 {
-    Task<List<ContaRecorrente>> GetByUsuarioIdAsync(Guid usuarioId);
-    Task<ContaRecorrente?> GetByIdAsync(Guid id);
-    Task<ContaRecorrente> CreateAsync(ContaRecorrente conta);
-    Task<ContaRecorrente> UpdateAsync(ContaRecorrente conta);
-    Task DeleteAsync(Guid id);
+    Task<List<ContaRecorrente>> ListarAtivasPorClienteAsync(Guid clienteId);
+    Task<ContaRecorrente?> ObterPorIdAsync(Guid clienteId, Guid id);
+    Task<ContaRecorrente> AdicionarAsync(ContaRecorrente conta);
+    Task<ContaRecorrente> AtualizarAsync(ContaRecorrente conta);
 }

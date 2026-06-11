@@ -97,31 +97,38 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("contas_recorrentes");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.Descricao).IsRequired().HasMaxLength(200);
-            entity.Property(e => e.Categoria).IsRequired().HasMaxLength(100);
-            entity.Property(e => e.Valor).HasPrecision(18, 2);
-            entity.Property(e => e.DiaVencimento).IsRequired();
-            entity.Property(e => e.CriadaEm).HasDefaultValueSql("NOW()");
-            entity.HasOne(e => e.Usuario)
-                  .WithMany(u => u.ContasRecorrentes)
-                  .HasForeignKey(e => e.UsuarioId)
-                  .OnDelete(DeleteBehavior.Cascade);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.Descricao).HasColumnName("descricao").IsRequired();
+            entity.Property(e => e.Valor).HasColumnName("valor").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Categoria).HasColumnName("categoria");
+            entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired();
+            entity.Property(e => e.DataInicio).HasColumnName("data_inicio");
+            entity.Property(e => e.DataFim).HasColumnName("data_fim");
+            entity.Property(e => e.Ativo).HasColumnName("ativo").HasDefaultValue(true);
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
+            entity.HasOne(e => e.Cliente)
+                .WithMany(u => u.ContasRecorrentes)
+                .HasForeignKey(e => e.ClienteId);
+            entity.HasIndex(e => new { e.ClienteId, e.Ativo });
         });
 
         modelBuilder.Entity<AuditLog>(entity =>
         {
             entity.ToTable("audit_logs");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.Acao).IsRequired().HasMaxLength(50);
-            entity.Property(e => e.Entidade).IsRequired().HasMaxLength(100);
-            entity.Property(e => e.EntidadeId).HasMaxLength(100);
-            entity.Property(e => e.CriadoEm).HasDefaultValueSql("NOW()");
-            entity.HasOne(e => e.Usuario)
-                  .WithMany(u => u.AuditLogs)
-                  .HasForeignKey(e => e.UsuarioId)
-                  .OnDelete(DeleteBehavior.Cascade);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.UsuarioId).HasColumnName("usuario_id");
+            entity.Property(e => e.Entidade).HasColumnName("entidade").IsRequired();
+            entity.Property(e => e.AcaoTipo).HasColumnName("acao_tipo").IsRequired();
+            entity.Property(e => e.EntidadeId).HasColumnName("entidade_id").IsRequired();
+            entity.Property(e => e.DadosAntes).HasColumnName("dados_antes");
+            entity.Property(e => e.DadosDepois).HasColumnName("dados_depois");
+            entity.Property(e => e.OcorridoEm).HasColumnName("ocorrido_em").HasDefaultValueSql("NOW()");
+            entity.HasIndex(e => new { e.ClienteId, e.OcorridoEm });
+            entity.HasIndex(e => new { e.Entidade, e.AcaoTipo });
         });
     }
 }

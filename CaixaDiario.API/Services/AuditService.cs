@@ -1,28 +1,33 @@
-namespace CaixaDiario.API.Services;
-
 using CaixaDiario.API.Data;
 using CaixaDiario.API.Models;
+
+namespace CaixaDiario.API.Services;
 
 public class AuditService : IAuditService
 {
     private readonly AppDbContext _context;
 
-    public AuditService(AppDbContext context)
-    {
-        _context = context;
-    }
+    public AuditService(AppDbContext context) => _context = context;
 
-    public async Task LogAsync(Guid usuarioId, string acao, string entidade, string? entidadeId = null, string? detalhes = null)
+    public async Task LogAsync(
+        Guid clienteId,
+        Guid usuarioId,
+        string entidade,
+        string acaoTipo,
+        string entidadeId,
+        string? dadosAntes,
+        string? dadosDepois)
     {
-        var log = new AuditLog
+        _context.AuditLogs.Add(new AuditLog
         {
+            ClienteId = clienteId,
             UsuarioId = usuarioId,
-            Acao = acao,
             Entidade = entidade,
+            AcaoTipo = acaoTipo,
             EntidadeId = entidadeId,
-            Detalhes = detalhes
-        };
-        _context.AuditLogs.Add(log);
+            DadosAntes = dadosAntes,
+            DadosDepois = dadosDepois,
+        });
         await _context.SaveChangesAsync();
     }
 }
