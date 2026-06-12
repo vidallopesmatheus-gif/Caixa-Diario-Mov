@@ -4,7 +4,8 @@ import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
 import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
-import type { ItemFinanceiro } from '../../types'
+import { listarCategorias } from '../../api/categorias'
+import type { ItemFinanceiro, Categorias } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
@@ -24,7 +25,12 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const [confirmado, setConfirmado] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  useEffect(() => {
+    listarCategorias().then(setCategorias).catch(console.error)
+  }, [])
 
   const totalEntradas = entradas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
   const totalSaidas = saidas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
@@ -81,8 +87,23 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     }
   }
 
-  function updateItem(list: ItemFinanceiro[], setList: (v: ItemFinanceiro[]) => void, i: number, field: keyof ItemFinanceiro, val: string) {
-    setList(list.map((x, j) => j === i ? { ...x, [field]: field === 'valor' ? Number(val) : val } : x))
+  function updateItem(
+    list: ItemFinanceiro[],
+    setList: (v: ItemFinanceiro[]) => void,
+    i: number,
+    field: keyof ItemFinanceiro,
+    val: string
+  ) {
+    setList(list.map((x, j) => {
+      if (j !== i) return x
+      const updated = { ...x, [field]: field === 'valor' ? Number(val) : val }
+      if (field === 'categoria') {
+        const todas = [...categorias.entradas, ...categorias.saidas]
+        const cat = todas.find(c => c.nome === val)
+        if (cat) updated.tipoCusto = cat.tipoCusto as 'Receita' | 'CustoFixo' | 'CustoVariavel'
+      }
+      return updated
+    }))
   }
 
   return (
@@ -108,6 +129,10 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
             <div key={i} className="saida-row">
               <input placeholder="Descrição" value={e.descricao} onChange={ev => updateItem(entradas, setEntradas, i, 'descricao', ev.target.value)} />
               <input type="number" placeholder="R$" value={e.valor || ''} onChange={ev => updateItem(entradas, setEntradas, i, 'valor', ev.target.value)} step="0.01" min="0" />
+              <select value={e.categoria ?? ''} onChange={ev => updateItem(entradas, setEntradas, i, 'categoria', ev.target.value)}>
+                <option value="">Categoria</option>
+                {categorias.entradas.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+              </select>
               <button className="btn-rm" onClick={() => setEntradas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
@@ -120,6 +145,10 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
             <div key={i} className="saida-row">
               <input placeholder="Descrição" value={s.descricao} onChange={e => updateItem(saidas, setSaidas, i, 'descricao', e.target.value)} />
               <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateItem(saidas, setSaidas, i, 'valor', e.target.value)} step="0.01" min="0" />
+              <select value={s.categoria ?? ''} onChange={ev => updateItem(saidas, setSaidas, i, 'categoria', ev.target.value)}>
+                <option value="">Categoria</option>
+                {categorias.saidas.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+              </select>
               <button className="btn-rm" onClick={() => setSaidas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
