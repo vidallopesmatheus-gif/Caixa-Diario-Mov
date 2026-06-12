@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtDate, todayISO } from '../../utils/format'
-import type { ContaProvisionada } from '../../types'
+import { listarContasRecorrentes, criarContaRecorrente, desativarContaRecorrente } from '../../api/contasRecorrentes'
+import type { ContaProvisionada, ContaRecorrente } from '../../types'
 import './ClientContas.css'
 
 interface Props { clienteIdOverride?: string }
@@ -25,6 +26,40 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [novoTipo, setNovoTipo] = useState<'receber' | 'pagar'>('receber')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+
+  const [recorrentes, setRecorrentes] = useState<ContaRecorrente[]>([])
+  const [novaRecDesc, setNovaRecDesc] = useState('')
+  const [novaRecValor, setNovaRecValor] = useState('')
+  const [novaRecTipo, setNovaRecTipo] = useState<'Receber' | 'Pagar'>('Pagar')
+  const [novaRecInicio, setNovaRecInicio] = useState('')
+  const [novaRecFim, setNovaRecFim] = useState('')
+  const [savingRec, setSavingRec] = useState(false)
+
+  useEffect(() => {
+    if (!clienteId) return
+    listarContasRecorrentes(clienteId).then(setRecorrentes).catch(console.error)
+  }, [clienteId])
+
+  async function adicionarRecorrente() {
+    if (!clienteId || !novaRecDesc || !novaRecValor || !novaRecInicio) return
+    setSavingRec(true)
+    try {
+      const nova = await criarContaRecorrente({
+        clienteId, descricao: novaRecDesc, valor: Number(novaRecValor),
+        tipo: novaRecTipo, dataInicio: novaRecInicio, dataFim: novaRecFim || undefined,
+      })
+      setRecorrentes(prev => [...prev, nova])
+      setNovaRecDesc(''); setNovaRecValor(''); setNovaRecInicio(''); setNovaRecFim('')
+    } finally {
+      setSavingRec(false)
+    }
+  }
+
+  async function handleDesativar(id: string) {
+    if (!clienteId) return
+    await desativarContaRecorrente(clienteId, id)
+    setRecorrentes(prev => prev.filter(r => r.id !== id))
+  }
 
   const todasContas = useMemo<ContaView[]>(() => {
     const acc: ContaView[] = []
@@ -149,6 +184,36 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           {pagasList.map(renderConta)}
         </div>
       )}
+
+      <div className="contas-section">
+        <h3>🔁 Contas Recorrentes ({recorrentes.length})</h3>
+        <div className="conta-form-row" style={{ marginBottom: 8 }}>
+          <select value={novaRecTipo} onChange={e => setNovaRecTipo(e.target.value as 'Receber' | 'Pagar')}>
+            <option value="Pagar">A Pagar</option>
+            <option value="Receber">A Receber</option>
+          </select>
+          <input placeholder="Descrição" value={novaRecDesc} onChange={e => setNovaRecDesc(e.target.value)} />
+          <input type="number" placeholder="Valor R$" value={novaRecValor} onChange={e => setNovaRecValor(e.target.value)} step="0.01" min="0" />
+        </div>
+        <div className="conta-form-row" style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 12, color: 'var(--tx3)' }}>Início:</label>
+          <input type="date" value={novaRecInicio} onChange={e => setNovaRecInicio(e.target.value)} />
+          <label style={{ fontSize: 12, color: 'var(--tx3)' }}>Fim (opcional):</label>
+          <input type="date" value={novaRecFim} onChange={e => setNovaRecFim(e.target.value)} />
+        </div>
+        <button className="btn-add-conta" onClick={adicionarRecorrente} disabled={savingRec || !novaRecDesc || !novaRecValor || !novaRecInicio}>
+          {savingRec ? 'Salvando...' : '＋ Adicionar Recorrente'}
+        </button>
+        {recorrentes.map(r => (
+          <div key={r.id} className="conta-item">
+            <div className="conta-info">
+              <div className="conta-desc">{r.descricao}</div>
+              <div className="conta-meta">{r.tipo} · {fmtBRL(r.valor)} · Desde {fmtDate(r.dataInicio)}{r.dataFim ? ` até ${fmtDate(r.dataFim)}` : ''}</div>
+            </div>
+            <button style={{ fontSize: 12, padding: '4px 10px', background: '#ff3b30', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer' }} onClick={() => handleDesativar(r.id)}>Desativar</button>
+          </div>
+        ))}
+      </div>
     </>
   )
 }
