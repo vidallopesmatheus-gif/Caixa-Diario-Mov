@@ -13,7 +13,7 @@ export interface ItemFinanceiro {
   descricao: string
   valor: number
   categoria?: string
-  tipoCusto?: string  // "Receita" | "CustoFixo" | "CustoVariavel"
+  tipoCusto?: 'Receita' | 'CustoFixo' | 'CustoVariavel'
 }
 
 export interface ContaProvisionada {
@@ -54,7 +54,7 @@ export interface ContaRecorrente {
 
 export interface CategoriaItem {
   nome: string
-  tipoCusto: string
+  tipoCusto: 'Receita' | 'CustoFixo' | 'CustoVariavel'
 }
 
 export interface Categorias {
