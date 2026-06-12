@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
 import { fmtBRL } from '../../utils/format'
 import { obterMeta, salvarMeta } from '../../api/metas'
+import { getContasEmRisco } from '../../utils/alertas'
 import type { MetaAnual } from '../../types'
 import './ClientDashboard.css'
 
@@ -15,6 +17,16 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, loading } = useRegistros(clienteId)
+  const navigate = useNavigate()
+
+  const contasEmRisco = useMemo(() => getContasEmRisco(registros), [registros])
+
+  const saldoProjetado = useMemo(() => {
+    const saldoAtual = registros[0]?.saldoConfirmado ?? 0
+    const totalReceber = registros.flatMap(r => r.contasAReceber).filter(c => !c.pago).reduce((s, c) => s + c.valor, 0)
+    const totalPagar = registros.flatMap(r => r.contasAPagar).filter(c => !c.pago).reduce((s, c) => s + c.valor, 0)
+    return saldoAtual + totalReceber - totalPagar
+  }, [registros])
 
   const hoje = new Date()
   const anoAtual = hoje.getFullYear()
@@ -113,6 +125,31 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         <StatCard label="💸 Total Saída" value={fmtBRL(totalSaida)} className="val-red" />
         <StatCard label="📊 Lucro Operacional" value={fmtBRL(lucroOp)} className={lucroOp >= 0 ? 'val-green' : 'val-red'} />
         <StatCard label="💰 Saldo Final" value={fmtBRL(saldoFinal)} className="val-blue" />
+      </div>
+
+      {contasEmRisco.length > 0 && (
+        <div className="meta-card" style={{ borderColor: '#ff9500' }}>
+          <h3>⚠️ Alertas de Vencimento ({contasEmRisco.length})</h3>
+          {contasEmRisco.slice(0, 5).map((c, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bd)', fontSize: 13 }}>
+              <span style={{ color: c.vencida ? '#ff3b30' : '#ff9500' }}>
+                {c.vencida ? '🔴' : '🟡'} {c.conta.descricao}
+              </span>
+              <span>{fmtBRL(c.conta.valor)} · {c.conta.dataVencimento}</span>
+            </div>
+          ))}
+          <button onClick={() => navigate('contas')} style={{ marginTop: 10, fontSize: 12, background: 'none', border: '1px solid var(--bd)', borderRadius: 6, color: 'var(--tx3)', padding: '4px 12px', cursor: 'pointer' }}>
+            Ver todas as contas →
+          </button>
+        </div>
+      )}
+
+      <div className="meta-card">
+        <h3>💵 Saldo Projetado</h3>
+        <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 8 }}>Saldo atual + contas a receber pendentes − contas a pagar pendentes</p>
+        <div style={{ fontSize: 22, fontWeight: 700, color: saldoProjetado >= 0 ? '#34c759' : '#ff3b30' }}>
+          {fmtBRL(saldoProjetado)}
+        </div>
       </div>
 
       <div className="meta-card">
