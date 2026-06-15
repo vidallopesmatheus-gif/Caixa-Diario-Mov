@@ -1,15 +1,18 @@
 // frontend/src/pages/client/ClientGraficoPage.test.tsx
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import ClientGraficoPage from './ClientGraficoPage'
 import * as AuthContextModule from '../../contexts/AuthContext'
-import * as useRegistrosHook from '../../hooks/useRegistros'
-import type { Registro } from '../../types'
+import * as metricasApi from '../../api/metricas'
+import type { EvolucaoMensal } from '../../api/metricas'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
   const actual = await importOriginal<typeof AuthContextModule>()
   return { ...actual, useAuth: vi.fn() }
 })
-vi.mock('../../hooks/useRegistros')
+vi.mock('../../api/metricas', async (importOriginal) => {
+  const actual = await importOriginal<typeof metricasApi>()
+  return { ...actual, obterEvolucao: vi.fn() }
+})
 
 // Recharts usa ResizeObserver; precisamos de um stub
 window.ResizeObserver = class {
@@ -20,64 +23,56 @@ window.ResizeObserver = class {
 
 const mockUser = { usuarioId: 'u1', nomeUsuario: 'cli1', perfil: 'cliente' as const, nomeCompleto: 'C', nomeEstabelecimento: '', token: 'tok' }
 
-const mesAtual = new Date().toISOString().slice(0, 7)
-const mockRegistros: Registro[] = [
-  {
-    id: 'r1', clienteId: 'u1', data: `${mesAtual}-01`,
-    saldoInicio: 1000, entradas: [{ descricao: 'Caixa', valor: 500 }],
-    saidas: [{ descricao: 'Aluguel', valor: 200 }],
-    contasAReceber: [], contasAPagar: [],
-    saldoConfirmado: 1300, saldoCalculado: 1300, criadoEm: '',
-  },
+const mockEvolucao: EvolucaoMensal[] = [
+  { mes: '2026-01', receita: 5000, custos: 2000, lucro: 3000, saldo: 10000 },
+  { mes: '2026-02', receita: 6000, custos: 2500, lucro: 3500, saldo: 13500 },
 ]
 
-function mockHooks(registros = mockRegistros, loading = false) {
+function mockHooks(evolucao: EvolucaoMensal[] = mockEvolucao) {
   vi.mocked(AuthContextModule.useAuth).mockReturnValue({ user: mockUser, login: vi.fn(), logout: vi.fn() })
-  vi.mocked(useRegistrosHook.useRegistros).mockReturnValue({
-    registros,
-    loading,
-    erro: '',
-    salvar: vi.fn(),
-    excluir: vi.fn(),
-    buscarPorData: vi.fn(),
-    recarregar: vi.fn(),
-  } as ReturnType<typeof useRegistrosHook.useRegistros>)
+  vi.mocked(metricasApi.obterEvolucao).mockResolvedValue(evolucao)
 }
 
 test('exibe loading enquanto carrega', () => {
-  mockHooks([], true)
+  vi.mocked(AuthContextModule.useAuth).mockReturnValue({ user: mockUser, login: vi.fn(), logout: vi.fn() })
+  vi.mocked(metricasApi.obterEvolucao).mockReturnValue(new Promise(() => {})) // never resolves
   render(<ClientGraficoPage />)
   expect(screen.getByText(/Carregando/)).toBeInTheDocument()
 })
 
-test('renderiza título da seção após carregar', () => {
+test('renderiza título da seção após carregar', async () => {
   mockHooks()
   render(<ClientGraficoPage />)
-  expect(screen.getByText(/Evolução Mensal/)).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByText(/Receita vs\. Custos/)).toBeInTheDocument())
 })
 
-test('renderiza StatCards com totais do mês', () => {
+test('renderiza StatCards com totais do período', async () => {
   mockHooks()
   render(<ClientGraficoPage />)
-  expect(screen.getByText(/Total Entradas/)).toBeInTheDocument()
-  expect(screen.getByText(/Total Saídas/)).toBeInTheDocument()
+  await waitFor(() => {
+    expect(screen.getByText(/Receita Total/)).toBeInTheDocument()
+    expect(screen.getByText(/Custos Totais/)).toBeInTheDocument()
+  })
 })
 
-test('renderiza sem crash quando não há registros', () => {
+test('renderiza sem crash quando não há registros', async () => {
   mockHooks([])
   render(<ClientGraficoPage />)
-  expect(screen.getByText(/Evolução Mensal/)).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByText(/Receita vs\. Custos/)).toBeInTheDocument())
 })
 
-test('clienteIdOverride é utilizado quando fornecido', () => {
+test('clienteIdOverride é utilizado quando fornecido', async () => {
   mockHooks()
   render(<ClientGraficoPage clienteIdOverride="outro-id" />)
-  expect(screen.getByText(/Evolução Mensal/)).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByText(/Receita vs\. Custos/)).toBeInTheDocument())
+  expect(vi.mocked(metricasApi.obterEvolucao)).toHaveBeenCalledWith('outro-id', 6)
 })
 
-test('renderiza StatCards com saldo inicial e final do mês', () => {
+test('renderiza StatCards com lucro e saldo atual', async () => {
   mockHooks()
   render(<ClientGraficoPage />)
-  expect(screen.getByText(/Saldo Inicial/)).toBeInTheDocument()
-  expect(screen.getByText(/Saldo Final/)).toBeInTheDocument()
+  await waitFor(() => {
+    expect(screen.getByText(/Lucro Total/)).toBeInTheDocument()
+    expect(screen.getByText(/Saldo Atual/)).toBeInTheDocument()
+  })
 })

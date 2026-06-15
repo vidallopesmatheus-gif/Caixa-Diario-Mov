@@ -2,11 +2,13 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
+import { useMetricas } from '../../hooks/useMetricas'
 import StatCard from '../../components/shared/StatCard'
 import { fmtBRL } from '../../utils/format'
 import { obterMeta, salvarMeta } from '../../api/metas'
 import { getContasEmRisco } from '../../utils/alertas'
 import type { MetaAnual } from '../../types'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import './ClientDashboard.css'
 
 interface Props { clienteIdOverride?: string }
@@ -37,6 +39,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   const [de, setDe] = useState(primeiroDiaMes)
   const [ate, setAte] = useState(ultimoDiaMes)
+  const { metricas, fluxo } = useMetricas(clienteId, de, ate)
   const [meta, setMeta] = useState<MetaAnual | null>(null)
   const [editReceita, setEditReceita] = useState('')
   const [editLucro, setEditLucro] = useState('')
@@ -151,6 +154,49 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           {fmtBRL(saldoProjetado)}
         </div>
       </div>
+
+      {metricas && (
+        <div className="stats-grid" style={{ marginTop: 16 }}>
+          {metricas.ebitda && (
+            <StatCard
+              label={`📊 EBITDA ${metricas.ebitda.semaforo === 'verde' ? '🟢' : metricas.ebitda.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
+              value={`${fmtBRL(metricas.ebitda.valor)} (${((metricas.ebitda.percentual ?? 0) * 100).toFixed(1)}%)`}
+              className={metricas.ebitda.semaforo === 'verde' ? 'val-green' : metricas.ebitda.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
+            />
+          )}
+          {metricas.primeCost?.percentual != null && (
+            <StatCard
+              label={`🍽️ Prime Cost ${metricas.primeCost.semaforo === 'verde' ? '🟢' : metricas.primeCost.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
+              value={`${((metricas.primeCost.percentual) * 100).toFixed(1)}%`}
+              className={metricas.primeCost.semaforo === 'verde' ? 'val-green' : metricas.primeCost.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
+            />
+          )}
+          {metricas.pontoDeEquilibrio && (
+            <StatCard
+              label={`⚖️ Ponto de Equilíbrio ${metricas.pontoDeEquilibrio.semaforo === 'verde' ? '🟢' : metricas.pontoDeEquilibrio.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
+              value={fmtBRL(metricas.pontoDeEquilibrio.valor)}
+              className={metricas.pontoDeEquilibrio.semaforo === 'verde' ? 'val-green' : metricas.pontoDeEquilibrio.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
+            />
+          )}
+        </div>
+      )}
+
+      {fluxo && fluxo.dias.length > 0 && (
+        <div className="meta-card">
+          <h3>📈 Fluxo de Caixa Projetado (30 dias)</h3>
+          <div style={{ height: 200 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={fluxo.dias.map(d => ({ dia: d.data.slice(5), saldo: d.saldoProjetado }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
+                <XAxis dataKey="dia" stroke="var(--tx3)" tick={{ fontSize: 11 }} interval={4} />
+                <YAxis stroke="var(--tx3)" tick={{ fontSize: 11 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v) => typeof v === 'number' ? fmtBRL(v) : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
+                <Line type="monotone" dataKey="saldo" stroke="#0a84ff" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       <div className="meta-card">
         <h3>🎯 Metas Anuais {anoAtual}</h3>
