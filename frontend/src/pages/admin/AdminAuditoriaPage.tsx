@@ -88,7 +88,7 @@ export default function AdminAuditoriaPage({ clienteId }: Props) {
                         <div>
                           <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 4 }}>Antes:</div>
                           <pre style={{ fontSize: 11, overflow: 'auto', maxHeight: 200, padding: 8, background: '#ff3b3010', borderRadius: 4 }}>
-                            {JSON.stringify(JSON.parse(log.dadosAntes), null, 2)}
+                            {(() => { try { return JSON.stringify(JSON.parse(log.dadosAntes!), null, 2) } catch { return log.dadosAntes } })()}
                           </pre>
                         </div>
                       )}
@@ -96,7 +96,7 @@ export default function AdminAuditoriaPage({ clienteId }: Props) {
                         <div>
                           <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 4 }}>Depois:</div>
                           <pre style={{ fontSize: 11, overflow: 'auto', maxHeight: 200, padding: 8, background: '#34c75910', borderRadius: 4 }}>
-                            {JSON.stringify(JSON.parse(log.dadosDepois), null, 2)}
+                            {(() => { try { return JSON.stringify(JSON.parse(log.dadosDepois!), null, 2) } catch { return log.dadosDepois } })()}
                           </pre>
                         </div>
                       )}
