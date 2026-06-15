@@ -62,6 +62,7 @@ builder.Services.AddScoped<IContaRecorrenteRepository, ContaRecorrenteRepository
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IRecorrenciaService, RecorrenciaService>();
 builder.Services.AddScoped<IContaRecorrenteService, ContaRecorrenteService>();
+builder.Services.AddScoped<IMetricasService, MetricasService>();
 
 var app = builder.Build();
 
