@@ -86,19 +86,19 @@ public class MetricasService : IMetricasService
         }
 
         // Runway
-        var saldoAtualRunway = todosRegistros.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0;
         var burnMedioMensal = ultimos3Meses
             .Where(m => m.Count > 0)
             .Select(m => m.SelectMany(r => r.Saidas).Sum(s => s.Valor))
             .DefaultIfEmpty(0)
             .Average();
+        var runwayMeses = burnMedioMensal > 0 ? Math.Round(saldoAtual / burnMedioMensal, 1) : 0;
 
         dto.Runway = new RunwayDto
         {
-            Meses = burnMedioMensal > 0 ? Math.Round(saldoAtualRunway / burnMedioMensal, 1) : 0,
+            Meses = runwayMeses,
             Semaforo = burnMedioMensal == 0 ? "cinza"
-                : saldoAtualRunway / burnMedioMensal > 6 ? "verde"
-                : saldoAtualRunway / burnMedioMensal >= 3 ? "amarelo"
+                : runwayMeses > 6 ? "verde"
+                : runwayMeses >= 3 ? "amarelo"
                 : "vermelho",
         };
 
@@ -117,7 +117,7 @@ public class MetricasService : IMetricasService
         }
         else
         {
-            var indice = Math.Round(saldoAtualRunway / contasPagarProximas, 2);
+            var indice = Math.Round(saldoAtual / contasPagarProximas, 2);
             dto.Liquidez = new LiquidezDto
             {
                 Indice = indice,
