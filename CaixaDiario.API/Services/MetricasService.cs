@@ -59,6 +59,73 @@ public class MetricasService : IMetricasService
         var totalPagar = todosRegistros.SelectMany(r => r.ContasPagar).Where(c => !c.Pago).Sum(c => c.Valor);
         dto.SaldoProjetado = saldoAtual + totalReceber - totalPagar;
 
+        // Valuation
+        var ultimos3Meses = Enumerable.Range(0, 3)
+            .Select(i => DateOnly.FromDateTime(DateTime.UtcNow).AddMonths(-i))
+            .Select(m => todosRegistros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month).ToList())
+            .ToList();
+
+        if (ultimos3Meses.Any(m => m.Count > 0))
+        {
+            var lucrosMensais = ultimos3Meses.Select(m =>
+                m.SelectMany(r => r.Entradas).Sum(e => e.Valor) -
+                m.SelectMany(r => r.Saidas).Sum(s => s.Valor)).ToList();
+            var lucroMedioMensal = lucrosMensais.Average();
+            var valuationValor = lucroMedioMensal * 12 * 3;
+            string valuationSemaforo = "cinza";
+            if (ultimos3Meses[0].Count > 0 && ultimos3Meses[1].Count > 0)
+            {
+                var lucroAtual = lucrosMensais[0];
+                var lucroAnterior = lucrosMensais[1];
+                valuationSemaforo = lucroAnterior == 0 ? "cinza"
+                    : (lucroAtual - lucroAnterior) / Math.Abs(lucroAnterior) > 0.05m ? "verde"
+                    : (lucroAtual - lucroAnterior) / Math.Abs(lucroAnterior) < -0.05m ? "vermelho"
+                    : "amarelo";
+            }
+            dto.Valuation = new ValuationDto { Valor = valuationValor, Semaforo = valuationSemaforo };
+        }
+
+        // Runway
+        var saldoAtualRunway = todosRegistros.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0;
+        var burnMedioMensal = ultimos3Meses
+            .Where(m => m.Count > 0)
+            .Select(m => m.SelectMany(r => r.Saidas).Sum(s => s.Valor))
+            .DefaultIfEmpty(0)
+            .Average();
+
+        dto.Runway = new RunwayDto
+        {
+            Meses = burnMedioMensal > 0 ? Math.Round(saldoAtualRunway / burnMedioMensal, 1) : 0,
+            Semaforo = burnMedioMensal == 0 ? "cinza"
+                : saldoAtualRunway / burnMedioMensal > 6 ? "verde"
+                : saldoAtualRunway / burnMedioMensal >= 3 ? "amarelo"
+                : "vermelho",
+        };
+
+        // Liquidez
+        var hoje30 = DateOnly.FromDateTime(DateTime.UtcNow);
+        var em30dias = hoje30.AddDays(30);
+        var contasPagarProximas = todosRegistros
+            .SelectMany(r => r.ContasPagar)
+            .Where(c => !c.Pago && c.DataVencimento.HasValue &&
+                        c.DataVencimento.Value >= hoje30 && c.DataVencimento.Value <= em30dias)
+            .Sum(c => c.Valor);
+
+        if (contasPagarProximas == 0)
+        {
+            dto.Liquidez = new LiquidezDto { AltaLiquidez = true, Semaforo = "verde" };
+        }
+        else
+        {
+            var indice = Math.Round(saldoAtualRunway / contasPagarProximas, 2);
+            dto.Liquidez = new LiquidezDto
+            {
+                Indice = indice,
+                AltaLiquidez = false,
+                Semaforo = indice >= 1.5m ? "verde" : indice >= 1.0m ? "amarelo" : "vermelho",
+            };
+        }
+
         return dto;
     }
 
