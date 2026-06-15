@@ -178,6 +178,27 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               className={metricas.pontoDeEquilibrio.semaforo === 'verde' ? 'val-green' : metricas.pontoDeEquilibrio.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
             />
           )}
+          {metricas.valuation && (
+            <StatCard
+              label={`💎 Valuation ${metricas.valuation.semaforo === 'verde' ? '🟢' : metricas.valuation.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
+              value={fmtBRL(metricas.valuation.valor)}
+              className={metricas.valuation.semaforo === 'verde' ? 'val-green' : 'val-blue'}
+            />
+          )}
+          {metricas.runway && (
+            <StatCard
+              label={`⏳ Runway ${metricas.runway.semaforo === 'verde' ? '🟢' : metricas.runway.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
+              value={`${metricas.runway.meses.toFixed(1)} meses`}
+              className={metricas.runway.semaforo === 'verde' ? 'val-green' : metricas.runway.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
+            />
+          )}
+          {metricas.liquidez && (
+            <StatCard
+              label={`💧 Liquidez ${metricas.liquidez.semaforo === 'verde' ? '🟢' : metricas.liquidez.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
+              value={metricas.liquidez.altaLiquidez ? 'Alta liquidez' : `${metricas.liquidez.indice?.toFixed(2)}×`}
+              className={metricas.liquidez.semaforo === 'verde' ? 'val-green' : metricas.liquidez.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
+            />
+          )}
         </div>
       )}
 
