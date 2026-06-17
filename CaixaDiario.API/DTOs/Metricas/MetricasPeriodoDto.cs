@@ -6,6 +6,7 @@ public class MetricasPeriodoDto
     public PrimeCostDto? PrimeCost { get; set; }
     public PontoDeEquilibrioDto? PontoDeEquilibrio { get; set; }
     public decimal SaldoProjetado { get; set; }
+    public decimal? BurnRate { get; set; }
     public ValuationDto? Valuation { get; set; }
     public RunwayDto? Runway { get; set; }
     public LiquidezDto? Liquidez { get; set; }

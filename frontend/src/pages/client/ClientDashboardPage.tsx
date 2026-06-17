@@ -230,6 +230,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               className={metricas.liquidez.semaforo === 'verde' ? 'val-green' : metricas.liquidez.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
             />
           )}
+          {metricas.burnRate != null && (
+            <StatCard label="🔥 Burn Rate (mês)" value={fmtBRL(metricas.burnRate)} className="val-red" />
+          )}
         </div>
       )}
 

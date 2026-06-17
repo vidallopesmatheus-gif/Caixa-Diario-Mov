@@ -39,6 +39,7 @@ export interface MetricasPeriodo {
   primeCost?: PrimeCostMetrica
   pontoDeEquilibrio?: PontoDeEquilibrioMetrica
   saldoProjetado: number
+  burnRate?: number
   valuation?: ValuationMetrica
   runway?: RunwayMetrica
   liquidez?: LiquidezMetrica

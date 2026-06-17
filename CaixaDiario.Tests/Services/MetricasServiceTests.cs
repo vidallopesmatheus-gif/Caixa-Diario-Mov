@@ -211,4 +211,20 @@ public class MetricasServiceTests
         Assert.Equal("verde", resultado.Liquidez.Semaforo);
         Assert.False(resultado.Liquidez.AltaLiquidez);
     }
+
+    // ---- Burn Rate ----
+
+    [Fact]
+    public void CalcularPeriodo_ComSaidas3Meses_CalculaBurnRate()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(hoje, new() { Item("Venda", 100m, "Vendas", "Receita") },
+                new() { Item("Custo", 900m, "Aluguel", "CustoFixo") }, saldoFinal: 1000m),
+        };
+        var resultado = _sut.CalcularPeriodo(registros, registros);
+        Assert.NotNull(resultado.BurnRate);
+        Assert.Equal(900m, resultado.BurnRate);
+    }
 }

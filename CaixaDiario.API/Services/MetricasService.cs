@@ -91,6 +91,7 @@ public class MetricasService : IMetricasService
             .Select(m => m.SelectMany(r => r.Saidas).Sum(s => s.Valor))
             .DefaultIfEmpty(0)
             .Average();
+        dto.BurnRate = burnMedioMensal > 0 ? Math.Round(burnMedioMensal, 2) : (decimal?)null;
         var runwayMeses = burnMedioMensal > 0 ? Math.Round(saldoAtual / burnMedioMensal, 1) : 0;
 
         dto.Runway = new RunwayDto
