@@ -112,13 +112,20 @@ public class MetricasService : IMetricasService
                         c.DataVencimento.Value >= hoje30 && c.DataVencimento.Value <= em30dias)
             .Sum(c => c.Valor);
 
+        var contasReceberProximas = todosRegistros
+            .SelectMany(r => r.ContasReceber)
+            .Where(c => !c.Pago && c.DataVencimento.HasValue &&
+                        c.DataVencimento.Value >= hoje30 && c.DataVencimento.Value <= em30dias)
+            .Sum(c => c.Valor);
+        var numeradorLiquidez = saldoAtual + contasReceberProximas;
+
         if (contasPagarProximas == 0)
         {
             dto.Liquidez = new LiquidezDto { AltaLiquidez = true, Semaforo = "verde" };
         }
         else
         {
-            var indice = Math.Round(saldoAtual / contasPagarProximas, 2);
+            var indice = Math.Round(numeradorLiquidez / contasPagarProximas, 2);
             dto.Liquidez = new LiquidezDto
             {
                 Indice = indice,

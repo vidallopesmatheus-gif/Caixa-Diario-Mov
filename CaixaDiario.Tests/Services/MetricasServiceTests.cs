@@ -212,6 +212,24 @@ public class MetricasServiceTests
         Assert.False(resultado.Liquidez.AltaLiquidez);
     }
 
+    [Fact]
+    public void CalcularPeriodo_ComContasReceberProximos30Dias_SomaNoNumeradorLiquidez()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var amanha = hoje.AddDays(1);
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Data = hoje,
+            Entradas = new(), Saidas = new(), SaldoFinal = 1000m,
+            ContasReceber = new() { new() { Descricao = "Cliente X", Valor = 2000m, DataVencimento = amanha, Pago = false } },
+            ContasPagar = new() { new() { Descricao = "Aluguel", Valor = 1000m, DataVencimento = amanha, Pago = false } },
+        };
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        // (1000 + 2000) / 1000 = 3.0
+        Assert.NotNull(resultado.Liquidez);
+        Assert.Equal(3.0m, resultado.Liquidez!.Indice);
+    }
+
     // ---- Burn Rate ----
 
     [Fact]
