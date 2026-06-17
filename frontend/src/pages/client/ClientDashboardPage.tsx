@@ -34,6 +34,21 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const anoAtual = hoje.getFullYear()
   const mesAtual = hoje.getMonth() + 1
 
+  const lucroComparativo = useMemo(() => {
+    const lucroDoMes = (ano: number, mes: number) => {
+      const prefixo = `${ano}-${String(mes).padStart(2, '0')}`
+      const doMes = registros.filter(r => r.data.startsWith(prefixo))
+      return doMes.reduce((s, r) =>
+        s + r.entradas.reduce((a, e) => a + e.valor, 0) - r.saidas.reduce((a, e) => a + e.valor, 0), 0)
+    }
+    const atual = lucroDoMes(anoAtual, mesAtual)
+    const mesAnt = mesAtual === 1 ? 12 : mesAtual - 1
+    const anoAnt = mesAtual === 1 ? anoAtual - 1 : anoAtual
+    const anterior = lucroDoMes(anoAnt, mesAnt)
+    const variacao = anterior !== 0 ? ((atual - anterior) / Math.abs(anterior)) * 100 : null
+    return { atual, anterior, variacao }
+  }, [registros, anoAtual, mesAtual])
+
   const primeiroDiaMes = `${anoAtual}-${String(mesAtual).padStart(2,'0')}-01`
   const ultimoDiaMes = new Date(anoAtual, mesAtual, 0).toISOString().slice(0,10)
 
@@ -127,6 +142,14 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         <StatCard label="📈 Total Receita" value={fmtBRL(totalReceita)} className="val-green" />
         <StatCard label="💸 Total Saída" value={fmtBRL(totalSaida)} className="val-red" />
         <StatCard label="📊 Lucro Operacional" value={fmtBRL(lucroOp)} className={lucroOp >= 0 ? 'val-green' : 'val-red'} />
+        <StatCard
+          label="🧮 Lucro Líquido (mês)"
+          value={fmtBRL(lucroComparativo.atual)}
+          className={lucroComparativo.atual >= 0 ? 'val-green' : 'val-red'}
+          sub={lucroComparativo.variacao === null
+            ? `Mês anterior: ${fmtBRL(lucroComparativo.anterior)}`
+            : `${lucroComparativo.variacao >= 0 ? '▲' : '▼'} ${Math.abs(lucroComparativo.variacao).toFixed(1)}% vs mês anterior`}
+        />
         <StatCard label="💰 Saldo Final" value={fmtBRL(saldoFinal)} className="val-blue" />
       </div>
 
