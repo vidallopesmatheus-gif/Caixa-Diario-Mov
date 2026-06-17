@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { useMetricas } from '../../hooks/useMetricas'
 import StatCard from '../../components/shared/StatCard'
-import { fmtBRL } from '../../utils/format'
+import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { obterMeta, salvarMeta } from '../../api/metas'
 import { getContasEmRisco } from '../../utils/alertas'
 import type { MetaAnual } from '../../types'
@@ -136,6 +136,14 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       <div className="dash-period">
         <label>De <input type="date" value={de} onChange={e => setDe(e.target.value)} /></label>
         <label>Até <input type="date" value={ate} onChange={e => setAte(e.target.value)} /></label>
+        <button type="button" onClick={() => { const h = todayISO(); setDe(h); setAte(h) }}
+          style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-card)', color: 'var(--tx1)', cursor: 'pointer' }}>
+          Hoje
+        </button>
+        <button type="button" onClick={() => { setDe(addDays(todayISO(), -29)); setAte(todayISO()) }}
+          style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-card)', color: 'var(--tx1)', cursor: 'pointer' }}>
+          Últimos 30 dias
+        </button>
       </div>
 
       <div className="stats-grid">
