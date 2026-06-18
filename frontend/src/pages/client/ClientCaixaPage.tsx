@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
@@ -14,9 +14,6 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, salvar, buscarPorData } = useRegistros(clienteId)
-
-  const registrosRef = useRef(registros)
-  useEffect(() => { registrosRef.current = registros }, [registros])
 
   const [data, setData] = useState(todayISO())
   const [inicio, setInicio] = useState(0)
@@ -37,7 +34,6 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const calculado = inicio + totalEntradas - totalSaidas
   const dif = confirmado !== '' ? calculado - Number(confirmado) : null
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!clienteId) return
     let ignore = false
@@ -50,7 +46,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0 }])
         setConfirmado(String(reg.saldoConfirmado))
       } else {
-        const prev = registrosRef.current.find(r => r.data < data)
+        const prev = registros.find(r => r.data < data)
         setInicio(prev?.saldoConfirmado ?? 0)
         setEntradas([{ descricao: '', valor: 0 }])
         setSaidas([{ descricao: '', valor: 0 }])
@@ -59,7 +55,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     }
     load()
     return () => { ignore = true }
-  }, [data, clienteId])
+  }, [data, clienteId, registros, buscarPorData])
 
   async function handleSave() {
     if (!clienteId) return

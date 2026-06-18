@@ -155,6 +155,32 @@ test('carrega saldo anterior quando buscarPorData retorna null e há registros a
   await waitFor(() => expect(buscarPorData).toHaveBeenCalled())
 })
 
+test('carrega saldo anterior quando registros chegam DEPOIS da montagem (race condition)', async () => {
+  // Cenário do bug: ao abrir direto no dia atual, a lista de registros ainda
+  // está sendo buscada (vazia). Ela chega só depois da montagem do componente.
+  const prevReg = {
+    id: 'r0', clienteId: 'u1', data: '2020-01-01',
+    saldoInicio: 0, entradas: [], saidas: [], contasAReceber: [], contasAPagar: [],
+    saldoConfirmado: 1200, saldoCalculado: 1200, criadoEm: '',
+  }
+  const buscarPorData = vi.fn().mockResolvedValue(null) // sem registro para hoje
+
+  // 1ª renderização: lista ainda vazia (fetch em andamento)
+  mockHooks({ buscarPorData, registros: [] })
+  const { rerender } = render(<ClientCaixaPage />)
+  await waitFor(() => expect(buscarPorData).toHaveBeenCalled())
+
+  // 2ª renderização: a lista chega com o saldo do dia anterior (1200)
+  mockHooks({ buscarPorData, registros: [prevReg] })
+  rerender(<ClientCaixaPage />)
+
+  // O "Saldo início" deve refletir o saldo confirmado do dia anterior, não zero
+  const inicioCard = screen.getByText('📥 Início').closest('.stat-card') as HTMLElement
+  await waitFor(() =>
+    expect(inicioCard).toHaveTextContent('1.200,00')
+  )
+})
+
 test('não salva quando clienteId é nulo', async () => {
   vi.mocked(AuthContextModule.useAuth).mockReturnValue({ user: null, login: vi.fn(), logout: vi.fn() })
   vi.mocked(useRegistrosHook.useRegistros).mockReturnValue({
