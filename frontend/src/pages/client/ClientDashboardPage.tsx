@@ -115,6 +115,16 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     })
   }, [meta, registros, anoAtual, mesAtual])
 
+  const metaMesAtual = useMemo(() => {
+    const linha = planejamento.find(p => p.isAtual)
+    if (!linha || linha.lucroReal === null) return null
+    const alvo = linha.targetLucro
+    const real = linha.lucroReal
+    const pct = alvo > 0 ? Math.min(100, Math.max(0, (real / alvo) * 100)) : 0
+    const faltante = Math.max(0, alvo - real)
+    return { alvo, real, pct, faltante, atingida: real >= alvo }
+  }, [planejamento])
+
   async function handleSaveMeta() {
     if (!clienteId) return
     setSavingMeta(true)
@@ -270,6 +280,30 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                 <Line type="monotone" dataKey="saldo" stroke="#0a84ff" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {metaMesAtual && (
+        <div className="meta-card">
+          <h3>🎯 Meta de Lucro do Mês</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--tx3)', marginBottom: 6 }}>
+            <span>Realizado: {fmtBRL(metaMesAtual.real)}</span>
+            <span>Meta: {fmtBRL(metaMesAtual.alvo)}</span>
+          </div>
+          <div style={{ height: 14, background: 'var(--bd)', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{
+              width: `${metaMesAtual.pct}%`, height: '100%',
+              background: metaMesAtual.atingida ? '#34c759' : '#0a84ff', transition: 'width .3s',
+            }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 14, fontWeight: 600 }}>
+            <span style={{ color: metaMesAtual.atingida ? '#34c759' : 'var(--tx1)' }}>
+              {metaMesAtual.pct.toFixed(1)}% atingido
+            </span>
+            <span style={{ color: metaMesAtual.atingida ? '#34c759' : '#ff9500' }}>
+              {metaMesAtual.atingida ? '✅ Meta batida!' : `Faltam ${fmtBRL(metaMesAtual.faltante)}`}
+            </span>
           </div>
         </div>
       )}
