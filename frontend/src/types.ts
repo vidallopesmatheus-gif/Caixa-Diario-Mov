@@ -55,6 +55,7 @@ export interface ContaRecorrente {
 export interface CategoriaItem {
   nome: string
   tipoCusto: 'Receita' | 'CustoFixo' | 'CustoVariavel'
+  grupo?: string
 }
 
 export interface Categorias {

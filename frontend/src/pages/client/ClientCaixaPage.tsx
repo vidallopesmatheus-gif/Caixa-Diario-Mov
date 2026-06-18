@@ -5,7 +5,8 @@ import StatCard from '../../components/shared/StatCard'
 import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { listarCategorias } from '../../api/categorias'
-import type { ItemFinanceiro, Categorias } from '../../types'
+import { ORDEM_GRUPOS } from '../../utils/categorias'
+import type { ItemFinanceiro, Categorias, CategoriaItem } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
@@ -149,7 +150,15 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
               <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateItem(saidas, setSaidas, i, 'valor', e.target.value)} step="0.01" min="0" />
               <select value={s.categoria ?? ''} onChange={ev => updateItem(saidas, setSaidas, i, 'categoria', ev.target.value)}>
                 <option value="">Categoria</option>
-                {categorias.saidas.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+                {ORDEM_GRUPOS.map(grupo => {
+                  const itens: CategoriaItem[] = categorias.saidas.filter(c => (c.grupo ?? 'Outros') === grupo)
+                  if (itens.length === 0) return null
+                  return (
+                    <optgroup key={grupo} label={grupo}>
+                      {itens.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+                    </optgroup>
+                  )
+                })}
               </select>
               <button className="btn-rm" onClick={() => setSaidas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
