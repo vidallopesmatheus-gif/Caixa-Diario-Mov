@@ -230,6 +230,28 @@ public class MetricasServiceTests
         Assert.Equal(3.0m, resultado.Liquidez!.Indice);
     }
 
+    // ---- Ticket Médio ----
+
+    [Fact]
+    public void CalcularPeriodo_ComRecebimentos_CalculaTicketMedio()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda 1", 600m, "Vendas", "Receita"), Item("Venda 2", 400m, "Vendas", "Receita") },
+            new());
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        Assert.NotNull(resultado.TicketMedio);
+        Assert.Equal(2, resultado.TicketMedio!.QuantidadeRecebimentos);
+        Assert.Equal(500m, resultado.TicketMedio.Valor);
+    }
+
+    [Fact]
+    public void CalcularPeriodo_SemRecebimentos_TicketMedioNull()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1), new(), new() { Item("Aluguel", 300m, "Aluguel", "CustoFixo") });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        Assert.Null(resultado.TicketMedio);
+    }
+
     // ---- Burn Rate ----
 
     [Fact]

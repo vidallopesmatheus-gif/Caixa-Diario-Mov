@@ -195,6 +195,14 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               className={metricas.ebitda.semaforo === 'verde' ? 'val-green' : metricas.ebitda.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
             />
           )}
+          {metricas.ticketMedio && (
+            <StatCard
+              label="🎟️ Ticket Médio"
+              value={fmtBRL(metricas.ticketMedio.valor)}
+              className="val-blue"
+              sub={`${metricas.ticketMedio.quantidadeRecebimentos} recebimentos`}
+            />
+          )}
           {metricas.primeCost?.percentual != null && (
             <StatCard
               label={`🍽️ Prime Cost ${metricas.primeCost.semaforo === 'verde' ? '🟢' : metricas.primeCost.semaforo === 'amarelo' ? '🟡' : '🔴'}`}

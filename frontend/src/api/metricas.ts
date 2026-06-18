@@ -34,6 +34,11 @@ export interface LiquidezMetrica {
   semaforo: string
 }
 
+export interface TicketMedioMetrica {
+  valor: number
+  quantidadeRecebimentos: number
+}
+
 export interface MetricasPeriodo {
   ebitda?: EbitdaMetrica
   primeCost?: PrimeCostMetrica
@@ -43,6 +48,7 @@ export interface MetricasPeriodo {
   valuation?: ValuationMetrica
   runway?: RunwayMetrica
   liquidez?: LiquidezMetrica
+  ticketMedio?: TicketMedioMetrica
 }
 
 export interface EvolucaoMensal {

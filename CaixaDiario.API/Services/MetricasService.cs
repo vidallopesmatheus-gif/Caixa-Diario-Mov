@@ -52,6 +52,16 @@ public class MetricasService : IMetricasService
                     Semaforo = receita >= pe * 1.2m ? "verde" : receita >= pe ? "amarelo" : "vermelho",
                 };
             }
+
+            var qtdRecebimentos = entradas.Count(e => e.TipoCusto == "Receita");
+            if (qtdRecebimentos > 0)
+            {
+                dto.TicketMedio = new TicketMedioDto
+                {
+                    Valor = Math.Round(receita / qtdRecebimentos, 2),
+                    QuantidadeRecebimentos = qtdRecebimentos,
+                };
+            }
         }
 
         var saldoAtual = todosRegistros.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0;

@@ -10,6 +10,13 @@ public class MetricasPeriodoDto
     public ValuationDto? Valuation { get; set; }
     public RunwayDto? Runway { get; set; }
     public LiquidezDto? Liquidez { get; set; }
+    public TicketMedioDto? TicketMedio { get; set; }
+}
+
+public class TicketMedioDto
+{
+    public decimal Valor { get; set; }
+    public int QuantidadeRecebimentos { get; set; }
 }
 
 public class EbitdaDto
