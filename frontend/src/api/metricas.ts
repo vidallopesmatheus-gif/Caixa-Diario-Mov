@@ -69,8 +69,8 @@ export interface FluxoProjetado {
   dias: FluxoDia[]
 }
 
-export async function obterMetricas(clienteId: string, de: string, ate: string): Promise<MetricasPeriodo> {
-  const res = await apiFetch<ApiResponse<MetricasPeriodo>>(`/api/metricas/${clienteId}?de=${de}&ate=${ate}`)
+export async function obterMetricas(clienteId: string, de: string, ate: string, multiplo = 3): Promise<MetricasPeriodo> {
+  const res = await apiFetch<ApiResponse<MetricasPeriodo>>(`/api/metricas/${clienteId}?de=${de}&ate=${ate}&multiplo=${multiplo}`)
   return res.dados
 }
 

@@ -5,7 +5,7 @@ namespace CaixaDiario.API.Services;
 
 public class MetricasService : IMetricasService
 {
-    public MetricasPeriodoDto CalcularPeriodo(List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo)
+    public MetricasPeriodoDto CalcularPeriodo(List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal multiplo = 3m)
     {
         var entradas = registrosDoPeriodo.SelectMany(r => r.Entradas).ToList();
         var saidas = registrosDoPeriodo.SelectMany(r => r.Saidas).ToList();
@@ -81,7 +81,7 @@ public class MetricasService : IMetricasService
                 m.SelectMany(r => r.Entradas).Sum(e => e.Valor) -
                 m.SelectMany(r => r.Saidas).Sum(s => s.Valor)).ToList();
             var lucroMedioMensal = lucrosMensais.Average();
-            var valuationValor = lucroMedioMensal * 12 * 3;
+            var valuationValor = lucroMedioMensal * 12 * multiplo;
             string valuationSemaforo = "cinza";
             if (ultimos3Meses[0].Count > 0 && ultimos3Meses[1].Count > 0)
             {

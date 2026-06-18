@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { obterMetricas, obterFluxoProjetado } from '../api/metricas'
 import type { MetricasPeriodo, FluxoProjetado } from '../api/metricas'
 
-export function useMetricas(clienteId: string | null, de: string, ate: string) {
+export function useMetricas(clienteId: string | null, de: string, ate: string, multiplo = 3) {
   const [metricas, setMetricas] = useState<MetricasPeriodo | null>(null)
   const [fluxo, setFluxo] = useState<FluxoProjetado | null>(null)
   const [loading, setLoading] = useState(false)
@@ -12,7 +12,7 @@ export function useMetricas(clienteId: string | null, de: string, ate: string) {
     setLoading(true)
     try {
       const [m, f] = await Promise.all([
-        obterMetricas(clienteId, de, ate),
+        obterMetricas(clienteId, de, ate, multiplo),
         obterFluxoProjetado(clienteId, 30),
       ])
       setMetricas(m)
@@ -22,7 +22,7 @@ export function useMetricas(clienteId: string | null, de: string, ate: string) {
     } finally {
       setLoading(false)
     }
-  }, [clienteId, de, ate])
+  }, [clienteId, de, ate, multiplo])
 
   useEffect(() => { carregar() }, [carregar])
 

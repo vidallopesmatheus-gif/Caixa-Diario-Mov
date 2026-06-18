@@ -54,7 +54,8 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   const [de, setDe] = useState(primeiroDiaMes)
   const [ate, setAte] = useState(ultimoDiaMes)
-  const { metricas, fluxo } = useMetricas(clienteId, de, ate)
+  const [multiploValuation, setMultiploValuation] = useState(3)
+  const { metricas, fluxo } = useMetricas(clienteId, de, ate, multiploValuation)
   const [meta, setMeta] = useState<MetaAnual | null>(null)
   const [editReceita, setEditReceita] = useState('')
   const [editLucro, setEditLucro] = useState('')
@@ -218,11 +219,23 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
             />
           )}
           {metricas.valuation && (
-            <StatCard
-              label={`💎 Valuation ${metricas.valuation.semaforo === 'verde' ? '🟢' : metricas.valuation.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
-              value={fmtBRL(metricas.valuation.valor)}
-              className={metricas.valuation.semaforo === 'verde' ? 'val-green' : 'val-blue'}
-            />
+            <>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '8px 0' }}>
+                <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Múltiplo Valuation:</span>
+                {[3, 4, 5, 6].map(m => (
+                  <button key={m} type="button" onClick={() => setMultiploValuation(m)}
+                    style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--bd)', cursor: 'pointer',
+                      background: multiploValuation === m ? '#0a84ff' : 'var(--bg-card)', color: multiploValuation === m ? '#fff' : 'var(--tx1)' }}>
+                    {m}x
+                  </button>
+                ))}
+              </div>
+              <StatCard
+                label={`💎 Valuation ${metricas.valuation.semaforo === 'verde' ? '🟢' : metricas.valuation.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
+                value={fmtBRL(metricas.valuation.valor)}
+                className={metricas.valuation.semaforo === 'verde' ? 'val-green' : 'val-blue'}
+              />
+            </>
           )}
           {metricas.runway && (
             <StatCard

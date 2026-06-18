@@ -35,12 +35,12 @@ public class MetricasController : ControllerBase
     }
 
     [HttpGet("{clienteId:guid}")]
-    public async Task<IActionResult> ObterMetricas(Guid clienteId, [FromQuery] DateOnly de, [FromQuery] DateOnly ate)
+    public async Task<IActionResult> ObterMetricas(Guid clienteId, [FromQuery] DateOnly de, [FromQuery] DateOnly ate, [FromQuery] decimal multiplo = 3)
     {
         VerificarAcesso(clienteId);
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
         var doPeriodo = todos.Where(r => r.Data >= de && r.Data <= ate).ToList();
-        var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo);
+        var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo, multiplo);
         return Ok(new ApiResponse<MetricasPeriodoDto> { Dados = resultado });
     }
 

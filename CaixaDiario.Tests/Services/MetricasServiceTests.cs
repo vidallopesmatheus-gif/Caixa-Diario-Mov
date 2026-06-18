@@ -252,6 +252,23 @@ public class MetricasServiceTests
         Assert.Null(resultado.TicketMedio);
     }
 
+    // ---- Múltiplo Valuation ----
+
+    [Fact]
+    public void CalcularPeriodo_MultiploCustomizado_AplicaNoValuation()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var registros = new List<RegistroDiario>();
+        for (int i = 2; i >= 0; i--)
+            registros.Add(CriarRegistro(hoje.AddMonths(-i).AddDays(-5),
+                new() { Item("Venda", 2000m, "Vendas", "Receita") },
+                new() { Item("Custo", 1000m, "Aluguel", "CustoFixo") }));
+
+        var v3 = _sut.CalcularPeriodo(registros, registros, 3m).Valuation!.Valor;
+        var v6 = _sut.CalcularPeriodo(registros, registros, 6m).Valuation!.Valor;
+        Assert.Equal(v3 * 2, v6);
+    }
+
     // ---- Burn Rate ----
 
     [Fact]
