@@ -34,7 +34,7 @@ public class RegistroServiceTests
             Data = data ?? DateOnly.FromDateTime(DateTime.UtcNow),
             Inicio = 100m,
             Entradas = new List<ItemFinanceiroDto> { new() { Descricao = "Caixa", Valor = 500m } },
-            Saidas = new List<ItemFinanceiroDto> { new() { Descricao = "Aluguel", Valor = 200m } },
+            Saidas = new List<ItemFinanceiroDto> { new() { Descricao = "Aluguel", Valor = 200m, Categoria = "Aluguel" } },
             ContasReceber = new(),
             ContasPagar = new(),
             SaldoFinal = 400m
@@ -132,6 +132,21 @@ public class RegistroServiceTests
         await _sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
 
         _recorrenciaMock.Verify(r => r.MaterializarMesAtualAsync(clienteId), Times.Once);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_SaidaSemCategoria_LancaExcecao()
+    {
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = Guid.NewGuid(),
+            Data = DateOnly.FromDateTime(DateTime.UtcNow),
+            Entradas = new(),
+            Saidas = new() { new ItemFinanceiroDto { Descricao = "Compra", Valor = 50m, Categoria = null } },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+        };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "tester"));
+        Assert.Equal(400, ex.StatusCode);
     }
 
     // --- existing tests preserved below ---

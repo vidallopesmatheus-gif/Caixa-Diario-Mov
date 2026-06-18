@@ -207,3 +207,21 @@ test('atualiza campo de valor de saída', () => {
   fireEvent.change(valorInputs[0], { target: { value: '150' } })
   expect((valorInputs[0] as HTMLInputElement).value).toBe('150')
 })
+
+test('salvar sem categoria em saída exibe mensagem e não chama a API', async () => {
+  const salvar = vi.fn().mockResolvedValue({})
+  mockHooks({ salvar })
+  render(<ClientCaixaPage />)
+  // preenche descrição e valor da saída para que ela passe no filtro (descricao || valor)
+  const descInputs = screen.getAllByPlaceholderText('Descrição')
+  const valorInputs = screen.getAllByPlaceholderText('R$')
+  // o segundo campo de descrição e valor corresponde à linha de saída
+  fireEvent.change(descInputs[1], { target: { value: 'Aluguel' } })
+  fireEvent.change(valorInputs[1], { target: { value: '100' } })
+  // não seleciona categoria — clica em salvar
+  fireEvent.click(screen.getByText(/Salvar e sincronizar/))
+  await waitFor(() =>
+    expect(screen.getByText(/Selecione uma categoria para cada saída/)).toBeInTheDocument()
+  )
+  expect(salvar).not.toHaveBeenCalled()
+})

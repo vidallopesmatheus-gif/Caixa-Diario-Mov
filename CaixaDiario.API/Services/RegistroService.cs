@@ -49,6 +49,9 @@ public class RegistroService : IRegistroService
         if (dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
 
+        if (dto.Saidas.Any(s => string.IsNullOrWhiteSpace(s.Categoria)))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Toda saída deve ter uma categoria.", "categoria");
+
         var existente = await _registroRepository.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data);
         var dadosAntes = existente != null ? JsonSerializer.Serialize(MapToDto(existente)) : null;
 

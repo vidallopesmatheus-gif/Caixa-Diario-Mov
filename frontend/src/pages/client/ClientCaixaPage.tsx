@@ -62,13 +62,19 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSaving(true)
     setMsg('')
     try {
+      const saidasValidas = saidas.filter(s => s.descricao || s.valor)
+      if (saidasValidas.some(s => !s.categoria)) {
+        setSaveSuccess(false)
+        setMsg('Selecione uma categoria para cada saída.')
+        return
+      }
       const regAtual = await buscarPorData(data)
       await salvar({
         clienteId,
         data,
         saldoInicio: inicio,
         entradas: entradas.filter(e => e.descricao || e.valor),
-        saidas: saidas.filter(s => s.descricao || s.valor),
+        saidas: saidasValidas,
         contasAReceber: regAtual?.contasAReceber ?? [],
         contasAPagar: regAtual?.contasAPagar ?? [],
         saldoConfirmado: confirmado === '' ? calculado : Number(confirmado),
@@ -132,7 +138,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
               <button className="btn-rm" onClick={() => setEntradas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
-          <button className="btn-add-saida" onClick={() => setEntradas(e => [...e, { descricao: '', valor: 0 }])}>＋ Adicionar entrada</button>
+          <button className="btn-add-receber" onClick={() => setEntradas(e => [...e, { descricao: '', valor: 0 }])}>＋ Adicionar Entrada</button>
         </div>
 
         <div className="inp-group">
