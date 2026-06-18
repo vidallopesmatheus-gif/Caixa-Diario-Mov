@@ -1,5 +1,5 @@
 // frontend/src/pages/client/ClientCaixaPage.test.tsx
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import ClientCaixaPage from './ClientCaixaPage'
 import * as AuthContextModule from '../../contexts/AuthContext'
 import * as useRegistrosHook from '../../hooks/useRegistros'
@@ -212,16 +212,16 @@ test('salvar sem categoria em saída exibe mensagem e não chama a API', async (
   const salvar = vi.fn().mockResolvedValue({})
   mockHooks({ salvar })
   render(<ClientCaixaPage />)
-  // preenche descrição e valor da saída para que ela passe no filtro (descricao || valor)
-  const descInputs = screen.getAllByPlaceholderText('Descrição')
-  const valorInputs = screen.getAllByPlaceholderText('R$')
-  // o segundo campo de descrição e valor corresponde à linha de saída
-  fireEvent.change(descInputs[1], { target: { value: 'Aluguel' } })
-  fireEvent.change(valorInputs[1], { target: { value: '100' } })
+  // escopa a query à seção de Saídas para evitar colisão com campos de Entradas
+  const saidasSection = screen.getByText(/Saídas do dia/).closest('.inp-group')!
+  const saidasContainer = within(saidasSection)
+  // preenche descrição e valor da primeira linha de saída para que ela passe no filtro (descricao || valor)
+  fireEvent.change(saidasContainer.getByPlaceholderText('Descrição'), { target: { value: 'Aluguel' } })
+  fireEvent.change(saidasContainer.getByPlaceholderText('R$'), { target: { value: '100' } })
   // não seleciona categoria — clica em salvar
   fireEvent.click(screen.getByText(/Salvar e sincronizar/))
   await waitFor(() =>
-    expect(screen.getByText(/Selecione uma categoria para cada saída/)).toBeInTheDocument()
+    expect(screen.getByText('Selecione uma categoria para cada saída.')).toBeInTheDocument()
   )
   expect(salvar).not.toHaveBeenCalled()
 })
