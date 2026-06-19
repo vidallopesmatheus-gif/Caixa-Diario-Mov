@@ -503,4 +503,259 @@ public class RegistroServiceTests
         Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5)), resultado.ContasReceber[0].DataVencimento);
         Assert.True(resultado.ContasPagar[0].Pago);
     }
+
+    // --- C2: cobertura de caminhos de criação/auto-baixa/lista-variável ---
+
+    [Fact]
+    public async Task SalvarAsync_CriacaoComContaPagarJaPaga_AjustaSaldoESetaDataBaixa()
+    {
+        // Gap 1: registro NOVO (existente=null) com ContaPagar já paga deve aplicar baixa (−valor, DataBaixa setada)
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId,
+            Data = hoje,
+            Entradas = new(),
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Fornecedor X", Valor = 300m, Pago = true },
+            },
+            SaldoFinal = 1000m,
+        };
+
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.True(criado);
+        Assert.Equal(700m, resultado.SaldoFinal); // 1000 - 300
+        Assert.True(resultado.ContasPagar[0].Pago);
+        Assert.Equal(hoje, resultado.ContasPagar[0].DataBaixa);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_CriacaoComContaReceberJaPaga_AumentaSaldoESetaDataBaixa()
+    {
+        // Gap 1 (opcional): registro NOVO com ContaReceber já paga deve aplicar baixa (+valor, DataBaixa setada)
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId,
+            Data = hoje,
+            Entradas = new(),
+            Saidas = new(),
+            ContasReceber = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Venda Y", Valor = 400m, Pago = true },
+            },
+            ContasPagar = new(),
+            SaldoFinal = 1000m,
+        };
+
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.True(criado);
+        Assert.Equal(1400m, resultado.SaldoFinal); // 1000 + 400
+        Assert.True(resultado.ContasReceber[0].Pago);
+        Assert.Equal(hoje, resultado.ContasReceber[0].DataBaixa);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ResaveComContaJaPagaNoExistente_NaoReajustaSaldo()
+    {
+        // Gap 2: após criado com conta paga (existente retorna registro com pago=true) não deve reajustar
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var dataBaixa = hoje.AddDays(-1);
+
+        var existente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new(), Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Fornecedor X", Valor = 300m, Pago = true, DataBaixa = dataBaixa },
+            },
+            SaldoFinal = 700m, // já com o ajuste da baixa anterior aplicado
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
+        };
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        // reenvia a mesma conta como paga (sem transição)
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId,
+            Data = hoje,
+            Entradas = new(),
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Fornecedor X", Valor = 300m, Pago = true, DataBaixa = dataBaixa },
+            },
+            SaldoFinal = 700m, // frontend reenvia saldo atual
+        };
+
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.False(criado);
+        Assert.Equal(700m, resultado.SaldoFinal); // idempotente: não reduz de novo
+        Assert.True(resultado.ContasPagar[0].Pago);
+        Assert.Equal(dataBaixa, resultado.ContasPagar[0].DataBaixa); // preserva data original
+    }
+
+    [Fact]
+    public async Task SalvarAsync_AutoBaixaPorVencimento_AjustaSaldoUmaVez()
+    {
+        // Gap 3 (primeiro save): ContaPagar com DataVencimento == dto.Data e pago=false.
+        // AplicarBaixaAutomatica marca pago=true; AplicarBaixaFinanceira deve detectar transição (antes=false) e ajustar uma vez.
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var existente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new(), Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Boleto Z", Valor = 150m, DataVencimento = hoje, Pago = false },
+            },
+            SaldoFinal = 1000m,
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
+        };
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId,
+            Data = hoje,
+            Entradas = new(),
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Boleto Z", Valor = 150m, DataVencimento = hoje, Pago = false },
+            },
+            SaldoFinal = 1000m,
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        // AplicarBaixaAutomatica marca pago=true; ajuste financeiro deve ocorrer UMA vez (−150)
+        Assert.Equal(850m, resultado.SaldoFinal); // 1000 - 150
+        Assert.True(resultado.ContasPagar[0].Pago);
+        Assert.Equal(hoje, resultado.ContasPagar[0].DataBaixa);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_AutoBaixaPorVencimento_SegundoSaveNaoReajusta()
+    {
+        // Gap 3 (segundo save): existente já tem pago=true; dto reenvia pago=false mas auto-baixa marcará true.
+        // Não deve reajustar o saldo porque a transição real já ocorreu no save anterior.
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var existente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new(), Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Boleto Z", Valor = 150m, DataVencimento = hoje, Pago = true, DataBaixa = hoje },
+            },
+            SaldoFinal = 850m, // já com o ajuste aplicado
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
+        };
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        // frontend reenvia pago=false, mas a auto-baixa marca true novamente
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId,
+            Data = hoje,
+            Entradas = new(),
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Boleto Z", Valor = 150m, DataVencimento = hoje, Pago = false },
+            },
+            SaldoFinal = 850m,
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        // auto-baixa marca pago=true; existente também era true → sem transição → sem reajuste
+        Assert.Equal(850m, resultado.SaldoFinal); // idempotente
+        Assert.True(resultado.ContasPagar[0].Pago);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ListaTamanhoMaior_ContaPreExistentePagaNaoReajustaNovaNaoAjusta()
+    {
+        // Gap 4: existente tem 1 conta paga; dto tem 2 contas (primeira igual paga, segunda nova não paga).
+        // A conta paga pré-existente NÃO é reajustada; a conta nova não paga não gera ajuste; sem erro de índice.
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var dataBaixa = hoje.AddDays(-2);
+
+        var existente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new(), Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Conta Antiga", Valor = 100m, Pago = true, DataBaixa = dataBaixa },
+            },
+            SaldoFinal = 900m,
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
+        };
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId,
+            Data = hoje,
+            Entradas = new(),
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Conta Antiga", Valor = 100m, Pago = true, DataBaixa = dataBaixa },
+                new() { Descricao = "Conta Nova", Valor = 50m, Pago = false },
+            },
+            SaldoFinal = 900m,
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(900m, resultado.SaldoFinal); // sem reajuste: conta paga já estava paga; conta nova está não-paga
+        Assert.Equal(2, resultado.ContasPagar.Count);
+        Assert.True(resultado.ContasPagar[0].Pago);
+        Assert.Equal(dataBaixa, resultado.ContasPagar[0].DataBaixa); // data original preservada
+        Assert.False(resultado.ContasPagar[1].Pago);
+        Assert.Null(resultado.ContasPagar[1].DataBaixa);
+    }
 }
