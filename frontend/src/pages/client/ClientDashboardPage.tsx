@@ -6,7 +6,7 @@ import { useMetricas } from '../../hooks/useMetricas'
 import StatCard from '../../components/shared/StatCard'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { obterMeta, salvarMeta } from '../../api/metas'
-import { getContasEmRisco } from '../../utils/alertas'
+import { getContasEmRisco, agruparVencimentos } from '../../utils/alertas'
 import type { MetaAnual } from '../../types'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import { grupoDaCategoria, CORES_GRUPO } from '../../utils/categorias'
@@ -23,6 +23,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const navigate = useNavigate()
 
   const contasEmRisco = useMemo(() => getContasEmRisco(registros), [registros])
+  const { vencemHoje, proximos7Dias } = useMemo(() => agruparVencimentos(registros), [registros])
 
   const saldoProjetado = useMemo(() => {
     const saldoAtual = registros[0]?.saldoConfirmado ?? 0
@@ -197,6 +198,30 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           <button onClick={() => navigate('contas')} style={{ marginTop: 10, fontSize: 12, background: 'none', border: '1px solid var(--bd)', borderRadius: 6, color: 'var(--tx3)', padding: '4px 12px', cursor: 'pointer' }}>
             Ver todas as contas →
           </button>
+        </div>
+      )}
+
+      {vencemHoje.length > 0 && (
+        <div className="meta-card" style={{ borderColor: '#ff3b30' }}>
+          <h3>🔴 Vencem Hoje ({vencemHoje.length})</h3>
+          {vencemHoje.map((c, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bd)', fontSize: 13 }}>
+              <span>{c.tipo === 'receber' ? '📥' : '📤'} {c.conta.descricao}</span>
+              <span>{fmtBRL(c.conta.valor)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {proximos7Dias.length > 0 && (
+        <div className="meta-card" style={{ borderColor: '#ff9500' }}>
+          <h3>🗓️ Próximos 7 dias ({proximos7Dias.length})</h3>
+          {proximos7Dias.map((c, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bd)', fontSize: 13 }}>
+              <span>{c.tipo === 'receber' ? '📥' : '📤'} {c.conta.descricao}</span>
+              <span>{fmtBRL(c.conta.valor)} · {c.conta.dataVencimento}</span>
+            </div>
+          ))}
         </div>
       )}
 
