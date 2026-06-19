@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import ClientGraficoPage from './ClientGraficoPage'
 import * as AuthContextModule from '../../contexts/AuthContext'
 import * as metricasApi from '../../api/metricas'
+import * as useRegistrosModule from '../../hooks/useRegistros'
 import type { EvolucaoMensal } from '../../api/metricas'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
@@ -12,6 +13,10 @@ vi.mock('../../contexts/AuthContext', async (importOriginal) => {
 vi.mock('../../api/metricas', async (importOriginal) => {
   const actual = await importOriginal<typeof metricasApi>()
   return { ...actual, obterEvolucao: vi.fn() }
+})
+vi.mock('../../hooks/useRegistros', async (importOriginal) => {
+  const actual = await importOriginal<typeof useRegistrosModule>()
+  return { ...actual, useRegistros: vi.fn() }
 })
 
 // Recharts usa ResizeObserver; precisamos de um stub
@@ -28,14 +33,26 @@ const mockEvolucao: EvolucaoMensal[] = [
   { mes: '2026-02', receita: 6000, custos: 2500, lucro: 3500, saldo: 13500 },
 ]
 
+const mockRegistrosReturn = {
+  registros: [],
+  loading: false,
+  erro: '',
+  salvar: vi.fn(),
+  excluir: vi.fn(),
+  buscarPorData: vi.fn(),
+  recarregar: vi.fn(),
+}
+
 function mockHooks(evolucao: EvolucaoMensal[] = mockEvolucao) {
   vi.mocked(AuthContextModule.useAuth).mockReturnValue({ user: mockUser, login: vi.fn(), logout: vi.fn() })
   vi.mocked(metricasApi.obterEvolucao).mockResolvedValue(evolucao)
+  vi.mocked(useRegistrosModule.useRegistros).mockReturnValue(mockRegistrosReturn)
 }
 
 test('exibe loading enquanto carrega', () => {
   vi.mocked(AuthContextModule.useAuth).mockReturnValue({ user: mockUser, login: vi.fn(), logout: vi.fn() })
   vi.mocked(metricasApi.obterEvolucao).mockReturnValue(new Promise(() => {})) // never resolves
+  vi.mocked(useRegistrosModule.useRegistros).mockReturnValue(mockRegistrosReturn)
   render(<ClientGraficoPage />)
   expect(screen.getByText(/Carregando/)).toBeInTheDocument()
 })

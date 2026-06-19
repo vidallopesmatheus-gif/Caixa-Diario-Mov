@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import StatCard from '../../components/shared/StatCard'
 import { fmtBRL } from '../../utils/format'
 import { obterEvolucao } from '../../api/metricas'
 import type { EvolucaoMensal } from '../../api/metricas'
+import { useRegistros } from '../../hooks/useRegistros'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
@@ -19,6 +20,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const [meses, setMeses] = useState<3 | 6 | 12>(6)
   const [evolucao, setEvolucao] = useState<EvolucaoMensal[]>([])
   const [loading, setLoading] = useState(false)
+  const { registros } = useRegistros(clienteId)
 
   useEffect(() => {
     if (!clienteId) return
@@ -41,6 +43,17 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const totalCustos = evolucao.reduce((s, e) => s + e.custos, 0)
   const totalLucro = evolucao.reduce((s, e) => s + e.lucro, 0)
   const saldoAtual = evolucao[evolucao.length - 1]?.saldo ?? 0
+
+  const totaisPorCategoria = useMemo(() => {
+    const acc: Record<string, number> = {}
+    for (const r of registros)
+      for (const s of r.saidas) {
+        const cat = s.categoria ?? 'Sem categoria'
+        acc[cat] = (acc[cat] ?? 0) + s.valor
+      }
+    return Object.entries(acc).map(([categoria, total]) => ({ categoria, total })).sort((a, b) => b.total - a.total)
+  }, [registros])
+  const totalGeral = totaisPorCategoria.reduce((s, c) => s + c.total, 0)
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
@@ -89,6 +102,17 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
         <StatCard label="💸 Custos Totais" value={fmtBRL(totalCustos)} className="val-red" />
         <StatCard label="📊 Lucro Total" value={fmtBRL(totalLucro)} className={totalLucro >= 0 ? 'val-green' : 'val-red'} />
         <StatCard label="💰 Saldo Atual" value={fmtBRL(saldoAtual)} className="val-blue" />
+      </div>
+
+      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '24px 0 14px', color: '#888' }}>💸 Total Gasto por Categoria</h3>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 14, padding: 20 }}>
+        {totaisPorCategoria.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Sem saídas no período.</p>}
+        {totaisPorCategoria.map(c => (
+          <div key={c.categoria} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bd)' }}>
+            <span>{c.categoria}</span>
+            <span>{fmtBRL(c.total)} · {totalGeral > 0 ? ((c.total / totalGeral) * 100).toFixed(1) : '0'}%</span>
+          </div>
+        ))}
       </div>
     </>
   )
