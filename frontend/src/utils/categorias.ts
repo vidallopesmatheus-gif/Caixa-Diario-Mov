@@ -32,6 +32,8 @@ const MAPA_GRUPO: Record<string, string> = {
   'Publicidade': 'Marketing',
   'Mídia paga': 'Marketing',
   'Material gráfico': 'Marketing',
+  // Alias legado: registros históricos podem usar o nome flat "Marketing"
+  'Marketing': 'Marketing',
   // Impostos
   'Simples/DAS': 'Impostos',
   'ISS': 'Impostos',

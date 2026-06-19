@@ -8,7 +8,8 @@ import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { obterMeta, salvarMeta } from '../../api/metas'
 import { getContasEmRisco } from '../../utils/alertas'
 import type { MetaAnual } from '../../types'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
+import { grupoDaCategoria, CORES_GRUPO } from '../../utils/categorias'
 import './ClientDashboard.css'
 
 interface Props { clienteIdOverride?: string }
@@ -76,6 +77,16 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     registros.filter(r => r.data >= de && r.data <= ate),
     [registros, de, ate]
   )
+
+  const composicaoDespesas = useMemo(() => {
+    const acc: Record<string, number> = {}
+    for (const r of doPeriodo)
+      for (const s of r.saidas) {
+        const grupo = grupoDaCategoria(s.categoria)
+        acc[grupo] = (acc[grupo] ?? 0) + s.valor
+      }
+    return Object.entries(acc).map(([name, value]) => ({ name, value })).filter(d => d.value > 0)
+  }, [doPeriodo])
 
   const totalReceita = doPeriodo.reduce((s, r) => s + r.entradas.reduce((a, e) => a + e.valor, 0), 0)
   const totalSaida = doPeriodo.reduce((s, r) => s + r.saidas.reduce((a, e) => a + e.valor, 0), 0)
@@ -279,6 +290,23 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                 <Tooltip formatter={(v) => typeof v === 'number' ? fmtBRL(v) : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
                 <Line type="monotone" dataKey="saldo" stroke="#0a84ff" strokeWidth={2} dot={false} />
               </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {composicaoDespesas.length > 0 && (
+        <div className="meta-card">
+          <h3>🥧 Composição das Despesas</h3>
+          <div style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={composicaoDespesas} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+                  {composicaoDespesas.map((d) => <Cell key={d.name} fill={CORES_GRUPO[d.name] ?? '#888'} />)}
+                </Pie>
+                <Tooltip formatter={(v) => typeof v === 'number' ? fmtBRL(v) : String(v)} />
+                <Legend />
+              </PieChart>
             </ResponsiveContainer>
           </div>
         </div>
