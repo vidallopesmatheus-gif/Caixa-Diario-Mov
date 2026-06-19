@@ -33,6 +33,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [novaRecTipo, setNovaRecTipo] = useState<'Receber' | 'Pagar'>('Pagar')
   const [novaRecInicio, setNovaRecInicio] = useState('')
   const [novaRecFim, setNovaRecFim] = useState('')
+  const [novaRecPeriodicidade, setNovaRecPeriodicidade] = useState('Mensal')
+  const [novaRecParcelas, setNovaRecParcelas] = useState('')
   const [savingRec, setSavingRec] = useState(false)
 
   useEffect(() => {
@@ -47,9 +49,12 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       const nova = await criarContaRecorrente({
         clienteId, descricao: novaRecDesc, valor: Number(novaRecValor),
         tipo: novaRecTipo, dataInicio: novaRecInicio, dataFim: novaRecFim || undefined,
+        periodicidade: novaRecPeriodicidade,
+        quantidadeParcelas: novaRecParcelas ? Number(novaRecParcelas) : undefined,
       })
       setRecorrentes(prev => [...prev, nova])
       setNovaRecDesc(''); setNovaRecValor(''); setNovaRecInicio(''); setNovaRecFim('')
+      setNovaRecPeriodicidade('Mensal'); setNovaRecParcelas('')
     } finally {
       setSavingRec(false)
     }
@@ -201,6 +206,18 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           <label style={{ fontSize: 12, color: 'var(--tx3)' }}>Fim (opcional):</label>
           <input type="date" value={novaRecFim} onChange={e => setNovaRecFim(e.target.value)} />
         </div>
+        <div className="conta-form-row" style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 12, color: 'var(--tx3)' }}>Periodicidade:</label>
+          <select value={novaRecPeriodicidade} onChange={e => setNovaRecPeriodicidade(e.target.value)}>
+            <option value="Mensal">Mensal</option>
+            <option value="Semanal">Semanal</option>
+            <option value="Quinzenal">Quinzenal</option>
+            <option value="Trimestral">Trimestral</option>
+            <option value="Semestral">Semestral</option>
+            <option value="Anual">Anual</option>
+          </select>
+          <input type="number" min="1" placeholder="Parcelas (opcional)" value={novaRecParcelas} onChange={e => setNovaRecParcelas(e.target.value)} />
+        </div>
         <button className="btn-add-conta" onClick={adicionarRecorrente} disabled={savingRec || !novaRecDesc || !novaRecValor || !novaRecInicio}>
           {savingRec ? 'Salvando...' : '＋ Adicionar Recorrente'}
         </button>
@@ -208,7 +225,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           <div key={r.id} className="conta-item">
             <div className="conta-info">
               <div className="conta-desc">{r.descricao}</div>
-              <div className="conta-meta">{r.tipo} · {fmtBRL(r.valor)} · Desde {fmtDate(r.dataInicio)}{r.dataFim ? ` até ${fmtDate(r.dataFim)}` : ''}</div>
+              <div className="conta-meta">{r.tipo} · {fmtBRL(r.valor)} · {r.periodicidade} · Desde {fmtDate(r.dataInicio)}{r.dataFim ? ` até ${fmtDate(r.dataFim)}` : ''}{r.quantidadeParcelas ? ` · ${r.quantidadeParcelas}x` : ''}</div>
             </div>
             <button style={{ fontSize: 12, padding: '4px 10px', background: '#ff3b30', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer' }} onClick={() => handleDesativar(r.id)}>Desativar</button>
           </div>

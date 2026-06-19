@@ -35,6 +35,13 @@ public class ContaRecorrenteService : IContaRecorrenteService
         if (dto.Tipo != "Receber" && dto.Tipo != "Pagar")
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Tipo deve ser 'Receber' ou 'Pagar'.", "tipo");
 
+        var periodicidadesValidas = new[] { "Semanal", "Quinzenal", "Mensal", "Trimestral", "Semestral", "Anual" };
+        if (!periodicidadesValidas.Contains(dto.Periodicidade))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Periodicidade inválida.", "periodicidade");
+
+        if (dto.QuantidadeParcelas.HasValue && dto.QuantidadeParcelas.Value < 1)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Quantidade de parcelas deve ser maior que zero.", "quantidadeParcelas");
+
         var conta = new ContaRecorrente
         {
             Id = Guid.NewGuid(),
@@ -45,6 +52,8 @@ public class ContaRecorrenteService : IContaRecorrenteService
             Tipo = dto.Tipo,
             DataInicio = dto.DataInicio,
             DataFim = dto.DataFim,
+            Periodicidade = dto.Periodicidade,
+            QuantidadeParcelas = dto.QuantidadeParcelas,
             Ativo = true,
             CriadoEm = DateTime.UtcNow,
         };
@@ -100,6 +109,7 @@ public class ContaRecorrenteService : IContaRecorrenteService
     {
         Id = c.Id, ClienteId = c.ClienteId, Descricao = c.Descricao, Valor = c.Valor,
         Categoria = c.Categoria, Tipo = c.Tipo, DataInicio = c.DataInicio, DataFim = c.DataFim,
+        Periodicidade = c.Periodicidade, QuantidadeParcelas = c.QuantidadeParcelas,
         Ativo = c.Ativo, CriadoEm = c.CriadoEm,
     };
 }

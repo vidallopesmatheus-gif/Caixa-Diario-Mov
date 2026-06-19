@@ -48,6 +48,8 @@ export interface ContaRecorrente {
   tipo: 'Receber' | 'Pagar'
   dataInicio: string
   dataFim?: string
+  periodicidade: string
+  quantidadeParcelas?: number
   ativo: boolean
   criadoEm: string
 }

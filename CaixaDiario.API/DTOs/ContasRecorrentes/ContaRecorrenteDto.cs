@@ -10,6 +10,8 @@ public class ContaRecorrenteDto
     public string Tipo { get; set; } = string.Empty;
     public DateOnly DataInicio { get; set; }
     public DateOnly? DataFim { get; set; }
+    public string Periodicidade { get; set; } = "Mensal";
+    public int? QuantidadeParcelas { get; set; }
     public bool Ativo { get; set; }
     public DateTime CriadoEm { get; set; }
 }

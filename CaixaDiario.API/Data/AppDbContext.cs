@@ -105,6 +105,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired();
             entity.Property(e => e.DataInicio).HasColumnName("data_inicio");
             entity.Property(e => e.DataFim).HasColumnName("data_fim");
+            entity.Property(e => e.Periodicidade).HasColumnName("periodicidade").IsRequired().HasDefaultValue("Mensal");
+            entity.Property(e => e.QuantidadeParcelas).HasColumnName("quantidade_parcelas");
             entity.Property(e => e.Ativo).HasColumnName("ativo").HasDefaultValue(true);
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");

@@ -194,12 +194,10 @@ public class MetricasService : IMetricasService
                 .Where(c => !c.Pago && c.DataVencimento == dia).Sum(c => c.Valor);
 
             var entradasRec = recorrentes.Where(r => r.Tipo == "Receber" && r.Ativo &&
-                r.DataInicio <= dia && (r.DataFim == null || r.DataFim >= dia) &&
-                r.DataInicio.Day == dia.Day).Sum(r => r.Valor);
+                RecorrenciaService.OcorreEm(r, dia)).Sum(r => r.Valor);
 
             var saidasRec = recorrentes.Where(r => r.Tipo == "Pagar" && r.Ativo &&
-                r.DataInicio <= dia && (r.DataFim == null || r.DataFim >= dia) &&
-                r.DataInicio.Day == dia.Day).Sum(r => r.Valor);
+                RecorrenciaService.OcorreEm(r, dia)).Sum(r => r.Valor);
 
             saldoCorrendo += entradas + entradasRec - saidas - saidasRec;
 

@@ -12,6 +12,8 @@ function mapContaRecorrente(raw: any): ContaRecorrente {
     tipo: raw.tipo,
     dataInicio: raw.dataInicio,
     dataFim: raw.dataFim,
+    periodicidade: raw.periodicidade,
+    quantidadeParcelas: raw.quantidadeParcelas ?? undefined,
     ativo: raw.ativo,
     criadoEm: raw.criadoEm,
   }
@@ -30,6 +32,8 @@ export async function criarContaRecorrente(dto: {
   tipo: 'Receber' | 'Pagar'
   dataInicio: string
   dataFim?: string
+  periodicidade: string
+  quantidadeParcelas?: number
 }): Promise<ContaRecorrente> {
   const res = await apiFetch<ApiResponse<unknown>>('/api/contas-recorrentes', {
     method: 'POST',
@@ -41,6 +45,8 @@ export async function criarContaRecorrente(dto: {
       tipo: dto.tipo,
       dataInicio: dto.dataInicio,
       dataFim: dto.dataFim,
+      periodicidade: dto.periodicidade,
+      quantidadeParcelas: dto.quantidadeParcelas,
     }),
   })
   return mapContaRecorrente(res.dados)

@@ -11,4 +11,6 @@ public class CriarContaRecorrenteDto
     [Required] public string Tipo { get; set; } = string.Empty;
     [Required] public DateOnly DataInicio { get; set; }
     public DateOnly? DataFim { get; set; }
+    public string Periodicidade { get; set; } = "Mensal";
+    public int? QuantidadeParcelas { get; set; }
 }
