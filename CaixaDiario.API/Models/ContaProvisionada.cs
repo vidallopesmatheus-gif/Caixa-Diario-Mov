@@ -8,4 +8,5 @@ public class ContaProvisionada
     public bool Pago { get; set; } = false;
     public string? Categoria { get; set; }
     public Guid? RecorrenciaId { get; set; }
+    public DateOnly? DataBaixa { get; set; }
 }

@@ -23,6 +23,7 @@ export interface ContaProvisionada {
   pago: boolean
   categoria?: string
   recorrenciaId?: string
+  dataBaixa?: string
 }
 
 export interface Registro {

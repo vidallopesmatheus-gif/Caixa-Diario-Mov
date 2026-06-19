@@ -377,6 +377,107 @@ public class RegistroServiceTests
         _repoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(x => x.Excluido && x.MotivoExclusao == "motivo teste")), Times.Once);
     }
 
+    // --- D7: baixa financeira ajusta o saldo automaticamente ---
+
+    private (RegistroDiario existente, CriarRegistroDto dto) SetupBaixa(
+        bool pagarPago, bool receberPago, bool existentePagarPago = false, bool existenteReceberPago = false,
+        DateOnly? dataBaixaPagarExistente = null, DateOnly? dataBaixaReceberExistente = null)
+    {
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var existente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new(), Saidas = new(),
+            ContasReceber = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Venda A", Valor = 500m, Pago = existenteReceberPago, DataBaixa = dataBaixaReceberExistente },
+            },
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Fornecedor B", Valor = 200m, Pago = existentePagarPago, DataBaixa = dataBaixaPagarExistente },
+            },
+            SaldoFinal = 1000m,
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
+        };
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(),
+            ContasReceber = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Venda A", Valor = 500m, Pago = receberPago,
+                    DataBaixa = receberPago == existenteReceberPago ? dataBaixaReceberExistente : null },
+            },
+            ContasPagar = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Fornecedor B", Valor = 200m, Pago = pagarPago,
+                    DataBaixa = pagarPago == existentePagarPago ? dataBaixaPagarExistente : null },
+            },
+            SaldoFinal = 1000m, // frontend reenvia o saldo inalterado
+        };
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        return (existente, dto);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_BaixarContaPagarPendente_ReduzSaldoESetaDataBaixa()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var (_, dto) = SetupBaixa(pagarPago: true, receberPago: false);
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(800m, resultado.SaldoFinal); // 1000 - 200
+        Assert.True(resultado.ContasPagar[0].Pago);
+        Assert.Equal(hoje, resultado.ContasPagar[0].DataBaixa);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_BaixarContaReceberPendente_AumentaSaldoESetaDataBaixa()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var (_, dto) = SetupBaixa(pagarPago: false, receberPago: true);
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(1500m, resultado.SaldoFinal); // 1000 + 500
+        Assert.True(resultado.ContasReceber[0].Pago);
+        Assert.Equal(hoje, resultado.ContasReceber[0].DataBaixa);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_SalvarNovamenteSemMudarPago_NaoReajustaSaldo()
+    {
+        var ontem = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
+        // conta a pagar já estava paga e baixada; reenvia paga (sem transição)
+        var (_, dto) = SetupBaixa(pagarPago: true, receberPago: false,
+            existentePagarPago: true, dataBaixaPagarExistente: ontem);
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(1000m, resultado.SaldoFinal); // inalterado: idempotente
+        Assert.True(resultado.ContasPagar[0].Pago);
+        Assert.Equal(ontem, resultado.ContasPagar[0].DataBaixa); // mantém a data original
+    }
+
+    [Fact]
+    public async Task SalvarAsync_DesfazerBaixaContaPagar_ReverteSaldoELimpaDataBaixa()
+    {
+        var ontem = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
+        // conta a pagar estava paga/baixada (saldo já tinha sido reduzido); agora desmarca
+        var (_, dto) = SetupBaixa(pagarPago: false, receberPago: false,
+            existentePagarPago: true, dataBaixaPagarExistente: ontem);
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(1200m, resultado.SaldoFinal); // 1000 + 200 (reverte a saída)
+        Assert.False(resultado.ContasPagar[0].Pago);
+        Assert.Null(resultado.ContasPagar[0].DataBaixa);
+    }
+
     [Fact]
     public async Task Salvar_NovoRegistroComContasReceberEPagar_MapeiaCorretamente()
     {

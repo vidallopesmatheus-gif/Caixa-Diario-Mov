@@ -57,12 +57,19 @@ public class RegistroService : IRegistroService
 
         if (existente != null)
         {
+            var contasReceberAntes = existente.ContasReceber;
+            var contasPagarAntes = existente.ContasPagar;
+
             existente.Inicio = dto.Inicio;
             existente.Entradas = dto.Entradas.Select(MapItemDto).ToList();
             existente.Saidas = dto.Saidas.Select(MapItemDto).ToList();
             existente.ContasReceber = AplicarBaixaAutomatica(dto.ContasReceber.Select(MapContaDto).ToList(), dto.Data);
             existente.ContasPagar = AplicarBaixaAutomatica(dto.ContasPagar.Select(MapContaDto).ToList(), dto.Data);
-            existente.SaldoFinal = dto.SaldoFinal;
+
+            // D7: a baixa (transição de pago) ajusta o SaldoFinal automaticamente.
+            var ajuste = AplicarBaixaFinanceira(contasReceberAntes, existente.ContasReceber, dto.Data, isReceber: true)
+                       + AplicarBaixaFinanceira(contasPagarAntes, existente.ContasPagar, dto.Data, isReceber: false);
+            existente.SaldoFinal = dto.SaldoFinal + ajuste;
             existente.SalvoEm = DateTime.UtcNow;
             existente.AtualizadoEm = DateTime.UtcNow;
             existente.UsuarioAtualizacao = nomeUsuarioLogado;
@@ -76,6 +83,13 @@ public class RegistroService : IRegistroService
             return (resultDto, false);
         }
 
+        var contasReceberNovo = AplicarBaixaAutomatica(dto.ContasReceber.Select(MapContaDto).ToList(), dto.Data);
+        var contasPagarNovo = AplicarBaixaAutomatica(dto.ContasPagar.Select(MapContaDto).ToList(), dto.Data);
+
+        // D7: registro novo — qualquer conta já paga é uma baixa (transição a partir de "nada baixado").
+        var ajusteNovo = AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasReceberNovo, dto.Data, isReceber: true)
+                       + AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasPagarNovo, dto.Data, isReceber: false);
+
         var novo = new RegistroDiario
         {
             Id = Guid.NewGuid(),
@@ -84,9 +98,9 @@ public class RegistroService : IRegistroService
             Inicio = dto.Inicio,
             Entradas = dto.Entradas.Select(MapItemDto).ToList(),
             Saidas = dto.Saidas.Select(MapItemDto).ToList(),
-            ContasReceber = AplicarBaixaAutomatica(dto.ContasReceber.Select(MapContaDto).ToList(), dto.Data),
-            ContasPagar = AplicarBaixaAutomatica(dto.ContasPagar.Select(MapContaDto).ToList(), dto.Data),
-            SaldoFinal = dto.SaldoFinal,
+            ContasReceber = contasReceberNovo,
+            ContasPagar = contasPagarNovo,
+            SaldoFinal = dto.SaldoFinal + ajusteNovo,
             CriadoEm = DateTime.UtcNow,
             SalvoEm = DateTime.UtcNow,
             UsuarioAtualizacao = nomeUsuarioLogado
@@ -133,11 +147,48 @@ public class RegistroService : IRegistroService
         return contas;
     }
 
+    // D7: detecta transições de pago comparando estado anterior (por índice) com o novo,
+    // ajusta DataBaixa e retorna o delta a aplicar sobre o SaldoFinal.
+    // Conta a receber: +valor ao baixar, -valor ao desfazer. Conta a pagar: o inverso.
+    // DataBaixa é o marcador de idempotência: sem transição, nada muda.
+    private static decimal AplicarBaixaFinanceira(
+        List<ContaProvisionada> antes, List<ContaProvisionada> depois, DateOnly data, bool isReceber)
+    {
+        decimal delta = 0m;
+        var sinal = isReceber ? 1m : -1m;
+
+        for (int i = 0; i < depois.Count; i++)
+        {
+            var nova = depois[i];
+            var pagaAntes = i < antes.Count && antes[i].Pago;
+
+            if (nova.Pago && !pagaAntes)
+            {
+                // transição NÃO pago -> pago: baixa
+                nova.DataBaixa = data;
+                delta += sinal * nova.Valor;
+            }
+            else if (!nova.Pago && pagaAntes)
+            {
+                // transição pago -> NÃO pago: desfaz a baixa
+                nova.DataBaixa = null;
+                delta -= sinal * nova.Valor;
+            }
+            else if (nova.Pago && pagaAntes)
+            {
+                // já estava baixada: preserva a DataBaixa original (idempotência)
+                nova.DataBaixa = antes[i].DataBaixa;
+            }
+        }
+
+        return delta;
+    }
+
     private static ItemFinanceiro MapItemDto(ItemFinanceiroDto d) =>
         new() { Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, TipoCusto = d.TipoCusto };
 
     private static ContaProvisionada MapContaDto(ContaProvisionadaDto d) =>
-        new() { Descricao = d.Descricao, Valor = d.Valor, DataVencimento = d.DataVencimento, Pago = d.Pago, Categoria = d.Categoria, RecorrenciaId = d.RecorrenciaId };
+        new() { Descricao = d.Descricao, Valor = d.Valor, DataVencimento = d.DataVencimento, Pago = d.Pago, Categoria = d.Categoria, RecorrenciaId = d.RecorrenciaId, DataBaixa = d.DataBaixa };
 
     private static RegistroDto MapToDto(RegistroDiario r) => new()
     {
@@ -147,8 +198,8 @@ public class RegistroService : IRegistroService
         Inicio = r.Inicio,
         Entradas = r.Entradas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto }).ToList(),
         Saidas = r.Saidas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto }).ToList(),
-        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId }).ToList(),
-        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId }).ToList(),
+        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa }).ToList(),
+        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa }).ToList(),
         SaldoFinal = r.SaldoFinal,
         SalvoEm = r.SalvoEm
     };

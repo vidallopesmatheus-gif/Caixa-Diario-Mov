@@ -10,6 +10,7 @@ function mapContaProvisionada(raw: any): ContaProvisionada {
     pago: raw.Pago ?? raw.pago ?? false,
     categoria: raw.Categoria ?? raw.categoria,
     recorrenciaId: raw.RecorrenciaId ?? raw.recorrenciaId,
+    dataBaixa: raw.DataBaixa ?? raw.dataBaixa,
   }
 }
 
@@ -66,8 +67,8 @@ export const salvarRegistro = async (dto: {
     inicio: dto.saldoInicio,
     entradas: dto.entradas.map(e => ({ Descricao: e.descricao, Valor: e.valor, Categoria: e.categoria, TipoCusto: e.tipoCusto })),
     saidas: dto.saidas.map(s => ({ Descricao: s.descricao, Valor: s.valor, Categoria: s.categoria, TipoCusto: s.tipoCusto })),
-    contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId })),
-    contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId })),
+    contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa })),
+    contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa })),
     saldoFinal: dto.saldoConfirmado,
   }
   const res = await apiFetch<ApiResponse<unknown>>('/api/registros', {

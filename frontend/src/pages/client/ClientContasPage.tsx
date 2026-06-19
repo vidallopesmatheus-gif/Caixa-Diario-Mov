@@ -131,7 +131,15 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   const renderConta = (view: ContaView) => (
     <div key={`${view.registroData}-${view.tipo}-${view.index}`} className={`conta-item ${view.conta.pago ? 'pago' : ''}`}>
-      <input type="checkbox" className="conta-check" checked={view.conta.pago} onChange={() => togglePago(view)} />
+      <button
+        onClick={() => togglePago(view)}
+        style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+          background: view.conta.pago ? 'var(--bd)' : view.tipo === 'receber' ? '#34c759' : '#ff3b30',
+          color: view.conta.pago ? 'var(--tx3)' : '#fff' }}>
+        {view.conta.pago
+          ? `✓ ${view.tipo === 'receber' ? 'Recebido' : 'Pago'}${view.conta.dataBaixa ? ` em ${fmtDate(view.conta.dataBaixa)}` : ''}`
+          : view.tipo === 'receber' ? 'Receber' : 'Pagar'}
+      </button>
       <div className="conta-info">
         <div className="conta-desc">{view.conta.descricao}</div>
         <div className="conta-meta">
