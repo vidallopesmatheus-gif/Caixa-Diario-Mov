@@ -213,7 +213,7 @@ test('salvar sem categoria em saída exibe mensagem e não chama a API', async (
   mockHooks({ salvar })
   render(<ClientCaixaPage />)
   // escopa a query à seção de Saídas para evitar colisão com campos de Entradas
-  const saidasSection = screen.getByText(/Saídas do dia/).closest('.inp-group')!
+  const saidasSection = screen.getByText(/Saídas do dia/).closest('.inp-group') as HTMLElement
   const saidasContainer = within(saidasSection)
   // preenche descrição e valor da primeira linha de saída para que ela passe no filtro (descricao || valor)
   fireEvent.change(saidasContainer.getByPlaceholderText('Descrição'), { target: { value: 'Aluguel' } })
