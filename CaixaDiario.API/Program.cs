@@ -58,6 +58,12 @@ builder.Services.AddScoped<IUsuarioService, UsuarioService>();
 builder.Services.AddScoped<IRegistroService, RegistroService>();
 builder.Services.AddScoped<IMetaRepository, MetaRepository>();
 builder.Services.AddScoped<IMetaService, MetaService>();
+builder.Services.AddScoped<IContaRecorrenteRepository, ContaRecorrenteRepository>();
+builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<IRecorrenciaService, RecorrenciaService>();
+builder.Services.AddScoped<IContaRecorrenteService, ContaRecorrenteService>();
+builder.Services.AddScoped<IMetricasService, MetricasService>();
+builder.Services.AddScoped<IAuditRepository, AuditRepository>();
 
 // Chat IA
 var groqApiKey = builder.Configuration["Groq:ApiKey"]

@@ -12,6 +12,8 @@ export interface Usuario {
 export interface ItemFinanceiro {
   descricao: string
   valor: number
+  categoria?: string
+  tipoCusto?: 'Receita' | 'CustoFixo' | 'CustoVariavel'
 }
 
 export interface ItemFinanceiroSaida {
@@ -19,6 +21,7 @@ export interface ItemFinanceiroSaida {
   valor: number
   categoria: string
   subcategoria: string
+  tipoCusto?: 'Receita' | 'CustoFixo' | 'CustoVariavel'
 }
 
 
@@ -27,6 +30,9 @@ export interface ContaProvisionada {
   valor: number
   dataVencimento?: string
   pago: boolean
+  categoria?: string
+  recorrenciaId?: string
+  dataBaixa?: string
 }
 
 export interface Registro {
@@ -41,6 +47,32 @@ export interface Registro {
   saldoConfirmado: number
   saldoCalculado: number
   criadoEm: string
+}
+
+export interface ContaRecorrente {
+  id: string
+  clienteId: string
+  descricao: string
+  valor: number
+  categoria?: string
+  tipo: 'Receber' | 'Pagar'
+  dataInicio: string
+  dataFim?: string
+  periodicidade: string
+  quantidadeParcelas?: number
+  ativo: boolean
+  criadoEm: string
+}
+
+export interface CategoriaItem {
+  nome: string
+  tipoCusto: 'Receita' | 'CustoFixo' | 'CustoVariavel'
+  grupo?: string
+}
+
+export interface Categorias {
+  entradas: CategoriaItem[]
+  saidas: CategoriaItem[]
 }
 
 export interface MetaAnual {

@@ -1,50 +1,118 @@
+import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
-import { fmtBRL, fmtDate } from '../../utils/format'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { fmtBRL } from '../../utils/format'
+import { obterEvolucao } from '../../api/metricas'
+import type { EvolucaoMensal } from '../../api/metricas'
+import { useRegistros } from '../../hooks/useRegistros'
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend,
+} from 'recharts'
 
 interface Props { clienteIdOverride?: string }
+
+const OPCOES_MESES = [3, 6, 12] as const
 
 export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
-  const { registros, loading } = useRegistros(clienteId)
+  const [meses, setMeses] = useState<3 | 6 | 12>(6)
+  const [evolucao, setEvolucao] = useState<EvolucaoMensal[]>([])
+  const [loading, setLoading] = useState(false)
+  const { registros } = useRegistros(clienteId)
 
-  const mesAtual = new Date().toISOString().slice(0, 7)
-  const doMes = registros.filter(r => r.data.startsWith(mesAtual)).slice().reverse()
+  useEffect(() => {
+    if (!clienteId) return
+    setLoading(true)
+    obterEvolucao(clienteId, meses)
+      .then(setEvolucao)
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [clienteId, meses])
 
-  const data = doMes.map(r => ({
-    dia: fmtDate(r.data).slice(0, 5),
-    saldo: r.saldoConfirmado,
+  const data = evolucao.map(e => ({
+    mes: e.mes.slice(2),
+    receita: e.receita,
+    custos: e.custos,
+    lucro: e.lucro,
+    saldo: e.saldo,
   }))
 
-  const primeiro = doMes[0]?.saldoInicio ?? 0
-  const ultimo = doMes[doMes.length - 1]?.saldoConfirmado ?? 0
-  const totalEnt = doMes.reduce((s, r) => s + r.entradas.reduce((a, x) => a + x.valor, 0), 0)
-  const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a, x) => a + x.valor, 0), 0)
+  const totalReceita = evolucao.reduce((s, e) => s + e.receita, 0)
+  const totalCustos = evolucao.reduce((s, e) => s + e.custos, 0)
+  const totalLucro = evolucao.reduce((s, e) => s + e.lucro, 0)
+  const saldoAtual = evolucao[evolucao.length - 1]?.saldo ?? 0
+
+  const totaisPorCategoria = useMemo(() => {
+    const acc: Record<string, number> = {}
+    for (const r of registros)
+      for (const s of r.saidas) {
+        const cat = s.categoria ?? 'Sem categoria'
+        acc[cat] = (acc[cat] ?? 0) + s.valor
+      }
+    return Object.entries(acc).map(([categoria, total]) => ({ categoria, total })).sort((a, b) => b.total - a.total)
+  }, [registros])
+  const totalGeral = totaisPorCategoria.reduce((s, c) => s + c.total, 0)
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
   return (
     <>
-      <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, color: '#888' }}>📊 Evolução Mensal</h3>
-      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 14, padding: 20, marginBottom: 24, height: 350 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {OPCOES_MESES.map(m => (
+          <button key={m} onClick={() => setMeses(m)}
+            style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--bd)', cursor: 'pointer',
+              background: meses === m ? '#0a84ff' : 'var(--bg-card)', color: meses === m ? '#fff' : 'var(--tx1)', fontSize: 13 }}>
+            {m} meses
+          </button>
+        ))}
+      </div>
+
+      <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, color: '#888' }}>📊 Receita vs. Custos (barras)</h3>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 14, padding: 20, marginBottom: 24, height: 280 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
+            <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 12 }} />
+            <YAxis stroke="var(--tx3)" tick={{ fontSize: 12 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
+            <Tooltip formatter={(v) => typeof v === 'number' ? fmtBRL(v) : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
+            <Legend />
+            <Bar dataKey="receita" name="Receita" fill="#34c759" radius={[4,4,0,0]} />
+            <Bar dataKey="custos" name="Custos" fill="#ff3b30" radius={[4,4,0,0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, color: '#888' }}>📈 Lucro Operacional (linha)</h3>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 14, padding: 20, marginBottom: 24, height: 200 }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
-            <XAxis dataKey="dia" stroke="var(--tx3)" tick={{ fontSize: 12 }} />
-            <YAxis stroke="var(--tx3)" tick={{ fontSize: 12 }} tickFormatter={v => fmtBRL(v).replace('R$ ', 'R$')} />
+            <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 12 }} />
+            <YAxis stroke="var(--tx3)" tick={{ fontSize: 12 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
             <Tooltip formatter={(v) => typeof v === 'number' ? fmtBRL(v) : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
-            <Line type="monotone" dataKey="saldo" stroke="#34c759" strokeWidth={2} dot={{ fill: '#34c759' }} />
+            <Line type="monotone" dataKey="lucro" name="Lucro Op." stroke="#ffd60a" strokeWidth={2} dot={{ fill: '#ffd60a' }} />
           </LineChart>
         </ResponsiveContainer>
       </div>
+
       <div className="stats-grid">
-        <StatCard label="💰 Saldo Inicial (Mês)" value={fmtBRL(primeiro)} className="val-blue" />
-        <StatCard label="📈 Saldo Final (Mês)"   value={fmtBRL(ultimo)}   className="val-green" />
-        <StatCard label="📤 Total Entradas"       value={fmtBRL(totalEnt)} className="val-green" />
-        <StatCard label="💸 Total Saídas"         value={fmtBRL(totalSai)} className="val-red" />
+        <StatCard label="📈 Receita Total" value={fmtBRL(totalReceita)} className="val-green" />
+        <StatCard label="💸 Custos Totais" value={fmtBRL(totalCustos)} className="val-red" />
+        <StatCard label="📊 Lucro Total" value={fmtBRL(totalLucro)} className={totalLucro >= 0 ? 'val-green' : 'val-red'} />
+        <StatCard label="💰 Saldo Atual" value={fmtBRL(saldoAtual)} className="val-blue" />
+      </div>
+
+      <h3 style={{ fontSize: 15, fontWeight: 700, margin: '24px 0 14px', color: '#888' }}>💸 Total Gasto por Categoria</h3>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 14, padding: 20 }}>
+        {totaisPorCategoria.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Sem saídas no período.</p>}
+        {totaisPorCategoria.map(c => (
+          <div key={c.categoria} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bd)' }}>
+            <span>{c.categoria}</span>
+            <span>{fmtBRL(c.total)} · {totalGeral > 0 ? ((c.total / totalGeral) * 100).toFixed(1) : '0'}%</span>
+          </div>
+        ))}
       </div>
     </>
   )

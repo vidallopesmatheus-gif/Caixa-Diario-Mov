@@ -10,4 +10,5 @@ public class ItemFinanceiroSaidaDto
     [Required, MinLength(1)]
     public string Categoria { get; set; } = "Administrativas";
     public string? Subcategoria { get; set; }
+    public string? TipoCusto { get; set; }
 }

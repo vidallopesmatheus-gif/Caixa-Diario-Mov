@@ -6,4 +6,5 @@ public class ItemFinanceiroSaida
     public decimal Valor { get; set; }
     public string Categoria { get; set; } = "Administrativas";
     public string? Subcategoria { get; set; }
+    public string? TipoCusto { get; set; }
 }

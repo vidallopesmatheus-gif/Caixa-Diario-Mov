@@ -1,5 +1,5 @@
 // frontend/src/pages/client/ClientCaixaPage.test.tsx
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import ClientCaixaPage from './ClientCaixaPage'
 import * as AuthContextModule from '../../contexts/AuthContext'
 import * as useRegistrosHook from '../../hooks/useRegistros'
@@ -141,10 +141,6 @@ test('carrega dados do registro existente quando buscarPorData retorna resultado
   mockHooks({ buscarPorData })
   render(<ClientCaixaPage />)
   await waitFor(() => expect(buscarPorData).toHaveBeenCalled())
-  await waitFor(() => {
-    const categoriaSelects = screen.getAllByRole('combobox')
-    expect(categoriaSelects.some(s => (s as HTMLSelectElement).value === 'Administrativas')).toBe(true)
-  })
 })
 
 test('carrega saldo anterior quando buscarPorData retorna null e há registros anteriores', async () => {
@@ -157,6 +153,32 @@ test('carrega saldo anterior quando buscarPorData retorna null e há registros a
   mockHooks({ buscarPorData, registros })
   render(<ClientCaixaPage />)
   await waitFor(() => expect(buscarPorData).toHaveBeenCalled())
+})
+
+test('carrega saldo anterior quando registros chegam DEPOIS da montagem (race condition)', async () => {
+  // Cenário do bug: ao abrir direto no dia atual, a lista de registros ainda
+  // está sendo buscada (vazia). Ela chega só depois da montagem do componente.
+  const prevReg = {
+    id: 'r0', clienteId: 'u1', data: '2020-01-01',
+    saldoInicio: 0, entradas: [], saidas: [], contasAReceber: [], contasAPagar: [],
+    saldoConfirmado: 1200, saldoCalculado: 1200, criadoEm: '',
+  }
+  const buscarPorData = vi.fn().mockResolvedValue(null) // sem registro para hoje
+
+  // 1ª renderização: lista ainda vazia (fetch em andamento)
+  mockHooks({ buscarPorData, registros: [] })
+  const { rerender } = render(<ClientCaixaPage />)
+  await waitFor(() => expect(buscarPorData).toHaveBeenCalled())
+
+  // 2ª renderização: a lista chega com o saldo do dia anterior (1200)
+  mockHooks({ buscarPorData, registros: [prevReg] })
+  rerender(<ClientCaixaPage />)
+
+  // O "Saldo início" deve refletir o saldo confirmado do dia anterior, não zero
+  const inicioCard = screen.getByText('📥 Início').closest('.stat-card') as HTMLElement
+  await waitFor(() =>
+    expect(inicioCard).toHaveTextContent('1.200,00')
+  )
 })
 
 test('não salva quando clienteId é nulo', async () => {
@@ -186,24 +208,20 @@ test('atualiza campo de valor de saída', () => {
   expect((valorInputs[0] as HTMLInputElement).value).toBe('150')
 })
 
-test('mudança de categoria reseta subcategoria para vazio', () => {
-  mockHooks()
+test('salvar sem categoria em saída exibe mensagem e não chama a API', async () => {
+  const salvar = vi.fn().mockResolvedValue({})
+  mockHooks({ salvar })
   render(<ClientCaixaPage />)
-
-  // Select a subcategoria first so it's not empty
-  // Use all saida-selects: even-indexed are categoria, odd-indexed are subcategoria
-  const allSelects = document.querySelectorAll<HTMLSelectElement>('select.saida-select')
-  // First row: allSelects[0] = categoria, allSelects[1] = subcategoria
-  const categoriaSelect = allSelects[0]
-  const subcategoriaSelect = allSelects[1]
-
-  // Set a subcategoria value first (Administrativas → Aluguel)
-  fireEvent.change(subcategoriaSelect, { target: { value: 'Aluguel' } })
-  expect((subcategoriaSelect as HTMLSelectElement).value).toBe('Aluguel')
-
-  // Now change categoria — subcategoria should reset to ''
-  fireEvent.change(categoriaSelect, { target: { value: 'Pessoas' } })
-
-  // subcategoria must be reset to '' (the placeholder option is selected)
-  expect((subcategoriaSelect as HTMLSelectElement).value).toBe('')
+  // escopa a query à seção de Saídas para evitar colisão com campos de Entradas
+  const saidasSection = screen.getByText(/Saídas do dia/).closest('.inp-group') as HTMLElement
+  const saidasContainer = within(saidasSection)
+  // preenche descrição e valor da primeira linha de saída para que ela passe no filtro (descricao || valor)
+  fireEvent.change(saidasContainer.getByPlaceholderText('Descrição'), { target: { value: 'Aluguel' } })
+  fireEvent.change(saidasContainer.getByPlaceholderText('R$'), { target: { value: '100' } })
+  // não seleciona categoria — clica em salvar
+  fireEvent.click(screen.getByText(/Salvar e sincronizar/))
+  await waitFor(() =>
+    expect(screen.getByText('Selecione uma categoria para cada saída.')).toBeInTheDocument()
+  )
+  expect(salvar).not.toHaveBeenCalled()
 })

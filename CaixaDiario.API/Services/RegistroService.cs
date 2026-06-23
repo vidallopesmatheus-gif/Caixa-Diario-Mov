@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CaixaDiario.API.DTOs.Registros;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
@@ -9,14 +10,25 @@ namespace CaixaDiario.API.Services;
 public class RegistroService : IRegistroService
 {
     private readonly IRegistroRepository _registroRepository;
+    private readonly IAuditService _auditService;
+    private readonly IRecorrenciaService _recorrenciaService;
 
-    public RegistroService(IRegistroRepository registroRepository) => _registroRepository = registroRepository;
+    public RegistroService(
+        IRegistroRepository registroRepository,
+        IAuditService auditService,
+        IRecorrenciaService recorrenciaService)
+    {
+        _registroRepository = registroRepository;
+        _auditService = auditService;
+        _recorrenciaService = recorrenciaService;
+    }
 
     public async Task<List<RegistroDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
     {
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
 
+        await _recorrenciaService.MaterializarMesAtualAsync(clienteId);
         var registros = await _registroRepository.ListarPorClienteAsync(clienteId);
         return registros.Select(MapToDto).ToList();
     }
@@ -37,29 +49,46 @@ public class RegistroService : IRegistroService
         if (dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
 
+        if (dto.Saidas.Any(s => string.IsNullOrWhiteSpace(s.Categoria)))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Toda saída deve ter uma categoria.", "categoria");
+
         var existente = await _registroRepository.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data);
+        var dadosAntes = existente != null ? JsonSerializer.Serialize(MapToDto(existente)) : null;
 
         if (existente != null)
         {
+            var contasReceberAntes = existente.ContasReceber;
+            var contasPagarAntes = existente.ContasPagar;
+
             existente.Inicio = dto.Inicio;
-            existente.Entradas = dto.Entradas.Select(s => new ItemFinanceiro { Descricao = s.Descricao, Valor = s.Valor }).ToList();
-            existente.Saidas = dto.Saidas.Select(s => new ItemFinanceiroSaida
-            {
-                Descricao = s.Descricao,
-                Valor = s.Valor,
-                Categoria = s.Categoria,
-                Subcategoria = s.Subcategoria
-            }).ToList();
-            existente.ContasReceber = dto.ContasReceber.Select(s => new ContaProvisionada { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList();
-            existente.ContasPagar = dto.ContasPagar.Select(s => new ContaProvisionada { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList();
-            existente.SaldoFinal = dto.SaldoFinal;
+            existente.Entradas = dto.Entradas.Select(MapItemDto).ToList();
+            existente.Saidas = dto.Saidas.Select(MapSaidaDto).ToList();
+            existente.ContasReceber = AplicarBaixaAutomatica(dto.ContasReceber.Select(MapContaDto).ToList(), dto.Data);
+            existente.ContasPagar = AplicarBaixaAutomatica(dto.ContasPagar.Select(MapContaDto).ToList(), dto.Data);
+
+            // D7: a baixa (transição de pago) ajusta o SaldoFinal automaticamente.
+            var ajuste = AplicarBaixaFinanceira(contasReceberAntes, existente.ContasReceber, dto.Data, isReceber: true)
+                       + AplicarBaixaFinanceira(contasPagarAntes, existente.ContasPagar, dto.Data, isReceber: false);
+            existente.SaldoFinal = dto.SaldoFinal + ajuste;
             existente.SalvoEm = DateTime.UtcNow;
             existente.AtualizadoEm = DateTime.UtcNow;
             existente.UsuarioAtualizacao = nomeUsuarioLogado;
 
             var atualizado = await _registroRepository.AtualizarAsync(existente);
-            return (MapToDto(atualizado), false);
+            var resultDto = MapToDto(atualizado);
+
+            await _auditService.LogAsync(existente.ClienteId, Guid.Empty, "RegistroDiario", "Edicao",
+                $"{existente.ClienteId}/{existente.Data}", dadosAntes, JsonSerializer.Serialize(resultDto));
+
+            return (resultDto, false);
         }
+
+        var contasReceberNovo = AplicarBaixaAutomatica(dto.ContasReceber.Select(MapContaDto).ToList(), dto.Data);
+        var contasPagarNovo = AplicarBaixaAutomatica(dto.ContasPagar.Select(MapContaDto).ToList(), dto.Data);
+
+        // D7: registro novo — qualquer conta já paga é uma baixa (transição a partir de "nada baixado").
+        var ajusteNovo = AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasReceberNovo, dto.Data, isReceber: true)
+                       + AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasPagarNovo, dto.Data, isReceber: false);
 
         var novo = new RegistroDiario
         {
@@ -67,24 +96,23 @@ public class RegistroService : IRegistroService
             ClienteId = dto.ClienteId,
             Data = dto.Data,
             Inicio = dto.Inicio,
-            Entradas = dto.Entradas.Select(s => new ItemFinanceiro { Descricao = s.Descricao, Valor = s.Valor }).ToList(),
-            Saidas = dto.Saidas.Select(s => new ItemFinanceiroSaida
-            {
-                Descricao = s.Descricao,
-                Valor = s.Valor,
-                Categoria = s.Categoria,
-                Subcategoria = s.Subcategoria
-            }).ToList(),
-            ContasReceber = dto.ContasReceber.Select(s => new ContaProvisionada { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList(),
-            ContasPagar = dto.ContasPagar.Select(s => new ContaProvisionada { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList(),
-            SaldoFinal = dto.SaldoFinal,
+            Entradas = dto.Entradas.Select(MapItemDto).ToList(),
+            Saidas = dto.Saidas.Select(MapSaidaDto).ToList(),
+            ContasReceber = contasReceberNovo,
+            ContasPagar = contasPagarNovo,
+            SaldoFinal = dto.SaldoFinal + ajusteNovo,
             CriadoEm = DateTime.UtcNow,
             SalvoEm = DateTime.UtcNow,
             UsuarioAtualizacao = nomeUsuarioLogado
         };
 
         var criado = await _registroRepository.AdicionarAsync(novo);
-        return (MapToDto(criado), true);
+        var criadoDto = MapToDto(criado);
+
+        await _auditService.LogAsync(novo.ClienteId, Guid.Empty, "RegistroDiario", "Criacao",
+            $"{novo.ClienteId}/{novo.Data}", null, JsonSerializer.Serialize(criadoDto));
+
+        return (criadoDto, true);
     }
 
     public async Task ExcluirAsync(Guid clienteId, DateOnly data, string motivo, Guid usuarioLogadoId, string perfil)
@@ -98,13 +126,72 @@ public class RegistroService : IRegistroService
         var registro = await _registroRepository.ObterPorClienteEDataAsync(clienteId, data)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
 
+        var dadosAntes = JsonSerializer.Serialize(MapToDto(registro));
         registro.Excluido = true;
         registro.MotivoExclusao = motivo;
         registro.AtualizadoEm = DateTime.UtcNow;
         registro.UsuarioAtualizacao = usuarioLogadoId.ToString();
 
         await _registroRepository.AtualizarAsync(registro);
+        await _auditService.LogAsync(clienteId, usuarioLogadoId, "RegistroDiario", "Exclusao",
+            $"{clienteId}/{data}", dadosAntes, null);
     }
+
+    private static List<ContaProvisionada> AplicarBaixaAutomatica(List<ContaProvisionada> contas, DateOnly data)
+    {
+        foreach (var c in contas)
+        {
+            if (c.DataVencimento.HasValue && c.DataVencimento.Value == data && !c.Pago)
+                c.Pago = true;
+        }
+        return contas;
+    }
+
+    // D7: detecta transições de pago comparando estado anterior (por índice) com o novo,
+    // ajusta DataBaixa e retorna o delta a aplicar sobre o SaldoFinal.
+    // Conta a receber: +valor ao baixar, -valor ao desfazer. Conta a pagar: o inverso.
+    // DataBaixa é o marcador de idempotência: sem transição, nada muda.
+    private static decimal AplicarBaixaFinanceira(
+        List<ContaProvisionada> antes, List<ContaProvisionada> depois, DateOnly data, bool isReceber)
+    {
+        decimal delta = 0m;
+        var sinal = isReceber ? 1m : -1m;
+
+        for (int i = 0; i < depois.Count; i++)
+        {
+            var nova = depois[i];
+            var pagaAntes = i < antes.Count && antes[i].Pago;
+
+            if (nova.Pago && !pagaAntes)
+            {
+                // transição NÃO pago -> pago: baixa
+                nova.DataBaixa = data;
+                delta += sinal * nova.Valor;
+            }
+            else if (!nova.Pago && pagaAntes)
+            {
+                // transição pago -> NÃO pago: desfaz a baixa
+                nova.DataBaixa = null;
+                delta -= sinal * nova.Valor;
+            }
+            else if (nova.Pago && pagaAntes)
+            {
+                // já estava baixada: preserva a DataBaixa original (idempotência)
+                nova.DataBaixa = antes[i].DataBaixa;
+            }
+        }
+
+        return delta;
+    }
+
+    private static ItemFinanceiro MapItemDto(ItemFinanceiroDto d) =>
+        new() { Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, TipoCusto = d.TipoCusto };
+
+    private static ItemFinanceiroSaida MapSaidaDto(ItemFinanceiroSaidaDto d) =>
+        new() { Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, Subcategoria = d.Subcategoria, TipoCusto = d.TipoCusto };
+
+    private static ContaProvisionada MapContaDto(ContaProvisionadaDto d) =>
+        new() { Descricao = d.Descricao, Valor = d.Valor, DataVencimento = d.DataVencimento, Pago = d.Pago, Categoria = d.Categoria, RecorrenciaId = d.RecorrenciaId, DataBaixa = d.DataBaixa };
 
     private static RegistroDto MapToDto(RegistroDiario r) => new()
     {
@@ -112,16 +199,10 @@ public class RegistroService : IRegistroService
         ClienteId = r.ClienteId,
         Data = r.Data,
         Inicio = r.Inicio,
-        Entradas = r.Entradas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor }).ToList(),
-        Saidas = r.Saidas.Select(s => new ItemFinanceiroSaidaDto
-        {
-            Descricao = s.Descricao,
-            Valor = s.Valor,
-            Categoria = s.Categoria,
-            Subcategoria = s.Subcategoria
-        }).ToList(),
-        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList(),
-        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago }).ToList(),
+        Entradas = r.Entradas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto }).ToList(),
+        Saidas = r.Saidas.Select(s => new ItemFinanceiroSaidaDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, Subcategoria = s.Subcategoria, TipoCusto = s.TipoCusto }).ToList(),
+        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa }).ToList(),
+        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa }).ToList(),
         SaldoFinal = r.SaldoFinal,
         SalvoEm = r.SalvoEm
     };

@@ -8,12 +8,20 @@ function mapContaProvisionada(raw: any): ContaProvisionada {
     valor: raw.Valor ?? raw.valor ?? 0,
     dataVencimento: raw.DataVencimento ?? raw.dataVencimento,
     pago: raw.Pago ?? raw.pago ?? false,
+    categoria: raw.Categoria ?? raw.categoria,
+    recorrenciaId: raw.RecorrenciaId ?? raw.recorrenciaId,
+    dataBaixa: raw.DataBaixa ?? raw.dataBaixa,
   }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapItemFinanceiro(raw: any): ItemFinanceiro {
-  return { descricao: raw.Descricao ?? raw.descricao ?? '', valor: raw.Valor ?? raw.valor ?? 0 }
+  return {
+    descricao: raw.Descricao ?? raw.descricao ?? '',
+    valor: raw.Valor ?? raw.valor ?? 0,
+    categoria: raw.Categoria ?? raw.categoria,
+    tipoCusto: raw.TipoCusto ?? raw.tipoCusto,
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -23,6 +31,7 @@ function mapItemFinanceiroSaida(raw: any): ItemFinanceiroSaida {
     valor: raw.Valor ?? raw.valor ?? 0,
     categoria: raw.Categoria ?? raw.categoria ?? 'Administrativas',
     subcategoria: raw.Subcategoria ?? raw.subcategoria ?? '',
+    tipoCusto: raw.TipoCusto ?? raw.tipoCusto,
   }
 }
 
@@ -67,15 +76,16 @@ export const salvarRegistro = async (dto: {
     clienteId: dto.clienteId,
     data: dto.data,
     inicio: dto.saldoInicio,
-    entradas: dto.entradas.map(e => ({ Descricao: e.descricao, Valor: e.valor })),
+    entradas: dto.entradas.map(e => ({ Descricao: e.descricao, Valor: e.valor, Categoria: e.categoria, TipoCusto: e.tipoCusto })),
     saidas: dto.saidas.map(s => ({
       Descricao: s.descricao,
       Valor: s.valor,
       Categoria: s.categoria,
       Subcategoria: s.subcategoria || undefined,
+      TipoCusto: s.tipoCusto,
     })),
-    contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago })),
-    contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago })),
+    contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa })),
+    contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa })),
     saldoFinal: dto.saldoConfirmado,
   }
   const res = await apiFetch<ApiResponse<unknown>>('/api/registros', {

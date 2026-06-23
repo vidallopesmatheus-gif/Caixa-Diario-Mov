@@ -13,6 +13,8 @@ public class AppDbContext : DbContext
     public DbSet<Usuario> Usuarios { get; set; }
     public DbSet<RegistroDiario> RegistrosDiarios { get; set; }
     public DbSet<MetaAnual> MetasAnuais { get; set; }
+    public DbSet<ContaRecorrente> ContasRecorrentes { get; set; }
+    public DbSet<AuditLog> AuditLogs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -89,6 +91,46 @@ public class AppDbContext : DbContext
                 .HasForeignKey(e => e.ClienteId);
 
             entity.HasIndex(e => new { e.ClienteId, e.Ano }).IsUnique();
+        });
+
+        modelBuilder.Entity<ContaRecorrente>(entity =>
+        {
+            entity.ToTable("contas_recorrentes");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.Descricao).HasColumnName("descricao").IsRequired();
+            entity.Property(e => e.Valor).HasColumnName("valor").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Categoria).HasColumnName("categoria");
+            entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired();
+            entity.Property(e => e.DataInicio).HasColumnName("data_inicio");
+            entity.Property(e => e.DataFim).HasColumnName("data_fim");
+            entity.Property(e => e.Periodicidade).HasColumnName("periodicidade").IsRequired().HasDefaultValue("Mensal");
+            entity.Property(e => e.QuantidadeParcelas).HasColumnName("quantidade_parcelas");
+            entity.Property(e => e.Ativo).HasColumnName("ativo").HasDefaultValue(true);
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
+            entity.HasOne(e => e.Cliente)
+                .WithMany(u => u.ContasRecorrentes)
+                .HasForeignKey(e => e.ClienteId);
+            entity.HasIndex(e => new { e.ClienteId, e.Ativo });
+        });
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.ToTable("audit_logs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.UsuarioId).HasColumnName("usuario_id");
+            entity.Property(e => e.Entidade).HasColumnName("entidade").IsRequired();
+            entity.Property(e => e.AcaoTipo).HasColumnName("acao_tipo").IsRequired();
+            entity.Property(e => e.EntidadeId).HasColumnName("entidade_id").IsRequired();
+            entity.Property(e => e.DadosAntes).HasColumnName("dados_antes");
+            entity.Property(e => e.DadosDepois).HasColumnName("dados_depois");
+            entity.Property(e => e.OcorridoEm).HasColumnName("ocorrido_em").HasDefaultValueSql("NOW()");
+            entity.HasIndex(e => new { e.ClienteId, e.OcorridoEm });
+            entity.HasIndex(e => new { e.Entidade, e.AcaoTipo });
         });
     }
 }

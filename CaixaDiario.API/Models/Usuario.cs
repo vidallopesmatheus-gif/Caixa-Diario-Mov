@@ -15,4 +15,5 @@ public class Usuario
 
     public ICollection<RegistroDiario> Registros { get; set; } = new List<RegistroDiario>();
     public List<MetaAnual> MetasAnuais { get; set; } = new();
+    public ICollection<ContaRecorrente> ContasRecorrentes { get; set; } = new List<ContaRecorrente>();
 }
