@@ -8,7 +8,12 @@ public class MetricasServiceTests
     private readonly MetricasService _sut = new();
 
     private static RegistroDiario CriarRegistro(DateOnly data, List<ItemFinanceiro> entradas, List<ItemFinanceiro> saidas, decimal saldoFinal = 0) =>
-        new() { Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Data = data, Entradas = entradas, Saidas = saidas, SaldoFinal = saldoFinal };
+        new()
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Data = data, Entradas = entradas,
+            Saidas = saidas.Select(s => new ItemFinanceiroSaida { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria ?? "", TipoCusto = s.TipoCusto }).ToList(),
+            SaldoFinal = saldoFinal
+        };
 
     private static ItemFinanceiro Item(string desc, decimal valor, string? categoria = null, string? tipoCusto = null) =>
         new() { Descricao = desc, Valor = valor, Categoria = categoria, TipoCusto = tipoCusto };

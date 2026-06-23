@@ -6,10 +6,12 @@ import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { listarCategorias } from '../../api/categorias'
 import { ORDEM_GRUPOS } from '../../utils/categorias'
-import type { ItemFinanceiro, Categorias, CategoriaItem } from '../../types'
+import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, CategoriaItem } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
+
+const novaSaida = (): ItemFinanceiroSaida => ({ descricao: '', valor: 0, categoria: '', subcategoria: '' })
 
 export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
@@ -19,7 +21,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const [data, setData] = useState(todayISO())
   const [inicio, setInicio] = useState(0)
   const [entradas, setEntradas] = useState<ItemFinanceiro[]>([{ descricao: '', valor: 0 }])
-  const [saidas, setSaidas] = useState<ItemFinanceiro[]>([{ descricao: '', valor: 0 }])
+  const [saidas, setSaidas] = useState<ItemFinanceiroSaida[]>([novaSaida()])
   const [confirmado, setConfirmado] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -44,13 +46,13 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       if (reg) {
         setInicio(reg.saldoInicio)
         setEntradas(reg.entradas.length ? reg.entradas : [{ descricao: '', valor: 0 }])
-        setSaidas(reg.saidas.length ? reg.saidas : [{ descricao: '', valor: 0 }])
+        setSaidas(reg.saidas.length ? reg.saidas : [novaSaida()])
         setConfirmado(String(reg.saldoConfirmado))
       } else {
         const prev = registros.find(r => r.data < data)
         setInicio(prev?.saldoConfirmado ?? 0)
         setEntradas([{ descricao: '', valor: 0 }])
-        setSaidas([{ descricao: '', valor: 0 }])
+        setSaidas([novaSaida()])
         setConfirmado('')
       }
     }
@@ -90,20 +92,30 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     }
   }
 
-  function updateItem(
-    list: ItemFinanceiro[],
-    setList: (v: ItemFinanceiro[]) => void,
-    i: number,
-    field: keyof ItemFinanceiro,
-    val: string
-  ) {
-    setList(list.map((x, j) => {
+  function tipoCustoDe(nome: string): 'Receita' | 'CustoFixo' | 'CustoVariavel' | undefined {
+    const cat = [...categorias.entradas, ...categorias.saidas].find(c => c.nome === nome)
+    return cat ? (cat.tipoCusto as 'Receita' | 'CustoFixo' | 'CustoVariavel') : undefined
+  }
+
+  function updateEntrada(i: number, field: keyof ItemFinanceiro, val: string) {
+    setEntradas(prev => prev.map((x, j) => {
       if (j !== i) return x
-      const updated = { ...x, [field]: field === 'valor' ? Number(val) : val }
+      const updated: ItemFinanceiro = { ...x, [field]: field === 'valor' ? Number(val) : val }
       if (field === 'categoria') {
-        const todas = [...categorias.entradas, ...categorias.saidas]
-        const cat = todas.find(c => c.nome === val)
-        if (cat) updated.tipoCusto = cat.tipoCusto as 'Receita' | 'CustoFixo' | 'CustoVariavel'
+        const tc = tipoCustoDe(val)
+        if (tc) updated.tipoCusto = tc
+      }
+      return updated
+    }))
+  }
+
+  function updateSaida(i: number, field: keyof ItemFinanceiroSaida, val: string) {
+    setSaidas(prev => prev.map((x, j) => {
+      if (j !== i) return x
+      const updated: ItemFinanceiroSaida = { ...x, [field]: field === 'valor' ? Number(val) : val }
+      if (field === 'categoria') {
+        const tc = tipoCustoDe(val)
+        if (tc) updated.tipoCusto = tc
       }
       return updated
     }))
@@ -130,9 +142,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
           <label>💵 Entradas do dia (dinheiro)</label>
           {entradas.map((e, i) => (
             <div key={i} className="saida-row">
-              <input placeholder="Descrição" value={e.descricao} onChange={ev => updateItem(entradas, setEntradas, i, 'descricao', ev.target.value)} />
-              <input type="number" placeholder="R$" value={e.valor || ''} onChange={ev => updateItem(entradas, setEntradas, i, 'valor', ev.target.value)} step="0.01" min="0" />
-              <select value={e.categoria ?? ''} onChange={ev => updateItem(entradas, setEntradas, i, 'categoria', ev.target.value)}>
+              <input placeholder="Descrição" value={e.descricao} onChange={ev => updateEntrada(i, 'descricao', ev.target.value)} />
+              <input type="number" placeholder="R$" value={e.valor || ''} onChange={ev => updateEntrada(i, 'valor', ev.target.value)} step="0.01" min="0" />
+              <select value={e.categoria ?? ''} onChange={ev => updateEntrada(i, 'categoria', ev.target.value)}>
                 <option value="">Categoria</option>
                 {categorias.entradas.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
               </select>
@@ -146,9 +158,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
           <label>💸 Saídas do dia</label>
           {saidas.map((s, i) => (
             <div key={i} className="saida-row">
-              <input placeholder="Descrição" value={s.descricao} onChange={e => updateItem(saidas, setSaidas, i, 'descricao', e.target.value)} />
-              <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateItem(saidas, setSaidas, i, 'valor', e.target.value)} step="0.01" min="0" />
-              <select value={s.categoria ?? ''} onChange={ev => updateItem(saidas, setSaidas, i, 'categoria', ev.target.value)}>
+              <input placeholder="Descrição" value={s.descricao} onChange={e => updateSaida(i, 'descricao', e.target.value)} />
+              <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateSaida(i, 'valor', e.target.value)} step="0.01" min="0" />
+              <select value={s.categoria ?? ''} onChange={ev => updateSaida(i, 'categoria', ev.target.value)}>
                 <option value="">Categoria</option>
                 {ORDEM_GRUPOS.map(grupo => {
                   const itens: CategoriaItem[] = categorias.saidas.filter(c => (c.grupo ?? 'Outros') === grupo)
@@ -163,7 +175,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
               <button className="btn-rm" onClick={() => setSaidas(prev => prev.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
-          <button className="btn-add-saida" onClick={() => setSaidas(s => [...s, { descricao: '', valor: 0 }])}>＋ Adicionar saída</button>
+          <button className="btn-add-saida" onClick={() => setSaidas(s => [...s, novaSaida()])}>＋ Adicionar saída</button>
         </div>
       </div>
 

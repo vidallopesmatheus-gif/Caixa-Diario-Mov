@@ -62,7 +62,7 @@ public class RegistroService : IRegistroService
 
             existente.Inicio = dto.Inicio;
             existente.Entradas = dto.Entradas.Select(MapItemDto).ToList();
-            existente.Saidas = dto.Saidas.Select(MapItemDto).ToList();
+            existente.Saidas = dto.Saidas.Select(MapSaidaDto).ToList();
             existente.ContasReceber = AplicarBaixaAutomatica(dto.ContasReceber.Select(MapContaDto).ToList(), dto.Data);
             existente.ContasPagar = AplicarBaixaAutomatica(dto.ContasPagar.Select(MapContaDto).ToList(), dto.Data);
 
@@ -97,7 +97,7 @@ public class RegistroService : IRegistroService
             Data = dto.Data,
             Inicio = dto.Inicio,
             Entradas = dto.Entradas.Select(MapItemDto).ToList(),
-            Saidas = dto.Saidas.Select(MapItemDto).ToList(),
+            Saidas = dto.Saidas.Select(MapSaidaDto).ToList(),
             ContasReceber = contasReceberNovo,
             ContasPagar = contasPagarNovo,
             SaldoFinal = dto.SaldoFinal + ajusteNovo,
@@ -187,6 +187,9 @@ public class RegistroService : IRegistroService
     private static ItemFinanceiro MapItemDto(ItemFinanceiroDto d) =>
         new() { Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, TipoCusto = d.TipoCusto };
 
+    private static ItemFinanceiroSaida MapSaidaDto(ItemFinanceiroSaidaDto d) =>
+        new() { Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, Subcategoria = d.Subcategoria, TipoCusto = d.TipoCusto };
+
     private static ContaProvisionada MapContaDto(ContaProvisionadaDto d) =>
         new() { Descricao = d.Descricao, Valor = d.Valor, DataVencimento = d.DataVencimento, Pago = d.Pago, Categoria = d.Categoria, RecorrenciaId = d.RecorrenciaId, DataBaixa = d.DataBaixa };
 
@@ -197,7 +200,7 @@ public class RegistroService : IRegistroService
         Data = r.Data,
         Inicio = r.Inicio,
         Entradas = r.Entradas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto }).ToList(),
-        Saidas = r.Saidas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto }).ToList(),
+        Saidas = r.Saidas.Select(s => new ItemFinanceiroSaidaDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, Subcategoria = s.Subcategoria, TipoCusto = s.TipoCusto }).ToList(),
         ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa }).ToList(),
         ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa }).ToList(),
         SaldoFinal = r.SaldoFinal,

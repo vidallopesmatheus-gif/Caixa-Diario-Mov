@@ -132,7 +132,7 @@ test('carrega dados do registro existente quando buscarPorData retorna resultado
   const reg = {
     id: 'r1', clienteId: 'u1', data: '2026-05-15',
     saldoInicio: 500, entradas: [{ descricao: 'Caixa', valor: 200 }],
-    saidas: [{ descricao: 'Aluguel', valor: 100 }],
+    saidas: [{ descricao: 'Aluguel', valor: 100, categoria: 'Administrativas', subcategoria: '' }],
     contasAReceber: [{ descricao: 'Mensalidade', valor: 300, pago: false }],
     contasAPagar: [{ descricao: 'Fornecedor', valor: 50, pago: false }],
     saldoConfirmado: 600, saldoCalculado: 600, criadoEm: '',

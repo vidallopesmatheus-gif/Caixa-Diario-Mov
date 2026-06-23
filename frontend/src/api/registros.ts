@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { ApiResponse, Registro, ItemFinanceiro, ContaProvisionada } from '../types'
+import type { ApiResponse, Registro, ItemFinanceiro, ItemFinanceiroSaida, ContaProvisionada } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapContaProvisionada(raw: any): ContaProvisionada {
@@ -25,6 +25,17 @@ function mapItemFinanceiro(raw: any): ItemFinanceiro {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapItemFinanceiroSaida(raw: any): ItemFinanceiroSaida {
+  return {
+    descricao: raw.Descricao ?? raw.descricao ?? '',
+    valor: raw.Valor ?? raw.valor ?? 0,
+    categoria: raw.Categoria ?? raw.categoria ?? 'Administrativas',
+    subcategoria: raw.Subcategoria ?? raw.subcategoria ?? '',
+    tipoCusto: raw.TipoCusto ?? raw.tipoCusto,
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRegistro(raw: any): Registro {
   return {
     id: raw.id,
@@ -32,7 +43,7 @@ function mapRegistro(raw: any): Registro {
     data: raw.data,
     saldoInicio: raw.inicio ?? 0,
     entradas: (raw.entradas ?? []).map(mapItemFinanceiro),
-    saidas: (raw.saidas ?? []).map(mapItemFinanceiro),
+    saidas: (raw.saidas ?? []).map(mapItemFinanceiroSaida),
     contasAReceber: (raw.contasReceber ?? []).map(mapContaProvisionada),
     contasAPagar: (raw.contasPagar ?? []).map(mapContaProvisionada),
     saldoConfirmado: raw.saldoFinal ?? 0,
@@ -56,7 +67,7 @@ export const salvarRegistro = async (dto: {
   data: string
   saldoInicio: number
   entradas: ItemFinanceiro[]
-  saidas: ItemFinanceiro[]
+  saidas: ItemFinanceiroSaida[]
   contasAReceber: ContaProvisionada[]
   contasAPagar: ContaProvisionada[]
   saldoConfirmado: number
@@ -66,7 +77,13 @@ export const salvarRegistro = async (dto: {
     data: dto.data,
     inicio: dto.saldoInicio,
     entradas: dto.entradas.map(e => ({ Descricao: e.descricao, Valor: e.valor, Categoria: e.categoria, TipoCusto: e.tipoCusto })),
-    saidas: dto.saidas.map(s => ({ Descricao: s.descricao, Valor: s.valor, Categoria: s.categoria, TipoCusto: s.tipoCusto })),
+    saidas: dto.saidas.map(s => ({
+      Descricao: s.descricao,
+      Valor: s.valor,
+      Categoria: s.categoria,
+      Subcategoria: s.subcategoria || undefined,
+      TipoCusto: s.tipoCusto,
+    })),
     contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa })),
     contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa })),
     saldoFinal: dto.saldoConfirmado,

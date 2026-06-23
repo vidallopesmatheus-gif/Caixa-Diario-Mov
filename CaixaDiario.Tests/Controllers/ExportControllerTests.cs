@@ -36,7 +36,7 @@ public class ExportControllerTests
             },
             Saidas = new()
             {
-                new ItemFinanceiro { Descricao = "Aluguel", Valor = 50m, Categoria = "Despesas Administrativas", TipoCusto = "CustoFixo" },
+                new ItemFinanceiroSaida { Descricao = "Aluguel", Valor = 50m, Categoria = "Despesas Administrativas", TipoCusto = "CustoFixo" },
             },
         },
     };

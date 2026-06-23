@@ -16,6 +16,15 @@ export interface ItemFinanceiro {
   tipoCusto?: 'Receita' | 'CustoFixo' | 'CustoVariavel'
 }
 
+export interface ItemFinanceiroSaida {
+  descricao: string
+  valor: number
+  categoria: string
+  subcategoria: string
+  tipoCusto?: 'Receita' | 'CustoFixo' | 'CustoVariavel'
+}
+
+
 export interface ContaProvisionada {
   descricao: string
   valor: number
@@ -32,7 +41,7 @@ export interface Registro {
   data: string
   saldoInicio: number
   entradas: ItemFinanceiro[]
-  saidas: ItemFinanceiro[]
+  saidas: ItemFinanceiroSaida[]
   contasAReceber: ContaProvisionada[]
   contasAPagar: ContaProvisionada[]
   saldoConfirmado: number
@@ -85,6 +94,20 @@ export interface LoginResponse {
 
 export interface ApiResponse<T> {
   dados: T
+  codigoRetorno: string
+  mensagem: string
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatResponse {
+  dados: {
+    reply: string
+    wasBlocked: boolean
+  }
   codigoRetorno: string
   mensagem: string
 }
