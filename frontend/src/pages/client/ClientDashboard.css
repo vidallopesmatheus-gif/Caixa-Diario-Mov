@@ -58,6 +58,16 @@
   border: 1px solid rgba(10,132,255,.2); border-radius: 10px; margin-top: 4px;
 }
 
+/* ── Tempo até meta + Simulador ── */
+.meta-tempo-meta {
+  margin-top: 10px; padding: 10px 14px;
+  background: rgba(52,199,89,.07); border: 1px solid rgba(52,199,89,.2);
+  border-radius: 10px; font-size: 14px; color: var(--tx1);
+}
+.meta-simulador { margin-top: 16px; }
+.meta-simulador-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.meta-sim-result { font-size: 13px; color: var(--tx1); }
+
 .meta-period-row { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .meta-period-field { display: flex; align-items: center; gap: 8px; }
 .meta-period-field label { font-size: 12px; color: var(--tx3); white-space: nowrap; }
