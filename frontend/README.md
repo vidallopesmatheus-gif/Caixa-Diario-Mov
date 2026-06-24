@@ -1,73 +1,53 @@
-# React + TypeScript + Vite
+# Caixa Diário — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Interface web do Caixa Diário. **React 19 + TypeScript + Vite**, com **React Router** e gráficos via **Recharts**. Testes com **Vitest + React Testing Library**.
 
-Currently, two official plugins are available:
+> Este frontend é compilado em arquivos estáticos e **servido pelo backend .NET**. O `npm run build` gera a saída diretamente em `../CaixaDiario.API/wwwroot/` (veja `vite.config.ts`). Por isso, ao rodar o backend sem buildar o frontend antes, as páginas retornam 404.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## Pré-requisitos
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js 18+
 
-## Expanding the ESLint configuration
+## Comandos
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+```bash
+npm install            # instalar dependências (primeira vez)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+npm run dev            # servidor de desenvolvimento com hot-reload (proxy p/ a API)
+npm run build          # compila e gera ../CaixaDiario.API/wwwroot/ (tsc -b + vite build)
+npm run preview        # pré-visualiza o build de produção
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+npm test               # testes (Vitest, modo watch)
+npm test -- LoginPage  # roda apenas os testes que casam com o padrão
+npm run test:coverage  # testes com relatório de cobertura
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+npm run lint           # ESLint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Dois fluxos de execução
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- **Desenvolver o frontend:** rode o backend (`dotnet run` em `CaixaDiario.API/`) num terminal e `npm run dev` em outro. O Vite serve a interface ao vivo e encaminha as chamadas de API para o backend — **não** precisa de `npm run build`.
+- **Servir tudo pelo backend:** rode `npm run build` para gerar o `wwwroot/` e então o backend serve a interface já compilada.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+---
+
+## Estrutura (`src/`)
+
+- `api/` — **única** camada que fala com o backend. Todas as requisições passam por `apiFetch` (`api/client.ts`), que anexa o token JWT e redireciona para `/login` em caso de 401. Nunca chame `fetch` direto de um componente.
+- `pages/` — telas, separadas por perfil: `admin/` e `client/`.
+- `components/` — componentes reutilizáveis (`Layout/`, `shared/`).
+- `hooks/` — hooks customizados (ex.: `useRegistros`, `useUsuarios`).
+- `contexts/` — `AuthContext` (estado de autenticação e perfil do usuário).
+- `utils/`, `types.ts`, `styles/` — utilitários, tipos compartilhados e estilos.
+
+Perfis: **admin** gerencia usuários/clientes e vê tudo; **client** vê apenas os próprios registros.
+
+---
+
+## Convenções e testes
+
+As regras de código, fluxo de Git/PR e padrões de teste do frontend estão no [`CLAUDE.md`](../CLAUDE.md) na raiz do repositório. Para a API consumida por este frontend, veja [`../CaixaDiario.API/README.md`](../CaixaDiario.API/README.md).
+
+A variável `VITE_API_URL` define a base das chamadas de API (vazia por padrão, usando o mesmo host que serve a interface).

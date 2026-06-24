@@ -68,7 +68,7 @@ VALUES (gen_random_uuid(), 'admin', '<hash-bcrypt-gerado>', 'Administrador', 'ad
 ```bash
 dotnet run
 ```
-A API estará disponível em `http://localhost:5000`.
+A API estará disponível em `http://localhost:5131`.
 
 ---
 
@@ -122,7 +122,9 @@ CaixaDiario.API/
 └── appsettings.json   # Configuração (sem segredos)
 
 CaixaDiario.Tests/
-└── Services/          # Testes unitários dos Services (xUnit + Moq)
+├── Services/          # Testes unitários dos Services (xUnit + Moq)
+├── Controllers/       # Testes dos Controllers
+└── Middleware/        # Testes do tratamento global de erros
 ```
 
 ---
@@ -141,8 +143,13 @@ CaixaDiario.Tests/
 | GET | `/api/registros/{clienteId}/{data}` | Admin + próprio cliente |
 | POST | `/api/registros` | Cliente |
 | DELETE | `/api/registros/{clienteId}/{data}` | Admin + próprio cliente |
+| GET | `/api/metas/{clienteId}/{ano}` | Admin + próprio cliente |
+| POST | `/api/metas` | Admin + próprio cliente |
+| GET | `/api/export/{clienteId}?de={data}&ate={data}` | Admin + próprio cliente |
 
 Todas as rotas autenticadas exigem o header: `Authorization: Bearer <token>`
+
+A rota de exportação retorna um arquivo Excel (`.xlsx`) com os registros do período (`de`/`ate` no formato `yyyy-MM-dd`), não o envelope JSON padrão.
 
 ---
 
@@ -166,7 +173,7 @@ Todas as rotas autenticadas exigem o header: `Authorization: Bearer <token>`
 dotnet test CaixaDiario.Tests/
 ```
 
-Testes unitários cobrem os Services (AuthService, UsuarioService, RegistroService) com mock dos Repositories via Moq. Esperado: 20 testes passando.
+Testes unitários cobrem os Services (Auth, Usuario, Registro, Meta, Token) com mock dos Repositories via Moq, além dos Controllers e do middleware de tratamento de erros. A cobertura deve permanecer **≥ 80%**.
 
 ---
 
