@@ -6,6 +6,7 @@ import { useMetricas } from '../../hooks/useMetricas'
 import StatCard from '../../components/shared/StatCard'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { obterMeta, salvarMeta } from '../../api/metas'
+import { obterSelicAtual } from '../../api/selic'
 import { getContasEmRisco, agruparVencimentos } from '../../utils/alertas'
 import type { MetaAnual } from '../../types'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
@@ -15,6 +16,7 @@ import './ClientDashboard.css'
 interface Props { clienteIdOverride?: string }
 
 const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+const MONTH_NAMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
 export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
@@ -61,15 +63,40 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [meta, setMeta] = useState<MetaAnual | null>(null)
   const [editReceita, setEditReceita] = useState('')
   const [editLucro, setEditLucro] = useState('')
+  const [editMesInicio, setEditMesInicio] = useState(1)
+  const [editPeriodoMeses, setEditPeriodoMeses] = useState(12)
   const [savingMeta, setSavingMeta] = useState(false)
   const [metaMsg, setMetaMsg] = useState('')
+  // Meu Sonho / Investimentos
+  const [editSonho, setEditSonho] = useState('')
+  const [editModoMeta, setEditModoMeta] = useState<'simples' | 'metodo'>('simples')
+  const [editValorSonho, setEditValorSonho] = useState('')
+  const [editPrazoAnos, setEditPrazoAnos] = useState('')
+  const [editTaxaRetorno, setEditTaxaRetorno] = useState('')
+  const [editTotalInvestido, setEditTotalInvestido] = useState('')
+  const [selic, setSelic] = useState(10.5)
+
+  useEffect(() => {
+    obterSelicAtual().then(setSelic).catch(() => setSelic(10.5))
+  }, [])
 
   useEffect(() => {
     if (!clienteId) return
     obterMeta(clienteId, anoAtual)
       .then(m => {
         setMeta(m)
-        if (m) { setEditReceita(String(m.metaReceita)); setEditLucro(String(m.metaLucro)) }
+        if (m) {
+          setEditReceita(String(m.metaReceita))
+          setEditLucro(String(m.metaLucro))
+          setEditMesInicio(m.mesInicio ?? 1)
+          setEditPeriodoMeses(m.periodoMeses ?? 12)
+          setEditSonho(m.sonho ?? '')
+          setEditModoMeta(m.modoMeta ?? 'simples')
+          setEditValorSonho(m.valorSonho ? String(m.valorSonho) : '')
+          setEditPrazoAnos(m.prazoAnos ? String(m.prazoAnos) : '')
+          setEditTaxaRetorno(m.taxaRetorno ? String(m.taxaRetorno) : '')
+          setEditTotalInvestido(m.totalInvestido ? String(m.totalInvestido) : '')
+        }
       })
       .catch(console.error)
   }, [clienteId, anoAtual])
@@ -94,24 +121,70 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const lucroOp = totalReceita - totalSaida
   const saldoFinal = doPeriodo[doPeriodo.length - 1]?.saldoConfirmado ?? 0
 
+  // Projeção por pagamentos cadastrados (contas a receber/pagar pendentes por mês)
+  const projecaoPagamentos = useMemo(() => {
+    const hoje = todayISO().slice(0, 7)
+    const byMonth: Record<string, { receber: number; pagar: number }> = {}
+    for (const r of registros) {
+      for (const c of r.contasAReceber) {
+        if (!c.pago && c.dataVencimento && c.dataVencimento.slice(0, 7) >= hoje) {
+          const mes = c.dataVencimento.slice(0, 7)
+          if (!byMonth[mes]) byMonth[mes] = { receber: 0, pagar: 0 }
+          byMonth[mes].receber += c.valor
+        }
+      }
+      for (const c of r.contasAPagar) {
+        if (!c.pago && c.dataVencimento && c.dataVencimento.slice(0, 7) >= hoje) {
+          const mes = c.dataVencimento.slice(0, 7)
+          if (!byMonth[mes]) byMonth[mes] = { receber: 0, pagar: 0 }
+          byMonth[mes].pagar += c.valor
+        }
+      }
+    }
+    return Object.entries(byMonth)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(0, 6)
+      .map(([mes, v]) => ({
+        mes,
+        label: `${MONTHS[parseInt(mes.slice(5)) - 1]}/${mes.slice(0, 4)}`,
+        receber: v.receber,
+        pagar: v.pagar,
+        saldo: v.receber - v.pagar,
+      }))
+  }, [registros])
+
   const planejamento = useMemo(() => {
     if (!meta) return []
+    const mesInicio = meta.mesInicio ?? 1
+    const periodoMeses = meta.periodoMeses ?? 12
+    const anoMeta = meta.ano
+
+    const salvoDate = meta.salvoEm ? new Date(meta.salvoEm) : null
+    const mesSalvo = salvoDate ? salvoDate.getMonth() + 1 : 1
+    const anoSalvo = salvoDate ? salvoDate.getFullYear() : anoMeta
+
     let remainingReceita = meta.metaReceita
     let remainingLucro = meta.metaLucro
 
-    return MONTHS.map((label, i) => {
-      const mes = i + 1
-      const remainingMonths = 12 - mes + 1
-      const targetReceita = remainingReceita / remainingMonths
-      const targetLucro = remainingLucro / remainingMonths
+    return Array.from({ length: periodoMeses }, (_, idx) => {
+      const mes = ((mesInicio - 1 + idx) % 12) + 1
+      const ano = anoMeta + Math.floor((mesInicio - 1 + idx) / 12)
+      const remainingMonths = periodoMeses - idx
 
-      const prefixo = `${anoAtual}-${String(mes).padStart(2,'0')}`
+      const prefixo = `${ano}-${String(mes).padStart(2, '0')}`
       const doMes = registros.filter(r => r.data.startsWith(prefixo))
       const receitaReal = doMes.reduce((s, r) => s + r.entradas.reduce((a, e) => a + e.valor, 0), 0)
-      const lucroReal = doMes.reduce((s, r) => s + r.entradas.reduce((a,e) => a+e.valor,0) - r.saidas.reduce((a,e) => a+e.valor,0), 0)
+      const lucroReal = doMes.reduce((s, r) =>
+        s + r.entradas.reduce((a, e) => a + e.valor, 0) - r.saidas.reduce((a, e) => a + e.valor, 0), 0)
 
-      const isPassado = mes < mesAtual
-      const isAtual = mes === mesAtual
+      const isPassado = ano < anoAtual || (ano === anoAtual && mes < mesAtual)
+      const isAtual = ano === anoAtual && mes === mesAtual
+      const isAntesSalvo = salvoDate
+        ? (ano < anoSalvo || (ano === anoSalvo && mes < mesSalvo))
+        : false
+
+      const targetReceita = remainingReceita / remainingMonths
+      const targetLucro = remainingLucro / remainingMonths
 
       if (isPassado || isAtual) {
         remainingReceita -= receitaReal
@@ -119,17 +192,21 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       }
 
       return {
-        mes, label: `${label}/${anoAtual}`, targetReceita, targetLucro,
+        mes, ano,
+        label: `${MONTHS[mes - 1]}/${ano}`,
+        targetReceita: isAntesSalvo ? null : targetReceita,
+        targetLucro: isAntesSalvo ? null : targetLucro,
         receitaReal: (isPassado || isAtual) ? receitaReal : null,
         lucroReal: (isPassado || isAtual) ? lucroReal : null,
         isAtual,
+        isAntesSalvo,
       }
     })
   }, [meta, registros, anoAtual, mesAtual])
 
   const metaMesAtual = useMemo(() => {
     const linha = planejamento.find(p => p.isAtual)
-    if (!linha || linha.lucroReal === null) return null
+    if (!linha || linha.lucroReal === null || linha.targetLucro === null) return null
     const alvo = linha.targetLucro
     const real = linha.lucroReal
     const pct = alvo > 0 ? Math.min(100, Math.max(0, (real / alvo) * 100)) : 0
@@ -137,12 +214,48 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     return { alvo, real, pct, faltante, atingida: real >= alvo }
   }, [planejamento])
 
+  const aporteMensal = useMemo(() => {
+    const vf = Number(editValorSonho)
+    const n = Number(editPrazoAnos) * 12
+    const taxa = Number(editTaxaRetorno)
+    const investido = Number(editTotalInvestido)
+    if (!vf || !n || !taxa) return null
+    const i = Math.pow(1 + taxa / 100, 1 / 12) - 1
+    const fvAtual = investido * Math.pow(1 + i, n)
+    const fvNecessario = vf - fvAtual
+    if (fvNecessario <= 0) return 0
+    return (fvNecessario * i) / (Math.pow(1 + i, n) - 1)
+  }, [editValorSonho, editPrazoAnos, editTaxaRetorno, editTotalInvestido])
+
+  const projecaoSelic = useMemo(() => {
+    const base = Number(editTotalInvestido)
+    if (!base || !selic) return null
+    return {
+      dez: base * Math.pow(1 + selic / 100, 10),
+      vinte: base * Math.pow(1 + selic / 100, 20),
+      trinta: base * Math.pow(1 + selic / 100, 30),
+    }
+  }, [editTotalInvestido, selic])
+
   async function handleSaveMeta() {
     if (!clienteId) return
     setSavingMeta(true)
     setMetaMsg('')
     try {
-      const saved = await salvarMeta({ clienteId, ano: anoAtual, metaReceita: Number(editReceita), metaLucro: Number(editLucro) })
+      const saved = await salvarMeta({
+        clienteId,
+        ano: anoAtual,
+        metaReceita: Number(editReceita),
+        metaLucro: Number(editLucro),
+        mesInicio: editMesInicio,
+        periodoMeses: editPeriodoMeses,
+        sonho: editSonho,
+        modoMeta: editModoMeta,
+        valorSonho: Number(editValorSonho) || 0,
+        prazoAnos: Number(editPrazoAnos) || 0,
+        taxaRetorno: Number(editTaxaRetorno) || 0,
+        totalInvestido: Number(editTotalInvestido) || 0,
+      })
       setMeta(saved)
       setMetaMsg('Meta salva!')
     } catch (e: unknown) {
@@ -362,26 +475,149 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       )}
 
       <div className="meta-card">
-        <h3>🎯 Metas Anuais {anoAtual}</h3>
+        <h3>🎯 Metas & Investimentos {anoAtual}</h3>
+
+        {/* ── Meu Sonho ── */}
+        <div className="meta-sonho-block">
+          <label className="meta-field-label">💭 Meu Sonho</label>
+          <input
+            type="text"
+            className="meta-sonho-input"
+            placeholder="Ex: Ter R$ 1.000.000 investidos, aposentadoria antecipada..."
+            value={editSonho}
+            onChange={e => setEditSonho(e.target.value)}
+          />
+          <div className="meta-modo-tabs">
+            <button
+              className={`meta-modo-btn ${editModoMeta === 'simples' ? 'active' : ''}`}
+              onClick={() => setEditModoMeta('simples')}>
+              Meta simples
+            </button>
+            <button
+              className={`meta-modo-btn ${editModoMeta === 'metodo' ? 'active' : ''}`}
+              onClick={() => setEditModoMeta('metodo')}>
+              Meta com método
+            </button>
+          </div>
+
+          {editModoMeta === 'metodo' && (
+            <div className="meta-metodo-fields">
+              <div className="meta-metodo-row">
+                <div className="meta-metodo-field">
+                  <label className="meta-field-label">Valor do sonho</label>
+                  <div className="val-input-wrap">
+                    <span className="val-prefix">R$</span>
+                    <input type="number" min="0" step="1000" value={editValorSonho}
+                      onChange={e => setEditValorSonho(e.target.value)} placeholder="1000000" />
+                  </div>
+                </div>
+                <div className="meta-metodo-field">
+                  <label className="meta-field-label">Já investido</label>
+                  <div className="val-input-wrap">
+                    <span className="val-prefix">R$</span>
+                    <input type="number" min="0" step="100" value={editTotalInvestido}
+                      onChange={e => setEditTotalInvestido(e.target.value)} placeholder="0" />
+                  </div>
+                </div>
+                <div className="meta-metodo-field">
+                  <label className="meta-field-label">Prazo (anos)</label>
+                  <input type="number" min="1" max="50" value={editPrazoAnos}
+                    onChange={e => setEditPrazoAnos(e.target.value)} placeholder="10"
+                    style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
+                </div>
+                <div className="meta-metodo-field">
+                  <label className="meta-field-label">Taxa retorno (% a.a.) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>SELIC: {selic.toFixed(1)}%</span></label>
+                  <input type="number" min="0" max="100" step="0.1" value={editTaxaRetorno}
+                    onChange={e => setEditTaxaRetorno(e.target.value)} placeholder={selic.toFixed(1)}
+                    style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
+                </div>
+              </div>
+
+              {aporteMensal !== null && (
+                <div className="meta-aporte-result">
+                  <div style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 4 }}>
+                    Para atingir {fmtBRL(Number(editValorSonho))} em {editPrazoAnos} anos com {editTaxaRetorno}% a.a.:
+                  </div>
+                  {aporteMensal === 0
+                    ? <div style={{ fontSize: 16, fontWeight: 700, color: '#34c759' }}>✅ Seu capital atual já atinge a meta no prazo!</div>
+                    : <div style={{ fontSize: 22, fontWeight: 800, color: '#0a84ff' }}>
+                        Aporte mensal necessário: <span>{fmtBRL(aporteMensal)}</span>
+                      </div>
+                  }
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="meta-period-row">
+          <div className="meta-period-field">
+            <label>Mês início</label>
+            <select value={editMesInicio} onChange={e => setEditMesInicio(Number(e.target.value))}>
+              {MONTH_NAMES.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+            </select>
+          </div>
+          <div className="meta-period-field">
+            <label>Duração</label>
+            <select value={editPeriodoMeses} onChange={e => setEditPeriodoMeses(Number(e.target.value))}>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map(n => (
+                <option key={n} value={n}>{n} {n === 1 ? 'mês' : 'meses'}</option>
+              ))}
+            </select>
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--tx3)' }}>
+            {MONTH_NAMES[editMesInicio - 1]} → {MONTH_NAMES[((editMesInicio - 1 + editPeriodoMeses - 1) % 12)]}
+          </span>
+        </div>
+
         <div className="meta-row">
-          <label>Meta de Receita Anual (R$)</label>
-          <input type="number" value={editReceita} onChange={e => setEditReceita(e.target.value)} placeholder="Ex: 120000" min="0" step="0.01" />
+          <label>Meta de Receita</label>
+          <div className="val-input-wrap">
+            <span className="val-prefix">R$</span>
+            <input type="number" value={editReceita} onChange={e => setEditReceita(e.target.value)} placeholder="0,00" min="0" step="0.01" />
+          </div>
         </div>
         <div className="meta-row">
-          <label>Meta de Lucro Anual (R$)</label>
-          <input type="number" value={editLucro} onChange={e => setEditLucro(e.target.value)} placeholder="Ex: 60000" min="0" step="0.01" />
+          <label>Meta de Lucro</label>
+          <div className="val-input-wrap">
+            <span className="val-prefix">R$</span>
+            <input type="number" value={editLucro} onChange={e => setEditLucro(e.target.value)} placeholder="0,00" min="0" step="0.01" />
+          </div>
         </div>
-        <button className="btn-meta" onClick={handleSaveMeta} disabled={savingMeta}>
-          {savingMeta ? 'Salvando...' : '💾 Salvar metas'}
-        </button>
-        {metaMsg && <span style={{ marginLeft: 12, fontSize: 13, color: '#34c759' }}>{metaMsg}</span>}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+          <button className="btn-meta" onClick={handleSaveMeta} disabled={savingMeta}>
+            {savingMeta ? 'Salvando...' : '💾 Salvar metas'}
+          </button>
+          {metaMsg && <span style={{ fontSize: 13, color: '#34c759' }}>{metaMsg}</span>}
+        </div>
+        {meta?.salvoEm && (
+          <div className="meta-salvo-em">
+            Projeção calculada a partir de {new Date(meta.salvoEm).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+          </div>
+        )}
       </div>
+
+      {projecaoSelic && (
+        <div className="meta-card">
+          <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({selic.toFixed(2)}% a.a.)</span></h3>
+          <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
+            Capital de {fmtBRL(Number(editTotalInvestido))} composto à SELIC, sem aportes adicionais.
+          </p>
+          <div className="stats-grid">
+            <StatCard label="📅 Em 10 anos" value={fmtBRL(projecaoSelic.dez)} className="val-blue" />
+            <StatCard label="📅 Em 20 anos" value={fmtBRL(projecaoSelic.vinte)} className="val-blue" />
+            <StatCard label="📅 Em 30 anos" value={fmtBRL(projecaoSelic.trinta)} className="val-blue" />
+          </div>
+        </div>
+      )}
 
       {meta && planejamento.length > 0 && (
         <div className="meta-card">
-          <h3>📅 Projeção Mês a Mês — {anoAtual}</h3>
+          <h3>📅 Projeção Mês a Mês — {MONTH_NAMES[meta.mesInicio - 1]} a {MONTH_NAMES[((meta.mesInicio - 1 + meta.periodoMeses - 1) % 12)]} / {meta.ano}</h3>
           <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 10 }}>
-            Se não bater a meta em um mês, o sistema redistribui o restante nos meses seguintes.
+            Redistribuição automática do restante nos meses seguintes. Projeção ativa a partir de{' '}
+            {meta.salvoEm ? new Date(meta.salvoEm).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : '—'}.
           </p>
           <table className="plan-table">
             <thead>
@@ -395,20 +631,57 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
             </thead>
             <tbody>
               {planejamento.map(p => (
-                <tr key={p.mes} className={p.isAtual ? 'atual' : ''}>
+                <tr key={`${p.ano}-${p.mes}`} className={p.isAtual ? 'atual' : ''}>
                   <td>{p.label}</td>
-                  <td>{fmtBRL(p.targetReceita)}</td>
+                  <td>
+                    {p.targetReceita !== null
+                      ? fmtBRL(p.targetReceita)
+                      : <span className="proj">—</span>}
+                  </td>
                   <td>
                     {p.receitaReal !== null
-                      ? <span className={p.receitaReal >= p.targetReceita ? 'ok' : 'nok'}>{fmtBRL(p.receitaReal)}</span>
+                      ? <span className={p.targetReceita !== null && p.receitaReal >= p.targetReceita ? 'ok' : 'nok'}>{fmtBRL(p.receitaReal)}</span>
                       : <span className="proj">—</span>}
                   </td>
-                  <td>{fmtBRL(p.targetLucro)}</td>
+                  <td>
+                    {p.targetLucro !== null
+                      ? fmtBRL(p.targetLucro)
+                      : <span className="proj">—</span>}
+                  </td>
                   <td>
                     {p.lucroReal !== null
-                      ? <span className={p.lucroReal >= p.targetLucro ? 'ok' : 'nok'}>{fmtBRL(p.lucroReal)}</span>
+                      ? <span className={p.targetLucro !== null && p.lucroReal >= p.targetLucro ? 'ok' : 'nok'}>{fmtBRL(p.lucroReal)}</span>
                       : <span className="proj">—</span>}
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {projecaoPagamentos.length > 0 && (
+        <div className="meta-card">
+          <h3>📋 Projeção por Pagamentos Cadastrados</h3>
+          <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 10 }}>
+            Contas a receber e a pagar pendentes, agrupadas por mês de vencimento.
+          </p>
+          <table className="plan-table">
+            <thead>
+              <tr>
+                <th>Mês</th>
+                <th>A Receber</th>
+                <th>A Pagar</th>
+                <th>Saldo Projetado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projecaoPagamentos.map(p => (
+                <tr key={p.mes}>
+                  <td>{p.label}</td>
+                  <td className="ok">{fmtBRL(p.receber)}</td>
+                  <td><span style={{ color: '#ff6b6b' }}>{fmtBRL(p.pagar)}</span></td>
+                  <td className={p.saldo >= 0 ? 'ok' : 'nok'}>{fmtBRL(p.saldo)}</td>
                 </tr>
               ))}
             </tbody>

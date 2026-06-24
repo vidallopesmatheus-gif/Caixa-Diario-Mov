@@ -4,8 +4,9 @@
 .meta-card { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
 .meta-card h3 { font-size: 14px; color: var(--tx3); font-weight: 700; margin-bottom: 14px; }
 .meta-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
-.meta-row label { font-size: 13px; color: var(--tx3); min-width: 160px; }
-.meta-row input { flex: 1; min-width: 140px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 14px; }
+.meta-row label { font-size: 13px; color: var(--tx3); min-width: 130px; }
+.meta-row input { flex: 1; min-width: 120px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 14px; }
+.meta-row select { flex: 1; min-width: 100px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 13px; cursor: pointer; }
 .btn-meta { padding: 9px 20px; background: #0a84ff; border: none; border-radius: 8px; color: #fff; font-weight: 700; cursor: pointer; font-size: 14px; }
 .btn-meta:disabled { opacity: 0.5; }
 .plan-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; overflow-x: auto; display: block; }
@@ -15,3 +16,50 @@
 .plan-table .ok { color: #34c759; font-weight: 700; }
 .plan-table .nok { color: #ff6b6b; font-weight: 700; }
 .plan-table .proj { color: var(--tx3); font-style: italic; }
+
+/* R$ input wrapper (shared with dashboard) */
+.val-input-wrap {
+  display: flex; align-items: stretch;
+  background: var(--bg-input, var(--bg));
+  border: 1px solid var(--bd); border-radius: 8px; overflow: hidden;
+}
+.val-prefix {
+  display: flex; align-items: center;
+  padding: 0 9px; font-size: 12px; font-weight: 700;
+  color: var(--tx3); white-space: nowrap;
+  border-right: 1px solid var(--bd); background: var(--bg);
+}
+.val-input-wrap input {
+  border: none !important; background: transparent !important;
+  padding: 8px 10px !important; flex: 1; min-width: 0;
+  outline: none !important; color: var(--tx1); font-size: 14px;
+}
+
+/* ── Meu Sonho ── */
+.meta-sonho-block { margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--bd); }
+.meta-field-label { display: block; font-size: 11px; font-weight: 700; color: var(--tx3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+.meta-sonho-input {
+  width: 100%; padding: 9px 12px; background: var(--bg);
+  border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1);
+  font-size: 14px; margin-bottom: 12px; box-sizing: border-box;
+}
+.meta-sonho-input:focus { outline: none; border-color: #0a84ff; }
+.meta-modo-tabs { display: flex; gap: 6px; margin-bottom: 4px; }
+.meta-modo-btn {
+  padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--bd); background: var(--bg); color: var(--tx3); transition: all .15s;
+}
+.meta-modo-btn.active { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+.meta-metodo-fields { margin-top: 14px; }
+.meta-metodo-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.meta-metodo-field { display: flex; flex-direction: column; gap: 4px; }
+.meta-aporte-result {
+  padding: 14px 16px; background: rgba(10,132,255,.07);
+  border: 1px solid rgba(10,132,255,.2); border-radius: 10px; margin-top: 4px;
+}
+
+.meta-period-row { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.meta-period-field { display: flex; align-items: center; gap: 8px; }
+.meta-period-field label { font-size: 12px; color: var(--tx3); white-space: nowrap; }
+.meta-period-field select { padding: 7px 10px; background: var(--bg); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 13px; cursor: pointer; }
+.meta-salvo-em { font-size: 11px; color: var(--tx3); margin-top: 8px; }

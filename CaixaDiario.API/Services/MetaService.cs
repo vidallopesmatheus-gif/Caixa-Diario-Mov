@@ -34,6 +34,14 @@ public class MetaService : IMetaService
         {
             existente.MetaReceita = dto.MetaReceita;
             existente.MetaLucro = dto.MetaLucro;
+            existente.MesInicio = dto.MesInicio;
+            existente.PeriodoMeses = dto.PeriodoMeses;
+            existente.Sonho = dto.Sonho;
+            existente.ModoMeta = dto.ModoMeta;
+            existente.ValorSonho = dto.ValorSonho;
+            existente.PrazoAnos = dto.PrazoAnos;
+            existente.TaxaRetorno = dto.TaxaRetorno;
+            existente.TotalInvestido = dto.TotalInvestido;
             existente.AtualizadoEm = DateTime.UtcNow;
             return MapToDto(await _metaRepository.SalvarAsync(existente));
         }
@@ -45,6 +53,14 @@ public class MetaService : IMetaService
             Ano = dto.Ano,
             MetaReceita = dto.MetaReceita,
             MetaLucro = dto.MetaLucro,
+            MesInicio = dto.MesInicio,
+            PeriodoMeses = dto.PeriodoMeses,
+            Sonho = dto.Sonho,
+            ModoMeta = dto.ModoMeta,
+            ValorSonho = dto.ValorSonho,
+            PrazoAnos = dto.PrazoAnos,
+            TaxaRetorno = dto.TaxaRetorno,
+            TotalInvestido = dto.TotalInvestido,
             CriadoEm = DateTime.UtcNow,
             AtualizadoEm = DateTime.UtcNow
         };
@@ -53,6 +69,11 @@ public class MetaService : IMetaService
 
     private static MetaAnualDto MapToDto(MetaAnual m) => new()
     {
-        Id = m.Id, ClienteId = m.ClienteId, Ano = m.Ano, MetaReceita = m.MetaReceita, MetaLucro = m.MetaLucro
+        Id = m.Id, ClienteId = m.ClienteId, Ano = m.Ano,
+        MetaReceita = m.MetaReceita, MetaLucro = m.MetaLucro,
+        MesInicio = m.MesInicio, PeriodoMeses = m.PeriodoMeses, SalvoEm = m.AtualizadoEm,
+        Sonho = m.Sonho, ModoMeta = m.ModoMeta,
+        ValorSonho = m.ValorSonho, PrazoAnos = m.PrazoAnos,
+        TaxaRetorno = m.TaxaRetorno, TotalInvestido = m.TotalInvestido,
     };
 }

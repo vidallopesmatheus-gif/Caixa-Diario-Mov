@@ -40,32 +40,92 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
         <StatCard label="💰 Último saldo" value={fmtBRL(ultimo)} className="val-green" />
       </div>
 
-      {registros.map(r => (
-        <div key={r.id} className="hist-item" style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 10, marginBottom: 8, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer' }}
-            onClick={() => setOpenId(openId === r.id ? null : r.id)}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtDate(r.data)}</div>
-              <div style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 2 }}>
-                Entradas: {fmtBRL(r.entradas.reduce((a, x) => a + x.valor, 0))} · Saídas: {fmtBRL(r.saidas.reduce((a, x) => a + x.valor, 0))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+        {registros.map(r => {
+          const entTotal = r.entradas.reduce((a, x) => a + x.valor, 0)
+          const saiTotal = r.saidas.reduce((a, x) => a + x.valor, 0)
+          const lucro = entTotal - saiTotal
+          const isOpen = openId === r.id
+
+          return (
+            <div key={r.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 10, overflow: 'hidden' }}>
+              {/* Linha de relatório */}
+              <div
+                style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 1fr 90px 28px', alignItems: 'center', gap: 8, padding: '10px 14px', cursor: 'pointer', fontSize: 13 }}
+                onClick={() => setOpenId(isOpen ? null : r.id)}
+              >
+                <span style={{ fontWeight: 600, color: 'var(--tx1)' }}>{fmtDate(r.data)}</span>
+                <span style={{ color: '#34c759' }}>↑ {fmtBRL(entTotal)}</span>
+                <span style={{ color: '#ff6b6b' }}>↓ {fmtBRL(saiTotal)}</span>
+                <span style={{ color: lucro >= 0 ? '#34c759' : '#ff3b30', fontWeight: 700 }}>
+                  {lucro >= 0 ? '+' : ''}{fmtBRL(lucro)}
+                </span>
+                <span style={{ color: 'var(--tx3)', textAlign: 'right' }}>{fmtBRL(r.saldoConfirmado)}</span>
+                <span style={{ color: 'var(--tx3)', textAlign: 'center', fontSize: 11 }}>{isOpen ? '▲' : '▼'}</span>
               </div>
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#34c759' }}>{fmtBRL(r.saldoConfirmado)}</div>
-          </div>
-          {openId === r.id && (
-            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--bd-sub)' }}>
-              {r.saidas.map((s, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', borderBottom: '1px solid var(--bg-card)' }}>
-                  <span>{s.descricao}{s.categoria ? <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--tx3)', background: 'var(--bd)', borderRadius: 4, padding: '1px 6px' }}>{s.categoria}</span> : null}</span>
-                  <span style={{ color: '#ff3b30' }}>-{fmtBRL(s.valor)}</span>
+
+              {/* Detalhe analítico */}
+              {isOpen && (
+                <div style={{ padding: '10px 14px 14px', borderTop: '1px solid var(--bd)' }}>
+                  {r.entradas.length > 0 && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.6px', color: '#34c759', marginBottom: 6 }}>
+                        Entradas
+                      </div>
+                      {r.entradas.map((e, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--bg)' }}>
+                          <span style={{ color: 'var(--tx1)' }}>
+                            {e.descricao}
+                            {e.categoria && (
+                              <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--tx3)', background: 'rgba(52,199,89,.12)', border: '1px solid rgba(52,199,89,.25)', borderRadius: 4, padding: '1px 6px' }}>
+                                {e.categoria}
+                              </span>
+                            )}
+                          </span>
+                          <span style={{ color: '#34c759', fontWeight: 600 }}>+{fmtBRL(e.valor)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {r.saidas.length > 0 && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.6px', color: '#ff6b6b', marginBottom: 6 }}>
+                        Saídas
+                      </div>
+                      {r.saidas.map((s, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--bg)' }}>
+                          <span style={{ color: 'var(--tx1)' }}>
+                            {s.descricao}
+                            {s.categoria && (
+                              <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--tx3)', background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.25)', borderRadius: 4, padding: '1px 6px' }}>
+                                {s.categoria}
+                              </span>
+                            )}
+                          </span>
+                          <span style={{ color: '#ff6b6b', fontWeight: 600 }}>-{fmtBRL(s.valor)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                    <button
+                      style={{ background: 'none', border: '1px solid var(--bd)', borderRadius: 6, color: '#ff6b6b', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}
+                      onClick={() => setDelData(r.data)}
+                    >
+                      🗑 Excluir registro
+                    </button>
+                    <span style={{ fontSize: 12, color: 'var(--tx3)' }}>
+                      Saldo confirmado: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(r.saldoConfirmado)}</strong>
+                    </span>
+                  </div>
                 </div>
-              ))}
-              <button style={{ marginTop: 8, background: 'none', border: '1px solid var(--bd)', borderRadius: 6, color: '#ff6b6b', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}
-                onClick={() => setDelData(r.data)}>🗑 Excluir registro</button>
+              )}
             </div>
-          )}
-        </div>
-      ))}
+          )
+        })}
+      </div>
 
       <Modal
         open={!!delData}

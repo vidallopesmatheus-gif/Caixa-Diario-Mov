@@ -81,6 +81,15 @@ export interface MetaAnual {
   ano: number
   metaReceita: number
   metaLucro: number
+  mesInicio: number
+  periodoMeses: number
+  salvoEm: string
+  sonho?: string
+  modoMeta: 'simples' | 'metodo'
+  valorSonho: number
+  prazoAnos: number
+  taxaRetorno: number
+  totalInvestido: number
 }
 
 export interface LoginResponse {
