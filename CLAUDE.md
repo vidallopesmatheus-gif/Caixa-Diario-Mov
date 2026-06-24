@@ -112,13 +112,17 @@ Multi-stage `Dockerfile` at the repo root: builds the frontend, copies `wwwroot`
 
 **Rule 1 — Never commit directly to `main`.** `main` is the production code. A bad commit there can break the live system for the client. Always work on a branch.
 
-**Rule 2 — One branch per task.** Before starting work:
+**Rule 2 — One branch per task, and always branch from an up-to-date `main`.** Before starting work:
 ```bash
 git checkout main
-git pull                       # get the latest code first
+git fetch origin
+git status -sb                 # confirm "## main...origin/main" with no "behind"
+git pull                       # only needed if behind; brings main up to date
 git checkout -b feat/short-description
 ```
 Branch name prefixes used here: `feat/` (new feature), `fix/` (bug fix), `test/` (tests only), `chore/` (tooling/config). Example: `feat/export-pdf`.
+
+> **[FOR THE AGENT — mandatory]** Never create a parallel/feature branch from a stale `main`. Before `git checkout -b`, you MUST verify `main` is up to date with `origin/main`: run `git fetch origin` then `git rev-list --left-right --count main...origin/main` and confirm the right-hand number (commits behind) is `0`. If it is not `0`, update `main` first (`git pull --rebase origin main` or `git pull`) and re-check before branching. **Why:** branching from a stale `main` means developing against old code — the new branch misses recent merges, which causes avoidable merge conflicts and bugs at PR time, and can silently reintroduce code others already changed.
 
 **Rule 3 — Commit in small, clear steps** using *Conventional Commits*. See **Conventional Commits** below for the full format. In short:
 ```
