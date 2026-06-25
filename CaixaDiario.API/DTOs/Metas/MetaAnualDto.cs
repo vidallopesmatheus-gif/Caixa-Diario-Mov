@@ -16,4 +16,6 @@ public class MetaAnualDto
     public int PrazoAnos { get; set; }
     public decimal TaxaRetorno { get; set; }
     public decimal TotalInvestido { get; set; }
+    public decimal? MargemPJ { get; set; }
+    public string? IconeSonho { get; set; }
 }

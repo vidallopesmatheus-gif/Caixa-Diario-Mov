@@ -15,7 +15,11 @@ export default function TabsBar() {
     { to: '/caixa',      label: '💵 Caixa Diária' },
     { to: '/contas',     label: '📋 Contas' },
     { to: '/historico',  label: '📈 Histórico' },
-    { to: '/exportar',   label: '⬇️ Exportar' },
+    { to: '/grafico',    label: '📊 Gráficos' },
+    { to: '/exportar',         label: '⬇️ Exportar' },
+    { to: '/contas-bancarias', label: '🏦 Banco' },
+    { to: '/dre',       label: '📑 DRE' },
+    { to: '/projecao', label: '🔭 Projeção' },
   ]
   const tabs = user.perfil === 'admin' ? adminTabs : clientTabs
 

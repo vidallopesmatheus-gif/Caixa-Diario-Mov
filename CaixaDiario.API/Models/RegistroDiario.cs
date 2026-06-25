@@ -19,4 +19,6 @@ public class RegistroDiario
     public string? UsuarioAtualizacao { get; set; }
 
     public Usuario Cliente { get; set; } = null!;
+    public Guid? ContaBancariaId { get; set; }
+    public ContaBancaria? ContaBancaria { get; set; }
 }

@@ -16,4 +16,6 @@ public class SalvarMetaAnualDto
     [Range(0, 100)] public int PrazoAnos { get; set; }
     [Range(0, 100)] public decimal TaxaRetorno { get; set; }
     [Range(0, double.MaxValue)] public decimal TotalInvestido { get; set; }
+    [Range(0, 100)] public decimal? MargemPJ { get; set; }
+    public string? IconeSonho { get; set; }
 }

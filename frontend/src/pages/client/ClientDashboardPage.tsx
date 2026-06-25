@@ -7,6 +7,11 @@ import StatCard from '../../components/shared/StatCard'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { obterMeta, salvarMeta } from '../../api/metas'
 import { obterSelicAtual } from '../../api/selic'
+import { listarContasBancarias } from '../../api/contasBancarias'
+import InsightsCard from './InsightsCard'
+import OrcamentoDinamicoCard from './OrcamentoDinamicoCard'
+import SaudeFinanceiraGauges from './SaudeFinanceiraGauges'
+import type { ContaBancaria } from '../../types'
 import { getContasEmRisco, agruparVencimentos } from '../../utils/alertas'
 import type { MetaAnual } from '../../types'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, ReferenceLine } from 'recharts'
@@ -18,11 +23,38 @@ interface Props { clienteIdOverride?: string }
 const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 const MONTH_NAMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
+function fmtNum(n: number) {
+  if (!n) return ''
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function parseBRL(s: string): number {
+  return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0
+}
+
 export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, loading } = useRegistros(clienteId)
   const navigate = useNavigate()
+
+  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
+  const [contaFiltro, setContaFiltro] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!clienteId) return
+    listarContasBancarias(clienteId).then(setContasBancarias).catch(console.error)
+  }, [clienteId])
+
+  // registros filtrados por conta quando há filtro ativo
+  const registrosFiltrados = useMemo(() =>
+    contaFiltro ? registros.filter(r => r.contaBancariaId === contaFiltro) : registros,
+    [registros, contaFiltro]
+  )
+
+  const saldoConsolidado = useMemo(() =>
+    contasBancarias.filter(c => c.ativa).reduce((s, c) => s + c.saldoAtual, 0),
+    [contasBancarias]
+  )
 
   const contasEmRisco = useMemo(() => getContasEmRisco(registros), [registros])
   const { vencemHoje, proximos7Dias } = useMemo(() => agruparVencimentos(registros), [registros])
@@ -74,6 +106,8 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [editPrazoAnos, setEditPrazoAnos] = useState('')
   const [editTaxaRetorno, setEditTaxaRetorno] = useState('')
   const [editTotalInvestido, setEditTotalInvestido] = useState('')
+  const [editMargemPJ, setEditMargemPJ] = useState('')
+  const [editIconeSonho, setEditIconeSonho] = useState('')
   const [selic, setSelic] = useState(10.5)
   const [simAporteExtra, setSimAporteExtra] = useState('')
 
@@ -87,24 +121,26 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       .then(m => {
         setMeta(m)
         if (m) {
-          setEditReceita(String(m.metaReceita))
-          setEditLucro(String(m.metaLucro))
+          setEditReceita(fmtNum(m.metaReceita))
+          setEditLucro(fmtNum(m.metaLucro))
           setEditMesInicio(m.mesInicio ?? 1)
           setEditPeriodoMeses(m.periodoMeses ?? 12)
           setEditSonho(m.sonho ?? '')
           setEditModoMeta(m.modoMeta ?? 'simples')
-          setEditValorSonho(m.valorSonho ? String(m.valorSonho) : '')
+          setEditValorSonho(m.valorSonho ? fmtNum(m.valorSonho) : '')
           setEditPrazoAnos(m.prazoAnos ? String(m.prazoAnos) : '')
           setEditTaxaRetorno(m.taxaRetorno ? String(m.taxaRetorno) : '')
-          setEditTotalInvestido(m.totalInvestido ? String(m.totalInvestido) : '')
+          setEditTotalInvestido(m.totalInvestido ? fmtNum(m.totalInvestido) : '')
+          setEditMargemPJ(m.margemPJ ? String(m.margemPJ) : '')
+          setEditIconeSonho(m.iconeSonho ?? '')
         }
       })
       .catch(console.error)
   }, [clienteId, anoAtual])
 
   const doPeriodo = useMemo(() =>
-    registros.filter(r => r.data >= de && r.data <= ate),
-    [registros, de, ate]
+    registrosFiltrados.filter(r => r.data >= de && r.data <= ate),
+    [registrosFiltrados, de, ate]
   )
 
   const composicaoDespesas = useMemo(() => {
@@ -216,10 +252,10 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   }, [planejamento])
 
   const aporteMensal = useMemo(() => {
-    const vf = Number(editValorSonho)
+    const vf = parseBRL(editValorSonho)
     const n = Number(editPrazoAnos) * 12
     const taxa = Number(editTaxaRetorno)
-    const investido = Number(editTotalInvestido)
+    const investido = parseBRL(editTotalInvestido)
     if (!vf || !n || !taxa) return null
     const i = Math.pow(1 + taxa / 100, 1 / 12) - 1
     const fvAtual = investido * Math.pow(1 + i, n)
@@ -229,7 +265,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   }, [editValorSonho, editPrazoAnos, editTaxaRetorno, editTotalInvestido])
 
   const projecaoSelic = useMemo(() => {
-    const base = Number(editTotalInvestido)
+    const base = parseBRL(editTotalInvestido)
     if (!base || !selic) return null
     return {
       dez: base * Math.pow(1 + selic / 100, 10),
@@ -241,7 +277,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const trajetorias = useMemo(() => {
     const taxa = Number(editTaxaRetorno)
     const prazo = Number(editPrazoAnos)
-    const investido = Number(editTotalInvestido)
+    const investido = parseBRL(editTotalInvestido)
     if (!prazo || !taxa || !investido) return null
     const ap = aporteMensal ?? 0
     const calcSerie = (taxaAa: number) => {
@@ -266,9 +302,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   }, [editTaxaRetorno, editPrazoAnos, editTotalInvestido, aporteMensal])
 
   const tempoAteMeta = useMemo(() => {
-    const vf = Number(editValorSonho)
+    const vf = parseBRL(editValorSonho)
     const taxa = Number(editTaxaRetorno)
-    const investido = Number(editTotalInvestido)
+    const investido = parseBRL(editTotalInvestido)
     if (!vf || !taxa || !investido || aporteMensal === null) return null
     if (investido >= vf) return { meses: 0, anos: 0, mesesRest: 0 }
     const i = Math.pow(1 + taxa / 100, 1 / 12) - 1
@@ -282,10 +318,10 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   const simTempoComExtra = useMemo(() => {
     if (!simAporteExtra || !tempoAteMeta || tempoAteMeta.meses === 0 || aporteMensal === null) return null
-    const vf = Number(editValorSonho)
+    const vf = parseBRL(editValorSonho)
     const taxa = Number(editTaxaRetorno)
-    const investido = Number(editTotalInvestido)
-    const extra = Number(simAporteExtra)
+    const investido = parseBRL(editTotalInvestido)
+    const extra = parseBRL(simAporteExtra)
     if (!vf || !taxa || !investido || !extra) return null
     const i = Math.pow(1 + taxa / 100, 1 / 12) - 1
     const ap = aporteMensal + extra
@@ -299,7 +335,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   }, [simAporteExtra, tempoAteMeta, editValorSonho, editTaxaRetorno, editTotalInvestido, aporteMensal])
 
   const fireNumber = useMemo(() => {
-    const investido = Number(editTotalInvestido)
+    const investido = parseBRL(editTotalInvestido)
     if (!investido || totalSaida <= 0) return null
     const daysInPeriod = Math.max(1,
       (new Date(ate).getTime() - new Date(de).getTime()) / 86400000 + 1
@@ -310,6 +346,41 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     return { fireTarget, despMensal, pct, atingido: investido >= fireTarget }
   }, [editTotalInvestido, totalSaida, de, ate])
 
+  const atrasadaNaSonho = useMemo(() => {
+    if (editModoMeta !== 'metodo' || aporteMensal === null || aporteMensal <= 0) return null
+    if (!meta?.salvoEm) return null
+    const vf = parseBRL(editValorSonho)
+    const prazoTotal = Number(editPrazoAnos) * 12
+    const taxa = Number(editTaxaRetorno)
+    const investido = parseBRL(editTotalInvestido)
+    if (!vf || prazoTotal < 2 || !taxa) return null
+    const i = Math.pow(1 + taxa / 100, 1 / 12) - 1
+    const dataMeta = new Date(meta.salvoEm)
+    const agora = new Date()
+    const mesesDecorridos = (agora.getFullYear() - dataMeta.getFullYear()) * 12 + (agora.getMonth() - dataMeta.getMonth())
+    if (mesesDecorridos <= 0) return null
+    const mesesRestantes = prazoTotal - mesesDecorridos
+    if (mesesRestantes <= 1) return null
+    const fvCorrigido = investido * Math.pow(1 + i, mesesRestantes)
+    const fvNecessario = vf - fvCorrigido
+    if (fvNecessario <= 0) return { atrasada: false as const, mesesDecorridos, mesesRestantes }
+    const aporteNecessarioAgora = (fvNecessario * i) / (Math.pow(1 + i, mesesRestantes) - 1)
+    if (aporteNecessarioAgora <= aporteMensal * 1.1) return { atrasada: false as const, mesesDecorridos, mesesRestantes }
+    // Opção 2: manter aporte original, calcular novo prazo
+    let p = investido
+    let mesesExtra = 0
+    const MAX = 600
+    while (p < vf && mesesExtra < MAX) { p = p * (1 + i) + aporteMensal; mesesExtra++ }
+    return {
+      atrasada: true as const,
+      mesesDecorridos,
+      mesesRestantes,
+      aporteNecessarioAgora,
+      novoPrazoMeses: mesesExtra,
+      aporteOriginal: aporteMensal,
+    }
+  }, [meta, editModoMeta, editValorSonho, editPrazoAnos, editTaxaRetorno, editTotalInvestido, aporteMensal])
+
   async function handleSaveMeta() {
     if (!clienteId) return
     setSavingMeta(true)
@@ -318,16 +389,18 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       const saved = await salvarMeta({
         clienteId,
         ano: anoAtual,
-        metaReceita: Number(editReceita),
-        metaLucro: Number(editLucro),
+        metaReceita: parseBRL(editReceita),
+        metaLucro: parseBRL(editLucro),
         mesInicio: editMesInicio,
         periodoMeses: editPeriodoMeses,
         sonho: editSonho,
         modoMeta: editModoMeta,
-        valorSonho: Number(editValorSonho) || 0,
+        valorSonho: parseBRL(editValorSonho),
         prazoAnos: Number(editPrazoAnos) || 0,
         taxaRetorno: Number(editTaxaRetorno) || 0,
-        totalInvestido: Number(editTotalInvestido) || 0,
+        totalInvestido: parseBRL(editTotalInvestido),
+        margemPJ: editMargemPJ ? Number(editMargemPJ) : undefined,
+        iconeSonho: editIconeSonho || undefined,
       })
       setMeta(saved)
       setMetaMsg('Meta salva!')
@@ -355,6 +428,38 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         </button>
       </div>
 
+      {/* Filtro por conta bancária */}
+      {contasBancarias.filter(c => c.ativa).length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Conta:</span>
+          <button
+            type="button"
+            onClick={() => setContaFiltro(null)}
+            style={{
+              padding: '4px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
+              border: '1px solid var(--bd)',
+              background: contaFiltro === null ? '#0a84ff' : 'var(--bg-card)',
+              color: contaFiltro === null ? '#fff' : 'var(--tx1)',
+            }}>
+            Todas
+          </button>
+          {contasBancarias.filter(c => c.ativa).map(c => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setContaFiltro(c.id)}
+              style={{
+                padding: '4px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
+                border: '1px solid var(--bd)',
+                background: contaFiltro === c.id ? '#0a84ff' : 'var(--bg-card)',
+                color: contaFiltro === c.id ? '#fff' : 'var(--tx1)',
+              }}>
+              {c.nome}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="stats-grid">
         <StatCard label="📈 Total Receita" value={fmtBRL(totalReceita)} className="val-green" />
         <StatCard label="💸 Total Saída" value={fmtBRL(totalSaida)} className="val-red" />
@@ -367,8 +472,21 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
             ? `Mês anterior: ${fmtBRL(lucroComparativo.anterior)}`
             : `${lucroComparativo.variacao >= 0 ? '▲' : '▼'} ${Math.abs(lucroComparativo.variacao).toFixed(1)}% vs mês anterior`}
         />
-        <StatCard label="💰 Saldo Final" value={fmtBRL(saldoFinal)} className="val-blue" />
+        <StatCard
+          label={contaFiltro === null ? '💰 Saldo Consolidado' : '💰 Saldo da Conta'}
+          value={contaFiltro === null
+            ? fmtBRL(saldoConsolidado)
+            : fmtBRL(contasBancarias.find(c => c.id === contaFiltro)?.saldoAtual ?? saldoFinal)}
+          className="val-blue"
+          sub={contaFiltro === null && contasBancarias.filter(c => c.ativa).length > 1
+            ? `${contasBancarias.filter(c => c.ativa).length} contas`
+            : undefined}
+        />
       </div>
+
+      {clienteId && <SaudeFinanceiraGauges clienteId={clienteId} />}
+      {clienteId && <OrcamentoDinamicoCard clienteId={clienteId} />}
+      {clienteId && <InsightsCard clienteId={clienteId} />}
 
       {contasEmRisco.length > 0 && (
         <div className="meta-card" style={{ borderColor: '#ff9500' }}>
@@ -553,13 +671,30 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         {/* ── Meu Sonho ── */}
         <div className="meta-sonho-block">
           <label className="meta-field-label">💭 Meu Sonho</label>
-          <input
-            type="text"
-            className="meta-sonho-input"
-            placeholder="Ex: Ter R$ 1.000.000 investidos, aposentadoria antecipada..."
-            value={editSonho}
-            onChange={e => setEditSonho(e.target.value)}
-          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="text"
+              className="meta-sonho-input"
+              style={{ flex: 1 }}
+              placeholder="Ex: Ter R$ 1.000.000 investidos, aposentadoria antecipada..."
+              value={editSonho}
+              onChange={e => setEditSonho(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: 4 }}>
+              {(['🚗', '✈️', '🏠', '⭐'] as const).map(icone => (
+                <button
+                  key={icone}
+                  type="button"
+                  onClick={() => setEditIconeSonho(editIconeSonho === icone ? '' : icone)}
+                  style={{
+                    fontSize: 20, padding: '4px 6px', borderRadius: 8, cursor: 'pointer',
+                    border: `2px solid ${editIconeSonho === icone ? '#0a84ff' : 'var(--bd)'}`,
+                    background: editIconeSonho === icone ? 'rgba(10,132,255,.12)' : 'var(--bg-card)',
+                  }}
+                >{icone}</button>
+              ))}
+            </div>
+          </div>
           <div className="meta-modo-tabs">
             <button
               className={`meta-modo-btn ${editModoMeta === 'simples' ? 'active' : ''}`}
@@ -580,28 +715,40 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                   <label className="meta-field-label">Valor do sonho</label>
                   <div className="val-input-wrap">
                     <span className="val-prefix">R$</span>
-                    <input type="number" min="0" step="1000" value={editValorSonho}
-                      onChange={e => setEditValorSonho(e.target.value)} placeholder="1000000" />
+                    <input type="text" inputMode="decimal" value={editValorSonho}
+                      onChange={e => setEditValorSonho(e.target.value)}
+                      onBlur={() => { const n = parseBRL(editValorSonho); if (n) setEditValorSonho(fmtNum(n)) }}
+                      placeholder="1.000.000,00" />
                   </div>
                 </div>
                 <div className="meta-metodo-field">
                   <label className="meta-field-label">Já investido</label>
                   <div className="val-input-wrap">
                     <span className="val-prefix">R$</span>
-                    <input type="number" min="0" step="100" value={editTotalInvestido}
-                      onChange={e => setEditTotalInvestido(e.target.value)} placeholder="0" />
+                    <input type="text" inputMode="decimal" value={editTotalInvestido}
+                      onChange={e => setEditTotalInvestido(e.target.value)}
+                      onBlur={() => { const n = parseBRL(editTotalInvestido); if (n) setEditTotalInvestido(fmtNum(n)) }}
+                      placeholder="0,00" />
                   </div>
                 </div>
                 <div className="meta-metodo-field">
                   <label className="meta-field-label">Prazo (anos)</label>
-                  <input type="number" min="1" max="50" value={editPrazoAnos}
+                  <input type="text" inputMode="numeric" value={editPrazoAnos}
                     onChange={e => setEditPrazoAnos(e.target.value)} placeholder="10"
                     style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
                 </div>
                 <div className="meta-metodo-field">
                   <label className="meta-field-label">Taxa retorno (% a.a.) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>SELIC: {selic.toFixed(1)}%</span></label>
-                  <input type="number" min="0" max="100" step="0.1" value={editTaxaRetorno}
+                  <input type="text" inputMode="decimal" value={editTaxaRetorno}
                     onChange={e => setEditTaxaRetorno(e.target.value)} placeholder={selic.toFixed(1)}
+                    style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
+                </div>
+                <div className="meta-metodo-field">
+                  <label className="meta-field-label">
+                    Margem PJ (%) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>% da receita que vira aporte</span>
+                  </label>
+                  <input type="text" inputMode="decimal" value={editMargemPJ}
+                    onChange={e => setEditMargemPJ(e.target.value)} placeholder="20"
                     style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
                 </div>
               </div>
@@ -609,13 +756,24 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               {aporteMensal !== null && (
                 <div className="meta-aporte-result">
                   <div style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 4 }}>
-                    Para atingir {fmtBRL(Number(editValorSonho))} em {editPrazoAnos} anos com {editTaxaRetorno}% a.a.:
+                    Para atingir {fmtBRL(parseBRL(editValorSonho))} em {editPrazoAnos} anos com {editTaxaRetorno}% a.a.:
                   </div>
                   {aporteMensal === 0
                     ? <div style={{ fontSize: 16, fontWeight: 700, color: '#34c759' }}>✅ Seu capital atual já atinge a meta no prazo!</div>
-                    : <div style={{ fontSize: 22, fontWeight: 800, color: '#0a84ff' }}>
-                        Aporte mensal necessário: <span>{fmtBRL(aporteMensal)}</span>
-                      </div>
+                    : <>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: '#0a84ff' }}>
+                          Aporte mensal necessário: <span>{fmtBRL(aporteMensal)}</span>
+                        </div>
+                        {editMargemPJ && Number(editMargemPJ) > 0 && (
+                          <div style={{ fontSize: 13, color: 'var(--tx3)', marginTop: 6 }}>
+                            💼 Com margem PJ de {editMargemPJ}%, você precisa faturar{' '}
+                            <strong style={{ color: 'var(--tx1)' }}>
+                              {fmtBRL(aporteMensal / (Number(editMargemPJ) / 100))}
+                            </strong>{' '}
+                            adicionalmente por mês.
+                          </div>
+                        )}
+                      </>
                   }
                 </div>
               )}
@@ -642,8 +800,10 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                   <div className="meta-simulador-row">
                     <div className="val-input-wrap" style={{ flex: 1, minWidth: 130 }}>
                       <span className="val-prefix">R$</span>
-                      <input type="number" min="0" step="100" value={simAporteExtra}
-                        onChange={e => setSimAporteExtra(e.target.value)} placeholder="500" />
+                      <input type="text" inputMode="decimal" value={simAporteExtra}
+                        onChange={e => setSimAporteExtra(e.target.value)}
+                        onBlur={() => { const n = parseBRL(simAporteExtra); if (n) setSimAporteExtra(fmtNum(n)) }}
+                        placeholder="500,00" />
                     </div>
                     {simTempoComExtra && (
                       <div className="meta-sim-result">
@@ -660,6 +820,39 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                         }
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {atrasadaNaSonho?.atrasada && (
+                <div className="meta-recovery-card">
+                  <div className="meta-recovery-title">⚠️ Meta com atraso detectado</div>
+                  <p className="meta-recovery-desc">
+                    Passaram-se <strong>{atrasadaNaSonho.mesesDecorridos} meses</strong> desde que você definiu esta meta.
+                    Seu aporte necessário subiu. Escolha como recuperar:
+                  </p>
+                  <div className="meta-recovery-options">
+                    <div className="meta-recovery-option">
+                      <div className="meta-recovery-option-label">Opção 1 · Manter prazo</div>
+                      <div className="meta-recovery-option-val">
+                        {fmtBRL(atrasadaNaSonho.aporteNecessarioAgora)}
+                        <span style={{ fontSize: 13, fontWeight: 400 }}>/mês</span>
+                      </div>
+                      <div className="meta-recovery-option-desc">Novo aporte para chegar à meta no prazo original</div>
+                    </div>
+                    <div className="meta-recovery-sep">ou</div>
+                    <div className="meta-recovery-option">
+                      <div className="meta-recovery-option-label">Opção 2 · Manter aporte</div>
+                      <div className="meta-recovery-option-val">
+                        +{Math.ceil(Math.max(0, atrasadaNaSonho.novoPrazoMeses - atrasadaNaSonho.mesesRestantes) / 12 * 10) / 10}a
+                        <span style={{ fontSize: 13, fontWeight: 400 }}> a mais</span>
+                      </div>
+                      <div className="meta-recovery-option-desc">
+                        Aportar {fmtBRL(atrasadaNaSonho.aporteOriginal)}/mês → meta em{' '}
+                        {Math.floor(atrasadaNaSonho.novoPrazoMeses / 12)}a{' '}
+                        {atrasadaNaSonho.novoPrazoMeses % 12}m
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -691,14 +884,20 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           <label>Meta de Receita</label>
           <div className="val-input-wrap">
             <span className="val-prefix">R$</span>
-            <input type="number" value={editReceita} onChange={e => setEditReceita(e.target.value)} placeholder="0,00" min="0" step="0.01" />
+            <input type="text" inputMode="decimal" value={editReceita}
+              onChange={e => setEditReceita(e.target.value)}
+              onBlur={() => { const n = parseBRL(editReceita); if (n) setEditReceita(fmtNum(n)) }}
+              placeholder="0,00" />
           </div>
         </div>
         <div className="meta-row">
           <label>Meta de Lucro</label>
           <div className="val-input-wrap">
             <span className="val-prefix">R$</span>
-            <input type="number" value={editLucro} onChange={e => setEditLucro(e.target.value)} placeholder="0,00" min="0" step="0.01" />
+            <input type="text" inputMode="decimal" value={editLucro}
+              onChange={e => setEditLucro(e.target.value)}
+              onBlur={() => { const n = parseBRL(editLucro); if (n) setEditLucro(fmtNum(n)) }}
+              placeholder="0,00" />
           </div>
         </div>
 

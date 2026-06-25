@@ -40,6 +40,7 @@ function mapRegistro(raw: any): Registro {
   return {
     id: raw.id,
     clienteId: raw.clienteId,
+    contaBancariaId: raw.contaBancariaId ?? undefined,
     data: raw.data,
     saldoInicio: raw.inicio ?? 0,
     entradas: (raw.entradas ?? []).map(mapItemFinanceiro),
@@ -57,13 +58,15 @@ export const listarRegistros = async (clienteId: string): Promise<ApiResponse<Re
   return { ...res, dados: (res.dados ?? []).map(mapRegistro) }
 }
 
-export const obterRegistroPorData = async (clienteId: string, data: string): Promise<ApiResponse<Registro>> => {
-  const res = await apiFetch<ApiResponse<unknown>>(`/api/registros/${clienteId}/${data}`)
+export const obterRegistroPorData = async (clienteId: string, data: string, contaBancariaId?: string): Promise<ApiResponse<Registro>> => {
+  const query = contaBancariaId ? `?contaBancariaId=${contaBancariaId}` : ''
+  const res = await apiFetch<ApiResponse<unknown>>(`/api/registros/${clienteId}/${data}${query}`)
   return { ...res, dados: res.dados ? mapRegistro(res.dados) : res.dados as Registro }
 }
 
 export const salvarRegistro = async (dto: {
   clienteId: string
+  contaBancariaId?: string
   data: string
   saldoInicio: number
   entradas: ItemFinanceiro[]
@@ -74,6 +77,7 @@ export const salvarRegistro = async (dto: {
 }): Promise<ApiResponse<Registro>> => {
   const payload = {
     clienteId: dto.clienteId,
+    contaBancariaId: dto.contaBancariaId ?? null,
     data: dto.data,
     inicio: dto.saldoInicio,
     entradas: dto.entradas.map(e => ({ Descricao: e.descricao, Valor: e.valor, Categoria: e.categoria, TipoCusto: e.tipoCusto })),

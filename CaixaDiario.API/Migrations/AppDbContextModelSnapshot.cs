@@ -75,6 +75,54 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("audit_logs", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.ContaBancaria", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Ativa")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("ativa");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<DateTime>("DataCriacao")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("data_criacao")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("nome");
+
+                    b.Property<decimal>("SaldoInicial")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18,2)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("saldo_inicial");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Caixa")
+                        .HasColumnName("tipo");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClienteId", "Ativa");
+
+                    b.ToTable("contas_bancarias", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.ContaRecorrente", b =>
                 {
                     b.Property<Guid>("Id")
@@ -190,6 +238,12 @@ namespace CaixaDiario.API.Migrations
                     b.Property<int>("PrazoAnos")
                         .HasColumnType("integer");
 
+                    b.Property<string>("IconeSonho")
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("MargemPJ")
+                        .HasColumnType("numeric");
+
                     b.Property<string>("Sonho")
                         .HasColumnType("text");
 
@@ -224,6 +278,10 @@ namespace CaixaDiario.API.Migrations
                     b.Property<Guid>("ClienteId")
                         .HasColumnType("uuid")
                         .HasColumnName("cliente_id");
+
+                    b.Property<Guid?>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
 
                     b.Property<string>("ContasPagar")
                         .IsRequired()
@@ -281,8 +339,11 @@ namespace CaixaDiario.API.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ClienteId", "Data")
-                        .IsUnique();
+                    b.HasIndex("ClienteId", "Data");
+
+                    b.HasIndex("ContaBancariaId", "Data")
+                        .IsUnique()
+                        .HasFilter("conta_bancaria_id IS NOT NULL AND excluido = FALSE");
 
                     b.ToTable("registros_diarios", (string)null);
                 });
@@ -344,6 +405,17 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("usuarios", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.ContaBancaria", b =>
+                {
+                    b.HasOne("CaixaDiario.API.Models.Usuario", "Cliente")
+                        .WithMany("ContasBancarias")
+                        .HasForeignKey("ClienteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Cliente");
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.ContaRecorrente", b =>
                 {
                     b.HasOne("CaixaDiario.API.Models.Usuario", "Cliente")
@@ -374,11 +446,98 @@ namespace CaixaDiario.API.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaBancaria")
+                        .WithMany("Registros")
+                        .HasForeignKey("ContaBancariaId");
+
                     b.Navigation("Cliente");
+
+                    b.Navigation("ContaBancaria");
+                });
+
+            modelBuilder.Entity("CaixaDiario.API.Models.TransacaoImportada", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<DateOnly>("Data")
+                        .HasColumnType("date")
+                        .HasColumnName("data");
+
+                    b.Property<decimal>("Valor")
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("valor");
+
+                    b.Property<string>("Descricao")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("descricao");
+
+                    b.Property<string>("FitId")
+                        .HasColumnType("text")
+                        .HasColumnName("fit_id");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Entrada")
+                        .HasColumnName("tipo");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Pendente")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Categoria")
+                        .HasColumnType("text")
+                        .HasColumnName("categoria");
+
+                    b.Property<DateTime>("ImportadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("importado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContaBancariaId", "Status");
+
+                    b.ToTable("transacoes_importadas", (string)null);
+                });
+
+            modelBuilder.Entity("CaixaDiario.API.Models.TransacaoImportada", b =>
+                {
+                    b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaBancaria")
+                        .WithMany()
+                        .HasForeignKey("ContaBancariaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ContaBancaria");
+                });
+
+            modelBuilder.Entity("CaixaDiario.API.Models.ContaBancaria", b =>
+                {
+                    b.Navigation("Registros");
                 });
 
             modelBuilder.Entity("CaixaDiario.API.Models.Usuario", b =>
                 {
+                    b.Navigation("ContasBancarias");
+
                     b.Navigation("ContasRecorrentes");
 
                     b.Navigation("MetasAnuais");

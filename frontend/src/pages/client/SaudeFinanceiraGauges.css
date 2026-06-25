@@ -1,0 +1,117 @@
+.saude-card {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+
+.saude-titulo {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tx3);
+  margin: 0 0 16px;
+}
+
+.saude-gauges {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+/* ── Individual gauge ── */
+.gauge-item {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gauge-arc {
+  width: 100%;
+  max-width: 160px;
+  /* let recharts size itself */
+}
+
+/* bottom label block */
+.gauge-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: -8px;
+  gap: 2px;
+}
+
+.gauge-valor {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.gauge-nome {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tx3);
+  text-align: center;
+  line-height: 1.3;
+}
+
+/* ── Tooltip ── */
+.gauge-tooltip-wrap {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gauge-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 10px 12px;
+  z-index: 50;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  pointer-events: none;
+}
+
+.gauge-tip-desc {
+  font-size: 12px;
+  color: var(--tx1);
+  margin: 0 0 6px;
+  line-height: 1.4;
+}
+
+.gauge-tip-calculo {
+  font-size: 11px;
+  color: var(--tx3);
+  margin: 0;
+  font-style: italic;
+  line-height: 1.3;
+}
+
+/* ── Faixas de referência (legenda visual) ── */
+.gauge-faixas {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  justify-content: center;
+}
+
+.gauge-faixa {
+  width: 8px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+@media (max-width: 480px) {
+  .saude-gauges { flex-direction: column; align-items: center; }
+  .gauge-item { width: 100%; max-width: 220px; }
+}

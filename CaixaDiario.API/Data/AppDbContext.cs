@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     public DbSet<MetaAnual> MetasAnuais { get; set; }
     public DbSet<ContaRecorrente> ContasRecorrentes { get; set; }
     public DbSet<AuditLog> AuditLogs { get; set; }
+    public DbSet<ContaBancaria> ContasBancarias { get; set; }
+    public DbSet<TransacaoImportada> TransacoesImportadas { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -67,11 +69,20 @@ public class AppDbContext : DbContext
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
             entity.Property(e => e.UsuarioAtualizacao).HasColumnName("usuario_atualizacao");
 
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+
             entity.HasOne(e => e.Cliente)
                 .WithMany(u => u.Registros)
                 .HasForeignKey(e => e.ClienteId);
 
-            entity.HasIndex(e => new { e.ClienteId, e.Data }).IsUnique();
+            entity.HasOne(e => e.ContaBancaria)
+                .WithMany(c => c.Registros)
+                .HasForeignKey(e => e.ContaBancariaId)
+                .IsRequired(false);
+
+            entity.HasIndex(e => new { e.ClienteId, e.Data });
+            entity.HasIndex(e => new { e.ContaBancariaId, e.Data }).IsUnique()
+                .HasFilter("conta_bancaria_id IS NOT NULL AND excluido = FALSE");
         });
 
         modelBuilder.Entity<MetaAnual>(entity =>
@@ -114,6 +125,49 @@ public class AppDbContext : DbContext
                 .WithMany(u => u.ContasRecorrentes)
                 .HasForeignKey(e => e.ClienteId);
             entity.HasIndex(e => new { e.ClienteId, e.Ativo });
+        });
+
+        modelBuilder.Entity<ContaBancaria>(entity =>
+        {
+            entity.ToTable("contas_bancarias");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.Nome).HasColumnName("nome").IsRequired();
+            entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired().HasDefaultValue("Caixa");
+            entity.Property(e => e.SaldoInicial).HasColumnName("saldo_inicial").HasColumnType("decimal(18,2)").HasDefaultValue(0m);
+            entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);
+            entity.Property(e => e.DataCriacao).HasColumnName("data_criacao").HasDefaultValueSql("NOW()");
+
+            entity.HasOne(e => e.Cliente)
+                .WithMany(u => u.ContasBancarias)
+                .HasForeignKey(e => e.ClienteId);
+
+            entity.HasIndex(e => new { e.ClienteId, e.Ativa });
+        });
+
+        modelBuilder.Entity<TransacaoImportada>(entity =>
+        {
+            entity.ToTable("transacoes_importadas");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.Data).HasColumnName("data");
+            entity.Property(e => e.Valor).HasColumnName("valor").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Descricao).HasColumnName("descricao").IsRequired();
+            entity.Property(e => e.FitId).HasColumnName("fit_id");
+            entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired().HasDefaultValue("Entrada");
+            entity.Property(e => e.Status).HasColumnName("status").IsRequired().HasDefaultValue("Pendente");
+            entity.Property(e => e.Categoria).HasColumnName("categoria");
+            entity.Property(e => e.ImportadoEm).HasColumnName("importado_em").HasDefaultValueSql("NOW()");
+
+            entity.HasOne(e => e.ContaBancaria)
+                .WithMany()
+                .HasForeignKey(e => e.ContaBancariaId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.ContaBancariaId, e.Status });
         });
 
         modelBuilder.Entity<AuditLog>(entity =>

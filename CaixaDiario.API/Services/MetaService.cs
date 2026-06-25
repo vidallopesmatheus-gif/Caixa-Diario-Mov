@@ -42,6 +42,8 @@ public class MetaService : IMetaService
             existente.PrazoAnos = dto.PrazoAnos;
             existente.TaxaRetorno = dto.TaxaRetorno;
             existente.TotalInvestido = dto.TotalInvestido;
+            existente.MargemPJ = dto.MargemPJ;
+            existente.IconeSonho = dto.IconeSonho;
             existente.AtualizadoEm = DateTime.UtcNow;
             return MapToDto(await _metaRepository.SalvarAsync(existente));
         }
@@ -61,6 +63,8 @@ public class MetaService : IMetaService
             PrazoAnos = dto.PrazoAnos,
             TaxaRetorno = dto.TaxaRetorno,
             TotalInvestido = dto.TotalInvestido,
+            MargemPJ = dto.MargemPJ,
+            IconeSonho = dto.IconeSonho,
             CriadoEm = DateTime.UtcNow,
             AtualizadoEm = DateTime.UtcNow
         };
@@ -75,5 +79,6 @@ public class MetaService : IMetaService
         Sonho = m.Sonho, ModoMeta = m.ModoMeta,
         ValorSonho = m.ValorSonho, PrazoAnos = m.PrazoAnos,
         TaxaRetorno = m.TaxaRetorno, TotalInvestido = m.TotalInvestido,
+        MargemPJ = m.MargemPJ, IconeSonho = m.IconeSonho,
     };
 }

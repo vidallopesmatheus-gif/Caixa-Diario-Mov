@@ -14,6 +14,9 @@ public class MetaRepository : IMetaRepository
     public async Task<MetaAnual?> ObterPorClienteEAnoAsync(Guid clienteId, int ano) =>
         await _context.MetasAnuais.FirstOrDefaultAsync(m => m.ClienteId == clienteId && m.Ano == ano);
 
+    public async Task<List<MetaAnual>> ListarPorClienteAsync(Guid clienteId) =>
+        await _context.MetasAnuais.Where(m => m.ClienteId == clienteId).ToListAsync();
+
     public async Task<MetaAnual> SalvarAsync(MetaAnual meta)
     {
         var existente = await _context.MetasAnuais.FindAsync(meta.Id);

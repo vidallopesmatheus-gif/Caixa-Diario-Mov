@@ -5,8 +5,9 @@ import StatCard from '../../components/shared/StatCard'
 import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { listarCategorias } from '../../api/categorias'
+import { listarContasBancarias } from '../../api/contasBancarias'
 import { ORDEM_GRUPOS } from '../../utils/categorias'
-import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias } from '../../types'
+import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, ContaBancaria } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
@@ -41,10 +42,24 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const [savedEntradas, setSavedEntradas] = useState<ItemFinanceiro[]>([])
   const [savedSaidas, setSavedSaidas] = useState<ItemFinanceiroSaida[]>([])
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const [contas, setContas] = useState<ContaBancaria[]>([])
+  const [contaId, setContaId] = useState<string>('')
 
   useEffect(() => {
     listarCategorias().then(setCategorias).catch(console.error)
   }, [])
+
+  useEffect(() => {
+    if (!clienteId) return
+    listarContasBancarias(clienteId)
+      .then(cs => {
+        setContas(cs)
+        const ativas = cs.filter(c => c.ativa)
+        if (ativas.length > 0 && !contaId) setContaId(ativas[0].id)
+      })
+      .catch(console.error)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId])
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -62,10 +77,10 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const dif = confirmado !== '' ? calculado - Number(confirmado) : null
 
   useEffect(() => {
-    if (!clienteId) return
+    if (!clienteId || !contaId) return
     let ignore = false
     const load = async () => {
-      const reg = await buscarPorData(data)
+      const reg = await buscarPorData(data, contaId)
       if (ignore) return
       if (reg) {
         setInicio(reg.saldoInicio)
@@ -77,7 +92,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setSaidaDisplays([''])
         setConfirmado(String(reg.saldoConfirmado))
       } else {
-        const prev = registros.find(r => r.data < data)
+        const prev = registros.filter(r => r.contaBancariaId === contaId).find(r => r.data < data)
         setInicio(prev?.saldoConfirmado ?? 0)
         setSavedEntradas([])
         setSavedSaidas([])
@@ -90,7 +105,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     }
     load()
     return () => { ignore = true }
-  }, [data, clienteId, registros, buscarPorData])
+  }, [data, clienteId, contaId, registros, buscarPorData])
 
   function handleSaveEntrada(idx: number) {
     const item = entradas[idx]
@@ -136,7 +151,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       }
       const regAtual = await buscarPorData(data)
       await salvar({
-        clienteId, data, saldoInicio: inicio,
+        clienteId, contaBancariaId: contaId || undefined, data, saldoInicio: inicio,
         entradas: todasEntradas, saidas: todasSaidas,
         contasAReceber: regAtual?.contasAReceber ?? [],
         contasAPagar: regAtual?.contasAPagar ?? [],
@@ -198,11 +213,28 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         <StatCard label="💰 Saldo" value={fmtBRL(calculado)} className="val-green" />
       </div>
 
+      {contas.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 13, color: 'var(--tx3)' }}>Conta:</span>
+          {contas.filter(c => c.ativa).map(c => (
+            <button key={c.id} type="button" onClick={() => setContaId(c.id)}
+              style={{
+                padding: '5px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+                border: '1px solid var(--bd)',
+                background: contaId === c.id ? '#0a84ff' : 'var(--bg-card)',
+                color: contaId === c.id ? '#fff' : 'var(--tx1)',
+              }}>
+              {c.nome}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="form-card">
         <h3>📋 Registro do dia</h3>
         <div className="inp-group">
           <label>Saldo início (preenchido automaticamente)</label>
-          <input type="number" value={inicio} readOnly style={{ color: 'var(--tx4)', cursor: 'not-allowed' }} />
+          <input type="text" value={fmtNum(inicio)} readOnly style={{ color: 'var(--tx4)', cursor: 'not-allowed' }} />
         </div>
 
         <div className="inp-group">

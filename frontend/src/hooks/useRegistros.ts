@@ -35,10 +35,10 @@ export function useRegistros(clienteId: string | null) {
     await carregar()
   }
 
-  const buscarPorData = useCallback(async (data: string) => {
+  const buscarPorData = useCallback(async (data: string, contaBancariaId?: string) => {
     if (!clienteId) return null
     try {
-      const res = await obterRegistroPorData(clienteId, data)
+      const res = await obterRegistroPorData(clienteId, data, contaBancariaId)
       return res.dados
     } catch {
       return null

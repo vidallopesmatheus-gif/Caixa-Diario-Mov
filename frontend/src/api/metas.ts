@@ -18,6 +18,8 @@ function mapMeta(raw: any): MetaAnual {
     prazoAnos: raw.prazoAnos ?? 0,
     taxaRetorno: raw.taxaRetorno ?? 0,
     totalInvestido: raw.totalInvestido ?? 0,
+    margemPJ: raw.margemPJ ?? undefined,
+    iconeSonho: raw.iconeSonho ?? undefined,
   }
 }
 
@@ -39,6 +41,8 @@ export const salvarMeta = async (dto: {
   prazoAnos?: number
   taxaRetorno?: number
   totalInvestido?: number
+  margemPJ?: number
+  iconeSonho?: string
 }): Promise<MetaAnual> => {
   const res = await apiFetch<ApiResponse<unknown>>('/api/metas', {
     method: 'POST',

@@ -175,6 +175,86 @@ public class MetricasService : IMetricasService
         return resultado;
     }
 
+    private static readonly Dictionary<string, string> _mapaGrupo = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Insumos/Mercadoria"] = "Custos Diretos",
+        ["Embalagens"]         = "Custos Diretos",
+        ["Comissões"]          = "Custos Diretos",
+        ["Salários/Folha"]     = "Pessoas",
+        ["Encargos"]           = "Pessoas",
+        ["Benefícios"]         = "Pessoas",
+        ["Pró-labore"]         = "Pessoas",
+        ["Aluguel"]                    = "Despesas Administrativas",
+        ["Energia/Água/Internet"]      = "Despesas Administrativas",
+        ["Seguros"]                    = "Despesas Administrativas",
+        ["Manutenção"]                 = "Despesas Administrativas",
+        ["Material de Escritório"]     = "Despesas Administrativas",
+        ["Publicidade"]     = "Marketing",
+        ["Mídia paga"]      = "Marketing",
+        ["Material gráfico"]= "Marketing",
+        ["Marketing"]       = "Marketing",
+        ["Simples/DAS"]      = "Impostos",
+        ["ISS"]              = "Impostos",
+        ["Outros tributos"]  = "Impostos",
+        ["Tarifas bancárias"]= "Financeiras",
+        ["Juros"]            = "Financeiras",
+        ["IOF"]              = "Financeiras",
+        ["Equipamentos"] = "Investimentos",
+        ["Reformas"]     = "Investimentos",
+        ["Software"]     = "Investimentos",
+    };
+
+    private static readonly string[] _ordemGrupos =
+    [
+        "Custos Diretos", "Pessoas", "Despesas Administrativas",
+        "Marketing", "Impostos", "Financeiras", "Investimentos", "Outros"
+    ];
+
+    public DreDto CalcularDre(List<RegistroDiario> registros)
+    {
+        var receitaBruta = registros.SelectMany(r => r.Entradas).Sum(e => e.Valor);
+
+        // Agrupa saídas por grupo → categoria
+        var porGrupo = new Dictionary<string, Dictionary<string, decimal>>();
+        foreach (var saida in registros.SelectMany(r => r.Saidas))
+        {
+            var grupo = _mapaGrupo.TryGetValue(saida.Categoria ?? "", out var g) ? g : "Outros";
+            if (!porGrupo.ContainsKey(grupo))
+                porGrupo[grupo] = new Dictionary<string, decimal>();
+            var cat = string.IsNullOrWhiteSpace(saida.Categoria) ? "Não Classificado" : saida.Categoria;
+            porGrupo[grupo][cat] = (porGrupo[grupo].TryGetValue(cat, out var v) ? v : 0m) + saida.Valor;
+        }
+
+        var linhas = _ordemGrupos
+            .Where(porGrupo.ContainsKey)
+            .Select(grupo =>
+            {
+                var cats = porGrupo[grupo]
+                    .OrderByDescending(kv => kv.Value)
+                    .Select(kv => new DreCategoriaDto { Nome = kv.Key, Total = kv.Value })
+                    .ToList();
+                return new DreLinhaDto
+                {
+                    Grupo = grupo,
+                    Total = cats.Sum(c => c.Total),
+                    Categorias = cats,
+                };
+            })
+            .ToList();
+
+        var totalDespesas = linhas.Sum(l => l.Total);
+        var resultado = receitaBruta - totalDespesas;
+
+        return new DreDto
+        {
+            ReceitaBruta  = receitaBruta,
+            GruposDespesa = linhas,
+            TotalDespesas = totalDespesas,
+            Resultado     = resultado,
+            Margem        = receitaBruta > 0 ? Math.Round(resultado / receitaBruta * 100, 1) : null,
+        };
+    }
+
     public FluxoProjetadoDto CalcularFluxoProjetado(List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, int dias)
     {
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
