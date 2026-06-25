@@ -27,9 +27,9 @@ public class RegistrosController : ControllerBase
     }
 
     [HttpGet("{clienteId:guid}/{data}")]
-    public async Task<IActionResult> ObterPorData(Guid clienteId, DateOnly data)
+    public async Task<IActionResult> ObterPorData(Guid clienteId, DateOnly data, [FromQuery] Guid? contaBancariaId = null)
     {
-        var registro = await _registroService.ObterPorDataAsync(clienteId, data, ObterUsuarioId(), ObterPerfil());
+        var registro = await _registroService.ObterPorDataAsync(clienteId, data, ObterUsuarioId(), ObterPerfil(), contaBancariaId);
         return Ok(new ApiResponse<RegistroDto> { Dados = registro });
     }
 

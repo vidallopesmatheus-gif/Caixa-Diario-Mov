@@ -11,13 +11,19 @@ public class RegistroRepository : IRegistroRepository
 
     public RegistroRepository(AppDbContext context) => _context = context;
 
-    public async Task<RegistroDiario?> ObterPorClienteEDataAsync(Guid clienteId, DateOnly data) =>
+    public async Task<RegistroDiario?> ObterPorContaEDataAsync(Guid contaBancariaId, DateOnly data) =>
         await _context.RegistrosDiarios
-            .FirstOrDefaultAsync(r => r.ClienteId == clienteId && r.Data == data && !r.Excluido);
+            .FirstOrDefaultAsync(r => r.ContaBancariaId == contaBancariaId && r.Data == data && !r.Excluido);
 
     public async Task<List<RegistroDiario>> ListarPorClienteAsync(Guid clienteId) =>
         await _context.RegistrosDiarios
             .Where(r => r.ClienteId == clienteId && !r.Excluido)
+            .OrderByDescending(r => r.Data)
+            .ToListAsync();
+
+    public async Task<List<RegistroDiario>> ListarPorContaAsync(Guid contaBancariaId) =>
+        await _context.RegistrosDiarios
+            .Where(r => r.ContaBancariaId == contaBancariaId && !r.Excluido)
             .OrderByDescending(r => r.Data)
             .ToListAsync();
 

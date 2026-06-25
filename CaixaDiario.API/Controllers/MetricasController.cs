@@ -62,4 +62,24 @@ public class MetricasController : ControllerBase
         var resultado = _metricasService.CalcularFluxoProjetado(registros, recorrentes, dias);
         return Ok(new ApiResponse<FluxoProjetadoDto> { Dados = resultado });
     }
+
+    [HttpGet("{clienteId:guid}/dre")]
+    public async Task<IActionResult> ObterDre(
+        Guid clienteId,
+        [FromQuery] DateOnly de,
+        [FromQuery] DateOnly ate,
+        [FromQuery] Guid? contaBancariaId = null)
+    {
+        VerificarAcesso(clienteId);
+        var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
+        var filtrados = todos
+            .Where(r => r.Data >= de && r.Data <= ate && !r.Excluido)
+            .ToList();
+
+        if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
+            filtrados = filtrados.Where(r => r.ContaBancariaId == contaBancariaId).ToList();
+
+        var resultado = _metricasService.CalcularDre(filtrados);
+        return Ok(new ApiResponse<DreDto> { Dados = resultado });
+    }
 }

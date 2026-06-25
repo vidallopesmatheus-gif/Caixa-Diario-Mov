@@ -35,9 +35,21 @@ export interface ContaProvisionada {
   dataBaixa?: string
 }
 
+export interface ContaBancaria {
+  id: string
+  clienteId: string
+  nome: string
+  tipo: 'Caixa' | 'ContaCorrente' | 'Investimento'
+  saldoInicial: number
+  saldoAtual: number
+  ativa: boolean
+  dataCriacao: string
+}
+
 export interface Registro {
   id: string
   clienteId: string
+  contaBancariaId?: string
   data: string
   saldoInicio: number
   entradas: ItemFinanceiro[]
@@ -81,6 +93,17 @@ export interface MetaAnual {
   ano: number
   metaReceita: number
   metaLucro: number
+  mesInicio: number
+  periodoMeses: number
+  salvoEm: string
+  sonho?: string
+  modoMeta: 'simples' | 'metodo'
+  valorSonho: number
+  prazoAnos: number
+  taxaRetorno: number
+  totalInvestido: number
+  margemPJ?: number
+  iconeSonho?: string
 }
 
 export interface LoginResponse {
@@ -101,6 +124,19 @@ export interface ApiResponse<T> {
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+}
+
+export interface TransacaoImportada {
+  id: string
+  contaBancariaId: string
+  data: string
+  valor: number
+  descricao: string
+  tipo: 'Entrada' | 'Saida'
+  status: 'Pendente' | 'Confirmada' | 'Ignorada'
+  categoria?: string
+  fitId?: string
+  duplicada: boolean
 }
 
 export interface ChatResponse {

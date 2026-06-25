@@ -1,0 +1,108 @@
+.cb-resumo {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.cb-resumo-item {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.cb-resumo-label {
+  font-size: 12px;
+  color: var(--tx3);
+}
+
+.cb-resumo-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--tx1);
+}
+
+.cb-conta-item {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cb-conta-item.cb-inativa {
+  opacity: 0.6;
+}
+
+.cb-conta-info {
+  flex: 1;
+  min-width: 160px;
+}
+
+.cb-conta-nome {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tx1);
+}
+
+.cb-conta-meta {
+  font-size: 12px;
+  color: var(--tx3);
+  margin-top: 2px;
+}
+
+.cb-conta-saldo {
+  font-size: 17px;
+  font-weight: 700;
+  min-width: 120px;
+  text-align: right;
+}
+
+.cb-conta-acoes {
+  display: flex;
+  gap: 8px;
+}
+
+.cb-btn-editar {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg-card);
+  color: var(--tx1);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cb-btn-editar:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cb-btn-inativar {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cb-btn-inativar:hover {
+  background: rgba(220,38,38,.18);
+}
+
+.cb-edit-form {
+  width: 100%;
+}

@@ -83,3 +83,34 @@ export async function obterFluxoProjetado(clienteId: string, dias = 90): Promise
   const res = await apiFetch<ApiResponse<FluxoProjetado>>(`/api/metricas/${clienteId}/fluxo-projetado?dias=${dias}`)
   return res.dados
 }
+
+export interface DreCategoria {
+  nome: string
+  total: number
+}
+
+export interface DreLinha {
+  grupo: string
+  total: number
+  categorias: DreCategoria[]
+}
+
+export interface Dre {
+  receitaBruta: number
+  gruposDespesa: DreLinha[]
+  totalDespesas: number
+  resultado: number
+  margem: number | null
+}
+
+export async function obterDre(
+  clienteId: string,
+  de: string,
+  ate: string,
+  contaBancariaId?: string,
+): Promise<Dre> {
+  const params = new URLSearchParams({ de, ate })
+  if (contaBancariaId) params.set('contaBancariaId', contaBancariaId)
+  const res = await apiFetch<ApiResponse<Dre>>(`/api/metricas/${clienteId}/dre?${params}`)
+  return res.dados
+}

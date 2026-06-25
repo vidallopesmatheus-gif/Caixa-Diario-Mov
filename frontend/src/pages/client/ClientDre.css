@@ -1,0 +1,185 @@
+.dre-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.dre-titulo {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.dre-subtitulo {
+  font-size: 13px;
+  color: var(--tx3);
+}
+
+.dre-controles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.dre-tipo-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.dre-tipo-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg-card);
+  color: var(--tx1);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.dre-tipo-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.dre-filtros {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dre-select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg);
+  color: var(--tx1);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dre-loading,
+.dre-erro {
+  color: var(--tx3);
+  font-size: 14px;
+  padding: 20px 0;
+}
+
+.dre-erro {
+  color: var(--danger);
+}
+
+.dre-corpo {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  padding: 24px;
+  max-width: 680px;
+  font-family: monospace;
+}
+
+.dre-linha {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.dre-linha-label {
+  font-size: 14px;
+  color: var(--tx1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dre-linha-valor {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 140px;
+  text-align: right;
+}
+
+.dre-linha-receita .dre-linha-label {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dre-linha-receita .dre-linha-valor {
+  font-size: 15px;
+}
+
+.dre-linha-grupo {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 7px 4px;
+  transition: background .12s;
+}
+
+.dre-linha-grupo:hover {
+  background: rgba(255,255,255,.04);
+}
+
+.dre-expand {
+  font-size: 11px;
+  color: var(--tx3);
+  width: 12px;
+}
+
+.dre-linha-cat {
+  padding: 4px 0 4px 28px;
+}
+
+.dre-cat-nome {
+  font-size: 12px;
+  color: var(--tx3);
+}
+
+.dre-cat-valor {
+  font-size: 12px;
+  color: var(--tx3);
+  font-weight: 400;
+}
+
+.dre-linha-total-desp .dre-linha-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx2);
+}
+
+.dre-divisor {
+  border: none;
+  border-top: 1px solid var(--bd);
+  margin: 6px 0;
+}
+
+.dre-divisor-duplo {
+  border-top: 3px double var(--bd);
+  margin: 8px 0;
+}
+
+.dre-linha-resultado .dre-linha-label {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dre-resultado-val {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+}
+
+.dre-margem {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--tx3);
+  text-align: right;
+}
+
+.dre-vazio {
+  padding: 16px 0;
+  color: var(--tx3);
+  font-size: 13px;
+}

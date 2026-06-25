@@ -10,7 +10,12 @@ import ClientGraficoPage from './pages/client/ClientGraficoPage'
 import ClientContasPage from './pages/client/ClientContasPage'
 import ClientDashboardPage from './pages/client/ClientDashboardPage'
 import ClientExportacaoPage from './pages/client/ClientExportacaoPage'
+import ClientContasBancariasPage from './pages/client/ClientContasBancariasPage'
+import ClientExtratoRevisaoPage from './pages/client/ClientExtratoRevisaoPage'
+import ClientDrePage from './pages/client/ClientDrePage'
+import ClientProjecaoPage from './pages/client/ClientProjecaoPage'
 import Layout from './components/Layout/Layout'
+import InstallPrompt from './components/InstallPrompt'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
@@ -37,7 +42,11 @@ function ProtectedRoutes() {
         <Route path="/contas"     element={<ClientContasPage />} />
         <Route path="/historico"  element={<ClientHistoricoPage />} />
         <Route path="/grafico"    element={<ClientGraficoPage />} />
-        <Route path="/exportar"   element={<ClientExportacaoPage />} />
+        <Route path="/exportar"         element={<ClientExportacaoPage />} />
+        <Route path="/contas-bancarias" element={<ClientContasBancariasPage />} />
+        <Route path="/extrato/:contaId" element={<ClientExtratoRevisaoPage />} />
+        <Route path="/dre"       element={<ClientDrePage />} />
+        <Route path="/projecao" element={<ClientProjecaoPage />} />
         <Route path="*"           element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Layout>
@@ -46,13 +55,16 @@ function ProtectedRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/*" element={<ProtectedRoutes />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+    <>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/*" element={<ProtectedRoutes />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+      <InstallPrompt />
+    </>
   )
 }

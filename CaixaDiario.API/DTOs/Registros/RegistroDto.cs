@@ -4,6 +4,7 @@ public class RegistroDto
 {
     public Guid Id { get; set; }
     public Guid ClienteId { get; set; }
+    public Guid? ContaBancariaId { get; set; }
     public DateOnly Data { get; set; }
     public decimal Inicio { get; set; }
     public List<ItemFinanceiroDto> Entradas { get; set; } = new();

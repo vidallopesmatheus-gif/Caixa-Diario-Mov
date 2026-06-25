@@ -58,11 +58,19 @@ builder.Services.AddScoped<IUsuarioService, UsuarioService>();
 builder.Services.AddScoped<IRegistroService, RegistroService>();
 builder.Services.AddScoped<IMetaRepository, MetaRepository>();
 builder.Services.AddScoped<IMetaService, MetaService>();
+builder.Services.AddScoped<IContaBancariaRepository, ContaBancariaRepository>();
+builder.Services.AddScoped<IContaBancariaService, ContaBancariaService>();
+builder.Services.AddScoped<ITransacaoImportadaRepository, TransacaoImportadaRepository>();
+builder.Services.AddScoped<IImportacaoService, ImportacaoService>();
 builder.Services.AddScoped<IContaRecorrenteRepository, ContaRecorrenteRepository>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IRecorrenciaService, RecorrenciaService>();
 builder.Services.AddScoped<IContaRecorrenteService, ContaRecorrenteService>();
 builder.Services.AddScoped<IMetricasService, MetricasService>();
+builder.Services.AddScoped<IProjecaoService, ProjecaoService>();
+builder.Services.AddScoped<IInsightService, InsightService>();
+builder.Services.AddScoped<IOrcamentoDinamicoService, OrcamentoDinamicoService>();
+builder.Services.AddScoped<ISaudeFinanceiraService, SaudeFinanceiraService>();
 builder.Services.AddScoped<IAuditRepository, AuditRepository>();
 
 // Chat IA
@@ -103,3 +111,4 @@ app.MapFallbackToFile("index.html", new StaticFileOptions
 });
 
 app.Run();
+

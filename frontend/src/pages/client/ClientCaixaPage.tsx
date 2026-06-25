@@ -1,17 +1,26 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
 import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { listarCategorias } from '../../api/categorias'
+import { listarContasBancarias } from '../../api/contasBancarias'
 import { ORDEM_GRUPOS } from '../../utils/categorias'
-import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, CategoriaItem } from '../../types'
+import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, ContaBancaria } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
 
 const novaSaida = (): ItemFinanceiroSaida => ({ descricao: '', valor: 0, categoria: '', subcategoria: '' })
+
+function fmtNum(n: number) {
+  if (!n) return ''
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function parseBRL(s: string): number {
+  return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0
+}
 
 export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
@@ -22,62 +31,128 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const [inicio, setInicio] = useState(0)
   const [entradas, setEntradas] = useState<ItemFinanceiro[]>([{ descricao: '', valor: 0 }])
   const [saidas, setSaidas] = useState<ItemFinanceiroSaida[]>([novaSaida()])
+  const [entradaDisplays, setEntradaDisplays] = useState<string[]>([''])
+  const [saidaDisplays, setSaidaDisplays] = useState<string[]>([''])
   const [confirmado, setConfirmado] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [catOpen, setCatOpen] = useState<{ tipo: 'entrada' | 'saida'; idx: number } | null>(null)
+  const [savedEntradas, setSavedEntradas] = useState<ItemFinanceiro[]>([])
+  const [savedSaidas, setSavedSaidas] = useState<ItemFinanceiroSaida[]>([])
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [contas, setContas] = useState<ContaBancaria[]>([])
+  const [contaId, setContaId] = useState<string>('')
 
   useEffect(() => {
     listarCategorias().then(setCategorias).catch(console.error)
   }, [])
 
-  const totalEntradas = entradas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
-  const totalSaidas = saidas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
+  useEffect(() => {
+    if (!clienteId) return
+    listarContasBancarias(clienteId)
+      .then(cs => {
+        setContas(cs)
+        const ativas = cs.filter(c => c.ativa)
+        if (ativas.length > 0 && !contaId) setContaId(ativas[0].id)
+      })
+      .catch(console.error)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId])
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setCatOpen(null)
+      }
+    }
+    if (catOpen) document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [catOpen])
+
+  const totalEntradas = [...entradas, ...savedEntradas].reduce((s, x) => s + (Number(x.valor) || 0), 0)
+  const totalSaidas = [...saidas, ...savedSaidas].reduce((s, x) => s + (Number(x.valor) || 0), 0)
   const calculado = inicio + totalEntradas - totalSaidas
   const dif = confirmado !== '' ? calculado - Number(confirmado) : null
 
   useEffect(() => {
-    if (!clienteId) return
+    if (!clienteId || !contaId) return
     let ignore = false
     const load = async () => {
-      const reg = await buscarPorData(data)
+      const reg = await buscarPorData(data, contaId)
       if (ignore) return
       if (reg) {
         setInicio(reg.saldoInicio)
-        setEntradas(reg.entradas.length ? reg.entradas : [{ descricao: '', valor: 0 }])
-        setSaidas(reg.saidas.length ? reg.saidas : [novaSaida()])
-        setConfirmado(String(reg.saldoConfirmado))
-      } else {
-        const prev = registros.find(r => r.data < data)
-        setInicio(prev?.saldoConfirmado ?? 0)
+        setSavedEntradas(reg.entradas)
+        setSavedSaidas(reg.saidas)
         setEntradas([{ descricao: '', valor: 0 }])
         setSaidas([novaSaida()])
+        setEntradaDisplays([''])
+        setSaidaDisplays([''])
+        setConfirmado(String(reg.saldoConfirmado))
+      } else {
+        const prev = registros.filter(r => r.contaBancariaId === contaId).find(r => r.data < data)
+        setInicio(prev?.saldoConfirmado ?? 0)
+        setSavedEntradas([])
+        setSavedSaidas([])
+        setEntradas([{ descricao: '', valor: 0 }])
+        setSaidas([novaSaida()])
+        setEntradaDisplays([''])
+        setSaidaDisplays([''])
         setConfirmado('')
       }
     }
     load()
     return () => { ignore = true }
-  }, [data, clienteId, registros, buscarPorData])
+  }, [data, clienteId, contaId, registros, buscarPorData])
+
+  function handleSaveEntrada(idx: number) {
+    const item = entradas[idx]
+    if (!item.descricao && !item.valor) return
+    setSavedEntradas(prev => [...prev, item])
+    setEntradas(prev => {
+      const next = prev.filter((_, j) => j !== idx)
+      return next.length ? next : [{ descricao: '', valor: 0 }]
+    })
+    setEntradaDisplays(prev => {
+      const next = prev.filter((_, j) => j !== idx)
+      return next.length ? next : ['']
+    })
+  }
+
+  function handleSaveSaida(idx: number) {
+    const item = saidas[idx]
+    if (!item.descricao && !item.valor) return
+    if (!item.categoria) { setMsg('Selecione uma categoria para a saída.'); setSaveSuccess(false); return }
+    setSavedSaidas(prev => [...prev, item])
+    setSaidas(prev => {
+      const next = prev.filter((_, j) => j !== idx)
+      return next.length ? next : [novaSaida()]
+    })
+    setSaidaDisplays(prev => {
+      const next = prev.filter((_, j) => j !== idx)
+      return next.length ? next : ['']
+    })
+    setMsg('')
+  }
 
   async function handleSave() {
     if (!clienteId) return
     setSaving(true)
     setMsg('')
     try {
-      const saidasValidas = saidas.filter(s => s.descricao || s.valor)
-      if (saidasValidas.some(s => !s.categoria)) {
+      const todasEntradas = [...savedEntradas, ...entradas.filter(e => e.descricao || e.valor)]
+      const todasSaidas = [...savedSaidas, ...saidas.filter(s => s.descricao || s.valor)]
+      if (todasSaidas.some(s => !s.categoria)) {
         setSaveSuccess(false)
         setMsg('Selecione uma categoria para cada saída.')
         return
       }
       const regAtual = await buscarPorData(data)
       await salvar({
-        clienteId,
-        data,
-        saldoInicio: inicio,
-        entradas: entradas.filter(e => e.descricao || e.valor),
-        saidas: saidasValidas,
+        clienteId, contaBancariaId: contaId || undefined, data, saldoInicio: inicio,
+        entradas: todasEntradas, saidas: todasSaidas,
         contasAReceber: regAtual?.contasAReceber ?? [],
         contasAPagar: regAtual?.contasAPagar ?? [],
         saldoConfirmado: confirmado === '' ? calculado : Number(confirmado),
@@ -92,7 +167,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     }
   }
 
-  function tipoCustoDe(nome: string): 'Receita' | 'CustoFixo' | 'CustoVariavel' | undefined {
+  function tipoCustoDe(nome: string) {
     const cat = [...categorias.entradas, ...categorias.saidas].find(c => c.nome === nome)
     return cat ? (cat.tipoCusto as 'Receita' | 'CustoFixo' | 'CustoVariavel') : undefined
   }
@@ -101,10 +176,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setEntradas(prev => prev.map((x, j) => {
       if (j !== i) return x
       const updated: ItemFinanceiro = { ...x, [field]: field === 'valor' ? Number(val) : val }
-      if (field === 'categoria') {
-        const tc = tipoCustoDe(val)
-        if (tc) updated.tipoCusto = tc
-      }
+      if (field === 'categoria') { const tc = tipoCustoDe(val); if (tc) updated.tipoCusto = tc }
       return updated
     }))
   }
@@ -113,12 +185,22 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSaidas(prev => prev.map((x, j) => {
       if (j !== i) return x
       const updated: ItemFinanceiroSaida = { ...x, [field]: field === 'valor' ? Number(val) : val }
-      if (field === 'categoria') {
-        const tc = tipoCustoDe(val)
-        if (tc) updated.tipoCusto = tc
-      }
+      if (field === 'categoria') { const tc = tipoCustoDe(val); if (tc) updated.tipoCusto = tc }
       return updated
     }))
+  }
+
+  function handleSelectCat(nome: string) {
+    if (!catOpen) return
+    if (catOpen.tipo === 'entrada') updateEntrada(catOpen.idx, 'categoria', nome)
+    else updateSaida(catOpen.idx, 'categoria', nome)
+    setCatOpen(null)
+  }
+
+  function catItemsForSaida() {
+    return ORDEM_GRUPOS
+      .map(g => ({ grupo: g, itens: categorias.saidas.filter(c => (c.grupo ?? 'Outros') === g) }))
+      .filter(g => g.itens.length > 0)
   }
 
   return (
@@ -131,51 +213,160 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         <StatCard label="💰 Saldo" value={fmtBRL(calculado)} className="val-green" />
       </div>
 
+      {contas.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 13, color: 'var(--tx3)' }}>Conta:</span>
+          {contas.filter(c => c.ativa).map(c => (
+            <button key={c.id} type="button" onClick={() => setContaId(c.id)}
+              style={{
+                padding: '5px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+                border: '1px solid var(--bd)',
+                background: contaId === c.id ? '#0a84ff' : 'var(--bg-card)',
+                color: contaId === c.id ? '#fff' : 'var(--tx1)',
+              }}>
+              {c.nome}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="form-card">
         <h3>📋 Registro do dia</h3>
         <div className="inp-group">
           <label>Saldo início (preenchido automaticamente)</label>
-          <input type="number" value={inicio} readOnly style={{ color: 'var(--tx4)', cursor: 'not-allowed' }} />
+          <input type="text" value={fmtNum(inicio)} readOnly style={{ color: 'var(--tx4)', cursor: 'not-allowed' }} />
         </div>
 
         <div className="inp-group">
           <label>💵 Entradas do dia (dinheiro)</label>
+          {savedEntradas.length > 0 && (
+            <div className="saved-summary">
+              {savedEntradas.map((e, i) => (
+                <span key={i} className="saved-badge">✔ {e.descricao || 'Entrada'} · {fmtBRL(e.valor)}</span>
+              ))}
+            </div>
+          )}
           {entradas.map((e, i) => (
-            <div key={i} className="saida-row">
-              <input placeholder="Descrição" value={e.descricao} onChange={ev => updateEntrada(i, 'descricao', ev.target.value)} />
-              <input type="number" placeholder="R$" value={e.valor || ''} onChange={ev => updateEntrada(i, 'valor', ev.target.value)} step="0.01" min="0" />
-              <select value={e.categoria ?? ''} onChange={ev => updateEntrada(i, 'categoria', ev.target.value)}>
-                <option value="">Categoria</option>
-                {categorias.entradas.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
-              </select>
-              <button className="btn-rm" onClick={() => setEntradas(prev => prev.filter((_, j) => j !== i))}>✕</button>
+            <div key={i} className="lancamento-row has-rm">
+              <input className="lancamento-desc" placeholder="Descrição" value={e.descricao}
+                onChange={ev => updateEntrada(i, 'descricao', ev.target.value)} />
+              <div className="val-input-wrap">
+                <span className="val-prefix">R$</span>
+                <input
+                  type="text" inputMode="decimal" placeholder="0,00"
+                  value={entradaDisplays[i] ?? ''}
+                  onChange={ev => {
+                    const raw = ev.target.value.replace(/[^\d,]/g, '')
+                    setEntradaDisplays(prev => prev.map((v, j) => j === i ? raw : v))
+                    updateEntrada(i, 'valor', String(parseBRL(raw)))
+                  }}
+                  onBlur={() => {
+                    const num = entradas[i]?.valor ?? 0
+                    setEntradaDisplays(prev => prev.map((v, j) => j === i ? fmtNum(num) : v))
+                  }}
+                />
+              </div>
+              <div style={{ position: 'relative' }}>
+                <button className="cat-btn cat-btn-entrada"
+                  onClick={() => setCatOpen(catOpen?.tipo === 'entrada' && catOpen.idx === i ? null : { tipo: 'entrada', idx: i })}>
+                  {e.categoria || 'Categoria'}
+                </button>
+                {catOpen?.tipo === 'entrada' && catOpen.idx === i && (
+                  <div className="cat-dropdown" ref={dropdownRef}>
+                    <div className="cat-items" style={{ padding: 6 }}>
+                      {categorias.entradas.map(c => (
+                        <button key={c.nome} className="cat-item"
+                          style={{ borderColor: '#007aff44' }}
+                          onClick={() => handleSelectCat(c.nome)}>
+                          {c.nome}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button className="btn-item-save btn-item-save-entrada"
+                disabled={!e.descricao && !e.valor} onClick={() => handleSaveEntrada(i)}>✔</button>
+              <button className="btn-rm" onClick={() => {
+                setEntradas(prev => prev.filter((_, j) => j !== i))
+                setEntradaDisplays(prev => prev.filter((_, j) => j !== i))
+              }}>✕</button>
             </div>
           ))}
-          <button className="btn-add-receber" onClick={() => setEntradas(e => [...e, { descricao: '', valor: 0 }])}>＋ Adicionar Entrada</button>
+          <button className="btn-add-entrada" onClick={() => {
+            setEntradas(e => [...e, { descricao: '', valor: 0 }])
+            setEntradaDisplays(d => [...d, ''])
+          }}>＋ Adicionar Entrada</button>
         </div>
 
         <div className="inp-group">
           <label>💸 Saídas do dia</label>
+          {savedSaidas.length > 0 && (
+            <div className="saved-summary">
+              {savedSaidas.map((s, i) => (
+                <span key={i} className="saved-badge"
+                  style={{ background: 'rgba(255,59,48,.1)', borderColor: 'rgba(255,59,48,.3)', color: '#ff6b6b' }}>
+                  ✔ {s.descricao || 'Saída'} · {fmtBRL(s.valor)}
+                </span>
+              ))}
+            </div>
+          )}
           {saidas.map((s, i) => (
-            <div key={i} className="saida-row">
-              <input placeholder="Descrição" value={s.descricao} onChange={e => updateSaida(i, 'descricao', e.target.value)} />
-              <input type="number" placeholder="R$" value={s.valor || ''} onChange={e => updateSaida(i, 'valor', e.target.value)} step="0.01" min="0" />
-              <select value={s.categoria ?? ''} onChange={ev => updateSaida(i, 'categoria', ev.target.value)}>
-                <option value="">Categoria</option>
-                {ORDEM_GRUPOS.map(grupo => {
-                  const itens: CategoriaItem[] = categorias.saidas.filter(c => (c.grupo ?? 'Outros') === grupo)
-                  if (itens.length === 0) return null
-                  return (
-                    <optgroup key={grupo} label={grupo}>
-                      {itens.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
-                    </optgroup>
-                  )
-                })}
-              </select>
-              <button className="btn-rm" onClick={() => setSaidas(prev => prev.filter((_, j) => j !== i))}>✕</button>
+            <div key={i} className="lancamento-row has-rm">
+              <input className="lancamento-desc" placeholder="Descrição" value={s.descricao}
+                onChange={ev => updateSaida(i, 'descricao', ev.target.value)} />
+              <div className="val-input-wrap">
+                <span className="val-prefix">R$</span>
+                <input
+                  type="text" inputMode="decimal" placeholder="0,00"
+                  value={saidaDisplays[i] ?? ''}
+                  onChange={ev => {
+                    const raw = ev.target.value.replace(/[^\d,]/g, '')
+                    setSaidaDisplays(prev => prev.map((v, j) => j === i ? raw : v))
+                    updateSaida(i, 'valor', String(parseBRL(raw)))
+                  }}
+                  onBlur={() => {
+                    const num = saidas[i]?.valor ?? 0
+                    setSaidaDisplays(prev => prev.map((v, j) => j === i ? fmtNum(num) : v))
+                  }}
+                />
+              </div>
+              <div style={{ position: 'relative' }}>
+                <button className={`cat-btn ${s.categoria ? 'cat-btn-saida com-cat' : 'cat-btn-saida sem-cat'}`}
+                  onClick={() => setCatOpen(catOpen?.tipo === 'saida' && catOpen.idx === i ? null : { tipo: 'saida', idx: i })}>
+                  {s.categoria || 'Categoria'}
+                </button>
+                {catOpen?.tipo === 'saida' && catOpen.idx === i && (
+                  <div className="cat-dropdown" ref={dropdownRef}>
+                    {catItemsForSaida().map(({ grupo, itens }) => (
+                      <div key={grupo} className="cat-group" style={{ padding: '6px 8px 0' }}>
+                        <div className="cat-group-label" style={{ borderColor: '#ff6b6b' }}>{grupo}</div>
+                        <div className="cat-items">
+                          {itens.map(c => (
+                            <button key={c.nome} className="cat-item"
+                              style={{ borderColor: '#ff6b6b44' }}
+                              onClick={() => handleSelectCat(c.nome)}>
+                              {c.nome}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button className="btn-item-save btn-item-save-saida"
+                disabled={!s.descricao && !s.valor} onClick={() => handleSaveSaida(i)}>✔</button>
+              <button className="btn-rm" onClick={() => {
+                setSaidas(prev => prev.filter((_, j) => j !== i))
+                setSaidaDisplays(prev => prev.filter((_, j) => j !== i))
+              }}>✕</button>
             </div>
           ))}
-          <button className="btn-add-saida" onClick={() => setSaidas(s => [...s, novaSaida()])}>＋ Adicionar saída</button>
+          <button className="btn-add-saida" onClick={() => {
+            setSaidas(s => [...s, novaSaida()])
+            setSaidaDisplays(d => [...d, ''])
+          }}>＋ Adicionar saída</button>
         </div>
       </div>
 

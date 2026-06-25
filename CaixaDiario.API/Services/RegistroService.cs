@@ -12,15 +12,18 @@ public class RegistroService : IRegistroService
     private readonly IRegistroRepository _registroRepository;
     private readonly IAuditService _auditService;
     private readonly IRecorrenciaService _recorrenciaService;
+    private readonly IContaBancariaRepository _contaBancariaRepository;
 
     public RegistroService(
         IRegistroRepository registroRepository,
         IAuditService auditService,
-        IRecorrenciaService recorrenciaService)
+        IRecorrenciaService recorrenciaService,
+        IContaBancariaRepository contaBancariaRepository)
     {
         _registroRepository = registroRepository;
         _auditService = auditService;
         _recorrenciaService = recorrenciaService;
+        _contaBancariaRepository = contaBancariaRepository;
     }
 
     public async Task<List<RegistroDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -33,12 +36,13 @@ public class RegistroService : IRegistroService
         return registros.Select(MapToDto).ToList();
     }
 
-    public async Task<RegistroDto> ObterPorDataAsync(Guid clienteId, DateOnly data, Guid usuarioLogadoId, string perfil)
+    public async Task<RegistroDto> ObterPorDataAsync(Guid clienteId, DateOnly data, Guid usuarioLogadoId, string perfil, Guid? contaBancariaId = null)
     {
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
 
-        var registro = await _registroRepository.ObterPorClienteEDataAsync(clienteId, data)
+        var contaId = await ResolverContaPadraoAsync(clienteId, contaBancariaId);
+        var registro = await _registroRepository.ObterPorContaEDataAsync(contaId, data)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
 
         return MapToDto(registro);
@@ -52,7 +56,9 @@ public class RegistroService : IRegistroService
         if (dto.Saidas.Any(s => string.IsNullOrWhiteSpace(s.Categoria)))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Toda saída deve ter uma categoria.", "categoria");
 
-        var existente = await _registroRepository.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data);
+        var contaId = await ResolverContaPadraoAsync(dto.ClienteId, dto.ContaBancariaId);
+
+        var existente = await _registroRepository.ObterPorContaEDataAsync(contaId, dto.Data);
         var dadosAntes = existente != null ? JsonSerializer.Serialize(MapToDto(existente)) : null;
 
         if (existente != null)
@@ -66,7 +72,6 @@ public class RegistroService : IRegistroService
             existente.ContasReceber = AplicarBaixaAutomatica(dto.ContasReceber.Select(MapContaDto).ToList(), dto.Data);
             existente.ContasPagar = AplicarBaixaAutomatica(dto.ContasPagar.Select(MapContaDto).ToList(), dto.Data);
 
-            // D7: a baixa (transição de pago) ajusta o SaldoFinal automaticamente.
             var ajuste = AplicarBaixaFinanceira(contasReceberAntes, existente.ContasReceber, dto.Data, isReceber: true)
                        + AplicarBaixaFinanceira(contasPagarAntes, existente.ContasPagar, dto.Data, isReceber: false);
             existente.SaldoFinal = dto.SaldoFinal + ajuste;
@@ -86,7 +91,6 @@ public class RegistroService : IRegistroService
         var contasReceberNovo = AplicarBaixaAutomatica(dto.ContasReceber.Select(MapContaDto).ToList(), dto.Data);
         var contasPagarNovo = AplicarBaixaAutomatica(dto.ContasPagar.Select(MapContaDto).ToList(), dto.Data);
 
-        // D7: registro novo — qualquer conta já paga é uma baixa (transição a partir de "nada baixado").
         var ajusteNovo = AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasReceberNovo, dto.Data, isReceber: true)
                        + AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasPagarNovo, dto.Data, isReceber: false);
 
@@ -94,6 +98,7 @@ public class RegistroService : IRegistroService
         {
             Id = Guid.NewGuid(),
             ClienteId = dto.ClienteId,
+            ContaBancariaId = contaId,
             Data = dto.Data,
             Inicio = dto.Inicio,
             Entradas = dto.Entradas.Select(MapItemDto).ToList(),
@@ -123,7 +128,8 @@ public class RegistroService : IRegistroService
         if (string.IsNullOrWhiteSpace(motivo))
             throw new ApiException(400, CodigoRetorno.MOTIVO_OBRIGATORIO, "Motivo de exclusão é obrigatório.", "motivo_exclusao");
 
-        var registro = await _registroRepository.ObterPorClienteEDataAsync(clienteId, data)
+        var contaId = await ResolverContaPadraoAsync(clienteId, null);
+        var registro = await _registroRepository.ObterPorContaEDataAsync(contaId, data)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
 
         var dadosAntes = JsonSerializer.Serialize(MapToDto(registro));
@@ -137,6 +143,19 @@ public class RegistroService : IRegistroService
             $"{clienteId}/{data}", dadosAntes, null);
     }
 
+    // Resolve a ContaBancariaId: usa a fornecida ou busca o Caixa padrão do cliente.
+    private async Task<Guid> ResolverContaPadraoAsync(Guid clienteId, Guid? contaBancariaId)
+    {
+        if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
+            return contaBancariaId.Value;
+
+        var caixa = await _contaBancariaRepository.ObterCaixaPadraoAsync(clienteId)
+            ?? throw new ApiException(500, CodigoRetorno.DADOS_INVALIDOS,
+                "Nenhuma conta Caixa encontrada para este cliente. Contate o suporte.");
+
+        return caixa.Id;
+    }
+
     private static List<ContaProvisionada> AplicarBaixaAutomatica(List<ContaProvisionada> contas, DateOnly data)
     {
         foreach (var c in contas)
@@ -147,10 +166,7 @@ public class RegistroService : IRegistroService
         return contas;
     }
 
-    // D7: detecta transições de pago comparando estado anterior (por índice) com o novo,
-    // ajusta DataBaixa e retorna o delta a aplicar sobre o SaldoFinal.
-    // Conta a receber: +valor ao baixar, -valor ao desfazer. Conta a pagar: o inverso.
-    // DataBaixa é o marcador de idempotência: sem transição, nada muda.
+    // D7: detecta transições de pago comparando estado anterior com o novo, ajusta DataBaixa.
     private static decimal AplicarBaixaFinanceira(
         List<ContaProvisionada> antes, List<ContaProvisionada> depois, DateOnly data, bool isReceber)
     {
@@ -164,19 +180,16 @@ public class RegistroService : IRegistroService
 
             if (nova.Pago && !pagaAntes)
             {
-                // transição NÃO pago -> pago: baixa
                 nova.DataBaixa = data;
                 delta += sinal * nova.Valor;
             }
             else if (!nova.Pago && pagaAntes)
             {
-                // transição pago -> NÃO pago: desfaz a baixa
                 nova.DataBaixa = null;
                 delta -= sinal * nova.Valor;
             }
             else if (nova.Pago && pagaAntes)
             {
-                // já estava baixada: preserva a DataBaixa original (idempotência)
                 nova.DataBaixa = antes[i].DataBaixa;
             }
         }
@@ -197,6 +210,7 @@ public class RegistroService : IRegistroService
     {
         Id = r.Id,
         ClienteId = r.ClienteId,
+        ContaBancariaId = r.ContaBancariaId,
         Data = r.Data,
         Inicio = r.Inicio,
         Entradas = r.Entradas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto }).ToList(),

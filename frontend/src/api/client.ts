@@ -5,10 +5,12 @@ export async function apiFetch<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = localStorage.getItem('token')
+  // Não forçar Content-Type quando o body for FormData (o browser define com boundary)
+  const isFormData = options.body instanceof FormData
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },

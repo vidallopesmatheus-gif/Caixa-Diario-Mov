@@ -1,87 +1,142 @@
-.saida-row, .prov-row {
+/* ── Layout de lançamento (descrição | valor | categoria | salvar | remover) ── */
+.lancamento-row {
   display: grid;
-  grid-template-columns: 1fr 90px 130px 130px 32px;
+  grid-template-columns: 1fr 140px minmax(100px,160px) 40px;
   gap: 8px; margin-bottom: 8px; align-items: center;
 }
-.saida-row input, .prov-row input {
+.lancamento-row.has-rm {
+  grid-template-columns: 1fr 140px minmax(100px,160px) 40px 32px;
+}
+.lancamento-desc {
   padding: 9px 12px; background: var(--bg-input);
   border: 1px solid var(--bd); border-radius: 8px;
   color: var(--tx); font-size: 14px; width: 100%;
 }
-.saida-row input:focus { border-color: #ff3b30; outline: none; }
-.prov-row input:focus  { border-color: #5ac8fa; outline: none; }
+.lancamento-desc:focus { outline: none; border-color: var(--accent); }
 
+/* ── R$ input wrapper ── */
+.val-input-wrap {
+  display: flex; align-items: stretch;
+  background: var(--bg-input, var(--bg));
+  border: 1px solid var(--bd); border-radius: 8px; overflow: hidden;
+}
+.val-prefix {
+  display: flex; align-items: center;
+  padding: 0 8px; font-size: 12px; font-weight: 700;
+  color: var(--tx3); white-space: nowrap;
+  border-right: 1px solid var(--bd); background: var(--bg);
+  user-select: none;
+}
+.val-input-wrap input {
+  border: none !important; background: transparent !important;
+  padding: 9px 8px !important; flex: 1; min-width: 0;
+  outline: none !important; color: var(--tx); font-size: 14px;
+}
+
+/* ── Botão categoria ── */
+.cat-btn {
+  padding: 9px 10px; border-radius: 8px; font-size: 12px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-align: left; transition: background 0.15s; border: 1px solid;
+}
+.cat-btn-entrada { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.cat-btn-entrada:hover { background: rgba(124,58,237,.22); }
+.cat-btn-saida.sem-cat { background: var(--rm-bg); border-color: var(--rm-bd); color: var(--warning); }
+.cat-btn-saida.com-cat { background: var(--success-soft); border-color: var(--success); color: var(--success); }
+.cat-btn-saida:hover { filter: brightness(1.15); }
+
+/* ── Botão salvar item individual ── */
+.btn-item-save {
+  padding: 8px 0; border-radius: 8px; font-size: 12px; font-weight: 700;
+  cursor: pointer; white-space: nowrap; border: none; transition: opacity 0.15s;
+  text-align: center;
+}
+.btn-item-save-entrada { background: var(--accent); color: #fff; }
+.btn-item-save-entrada:hover:not(:disabled) { background: #5b21b6; }
+.btn-item-save-saida { background: var(--danger); color: #fff; }
+.btn-item-save-saida:hover:not(:disabled) { background: #991b1b; }
+.btn-item-save:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Botão remover linha ── */
 .btn-rm {
   background: var(--rm-bg); border: 1px solid var(--rm-bd);
-  color: #ff6b6b; width: 32px; height: 36px; border-radius: 8px; font-size: 14px;
+  color: var(--danger); width: 32px; height: 36px; border-radius: 8px; font-size: 14px;
 }
-.btn-rm:hover { background: #3a1010; }
-.btn-rm-prov {
-  background: var(--rmp-bg); border: 1px solid var(--rmp-bd);
-  color: #5ac8fa; width: 32px; height: 36px; border-radius: 8px; font-size: 14px;
-}
-.btn-rm-prov:hover { background: #1a3a4a; }
+.btn-rm:hover { background: rgba(220,38,38,.12); }
 
+/* ── Botões adicionar ── */
+.btn-add-entrada {
+  width: 100%; padding: 9px; border: 1px dashed var(--accent);
+  border-radius: 8px; color: var(--accent); font-size: 13px; font-weight: 600;
+  background: var(--accent-soft); margin-top: 4px;
+}
+.btn-add-entrada:hover { background: rgba(124,58,237,.22); }
 .btn-add-saida {
-  width: 100%; padding: 9px;
-  background: var(--rm-bg); border: 1px dashed var(--rm-bd);
-  border-radius: 8px; color: #ff6b6b; font-size: 13px; font-weight: 600; margin-top: 4px;
+  width: 100%; padding: 9px; border: 1px dashed var(--rm-bd);
+  border-radius: 8px; color: var(--danger); font-size: 13px; font-weight: 600;
+  background: var(--rm-bg); margin-top: 4px;
 }
-.btn-add-saida:hover { background: #201010; }
-.btn-add-receber {
-  width: 100%; padding: 9px; border: 1px dashed;
-  border-radius: 8px; font-size: 13px; font-weight: 600; margin-top: 4px;
-  background: var(--ov-hv); border-color: var(--rmp-bd); color: #5ac8fa;
-}
-.btn-add-receber:hover { background: #0a2a3a; }
-.btn-add-pagar {
-  width: 100%; padding: 9px; border: 1px dashed;
-  border-radius: 8px; font-size: 13px; font-weight: 600; margin-top: 4px;
-  background: var(--rm-bg); border-color: var(--rm-bd); color: #ff6b6b;
-}
-.btn-add-pagar:hover { background: #1a1010; }
+.btn-add-saida:hover { background: rgba(220,38,38,.14); }
 
+/* ── Caixas de saldo ── */
 .saldo-box {
-  background: var(--sl-bg, #0a1a0a); border: 1px solid var(--sl-bd, #1a4a1a);
+  background: var(--sl-bg, #071a0f); border: 1px solid var(--sl-bd, #1a3a22);
   border-radius: 12px; padding: 16px 20px;
   display: flex; align-items: center; justify-content: space-between; margin: 16px 0;
 }
 .saldo-calc-lbl { font-size: 13px; color: var(--tx3); }
-.saldo-calc-val { font-size: 24px; font-weight: 800; color: #34c759; }
+.saldo-calc-val { font-size: 24px; font-weight: 800; color: var(--success); }
 .dif-msg { font-size: 13px; font-weight: 600; margin-top: 8px; min-height: 18px; }
 
+/* ── Botão sincronizar ── */
 .btn-save {
   width: 100%; padding: 14px;
-  background: linear-gradient(135deg, #34c759, #30d158);
-  color: #000; border: none; border-radius: 10px;
+  background: var(--success);
+  color: #fff; border: none; border-radius: 10px;
   font-size: 15px; font-weight: 700;
   display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px;
 }
-.btn-save:hover { opacity: .9; }
+.btn-save:hover:not(:disabled) { opacity: .88; }
 .btn-save:disabled { opacity: .5; cursor: not-allowed; }
 
-.btn-add-entrada {
-  width: 100%; padding: 9px;
-  background: #001a33; border: 1px dashed #007aff;
-  border-radius: 8px; color: #007aff; font-size: 13px; font-weight: 600; margin-top: 4px;
+/* ── Sumário dos itens salvos ── */
+.saved-summary {
+  font-size: 12px; color: var(--tx3); padding: 6px 0 10px;
+  display: flex; align-items: center; gap: 6px;
 }
-.btn-add-entrada:hover { background: #002a55; }
+.saved-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--success-soft); border: 1px solid rgba(5,150,105,.3);
+  color: var(--success); border-radius: 12px; padding: 2px 8px; font-size: 11px; font-weight: 700;
+}
 
-.entrada-row {
-  display: grid;
-  grid-template-columns: 1fr 90px 32px;
-  gap: 8px; margin-bottom: 8px; align-items: center;
+/* ── Dropdown de categoria ── */
+.cat-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0;
+  z-index: 200; min-width: 220px; max-height: 280px; overflow-y: auto;
+  background: var(--bg-card); border: 1px solid var(--bd);
+  border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
 }
-.entrada-row input {
-  padding: 9px 12px; background: var(--bg-input);
-  border: 1px solid var(--bd); border-radius: 8px;
-  color: var(--tx); font-size: 14px; width: 100%;
+.cat-group { margin-bottom: 18px; }
+.cat-group-label {
+  font-size: 10px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .8px; color: var(--tx3); padding-bottom: 6px;
+  margin-bottom: 8px; border-bottom: 2px solid;
 }
-.entrada-row input:focus { border-color: #007aff; outline: none; }
+.cat-items { display: flex; flex-wrap: wrap; gap: 8px; }
+.cat-item {
+  padding: 7px 14px; border-radius: 20px; border: 1px solid;
+  background: transparent; font-size: 13px; cursor: pointer;
+  transition: background 0.15s; color: var(--tx1);
+}
+.cat-item:hover { background: rgba(255,255,255,.06); }
 
-.saida-select {
-  padding: 9px 8px; background: var(--bg-input);
-  border: 1px solid var(--bd); border-radius: 8px;
-  color: var(--tx); font-size: 13px; width: 100%;
+/* ── Responsividade básica ── */
+@media (max-width: 540px) {
+  .lancamento-row, .lancamento-row.has-rm {
+    grid-template-columns: 1fr 110px;
+    grid-template-rows: auto auto;
+  }
+  .lancamento-row .cat-btn { grid-column: 1; }
+  .lancamento-row .btn-item-save { grid-column: 2; }
 }
-.saida-select:focus { border-color: #ff3b30; outline: none; }
