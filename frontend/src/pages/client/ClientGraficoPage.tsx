@@ -5,6 +5,7 @@ import { fmtBRL } from '../../utils/format'
 import { obterIndicadores } from '../../api/metricas'
 import type { IndicadoresDecisao, CategoriaIndicador } from '../../api/metricas'
 import { useRegistros } from '../../hooks/useRegistros'
+import { leituraMargemDre } from '../../utils/leituras'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
@@ -90,14 +91,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const pctVariavel = custoTotalClassificavel > 0 ? (indicadores.custoVariavel / custoTotalClassificavel) * 100 : 0
   const pctNaoClass = custoTotalClassificavel > 0 ? (indicadores.custoNaoClassificado / custoTotalClassificavel) * 100 : 0
 
-  let leituraMargem: string
-  if (dre.margem === null) {
-    leituraMargem = 'Sem receita no período para calcular a margem.'
-  } else if (dre.margem >= 0) {
-    leituraMargem = `De cada R$ 100 que entram, sobram R$ ${Math.round(dre.margem)}.`
-  } else {
-    leituraMargem = `De cada R$ 100 que entram, saem R$ ${Math.round(100 - dre.margem)} — o negócio está no vermelho este mês.`
-  }
+  const leituraMargem = leituraMargemDre(dre.margem)
 
   let leitura6Meses: string
   if (ultimos6.length === 0) {

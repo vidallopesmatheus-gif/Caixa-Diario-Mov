@@ -53,6 +53,7 @@ public class InsightService : IInsightService
                 Prioridade = 1,
                 Texto = $"O saldo projetado ficará negativo em {diasAte} dia{(diasAte != 1 ? "s" : "")}.",
                 Detalhe = "Reveja as saídas programadas ou antecipe recebimentos.",
+                Categoria = "saldo",
             });
         }
 
@@ -87,6 +88,7 @@ public class InsightService : IInsightService
                         Prioridade = 2,
                         Texto = $"Gastos deste mês estão {deltaPct:F0}% acima da média mensal no ritmo atual.",
                         Detalhe = $"Média: {Brl(mediaMensal)} · Projeção do mês: {Brl(gastoExtrapolado)}",
+                        Categoria = "gasto",
                     });
 
                     // ── 3. Impacto dos gastos excessivos na meta de sonho ──────
@@ -106,6 +108,7 @@ public class InsightService : IInsightService
                                     Prioridade = 3,
                                     Texto = $"O excesso de gastos deste mês equivale a {pctDoAporte:F0}% do aporte necessário{sonho}.",
                                     Detalhe = "Reduzir gastos pode acelerar o objetivo.",
+                                    Categoria = "meta",
                                 });
                             }
                         }
@@ -119,6 +122,7 @@ public class InsightService : IInsightService
                         Prioridade = 4,
                         Texto = $"Ótimo controle! Os gastos deste mês estão {Math.Abs(deltaPct):F0}% abaixo da média.",
                         Detalhe = $"Economia estimada: {Brl(mediaMensal - gastoExtrapolado)} em relação à média mensal.",
+                        Categoria = "gasto",
                     });
                 }
             }
@@ -148,6 +152,7 @@ public class InsightService : IInsightService
                             Tipo = "positivo",
                             Prioridade = 2,
                             Texto = $"Parabéns! Você já atingiu a meta{sonho} antes do prazo.",
+                            Categoria = "meta",
                         });
                     }
                     else
@@ -162,6 +167,7 @@ public class InsightService : IInsightService
                                 Prioridade = 3,
                                 Texto = $"Sua meta{sonho} está com atraso — aporte necessário subiu para {Brl(aporteAgora)}/mês.",
                                 Detalhe = "Considere aumentar o aporte mensal ou estender o prazo.",
+                                Categoria = "meta",
                             });
                         }
                         else if (aporteAgora < aporteMensal * 0.9m)
@@ -172,6 +178,7 @@ public class InsightService : IInsightService
                                 Prioridade = 4,
                                 Texto = $"Você está adiantado na meta{sonho}! O aporte necessário caiu para {Brl(aporteAgora)}/mês.",
                                 Detalhe = "Continue no ritmo atual para chegar antes do prazo.",
+                                Categoria = "meta",
                             });
                         }
                     }
@@ -205,6 +212,7 @@ public class InsightService : IInsightService
                     Prioridade = 5,
                     Texto = $"O lucro deste mês está {superavitPct:F0}% acima da média dos últimos 3 meses.",
                     Detalhe = "Bom momento para reforçar seus investimentos.",
+                    Categoria = "lucro",
                 });
             }
         }

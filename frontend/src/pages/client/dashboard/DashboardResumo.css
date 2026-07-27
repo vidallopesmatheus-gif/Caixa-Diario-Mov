@@ -1,0 +1,98 @@
+/* ── Camada 1: status bar ───────────────────────────────────────────── */
+.resumo-status-bar {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+  gap: 16px; margin-bottom: 18px;
+}
+.resumo-saldo-principal { display: flex; flex-direction: column; gap: 2px; }
+.resumo-saldo-label { font-size: 13px; color: var(--tx3); font-weight: 600; }
+.resumo-saldo-valor { font-size: 34px; font-weight: 800; line-height: 1.1; }
+.resumo-saldo-sub { font-size: 12px; color: var(--tx3); }
+
+.resumo-controles { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.resumo-periodo-tabs { display: flex; gap: 4px; background: var(--bg-card); border: 1px solid var(--bd); border-radius: 10px; padding: 3px; }
+.resumo-periodo-btn {
+  padding: 6px 12px; border-radius: 8px; border: none; background: transparent;
+  color: var(--tx3); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.resumo-periodo-btn.active { background: var(--accent); color: #fff; }
+.resumo-periodo-datas { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tx3); }
+.resumo-periodo-datas input[type=date] { padding: 6px 8px; background: var(--bg-card); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 12px; }
+.resumo-conta-select { padding: 7px 10px; background: var(--bg-card); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 13px; cursor: pointer; }
+
+/* ── Camada 2: cards de métricas ───────────────────────────────────── */
+.resumo-cards-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px;
+}
+@media (max-width: 900px) { .resumo-cards-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .resumo-cards-grid { grid-template-columns: 1fr; } }
+
+.resumo-metric-card {
+  background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0;
+}
+.resumo-metric-label { font-size: 12px; color: var(--tx3); font-weight: 600; }
+.resumo-metric-valor { font-size: 22px; font-weight: 700; color: var(--tx1); min-height: 27px; }
+.resumo-metric-rodape { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.resumo-metric-variacao { font-size: 11px; color: var(--tx3); white-space: nowrap; }
+.resumo-metric-rodape > div { flex: 1; min-width: 40px; max-width: 70px; }
+
+.resumo-skeleton {
+  display: inline-block; width: 70%; height: 20px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--bd) 25%, var(--bd-str, var(--bd)) 37%, var(--bd) 63%);
+  background-size: 400% 100%; animation: resumo-shimmer 1.4s ease infinite;
+}
+@keyframes resumo-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+/* ── Camada 3: precisa de atenção ──────────────────────────────────── */
+.atencao-card { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px; padding: 16px 18px; margin-bottom: 18px; }
+.atencao-titulo { font-size: 14px; font-weight: 700; color: var(--tx1); margin-bottom: 10px; }
+.atencao-vazio { font-size: 13px; color: var(--success); }
+.atencao-lista { display: flex; flex-direction: column; gap: 6px; }
+.atencao-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 10px 12px; border-radius: 8px; border: 1px solid var(--bd); background: var(--bg);
+  cursor: pointer; font-size: 13px; color: var(--tx1);
+}
+.atencao-item:hover { border-color: var(--accent); }
+.atencao-item.urgente { border-left: 3px solid var(--danger); }
+.atencao-item-texto { flex: 1; }
+.atencao-item-detalhe { font-size: 11px; color: var(--tx3); white-space: nowrap; }
+.atencao-item-seta { color: var(--tx3); }
+.atencao-skeleton { height: 40px; border-radius: 8px; background: var(--bg); }
+
+/* ── Camada 4: saúde do negócio ────────────────────────────────────── */
+.saude-negocio-bloco { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 18px; align-items: stretch; }
+.saude-negocio-bloco .saude-card { flex: 2; min-width: 260px; margin-bottom: 0; }
+.saude-margem-card {
+  flex: 1; min-width: 200px; background: var(--bg-card); border: 1px solid var(--bd);
+  border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; justify-content: center;
+}
+.saude-margem-label { font-size: 12px; color: var(--tx3); font-weight: 600; }
+.saude-margem-valor { font-size: 26px; font-weight: 800; color: var(--tx1); }
+.saude-margem-leitura { font-size: 12px; color: var(--tx3); line-height: 1.4; }
+
+/* ── Camada 5: atividade recente ───────────────────────────────────── */
+.atividade-card { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px; padding: 16px 18px; margin-bottom: 22px; }
+.atividade-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.atividade-titulo { font-size: 14px; font-weight: 700; color: var(--tx1); }
+.atividade-ver-todos { font-size: 12px; color: var(--accent); text-decoration: none; font-weight: 600; }
+.atividade-vazio { font-size: 13px; color: var(--tx3); }
+.atividade-vazio a { color: var(--accent); }
+.atividade-lista { display: flex; flex-direction: column; }
+.atividade-linha {
+  display: grid; grid-template-columns: 70px 1.6fr 1fr 1fr auto; align-items: center; gap: 10px;
+  padding: 8px 4px; border-bottom: 1px solid var(--bd); font-size: 13px;
+}
+.atividade-linha:last-child { border-bottom: none; }
+.atividade-data { color: var(--tx3); font-size: 12px; }
+.atividade-descricao { color: var(--tx1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atividade-categoria, .atividade-conta { color: var(--tx3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atividade-valor { font-weight: 700; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .atividade-linha { grid-template-columns: 56px 1fr auto; }
+  .atividade-categoria, .atividade-conta { display: none; }
+}
+
+/* ── Separador antes do conteúdo legado (Metas/Investimentos, indicadores detalhados) ── */
+.resumo-fim-secao { border: none; border-top: 1px solid var(--bd); margin: 8px 0 22px; }

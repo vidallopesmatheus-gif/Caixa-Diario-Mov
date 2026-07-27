@@ -67,6 +67,7 @@ public class InsightServiceTests
         var alerta = Assert.Single(insights, i => i.Prioridade == 1);
         Assert.Equal("alerta", alerta.Tipo);
         Assert.Contains("3 dia", alerta.Texto);
+        Assert.Equal("saldo", alerta.Categoria);
     }
 
     [Fact]
@@ -90,6 +91,7 @@ public class InsightServiceTests
         var alerta = Assert.Single(insights, i => i.Prioridade == 2);
         Assert.Equal("alerta", alerta.Tipo);
         Assert.Contains("acima da média", alerta.Texto);
+        Assert.Equal("gasto", alerta.Categoria);
         Assert.DoesNotContain(insights, i => i.Prioridade == 3);
     }
 
@@ -114,6 +116,7 @@ public class InsightServiceTests
         var impacto = Assert.Single(insights, i => i.Prioridade == 3 && i.Texto.Contains("excesso de gastos"));
         Assert.Equal("alerta", impacto.Tipo);
         Assert.Contains("Casa na praia", impacto.Texto);
+        Assert.Equal("meta", impacto.Categoria);
     }
 
     [Fact]
@@ -136,6 +139,7 @@ public class InsightServiceTests
 
         var positivo = Assert.Single(insights, i => i.Prioridade == 4 && i.Texto.Contains("controle"));
         Assert.Equal("positivo", positivo.Tipo);
+        Assert.Equal("gasto", positivo.Categoria);
     }
 
     [Fact]
@@ -147,6 +151,7 @@ public class InsightServiceTests
         Assert.Equal("alerta", alerta.Tipo);
         Assert.Contains("atraso", alerta.Texto);
         Assert.Contains("Casa na praia", alerta.Texto);
+        Assert.Equal("meta", alerta.Categoria);
     }
 
     [Fact]
@@ -184,6 +189,7 @@ public class InsightServiceTests
         var positivo = Assert.Single(insights, i => i.Prioridade == 5);
         Assert.Equal("positivo", positivo.Tipo);
         Assert.Contains("lucro", positivo.Texto);
+        Assert.Equal("lucro", positivo.Categoria);
     }
 
     [Fact]
