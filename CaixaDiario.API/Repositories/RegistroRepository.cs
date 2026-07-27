@@ -15,6 +15,10 @@ public class RegistroRepository : IRegistroRepository
         await _context.RegistrosDiarios
             .FirstOrDefaultAsync(r => r.ContaBancariaId == contaBancariaId && r.Data == data && !r.Excluido);
 
+    public async Task<RegistroDiario?> ObterPorClienteEDataAsync(Guid clienteId, DateOnly data) =>
+        await _context.RegistrosDiarios
+            .FirstOrDefaultAsync(r => r.ClienteId == clienteId && r.Data == data && !r.Excluido);
+
     public async Task<List<RegistroDiario>> ListarPorClienteAsync(Guid clienteId) =>
         await _context.RegistrosDiarios
             .Where(r => r.ClienteId == clienteId && !r.Excluido)

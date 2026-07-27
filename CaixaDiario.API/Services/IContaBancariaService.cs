@@ -9,4 +9,6 @@ public interface IContaBancariaService
     Task<ContaBancariaDto> CriarAsync(CriarContaBancariaDto dto, Guid usuarioLogadoId, string perfil);
     Task<ContaBancariaDto> AtualizarAsync(Guid id, AtualizarContaBancariaDto dto, Guid usuarioLogadoId, string perfil);
     Task InativarAsync(Guid id, Guid usuarioLogadoId, string perfil);
+    Task<List<LancamentoExtratoDto>> ObterExtratoAsync(Guid contaId, Guid usuarioLogadoId, string perfil, DateOnly? de, DateOnly? ate);
+    Task<PendenciasContaDto> ObterPendenciasAsync(Guid contaId, Guid usuarioLogadoId, string perfil);
 }

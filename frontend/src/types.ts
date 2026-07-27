@@ -33,6 +33,7 @@ export interface ContaProvisionada {
   categoria?: string
   recorrenciaId?: string
   dataBaixa?: string
+  contaBancariaId?: string
 }
 
 export interface ContaBancaria {
@@ -42,8 +43,23 @@ export interface ContaBancaria {
   tipo: 'Caixa' | 'ContaCorrente' | 'Investimento'
   saldoInicial: number
   saldoAtual: number
+  entradasMes: number
+  saidasMes: number
   ativa: boolean
   dataCriacao: string
+}
+
+export interface LancamentoExtrato {
+  data: string
+  descricao: string
+  categoria?: string
+  valor: number
+  saldoAcumulado: number
+}
+
+export interface PendenciasConta {
+  recebiveis: ContaProvisionada[]
+  pagamentos: ContaProvisionada[]
 }
 
 export interface Registro {

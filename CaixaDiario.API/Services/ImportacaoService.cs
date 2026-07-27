@@ -31,18 +31,21 @@ public class ImportacaoService : IImportacaoService
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
 
         var ext = Path.GetExtension(arquivo.FileName).ToLowerInvariant();
-        if (ext is not ".ofx" and not ".csv")
+        if (ext is not ".ofx" and not ".csv" and not ".xlsx")
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
-                "Formato inválido. Envie um arquivo .ofx ou .csv.");
+                "Formato inválido. Envie um arquivo .ofx, .csv ou .xlsx.");
 
         List<TransacaoImportada> novas;
 
         using var stream = arquivo.OpenReadStream();
         try
         {
-            novas = ext == ".ofx"
-                ? await ParsearOfx(stream, conta)
-                : await ParsearCsv(stream, conta);
+            novas = ext switch
+            {
+                ".ofx" => await ParsearOfx(stream, conta),
+                ".xlsx" => await ParsearPlanilha(stream, conta, XlsxParser.Parse),
+                _ => await ParsearPlanilha(stream, conta, CsvParser.Parse),
+            };
         }
         catch (InvalidOperationException ex)
         {
@@ -195,6 +198,54 @@ public class ImportacaoService : IImportacaoService
         await _importRepo.AtualizarLoteAsync(toUpdate);
     }
 
+    // ── Sugestão de categoria por palavra-chave ────────────────────────────────
+    // Dicionário simples e estático (palavra-chave → categoria já existente em /api/categorias).
+    // Só sugere para Saídas: o usuário confirma/troca na tela de revisão antes de virar lançamento.
+    private static readonly (string Palavra, string Categoria)[] SugestoesPorPalavraChave =
+    {
+        ("posto", "Manutenção"),
+        ("combust", "Manutenção"),
+        ("gasolina", "Manutenção"),
+        ("etanol", "Manutenção"),
+        ("mercado", "Insumos/Mercadoria"),
+        ("supermercado", "Insumos/Mercadoria"),
+        ("atacad", "Insumos/Mercadoria"),
+        ("farmacia", "Benefícios"),
+        ("farmácia", "Benefícios"),
+        ("drogaria", "Benefícios"),
+        ("aluguel", "Aluguel"),
+        ("energia", "Energia/Água/Internet"),
+        ("eletrica", "Energia/Água/Internet"),
+        ("agua", "Energia/Água/Internet"),
+        ("internet", "Energia/Água/Internet"),
+        ("telefonia", "Energia/Água/Internet"),
+        ("salario", "Salários/Folha"),
+        ("salário", "Salários/Folha"),
+        ("folha de pagamento", "Salários/Folha"),
+        ("simples nacional", "Simples/DAS"),
+        ("das ", "Simples/DAS"),
+        ("tarifa", "Tarifas bancárias"),
+        ("juros", "Juros"),
+        ("seguro", "Seguros"),
+        ("publicidade", "Mídia paga"),
+        ("ads", "Mídia paga"),
+        ("papelaria", "Material de Escritório"),
+        ("escritorio", "Material de Escritório"),
+    };
+
+    private static string? SugerirCategoria(string tipo, string descricao)
+    {
+        if (tipo != "Saida" || string.IsNullOrWhiteSpace(descricao))
+            return null;
+
+        var descNormalizada = descricao.ToLowerInvariant();
+        foreach (var (palavra, categoria) in SugestoesPorPalavraChave)
+            if (descNormalizada.Contains(palavra))
+                return categoria;
+
+        return null;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     private async Task<ContaBancaria> ObterContaComAcesso(Guid contaBancariaId, Guid usuarioId, string perfil)
     {
@@ -225,6 +276,7 @@ public class ImportacaoService : IImportacaoService
                 Valor = t.Valor,
                 Descricao = t.Descricao,
                 Tipo = t.Tipo,
+                Categoria = SugerirCategoria(t.Tipo, t.Descricao),
                 FitId = t.FitId,
                 Status = "Pendente",
                 ImportadoEm = DateTime.UtcNow,
@@ -234,9 +286,10 @@ public class ImportacaoService : IImportacaoService
         return resultado;
     }
 
-    private async Task<List<TransacaoImportada>> ParsearCsv(Stream stream, ContaBancaria conta)
+    private async Task<List<TransacaoImportada>> ParsearPlanilha(
+        Stream stream, ContaBancaria conta, Func<Stream, List<TransacaoCsv>> parser)
     {
-        var transacoes = CsvParser.Parse(stream);
+        var transacoes = parser(stream);
         // Dedup: carrega importações já existentes para mesma conta
         var existentes = await _importRepo.ListarPendentesPorContaAsync(conta.Id);
 
@@ -251,6 +304,7 @@ public class ImportacaoService : IImportacaoService
                 Valor = t.Valor,
                 Descricao = t.Descricao,
                 Tipo = t.Tipo,
+                Categoria = SugerirCategoria(t.Tipo, t.Descricao),
                 Status = "Pendente",
                 ImportadoEm = DateTime.UtcNow,
             })

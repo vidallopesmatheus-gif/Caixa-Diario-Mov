@@ -60,6 +60,22 @@ public class ContasBancariasController : ControllerBase
         return Ok(new ApiResponse<object> { Dados = null });
     }
 
+    // ── Extrato e pendências por conta ─────────────────────────────────────────
+
+    [HttpGet("{contaId:guid}/extrato")]
+    public async Task<IActionResult> ObterExtrato(Guid contaId, [FromQuery] DateOnly? de, [FromQuery] DateOnly? ate)
+    {
+        var lancamentos = await _service.ObterExtratoAsync(contaId, ObterUsuarioId(), ObterPerfil(), de, ate);
+        return Ok(new ApiResponse<List<LancamentoExtratoDto>> { Dados = lancamentos });
+    }
+
+    [HttpGet("{contaId:guid}/pendencias")]
+    public async Task<IActionResult> ObterPendencias(Guid contaId)
+    {
+        var pendencias = await _service.ObterPendenciasAsync(contaId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<PendenciasContaDto> { Dados = pendencias });
+    }
+
     // ── Importação de extrato ──────────────────────────────────────────────────
 
     [HttpPost("{contaId:guid}/importar-extrato")]

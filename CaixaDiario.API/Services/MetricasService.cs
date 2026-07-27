@@ -255,6 +255,92 @@ public class MetricasService : IMetricasService
         };
     }
 
+    public IndicadoresDecisaoDto CalcularIndicadores(List<RegistroDiario> registros, int mesesEvolucao = 13)
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var doMesAtual = registros.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month).ToList();
+
+        var dre = CalcularDre(doMesAtual);
+        var evolucao = CalcularEvolucao(registros, mesesEvolucao);
+
+        // Fixo x Variável x Não Classificado — sempre reconcilia com dre.TotalDespesas
+        var saidasMes = doMesAtual.SelectMany(r => r.Saidas).ToList();
+        var custoFixo = saidasMes.Where(s => s.TipoCusto == "CustoFixo").Sum(s => s.Valor);
+        var custoVariavel = saidasMes.Where(s => s.TipoCusto == "CustoVariavel").Sum(s => s.Valor);
+        var custoNaoClassificado = dre.TotalDespesas - custoFixo - custoVariavel;
+
+        // Ranking de categorias: achata dre.GruposDespesa (já calculado) e agrega % da receita + comparação
+        // com a média dos 3 meses anteriores, extrapolando o mês atual (parcial) para o mês cheio.
+        var mesesAnteriores = Enumerable.Range(1, 3)
+            .Select(i => hoje.AddMonths(-i))
+            .Select(m => SomarSaidasPorCategoria(registros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)))
+            .ToList();
+
+        var diasNoMes = DateTime.DaysInMonth(hoje.Year, hoje.Month);
+        var ranking = dre.GruposDespesa
+            .SelectMany(g => g.Categorias.Select(c => (Grupo: g.Grupo, c.Nome, c.Total)))
+            .Select(c =>
+            {
+                var mediasEncontradas = mesesAnteriores.Select(m => m.TryGetValue(c.Nome, out var v) ? v : 0m).ToList();
+                var media = mediasEncontradas.Any(v => v > 0) ? mediasEncontradas.Average() : (decimal?)null;
+                var extrapolado = hoje.Day > 0 ? c.Total / hoje.Day * diasNoMes : c.Total;
+                return new CategoriaIndicadorDto
+                {
+                    Nome = c.Nome,
+                    Grupo = c.Grupo,
+                    Total = c.Total,
+                    PercentualReceita = dre.ReceitaBruta > 0 ? Math.Round(c.Total / dre.ReceitaBruta * 100, 1) : null,
+                    MediaMesesAnteriores = media,
+                    VariacaoPercentual = media is > 0 ? Math.Round((extrapolado - media.Value) / media.Value * 100, 1) : null,
+                };
+            })
+            .OrderByDescending(c => c.Total)
+            .ToList();
+
+        var mesesComAtividade = evolucao.Count(e => e.Receita > 0 || e.Custos > 0);
+
+        decimal? variacaoMoM = null;
+        decimal? variacaoYoY = null;
+        if (evolucao.Count >= 2)
+        {
+            var atual = evolucao[^1];
+            var anterior = evolucao[^2];
+            if (anterior.Receita > 0)
+                variacaoMoM = Math.Round((atual.Receita - anterior.Receita) / anterior.Receita * 100, 1);
+        }
+        if (evolucao.Count >= 13)
+        {
+            var atual = evolucao[^1];
+            var mesmoMesAnoAnterior = evolucao[^13];
+            if (mesmoMesAnoAnterior.Receita > 0)
+                variacaoYoY = Math.Round((atual.Receita - mesmoMesAnoAnterior.Receita) / mesmoMesAnoAnterior.Receita * 100, 1);
+        }
+
+        return new IndicadoresDecisaoDto
+        {
+            Dre = dre,
+            CustoFixo = custoFixo,
+            CustoVariavel = custoVariavel,
+            CustoNaoClassificado = custoNaoClassificado,
+            RankingCategorias = ranking,
+            Evolucao = evolucao,
+            MesesComAtividade = mesesComAtividade,
+            VariacaoReceitaMesAnterior = variacaoMoM,
+            VariacaoReceitaAnoAnterior = variacaoYoY,
+        };
+    }
+
+    private static Dictionary<string, decimal> SomarSaidasPorCategoria(IEnumerable<RegistroDiario> registros)
+    {
+        var dict = new Dictionary<string, decimal>();
+        foreach (var s in registros.SelectMany(r => r.Saidas))
+        {
+            var cat = string.IsNullOrWhiteSpace(s.Categoria) ? "Não Classificado" : s.Categoria;
+            dict[cat] = (dict.TryGetValue(cat, out var v) ? v : 0m) + s.Valor;
+        }
+        return dict;
+    }
+
     public FluxoProjetadoDto CalcularFluxoProjetado(List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, int dias)
     {
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);

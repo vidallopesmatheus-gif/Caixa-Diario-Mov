@@ -248,22 +248,33 @@ export default function ClientContasBancariasPage({ clienteIdOverride }: Props) 
                 </div>
               </div>
             ) : (
-              /* Modo visualização */
-              <>
+              /* Modo visualização — card clicável leva ao extrato da conta */
+              <div
+                className="cb-conta-clicavel"
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/contas-bancarias/${c.id}`)}
+                onKeyDown={e => { if (e.key === 'Enter') navigate(`/contas-bancarias/${c.id}`) }}
+              >
                 <div className="cb-conta-info">
                   <div className="cb-conta-nome">{c.nome}</div>
                   <div className="cb-conta-meta">
                     {TIPO_LABEL[c.tipo] ?? c.tipo}
                     {c.saldoInicial > 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`}
                   </div>
+                  <div className="cb-conta-resumo-mes">
+                    Este mês: <span className="val-green">+{fmtBRL(c.entradasMes)}</span>
+                    {' · '}
+                    <span className="val-red">-{fmtBRL(c.saidasMes)}</span>
+                  </div>
                 </div>
                 <div className="cb-conta-saldo val-green">{fmtBRL(c.saldoAtual)}</div>
-                <div className="cb-conta-acoes">
+                <div className="cb-conta-acoes" onClick={e => e.stopPropagation()}>
                   {/* Input de arquivo oculto por conta */}
                   <input
                     ref={el => { fileInputRefs.current[c.id] = el }}
                     type="file"
-                    accept=".ofx,.csv"
+                    accept=".ofx,.csv,.xlsx"
                     style={{ display: 'none' }}
                     onChange={e => {
                       const f = e.target.files?.[0]
@@ -274,13 +285,13 @@ export default function ClientContasBancariasPage({ clienteIdOverride }: Props) 
                   <button
                     className="cb-btn-editar"
                     onClick={() => fileInputRefs.current[c.id]?.click()}
-                    title="Importar extrato OFX ou CSV">
+                    title="Importar extrato OFX, CSV ou XLSX">
                     ⬆️ Importar
                   </button>
                   <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
                   <button className="cb-btn-inativar" onClick={() => handleInativar(c.id)}>Inativar</button>
                 </div>
-              </>
+              </div>
             )}
           </div>
         ))}

@@ -25,6 +25,8 @@ export default function ClientExtratoRevisaoPage() {
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg] = useState('')
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [categoriaLote, setCategoriaLote] = useState('')
 
   const clienteId = user?.usuarioId ?? ''
 
@@ -42,9 +44,9 @@ export default function ClientExtratoRevisaoPage() {
       const conta = contas.find(c => c.id === contaId)
       setNomeConta(conta?.nome ?? '')
 
-      // Estado inicial: nenhum ignorado, categoria vazia
+      // Estado inicial: categoria sugerida (se houver) pré-preenchida; possíveis duplicatas nascem desmarcadas
       const est: Record<string, EstadoLocal> = {}
-      ts.forEach(t => { est[t.id] = { categoria: t.categoria ?? '', ignorar: false } })
+      ts.forEach(t => { est[t.id] = { categoria: t.categoria ?? '', ignorar: t.duplicada } })
       setEstados(est)
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao carregar transações.')
@@ -70,6 +72,30 @@ export default function ClientExtratoRevisaoPage() {
       return next
     })
   }
+
+  function toggleSelecionado(id: string) {
+    setSelecionados(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function aplicarCategoriaLote() {
+    if (!categoriaLote || selecionados.size === 0) return
+    setEstados(prev => {
+      const next = { ...prev }
+      selecionados.forEach(id => { next[id] = { ...next[id], categoria: categoriaLote } })
+      return next
+    })
+    setSelecionados(new Set())
+    setCategoriaLote('')
+  }
+
+  const categoriasLote = Array.from(
+    new Map([...categorias.entradas, ...categorias.saidas].map(c => [c.nome, c])).values()
+  )
 
   async function handleConfirmar() {
     if (!contaId) return
@@ -146,6 +172,25 @@ export default function ClientExtratoRevisaoPage() {
         <button className="er-btn-lote er-btn-lote-ignore" onClick={() => selecionarTodas(true)}>✕ Ignorar todas</button>
       </div>
 
+      {/* Categorização em lote das linhas selecionadas */}
+      <div className="er-acoes-lote">
+        <select
+          className="er-cat-select"
+          value={categoriaLote}
+          onChange={e => setCategoriaLote(e.target.value)}
+        >
+          <option value="">Categoria para selecionadas...</option>
+          {categoriasLote.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+        </select>
+        <button
+          className="er-btn-lote"
+          onClick={aplicarCategoriaLote}
+          disabled={!categoriaLote || selecionados.size === 0}
+        >
+          Aplicar a {selecionados.size} selecionada(s)
+        </button>
+      </div>
+
       {/* Lista de transações */}
       <div className="er-lista">
         {transacoes.map(t => {
@@ -153,6 +198,12 @@ export default function ClientExtratoRevisaoPage() {
           const catOpts = t.tipo === 'Entrada' ? categorias.entradas : categorias.saidas
           return (
             <div key={t.id} className={`er-item ${est.ignorar ? 'er-ignorada' : ''} ${t.duplicada ? 'er-duplicada' : ''}`}>
+              <input
+                type="checkbox"
+                checked={selecionados.has(t.id)}
+                onChange={() => toggleSelecionado(t.id)}
+                title="Selecionar para categorização em lote"
+              />
               <div className="er-item-data">{t.data.slice(0, 10).split('-').reverse().join('/')}</div>
               <div className="er-item-info">
                 <div className="er-item-desc">{t.descricao}</div>

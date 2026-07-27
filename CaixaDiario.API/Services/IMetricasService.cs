@@ -9,4 +9,5 @@ public interface IMetricasService
     List<EvolucaoMensalDto> CalcularEvolucao(List<RegistroDiario> registros, int meses);
     FluxoProjetadoDto CalcularFluxoProjetado(List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, int dias);
     DreDto CalcularDre(List<RegistroDiario> registros);
+    IndicadoresDecisaoDto CalcularIndicadores(List<RegistroDiario> registros, int mesesEvolucao = 13);
 }

@@ -11,6 +11,7 @@ import ClientContasPage from './pages/client/ClientContasPage'
 import ClientDashboardPage from './pages/client/ClientDashboardPage'
 import ClientExportacaoPage from './pages/client/ClientExportacaoPage'
 import ClientContasBancariasPage from './pages/client/ClientContasBancariasPage'
+import ClientContaDetalhePage from './pages/client/ClientContaDetalhePage'
 import ClientExtratoRevisaoPage from './pages/client/ClientExtratoRevisaoPage'
 import ClientDrePage from './pages/client/ClientDrePage'
 import ClientProjecaoPage from './pages/client/ClientProjecaoPage'
@@ -44,6 +45,7 @@ function ProtectedRoutes() {
         <Route path="/grafico"    element={<ClientGraficoPage />} />
         <Route path="/exportar"         element={<ClientExportacaoPage />} />
         <Route path="/contas-bancarias" element={<ClientContasBancariasPage />} />
+        <Route path="/contas-bancarias/:contaId" element={<ClientContaDetalhePage />} />
         <Route path="/extrato/:contaId" element={<ClientExtratoRevisaoPage />} />
         <Route path="/dre"       element={<ClientDrePage />} />
         <Route path="/projecao" element={<ClientProjecaoPage />} />

@@ -72,5 +72,15 @@ export default defineConfig({
   build: {
     outDir: '../CaixaDiario.API/wwwroot',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+        },
+      },
+    },
   },
 })

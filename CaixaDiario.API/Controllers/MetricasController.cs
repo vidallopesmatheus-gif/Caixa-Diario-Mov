@@ -82,4 +82,14 @@ public class MetricasController : ControllerBase
         var resultado = _metricasService.CalcularDre(filtrados);
         return Ok(new ApiResponse<DreDto> { Dados = resultado });
     }
+
+    [HttpGet("{clienteId:guid}/indicadores")]
+    public async Task<IActionResult> ObterIndicadores(Guid clienteId, [FromQuery] int mesesEvolucao = 13)
+    {
+        VerificarAcesso(clienteId);
+        var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
+        var registros = todos.Where(r => !r.Excluido).ToList();
+        var resultado = _metricasService.CalcularIndicadores(registros, mesesEvolucao);
+        return Ok(new ApiResponse<IndicadoresDecisaoDto> { Dados = resultado });
+    }
 }
