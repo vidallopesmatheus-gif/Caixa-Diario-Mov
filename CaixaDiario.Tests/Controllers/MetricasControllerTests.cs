@@ -81,4 +81,73 @@ public class MetricasControllerTests
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.IsType<ApiResponse<FluxoProjetadoDto>>(ok.Value);
     }
+
+    [Fact]
+    public async Task ObterDre_SemFiltroDeConta_RetornaOk()
+    {
+        var clienteId = Guid.NewGuid();
+        _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
+        _metricasMock.Setup(m => m.CalcularDre(It.IsAny<List<RegistroDiario>>())).Returns(new DreDto());
+
+        var result = await CriarSut(Guid.NewGuid(), "admin")
+            .ObterDre(clienteId, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.IsType<ApiResponse<DreDto>>(ok.Value);
+    }
+
+    [Fact]
+    public async Task ObterDre_ComFiltroDeConta_FiltraRegistrosDaContaInformada()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaId = Guid.NewGuid();
+        var outraContaId = Guid.NewGuid();
+        var data = new DateOnly(2026, 1, 15);
+        _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(), CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow },
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = outraContaId, Data = data, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(), CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow },
+        });
+
+        List<RegistroDiario>? recebidos = null;
+        _metricasMock.Setup(m => m.CalcularDre(It.IsAny<List<RegistroDiario>>()))
+            .Callback<List<RegistroDiario>>(r => recebidos = r)
+            .Returns(new DreDto());
+
+        await CriarSut(Guid.NewGuid(), "admin").ObterDre(clienteId, data, data, contaId);
+
+        var recebido = Assert.Single(recebidos!);
+        Assert.Equal(contaId, recebido.ContaBancariaId);
+    }
+
+    [Fact]
+    public async Task ObterDre_ClienteAcessandoOutro_LancaAcessoNegado()
+    {
+        var sut = CriarSut(Guid.NewGuid(), "cliente");
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            sut.ObterDre(Guid.NewGuid(), new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+        Assert.Equal(403, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ObterIndicadores_Admin_RetornaOk()
+    {
+        var clienteId = Guid.NewGuid();
+        _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
+        _metricasMock.Setup(m => m.CalcularIndicadores(It.IsAny<List<RegistroDiario>>(), It.IsAny<int>()))
+            .Returns(new IndicadoresDecisaoDto { Dre = new DreDto() });
+
+        var result = await CriarSut(Guid.NewGuid(), "admin").ObterIndicadores(clienteId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.IsType<ApiResponse<IndicadoresDecisaoDto>>(ok.Value);
+    }
+
+    [Fact]
+    public async Task ObterIndicadores_ClienteAcessandoOutro_LancaAcessoNegado()
+    {
+        var sut = CriarSut(Guid.NewGuid(), "cliente");
+        var ex = await Assert.ThrowsAsync<ApiException>(() => sut.ObterIndicadores(Guid.NewGuid()));
+        Assert.Equal(403, ex.StatusCode);
+    }
 }

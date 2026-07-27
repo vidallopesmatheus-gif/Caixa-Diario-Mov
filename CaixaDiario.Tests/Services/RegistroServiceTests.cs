@@ -14,6 +14,7 @@ public class RegistroServiceTests
     private readonly Mock<IRegistroRepository> _repoMock = new();
     private readonly Mock<IAuditService> _auditMock = new();
     private readonly Mock<IRecorrenciaService> _recorrenciaMock = new();
+    private readonly Mock<IContaBancariaRepository> _contaBancariaMock = new();
     private readonly RegistroService _sut;
 
     public RegistroServiceTests()
@@ -23,7 +24,7 @@ public class RegistroServiceTests
             .Returns(Task.CompletedTask);
         _recorrenciaMock.Setup(r => r.MaterializarMesAtualAsync(It.IsAny<Guid>()))
             .Returns(Task.CompletedTask);
-        _sut = new RegistroService(_repoMock.Object, _auditMock.Object, _recorrenciaMock.Object);
+        _sut = new RegistroService(_repoMock.Object, _auditMock.Object, _recorrenciaMock.Object, _contaBancariaMock.Object);
     }
 
     private static CriarRegistroDto CriarDto(DateOnly? data = null)
@@ -121,6 +122,54 @@ public class RegistroServiceTests
         _auditMock.Verify(a => a.LogAsync(
             clienteId, It.IsAny<Guid>(), "RegistroDiario", "Criacao",
             It.IsAny<string>(), null, It.IsAny<string>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ContaDuplicadaNaoAjustaSaldo()
+    {
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var contaId = Guid.NewGuid();
+        var registroExistente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(),
+            ClienteId = clienteId,
+            ContaBancariaId = contaId,
+            Data = hoje.AddDays(-1),
+            Entradas = new(),
+            Saidas = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Fornecedor X", Valor = 300m, DataVencimento = hoje, Pago = true, DataBaixa = hoje.AddDays(-1), ContaBancariaId = contaId },
+            },
+            ContasReceber = new(),
+            SaldoFinal = 700m,
+            CriadoEm = DateTime.UtcNow,
+            SalvoEm = DateTime.UtcNow,
+        };
+
+        _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registroExistente });
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId,
+            Data = hoje,
+            Entradas = new(),
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Fornecedor X", Valor = 300m, DataVencimento = hoje, Pago = true, ContaBancariaId = contaId },
+            },
+            SaldoFinal = 1000m,
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.False(resultado.ContasPagar[0].Pago);
+        Assert.Equal(1000m, resultado.SaldoFinal);
     }
 
     [Fact]
