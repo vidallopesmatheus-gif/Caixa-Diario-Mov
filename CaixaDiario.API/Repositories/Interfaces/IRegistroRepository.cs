@@ -5,6 +5,7 @@ namespace CaixaDiario.API.Repositories.Interfaces;
 public interface IRegistroRepository
 {
     Task<RegistroDiario?> ObterPorContaEDataAsync(Guid contaBancariaId, DateOnly data);
+    Task<RegistroDiario?> ObterPorClienteEDataAsync(Guid clienteId, DateOnly data);
     Task<List<RegistroDiario>> ListarPorClienteAsync(Guid clienteId);
     Task<List<RegistroDiario>> ListarPorContaAsync(Guid contaBancariaId);
     Task<RegistroDiario> AdicionarAsync(RegistroDiario registro);

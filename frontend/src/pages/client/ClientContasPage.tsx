@@ -3,7 +3,9 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtDate, todayISO } from '../../utils/format'
 import { listarContasRecorrentes, criarContaRecorrente, desativarContaRecorrente } from '../../api/contasRecorrentes'
-import type { ContaProvisionada, ContaRecorrente } from '../../types'
+import { listarContasBancarias } from '../../api/contasBancarias'
+import Modal from '../../components/shared/Modal'
+import type { ContaProvisionada, ContaRecorrente, ContaBancaria } from '../../types'
 import './ClientContas.css'
 
 interface Props { clienteIdOverride?: string }
@@ -43,15 +45,44 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [msg, setMsg] = useState('')
 
   const [recorrentes, setRecorrentes] = useState<ContaRecorrente[]>([])
+  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
+  const [contaSelecionadaId, setContaSelecionadaId] = useState('')
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false)
+  const [pendingDuplicate, setPendingDuplicate] = useState<{
+    tipo: 'receber' | 'pagar'
+    conta: ContaProvisionada
+    registroData: string
+  } | null>(null)
 
   useEffect(() => {
     if (!clienteId) return
     listarContasRecorrentes(clienteId).then(setRecorrentes).catch(console.error)
+    listarContasBancarias(clienteId).then(setContasBancarias).catch(console.error)
   }, [clienteId])
+
+  useEffect(() => {
+    if (!contasBancarias.length) return
+    if (!contaSelecionadaId) {
+      const caixa = contasBancarias.find(c => c.tipo === 'Caixa' || c.nome.toLowerCase() === 'caixa') ?? contasBancarias[0]
+      setContaSelecionadaId(caixa.id)
+    }
+  }, [contasBancarias, contaSelecionadaId])
 
   function resetForm() {
     setDesc(''); setValorDisplay(''); setValor(0); setVenc('')
     setRecInicio(''); setRecFim(''); setRecPeriodicidade('Mensal'); setRecParcelas('')
+  }
+
+  function encontrarDuplicata(conta: ContaProvisionada, registroData: string) {
+    const dataReferencia = conta.dataVencimento || registroData
+    return todasContas.find(view => {
+      if (view.tipo !== tipo) return false
+      const mesmaData = (view.conta.dataVencimento || view.registroData) === dataReferencia
+      const mesmoValor = Math.abs(view.conta.valor - conta.valor) < 0.01
+      const mesmaDescricao = view.conta.descricao.trim().toLowerCase() === conta.descricao.trim().toLowerCase()
+      const mesmaConta = !conta.contaBancariaId || !view.conta.contaBancariaId || view.conta.contaBancariaId === conta.contaBancariaId
+      return mesmaData && mesmoValor && mesmaDescricao && mesmaConta
+    })
   }
 
   async function handleAdicionar() {
@@ -73,7 +104,19 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       } else {
         const hoje = todayISO()
         const reg = registros.find(r => r.data === hoje)
-        const novaConta: ContaProvisionada = { descricao: desc, valor, dataVencimento: venc || undefined, pago: false }
+        const novaConta: ContaProvisionada = {
+          descricao: desc,
+          valor,
+          dataVencimento: venc || undefined,
+          pago: false,
+          contaBancariaId: contaSelecionadaId || undefined,
+        }
+        const duplicata = encontrarDuplicata(novaConta, hoje)
+        if (duplicata) {
+          setPendingDuplicate({ tipo, conta: novaConta, registroData: hoje })
+          setShowDuplicateModal(true)
+          return
+        }
         await salvar({
           clienteId, data: hoje,
           saldoInicio: reg?.saldoInicio ?? 0,
@@ -116,6 +159,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const recebidasList = todasContas.filter(c => c.tipo === 'receber' && c.conta.pago)
   const pendentesPagar = todasContas.filter(c => c.tipo === 'pagar' && !c.conta.pago)
   const pagasList = todasContas.filter(c => c.tipo === 'pagar' && c.conta.pago)
+  const contaSelecionada = contasBancarias.find(c => c.id === contaSelecionadaId)
 
   async function togglePago(view: ContaView) {
     if (!clienteId) return
@@ -130,9 +174,38 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     })
   }
 
+  async function confirmarDuplicata(linkToExisting: boolean) {
+    if (!pendingDuplicate || !clienteId) return
+    const hoje = todayISO()
+    const reg = registros.find(r => r.data === hoje)
+    if (!reg) return
+
+    if (!linkToExisting) {
+      await salvar({
+        clienteId, data: hoje,
+        saldoInicio: reg.saldoInicio,
+        entradas: reg.entradas,
+        saidas: reg.saidas,
+        contasAReceber: pendingDuplicate.tipo === 'receber' ? [...(reg.contasAReceber ?? []), pendingDuplicate.conta] : (reg.contasAReceber ?? []),
+        contasAPagar: pendingDuplicate.tipo === 'pagar' ? [...(reg.contasAPagar ?? []), pendingDuplicate.conta] : (reg.contasAPagar ?? []),
+        saldoConfirmado: reg.saldoConfirmado,
+      })
+      setMsg('Nova conta criada.')
+    } else {
+      setMsg('Conta semelhante já existente; nenhuma nova entrada foi criada.')
+    }
+
+    setShowDuplicateModal(false)
+    setPendingDuplicate(null)
+    resetForm()
+  }
+
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
-  const renderConta = (view: ContaView) => (
+  const renderConta = (view: ContaView) => {
+    const contaNome = contasBancarias.find(c => c.id === view.conta.contaBancariaId)?.nome ?? 'Conta padrão'
+
+    return (
     <div key={`${view.registroData}-${view.tipo}-${view.index}`} className={`conta-item ${view.conta.pago ? 'pago' : ''}`}>
       <button
         onClick={() => togglePago(view)}
@@ -148,11 +221,13 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         <div className="conta-meta">
           Lançado em {fmtDate(view.registroData)}
           {view.conta.dataVencimento ? ` · Vence: ${fmtDate(view.conta.dataVencimento)}` : ''}
+          {` · Conta: ${contaNome}`}
         </div>
       </div>
       <div className={`conta-valor ${view.tipo}`}>{fmtBRL(view.conta.valor)}</div>
     </div>
-  )
+    )
+  }
 
   const podeAdicionar = !!desc && valor > 0 && (!isRecorrente || !!recInicio)
 
@@ -169,6 +244,19 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
             <option value="pagar">A Pagar</option>
           </select>
           <input placeholder="Descrição" value={desc} onChange={e => setDesc(e.target.value)} style={{ flex: 2 }} />
+          {!isRecorrente && (
+            <div style={{ minWidth: 220, flex: 1.1 }}>
+              <label className="conta-field-label">Conta bancária</label>
+              <select value={contaSelecionadaId} onChange={e => setContaSelecionadaId(e.target.value)} style={{ width: '100%', maxWidth: 220 }}>
+                {contasBancarias.filter(c => c.ativa).map(c => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+              {contaSelecionada && (
+                <div className="conta-field-hint">O lançamento será vinculado a {contaSelecionada.nome}.</div>
+              )}
+            </div>
+          )}
           <div className="val-input-wrap" style={{ flex: 1, minWidth: 120 }}>
             <span className="val-prefix">R$</span>
             <input
@@ -264,6 +352,29 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           {pagasList.map(renderConta)}
         </div>
       )}
+
+      <Modal
+        open={showDuplicateModal}
+        title="Conta semelhante já existe"
+        onClose={() => {
+          setShowDuplicateModal(false)
+          setPendingDuplicate(null)
+        }}
+        footer={(
+          <>
+            <button className="btn-cancel" onClick={() => {
+              setShowDuplicateModal(false)
+              setPendingDuplicate(null)
+            }}>Cancelar</button>
+            <button className="btn-confirm" onClick={() => confirmarDuplicata(true)}>Vincular à existente</button>
+            <button className="btn-confirm" onClick={() => confirmarDuplicata(false)}>Criar nova</button>
+          </>
+        )}
+      >
+        <p style={{ color: 'var(--tx3)', marginBottom: 8 }}>
+          Encontramos uma conta parecida para a mesma descrição, valor e data{contaSelecionada ? ` em ${contaSelecionada.nome}` : ''}. Você pode vincular a entrada existente ou criar uma nova.
+        </p>
+      </Modal>
 
       {recorrentes.length > 0 && (
         <div className="contas-section">

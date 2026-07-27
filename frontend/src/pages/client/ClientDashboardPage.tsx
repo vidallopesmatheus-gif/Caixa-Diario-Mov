@@ -1,22 +1,28 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { useMetricas } from '../../hooks/useMetricas'
 import StatCard from '../../components/shared/StatCard'
-import { fmtBRL, todayISO, addDays } from '../../utils/format'
+import { fmtBRL, todayISO } from '../../utils/format'
+import { calcularJanelaPeriodo } from '../../utils/periodo'
+import type { PeriodoOpcao } from '../../utils/periodo'
 import { obterMeta, salvarMeta } from '../../api/metas'
 import { obterSelicAtual } from '../../api/selic'
 import { listarContasBancarias } from '../../api/contasBancarias'
-import InsightsCard from './InsightsCard'
+import { obterDre } from '../../api/metricas'
+import type { Dre } from '../../api/metricas'
 import OrcamentoDinamicoCard from './OrcamentoDinamicoCard'
-import SaudeFinanceiraGauges from './SaudeFinanceiraGauges'
+import ResumoStatusBar from './dashboard/ResumoStatusBar'
+import ResumoMetricCards from './dashboard/ResumoMetricCards'
+import AtencaoCard from './dashboard/AtencaoCard'
+import SaudeNegocioBlock from './dashboard/SaudeNegocioBlock'
+import AtividadeRecente from './dashboard/AtividadeRecente'
 import type { ContaBancaria } from '../../types'
-import { getContasEmRisco, agruparVencimentos } from '../../utils/alertas'
 import type { MetaAnual } from '../../types'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, ReferenceLine } from 'recharts'
 import { grupoDaCategoria, CORES_GRUPO } from '../../utils/categorias'
 import './ClientDashboard.css'
+import './dashboard/DashboardResumo.css'
 
 interface Props { clienteIdOverride?: string }
 
@@ -35,10 +41,18 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, loading } = useRegistros(clienteId)
-  const navigate = useNavigate()
 
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
   const [contaFiltro, setContaFiltro] = useState<string | null>(null)
+
+  // ── Camada 1: período e conta selecionados no topo controlam o resumo (camadas 1-4) ──
+  const [periodoOpcao, setPeriodoOpcao] = useState<PeriodoOpcao>('mes')
+  const [personalizadoDe, setPersonalizadoDe] = useState(todayISO())
+  const [personalizadoAte, setPersonalizadoAte] = useState(todayISO())
+  const janela = useMemo(
+    () => calcularJanelaPeriodo(periodoOpcao, { de: personalizadoDe, ate: personalizadoAte }),
+    [periodoOpcao, personalizadoDe, personalizadoAte]
+  )
 
   useEffect(() => {
     if (!clienteId) return
@@ -56,40 +70,33 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     [contasBancarias]
   )
 
-  const contasEmRisco = useMemo(() => getContasEmRisco(registros), [registros])
-  const { vencemHoje, proximos7Dias } = useMemo(() => agruparVencimentos(registros), [registros])
+  const saldoAtualSelecionado = useMemo(() => {
+    if (!contaFiltro) return saldoConsolidado
+    return contasBancarias.find(c => c.id === contaFiltro)?.saldoAtual ?? 0
+  }, [contasBancarias, contaFiltro, saldoConsolidado])
 
-  const saldoProjetado = useMemo(() => {
-    const saldoAtual = registros[0]?.saldoConfirmado ?? 0
-    const totalReceber = registros.flatMap(r => r.contasAReceber).filter(c => !c.pago).reduce((s, c) => s + c.valor, 0)
-    const totalPagar = registros.flatMap(r => r.contasAPagar).filter(c => !c.pago).reduce((s, c) => s + c.valor, 0)
-    return saldoAtual + totalReceber - totalPagar
-  }, [registros])
+  // DRE do período selecionado (camadas 2 e 4) + do período anterior equivalente (comparação)
+  const [dreAtual, setDreAtual] = useState<Dre | null>(null)
+  const [dreAnterior, setDreAnterior] = useState<Dre | null>(null)
+  const [dreLoading, setDreLoading] = useState(true)
+
+  useEffect(() => {
+    if (!clienteId) return
+    Promise.all([
+      obterDre(clienteId, janela.de, janela.ate, contaFiltro ?? undefined),
+      obterDre(clienteId, janela.deAnterior, janela.ateAnterior, contaFiltro ?? undefined),
+    ])
+      .then(([atual, anterior]) => { setDreAtual(atual); setDreAnterior(anterior); setDreLoading(false) })
+      .catch(() => { setDreAtual(null); setDreAnterior(null); setDreLoading(false) })
+  }, [clienteId, janela.de, janela.ate, janela.deAnterior, janela.ateAnterior, contaFiltro])
 
   const hoje = new Date()
   const anoAtual = hoje.getFullYear()
   const mesAtual = hoje.getMonth() + 1
 
-  const lucroComparativo = useMemo(() => {
-    const lucroDoMes = (ano: number, mes: number) => {
-      const prefixo = `${ano}-${String(mes).padStart(2, '0')}`
-      const doMes = registros.filter(r => r.data.startsWith(prefixo))
-      return doMes.reduce((s, r) =>
-        s + r.entradas.reduce((a, e) => a + e.valor, 0) - r.saidas.reduce((a, e) => a + e.valor, 0), 0)
-    }
-    const atual = lucroDoMes(anoAtual, mesAtual)
-    const mesAnt = mesAtual === 1 ? 12 : mesAtual - 1
-    const anoAnt = mesAtual === 1 ? anoAtual - 1 : anoAtual
-    const anterior = lucroDoMes(anoAnt, mesAnt)
-    const variacao = anterior !== 0 ? ((atual - anterior) / Math.abs(anterior)) * 100 : null
-    return { atual, anterior, variacao }
-  }, [registros, anoAtual, mesAtual])
-
-  const primeiroDiaMes = `${anoAtual}-${String(mesAtual).padStart(2,'0')}-01`
-  const ultimoDiaMes = new Date(anoAtual, mesAtual, 0).toISOString().slice(0,10)
-
-  const [de, setDe] = useState(primeiroDiaMes)
-  const [ate, setAte] = useState(ultimoDiaMes)
+  // As demais seções legadas (indicadores detalhados, fluxo, composição) seguem o mesmo período do resumo.
+  const de = janela.de
+  const ate = janela.ate
   const [multiploValuation, setMultiploValuation] = useState(3)
   const { metricas, fluxo } = useMetricas(clienteId, de, ate, multiploValuation)
   const [meta, setMeta] = useState<MetaAnual | null>(null)
@@ -153,10 +160,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     return Object.entries(acc).map(([name, value]) => ({ name, value })).filter(d => d.value > 0)
   }, [doPeriodo])
 
-  const totalReceita = doPeriodo.reduce((s, r) => s + r.entradas.reduce((a, e) => a + e.valor, 0), 0)
   const totalSaida = doPeriodo.reduce((s, r) => s + r.saidas.reduce((a, e) => a + e.valor, 0), 0)
-  const lucroOp = totalReceita - totalSaida
-  const saldoFinal = doPeriodo[doPeriodo.length - 1]?.saldoConfirmado ?? 0
 
   // Projeção por pagamentos cadastrados (contas a receber/pagar pendentes por mês)
   const projecaoPagamentos = useMemo(() => {
@@ -415,127 +419,44 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   return (
     <>
-      <div className="dash-period">
-        <label>De <input type="date" value={de} onChange={e => setDe(e.target.value)} /></label>
-        <label>Até <input type="date" value={ate} onChange={e => setAte(e.target.value)} /></label>
-        <button type="button" onClick={() => { const h = todayISO(); setDe(h); setAte(h) }}
-          style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-card)', color: 'var(--tx1)', cursor: 'pointer' }}>
-          Hoje
-        </button>
-        <button type="button" onClick={() => { setDe(addDays(todayISO(), -29)); setAte(todayISO()) }}
-          style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-card)', color: 'var(--tx1)', cursor: 'pointer' }}>
-          Últimos 30 dias
-        </button>
-      </div>
+      {/* ══ Camada 1: status — saldo consolidado + seletor de período/conta ══ */}
+      <ResumoStatusBar
+        contasBancarias={contasBancarias}
+        contaFiltro={contaFiltro}
+        onContaFiltroChange={setContaFiltro}
+        periodoOpcao={periodoOpcao}
+        onPeriodoOpcaoChange={setPeriodoOpcao}
+        personalizadoDe={personalizadoDe}
+        personalizadoAte={personalizadoAte}
+        onPersonalizadoChange={(d, a) => { setPersonalizadoDe(d); setPersonalizadoAte(a) }}
+      />
 
-      {/* Filtro por conta bancária */}
-      {contasBancarias.filter(c => c.ativa).length > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Conta:</span>
-          <button
-            type="button"
-            onClick={() => setContaFiltro(null)}
-            style={{
-              padding: '4px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
-              border: '1px solid var(--bd)',
-              background: contaFiltro === null ? '#0a84ff' : 'var(--bg-card)',
-              color: contaFiltro === null ? '#fff' : 'var(--tx1)',
-            }}>
-            Todas
-          </button>
-          {contasBancarias.filter(c => c.ativa).map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setContaFiltro(c.id)}
-              style={{
-                padding: '4px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
-                border: '1px solid var(--bd)',
-                background: contaFiltro === c.id ? '#0a84ff' : 'var(--bg-card)',
-                color: contaFiltro === c.id ? '#fff' : 'var(--tx1)',
-              }}>
-              {c.nome}
-            </button>
-          ))}
-        </div>
+      {/* ══ Camada 2: 4 cards de métricas (saldo, entradas, saídas, projeção) ══ */}
+      {clienteId && (
+        <ResumoMetricCards
+          clienteId={clienteId}
+          contaFiltro={contaFiltro}
+          janela={janela}
+          dreAtual={dreLoading ? null : dreAtual}
+          dreAnterior={dreLoading ? null : dreAnterior}
+          saldoAtual={saldoAtualSelecionado}
+        />
       )}
 
-      <div className="stats-grid">
-        <StatCard label="📈 Total Receita" value={fmtBRL(totalReceita)} className="val-green" />
-        <StatCard label="💸 Total Saída" value={fmtBRL(totalSaida)} className="val-red" />
-        <StatCard label="📊 Lucro Operacional" value={fmtBRL(lucroOp)} className={lucroOp >= 0 ? 'val-green' : 'val-red'} />
-        <StatCard
-          label="🧮 Lucro Líquido (mês)"
-          value={fmtBRL(lucroComparativo.atual)}
-          className={lucroComparativo.atual >= 0 ? 'val-green' : 'val-red'}
-          sub={lucroComparativo.variacao === null
-            ? `Mês anterior: ${fmtBRL(lucroComparativo.anterior)}`
-            : `${lucroComparativo.variacao >= 0 ? '▲' : '▼'} ${Math.abs(lucroComparativo.variacao).toFixed(1)}% vs mês anterior`}
-        />
-        <StatCard
-          label={contaFiltro === null ? '💰 Saldo Consolidado' : '💰 Saldo da Conta'}
-          value={contaFiltro === null
-            ? fmtBRL(saldoConsolidado)
-            : fmtBRL(contasBancarias.find(c => c.id === contaFiltro)?.saldoAtual ?? saldoFinal)}
-          className="val-blue"
-          sub={contaFiltro === null && contasBancarias.filter(c => c.ativa).length > 1
-            ? `${contasBancarias.filter(c => c.ativa).length} contas`
-            : undefined}
-        />
-      </div>
+      {/* ══ Camada 3: precisa de atenção — insights + vencimentos, priorizados, clicáveis ══ */}
+      {clienteId && <AtencaoCard clienteId={clienteId} registros={registros} />}
 
-      {clienteId && <SaudeFinanceiraGauges clienteId={clienteId} />}
+      {/* ══ Camada 4: saúde do negócio — gauges + margem do período ══ */}
+      {clienteId && (
+        <SaudeNegocioBlock clienteId={clienteId} margem={dreLoading ? undefined : (dreAtual?.margem ?? null)} />
+      )}
+
+      {/* ══ Camada 5: atividade recente ══ */}
+      <AtividadeRecente registros={registros} contasBancarias={contasBancarias} />
+
+      <hr className="resumo-fim-secao" />
+
       {clienteId && <OrcamentoDinamicoCard clienteId={clienteId} />}
-      {clienteId && <InsightsCard clienteId={clienteId} />}
-
-      {contasEmRisco.length > 0 && (
-        <div className="meta-card" style={{ borderColor: '#ff9500' }}>
-          <h3>⚠️ Alertas de Vencimento ({contasEmRisco.length})</h3>
-          {contasEmRisco.slice(0, 5).map((c, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bd)', fontSize: 13 }}>
-              <span style={{ color: c.vencida ? '#ff3b30' : '#ff9500' }}>
-                {c.vencida ? '🔴' : '🟡'} {c.conta.descricao}
-              </span>
-              <span>{fmtBRL(c.conta.valor)} · {c.conta.dataVencimento}</span>
-            </div>
-          ))}
-          <button onClick={() => navigate('contas')} style={{ marginTop: 10, fontSize: 12, background: 'none', border: '1px solid var(--bd)', borderRadius: 6, color: 'var(--tx3)', padding: '4px 12px', cursor: 'pointer' }}>
-            Ver todas as contas →
-          </button>
-        </div>
-      )}
-
-      {vencemHoje.length > 0 && (
-        <div className="meta-card" style={{ borderColor: '#ff3b30' }}>
-          <h3>🔴 Vencem Hoje ({vencemHoje.length})</h3>
-          {vencemHoje.map((c, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bd)', fontSize: 13 }}>
-              <span>{c.tipo === 'receber' ? '📥' : '📤'} {c.conta.descricao}</span>
-              <span>{fmtBRL(c.conta.valor)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {proximos7Dias.length > 0 && (
-        <div className="meta-card" style={{ borderColor: '#ff9500' }}>
-          <h3>🗓️ Próximos 7 dias ({proximos7Dias.length})</h3>
-          {proximos7Dias.map((c, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--bd)', fontSize: 13 }}>
-              <span>{c.tipo === 'receber' ? '📥' : '📤'} {c.conta.descricao}</span>
-              <span>{fmtBRL(c.conta.valor)} · {c.conta.dataVencimento}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="meta-card">
-        <h3>💵 Saldo Projetado</h3>
-        <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 8 }}>Saldo atual + contas a receber pendentes − contas a pagar pendentes</p>
-        <div style={{ fontSize: 22, fontWeight: 700, color: saldoProjetado >= 0 ? '#34c759' : '#ff3b30' }}>
-          {fmtBRL(saldoProjetado)}
-        </div>
-      </div>
 
       {metricas && (
         <div className="stats-grid" style={{ marginTop: 16 }}>
@@ -665,7 +586,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         </div>
       )}
 
-      <div className="meta-card">
+      <div className="meta-card" id="metas-investimentos">
         <h3>🎯 Metas & Investimentos {anoAtual}</h3>
 
         {/* ── Meu Sonho ── */}

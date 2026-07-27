@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { ApiResponse, ContaBancaria } from '../types'
+import type { ApiResponse, ContaBancaria, LancamentoExtrato, PendenciasConta } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapConta(raw: any): ContaBancaria {
@@ -10,8 +10,35 @@ function mapConta(raw: any): ContaBancaria {
     tipo: raw.tipo,
     saldoInicial: raw.saldoInicial ?? 0,
     saldoAtual: raw.saldoAtual ?? 0,
+    entradasMes: raw.entradasMes ?? 0,
+    saidasMes: raw.saidasMes ?? 0,
     ativa: raw.ativa ?? true,
     dataCriacao: raw.dataCriacao ?? '',
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapLancamento(raw: any): LancamentoExtrato {
+  return {
+    data: raw.data,
+    descricao: raw.descricao ?? '',
+    categoria: raw.categoria ?? undefined,
+    valor: raw.valor ?? 0,
+    saldoAcumulado: raw.saldoAcumulado ?? 0,
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapContaProvisionada(raw: any) {
+  return {
+    descricao: raw.descricao ?? '',
+    valor: raw.valor ?? 0,
+    dataVencimento: raw.dataVencimento ?? undefined,
+    pago: raw.pago ?? false,
+    categoria: raw.categoria ?? undefined,
+    recorrenciaId: raw.recorrenciaId ?? undefined,
+    dataBaixa: raw.dataBaixa ?? undefined,
+    contaBancariaId: raw.contaBancariaId ?? undefined,
   }
 }
 
@@ -48,4 +75,29 @@ export const atualizarContaBancaria = async (id: string, dto: {
 
 export const inativarContaBancaria = async (id: string): Promise<void> => {
   await apiFetch<ApiResponse<null>>(`/api/contas-bancarias/${id}`, { method: 'DELETE' })
+}
+
+export const obterExtratoConta = async (
+  contaId: string,
+  de?: string,
+  ate?: string,
+): Promise<LancamentoExtrato[]> => {
+  const params = new URLSearchParams()
+  if (de) params.set('de', de)
+  if (ate) params.set('ate', ate)
+  const qs = params.toString()
+  const res = await apiFetch<ApiResponse<unknown[]>>(
+    `/api/contas-bancarias/${contaId}/extrato${qs ? `?${qs}` : ''}`,
+  )
+  return (res.dados ?? []).map(mapLancamento)
+}
+
+export const obterPendenciasConta = async (contaId: string): Promise<PendenciasConta> => {
+  const res = await apiFetch<ApiResponse<{ recebiveis: unknown[]; pagamentos: unknown[] }>>(
+    `/api/contas-bancarias/${contaId}/pendencias`,
+  )
+  return {
+    recebiveis: (res.dados?.recebiveis ?? []).map(mapContaProvisionada),
+    pagamentos: (res.dados?.pagamentos ?? []).map(mapContaProvisionada),
+  }
 }

@@ -9,4 +9,5 @@ public class ContaProvisionada
     public string? Categoria { get; set; }
     public Guid? RecorrenciaId { get; set; }
     public DateOnly? DataBaixa { get; set; }
+    public Guid? ContaBancariaId { get; set; }
 }

@@ -1,4 +1,5 @@
 using CaixaDiario.API.DTOs.ContasBancarias;
+using CaixaDiario.API.DTOs.Registros;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
@@ -85,6 +86,125 @@ public class ContaBancariaService : IContaBancariaService
         await _contaRepo.AtualizarAsync(conta);
     }
 
+    public async Task<List<LancamentoExtratoDto>> ObterExtratoAsync(
+        Guid contaId, Guid usuarioLogadoId, string perfil, DateOnly? de, DateOnly? ate)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+
+        var registros = (await _registroRepo.ListarPorContaAsync(contaId))
+            .OrderBy(r => r.Data)
+            .ToList();
+
+        var linhas = new List<(DateOnly Data, LancamentoExtratoDto Dto)>();
+        decimal saldo = conta.SaldoInicial;
+
+        foreach (var r in registros)
+        {
+            // Sincroniza com o início do dia armazenado, evitando deriva por edições manuais de saldo.
+            saldo = r.Inicio;
+
+            foreach (var entrada in r.Entradas)
+            {
+                saldo += entrada.Valor;
+                linhas.Add((r.Data, new LancamentoExtratoDto
+                {
+                    Data = r.Data.ToString("yyyy-MM-dd"),
+                    Descricao = entrada.Descricao,
+                    Categoria = entrada.Categoria,
+                    Valor = entrada.Valor,
+                    SaldoAcumulado = saldo,
+                }));
+            }
+
+            foreach (var recebido in r.ContasReceber.Where(cp => cp.Pago && cp.DataBaixa == r.Data))
+            {
+                saldo += recebido.Valor;
+                linhas.Add((r.Data, new LancamentoExtratoDto
+                {
+                    Data = r.Data.ToString("yyyy-MM-dd"),
+                    Descricao = $"{recebido.Descricao} (recebimento)",
+                    Categoria = recebido.Categoria,
+                    Valor = recebido.Valor,
+                    SaldoAcumulado = saldo,
+                }));
+            }
+
+            foreach (var saida in r.Saidas)
+            {
+                saldo -= saida.Valor;
+                linhas.Add((r.Data, new LancamentoExtratoDto
+                {
+                    Data = r.Data.ToString("yyyy-MM-dd"),
+                    Descricao = saida.Descricao,
+                    Categoria = saida.Categoria,
+                    Valor = -saida.Valor,
+                    SaldoAcumulado = saldo,
+                }));
+            }
+
+            foreach (var pago in r.ContasPagar.Where(cp => cp.Pago && cp.DataBaixa == r.Data))
+            {
+                saldo -= pago.Valor;
+                linhas.Add((r.Data, new LancamentoExtratoDto
+                {
+                    Data = r.Data.ToString("yyyy-MM-dd"),
+                    Descricao = $"{pago.Descricao} (pagamento)",
+                    Categoria = pago.Categoria,
+                    Valor = -pago.Valor,
+                    SaldoAcumulado = saldo,
+                }));
+            }
+        }
+
+        IEnumerable<(DateOnly Data, LancamentoExtratoDto Dto)> filtradas = linhas;
+        if (de.HasValue) filtradas = filtradas.Where(l => l.Data >= de.Value);
+        if (ate.HasValue) filtradas = filtradas.Where(l => l.Data <= ate.Value);
+
+        return filtradas
+            .OrderByDescending(l => l.Data)
+            .Select(l => l.Dto)
+            .ToList();
+    }
+
+    public async Task<PendenciasContaDto> ObterPendenciasAsync(Guid contaId, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+
+        var registros = await _registroRepo.ListarPorClienteAsync(conta.ClienteId);
+
+        var recebiveis = registros
+            .SelectMany(r => r.ContasReceber)
+            .Where(cp => !cp.Pago && cp.ContaBancariaId == contaId)
+            .Select(MapProvisionadaToDto)
+            .OrderBy(d => d.DataVencimento)
+            .ToList();
+
+        var pagamentos = registros
+            .SelectMany(r => r.ContasPagar)
+            .Where(cp => !cp.Pago && cp.ContaBancariaId == contaId)
+            .Select(MapProvisionadaToDto)
+            .OrderBy(d => d.DataVencimento)
+            .ToList();
+
+        return new PendenciasContaDto { Recebiveis = recebiveis, Pagamentos = pagamentos };
+    }
+
+    private static ContaProvisionadaDto MapProvisionadaToDto(ContaProvisionada c) => new()
+    {
+        Descricao = c.Descricao,
+        Valor = c.Valor,
+        DataVencimento = c.DataVencimento,
+        Pago = c.Pago,
+        Categoria = c.Categoria,
+        RecorrenciaId = c.RecorrenciaId,
+        DataBaixa = c.DataBaixa,
+        ContaBancariaId = c.ContaBancariaId,
+    };
+
     private static void VerificarAcesso(Guid clienteId, Guid usuarioLogadoId, string perfil)
     {
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
@@ -100,6 +220,11 @@ public class ContaBancariaService : IContaBancariaService
 
         var saldoAtual = regsOrdenados.FirstOrDefault()?.SaldoFinal ?? c.SaldoInicial;
 
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var regsDoMes = regsOrdenados.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month);
+        var entradasMes = regsDoMes.SelectMany(r => r.Entradas).Sum(e => e.Valor);
+        var saidasMes = regsDoMes.SelectMany(r => r.Saidas).Sum(s => s.Valor);
+
         return new ContaBancariaDto
         {
             Id = c.Id,
@@ -108,6 +233,8 @@ public class ContaBancariaService : IContaBancariaService
             Tipo = c.Tipo,
             SaldoInicial = c.SaldoInicial,
             SaldoAtual = saldoAtual,
+            EntradasMes = entradasMes,
+            SaidasMes = saidasMes,
             Ativa = c.Ativa,
             DataCriacao = c.DataCriacao,
         };

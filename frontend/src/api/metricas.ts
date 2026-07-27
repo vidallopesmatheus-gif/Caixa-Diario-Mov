@@ -114,3 +114,31 @@ export async function obterDre(
   const res = await apiFetch<ApiResponse<Dre>>(`/api/metricas/${clienteId}/dre?${params}`)
   return res.dados
 }
+
+export interface CategoriaIndicador {
+  nome: string
+  grupo: string
+  total: number
+  percentualReceita: number | null
+  mediaMesesAnteriores: number | null
+  variacaoPercentual: number | null
+}
+
+export interface IndicadoresDecisao {
+  dre: Dre
+  custoFixo: number
+  custoVariavel: number
+  custoNaoClassificado: number
+  rankingCategorias: CategoriaIndicador[]
+  evolucao: EvolucaoMensal[]
+  mesesComAtividade: number
+  variacaoReceitaMesAnterior: number | null
+  variacaoReceitaAnoAnterior: number | null
+}
+
+export async function obterIndicadores(clienteId: string, mesesEvolucao = 13): Promise<IndicadoresDecisao> {
+  const res = await apiFetch<ApiResponse<IndicadoresDecisao>>(
+    `/api/metricas/${clienteId}/indicadores?mesesEvolucao=${mesesEvolucao}`,
+  )
+  return res.dados
+}

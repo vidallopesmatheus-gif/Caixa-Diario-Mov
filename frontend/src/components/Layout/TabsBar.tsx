@@ -11,15 +11,15 @@ export default function TabsBar() {
     { to: '/admin/clientes', label: '👥 Clientes' },
   ]
   const clientTabs = [
-    { to: '/dashboard',  label: '📊 Dashboard' },
-    { to: '/caixa',      label: '💵 Caixa Diária' },
-    { to: '/contas',     label: '📋 Contas' },
-    { to: '/historico',  label: '📈 Histórico' },
-    { to: '/grafico',    label: '📊 Gráficos' },
-    { to: '/exportar',         label: '⬇️ Exportar' },
-    { to: '/contas-bancarias', label: '🏦 Banco' },
-    { to: '/dre',       label: '📑 DRE' },
-    { to: '/projecao', label: '🔭 Projeção' },
+    { to: '/dashboard', label: 'Dashboard' },
+    { to: '/caixa', label: 'Caixa' },
+    { to: '/contas-bancarias', label: 'Banco' },
+    { to: '/contas', label: 'Contas' },
+    { to: '/dre', label: 'DRE' },
+    { to: '/projecao', label: 'Projeção' },
+    { to: '/grafico', label: 'Indicadores' },
+    { to: '/historico', label: 'Histórico' },
+    { to: '/exportar', label: 'Exportar' },
   ]
   const tabs = user.perfil === 'admin' ? adminTabs : clientTabs
 

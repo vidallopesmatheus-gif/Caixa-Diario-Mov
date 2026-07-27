@@ -43,6 +43,20 @@
   opacity: 0.6;
 }
 
+.cb-conta-clicavel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.cb-conta-clicavel:hover .cb-conta-nome {
+  color: var(--accent);
+}
+
 .cb-conta-info {
   flex: 1;
   min-width: 160px;
@@ -58,6 +72,12 @@
   font-size: 12px;
   color: var(--tx3);
   margin-top: 2px;
+}
+
+.cb-conta-resumo-mes {
+  font-size: 12px;
+  color: var(--tx3);
+  margin-top: 4px;
 }
 
 .cb-conta-saldo {
