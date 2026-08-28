@@ -85,7 +85,7 @@ namespace CaixaDiario.API.Migrations
                 migrationBuilder.InsertData(
                     table: "categorias",
                     columns: new[] { "id", "nome", "tipo", "grupo", "ordem", "ativa", "criado_em" },
-                    values: new object[] { Guid.NewGuid(), seed[i].Nome, seed[i].Tipo, (object)seed[i].Grupo ?? DBNull.Value, i, true, agora });
+                    values: new object[] { Guid.NewGuid(), seed[i].Nome, seed[i].Tipo, seed[i].Grupo, i, true, agora });
             }
         }
 
