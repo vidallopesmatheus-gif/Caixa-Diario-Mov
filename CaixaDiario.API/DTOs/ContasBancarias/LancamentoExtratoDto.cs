@@ -7,4 +7,5 @@ public class LancamentoExtratoDto
     public string? Categoria { get; set; }
     public decimal Valor { get; set; } // positivo = entrada, negativo = saída
     public decimal SaldoAcumulado { get; set; }
+    public bool PendenteCategorizacao { get; set; }
 }

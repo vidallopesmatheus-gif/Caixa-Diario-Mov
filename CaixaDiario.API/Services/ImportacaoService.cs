@@ -24,183 +24,223 @@ public class ImportacaoService : IImportacaoService
         _registroRepo = registroRepo;
     }
 
-    // ── Importar arquivo ──────────────────────────────────────────────────────
-    public async Task<List<TransacaoImportadaDto>> ImportarArquivoAsync(
+    // Representação unificada de uma linha do arquivo, independente do formato de origem.
+    // Indice = posição no arquivo, na mesma ordem em que o parser encontrou — é o que o preview
+    // devolve e o que a confirmação usa para "forçar inclusão" de uma linha já importada antes.
+    private record TransacaoParseada(int Indice, DateOnly Data, decimal Valor, string Descricao, string Tipo, string? FitId);
+
+    // ── Preview (não persiste nada) ──────────────────────────────────────────────
+    public async Task<PreviewImportacaoDto> PreviewAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo)
     {
+        await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        var parseadas = ParsearArquivoValidando(arquivo);
+
+        var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
+        var dtos = parseadas.Select(t => new PreviewTransacaoDto
+        {
+            Indice = t.Indice,
+            Data = t.Data.ToString("yyyy-MM-dd"),
+            Valor = t.Valor,
+            Descricao = t.Descricao,
+            Tipo = t.Tipo,
+            FitId = t.FitId,
+            JaImportada = JaFoiImportada(t, historico),
+        }).ToList();
+
+        return new PreviewImportacaoDto { Transacoes = dtos };
+    }
+
+    // ── Importar (lança direto no RegistroDiario — afeta saldo na hora) ──────────
+    public async Task<ResultadoImportacaoDto> ImportarArquivoAsync(
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
+        DateOnly? dataInicio, DateOnly? dataFim, List<int>? indicesForcarInclusao)
+    {
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        var parseadas = ParsearArquivoValidando(arquivo);
 
-        var ext = Path.GetExtension(arquivo.FileName).ToLowerInvariant();
-        if (ext is not ".ofx" and not ".csv" and not ".xlsx")
+        if (dataInicio.HasValue) parseadas = parseadas.Where(t => t.Data >= dataInicio.Value).ToList();
+        if (dataFim.HasValue) parseadas = parseadas.Where(t => t.Data <= dataFim.Value).ToList();
+
+        var forcar = (indicesForcarInclusao ?? new()).ToHashSet();
+        var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
+
+        var aImportar = parseadas
+            .Where(t => forcar.Contains(t.Indice) || !JaFoiImportada(t, historico))
+            .ToList();
+
+        if (aImportar.Count == 0)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
-                "Formato inválido. Envie um arquivo .ofx, .csv ou .xlsx.");
+                "Nenhuma transação nova para importar no intervalo selecionado.");
 
-        List<TransacaoImportada> novas;
-
-        using var stream = arquivo.OpenReadStream();
-        try
-        {
-            novas = ext switch
-            {
-                ".ofx" => await ParsearOfx(stream, conta),
-                ".xlsx" => await ParsearPlanilha(stream, conta, XlsxParser.Parse),
-                _ => await ParsearPlanilha(stream, conta, CsvParser.Parse),
-            };
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, ex.Message);
-        }
-
-        if (novas.Count == 0)
-            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
-                "Nenhuma transação encontrada no arquivo. Verifique o formato.");
-
-        // Carrega registros existentes para marcar duplicatas
-        var registros = await _registroRepo.ListarPorContaAsync(contaBancariaId);
-        var dtos = novas.Select(t => MapToDto(t, registros)).ToList();
-
-        await _importRepo.AdicionarLoteAsync(novas);
-        return dtos;
-    }
-
-    // ── Listar pendentes ──────────────────────────────────────────────────────
-    public async Task<List<TransacaoImportadaDto>> ListarPendentesAsync(
-        Guid contaBancariaId, Guid usuarioLogadoId, string perfil)
-    {
-        await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
-        var pendentes = await _importRepo.ListarPendentesPorContaAsync(contaBancariaId);
-        var registros = await _registroRepo.ListarPorContaAsync(contaBancariaId);
-        return pendentes.Select(t => MapToDto(t, registros)).ToList();
-    }
-
-    // ── Confirmar / Ignorar ───────────────────────────────────────────────────
-    public async Task ConfirmarTransacoesAsync(
-        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, ConfirmarTransacoesDto dto)
-    {
-        await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
-
-        var ids = dto.Transacoes.Select(t => t.Id).ToList();
-        var transacoes = await _importRepo.ObterPorIdsAsync(ids);
-
-        // Valida que todas pertencem à conta solicitada
-        if (transacoes.Any(t => t.ContaBancariaId != contaBancariaId))
-            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado a uma ou mais transações.");
-
-        // Carrega registros diários da conta ordenados por data
-        var registros = await _registroRepo.ListarPorContaAsync(contaBancariaId);
+        var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
+            .Where(r => !r.Excluido)
+            .ToList();
         var registrosPorData = registros.ToDictionary(r => r.Data);
+        var auditoria = new List<TransacaoImportada>();
+        var pendentes = 0;
 
-        // Agrupa transações confirmadas por data para processar dia a dia
-        var confirmadas = dto.Transacoes
-            .Join(transacoes, item => item.Id, t => t.Id, (item, t) => (item, t))
-            .Where(x => !x.item.Ignorar && x.t.Status == "Pendente")
-            .ToList();
-
-        var ignoradas = dto.Transacoes
-            .Join(transacoes, item => item.Id, t => t.Id, (item, t) => (item, t))
-            .Where(x => x.item.Ignorar && x.t.Status == "Pendente")
-            .ToList();
-
-        // Agrupa confirmadas por data
-        var porData = confirmadas.GroupBy(x => x.t.Data).OrderBy(g => g.Key);
-
-        foreach (var grupo in porData)
+        foreach (var grupo in aImportar.GroupBy(t => t.Data).OrderBy(g => g.Key))
         {
             var data = grupo.Key;
-
-            // Obtém ou cria RegistroDiario para esse dia
+            bool novo;
             RegistroDiario registro;
-            bool criando = false;
             if (registrosPorData.TryGetValue(data, out var existente))
             {
                 registro = existente;
+                novo = false;
             }
             else
             {
-                // Saldo início = SaldoFinal do dia anterior mais recente
-                var prev = registros
+                var anterior = registros
                     .Where(r => r.Data < data)
                     .OrderByDescending(r => r.Data)
                     .FirstOrDefault();
-
-                // Usa SaldoFinal do dia anterior; se não houver, usa saldo do registro mais recente
-                decimal inicio = prev?.SaldoFinal ?? 0m;
+                var saldoBase = anterior?.SaldoFinal ?? conta.SaldoInicial;
 
                 registro = new RegistroDiario
                 {
                     Id = Guid.NewGuid(),
-                    ClienteId = contaBancariaId,  // será corrigido abaixo
-                    ContaBancariaId = contaBancariaId,
+                    ClienteId = conta.ClienteId,
+                    ContaBancariaId = conta.Id,
                     Data = data,
-                    Inicio = inicio,
-                    Entradas = new List<ItemFinanceiro>(),
-                    Saidas = new List<ItemFinanceiroSaida>(),
-                    ContasReceber = new List<ContaProvisionada>(),
-                    ContasPagar = new List<ContaProvisionada>(),
-                    SaldoFinal = inicio,
+                    Inicio = saldoBase,
+                    Entradas = new(),
+                    Saidas = new(),
+                    ContasReceber = new(),
+                    ContasPagar = new(),
+                    SaldoFinal = saldoBase,
                     CriadoEm = DateTime.UtcNow,
                     SalvoEm = DateTime.UtcNow,
                     UsuarioAtualizacao = "importacao",
                 };
-
-                // Corrije o ClienteId usando a conta
-                var contaInfo = await _contaRepo.ObterPorIdAsync(contaBancariaId);
-                registro.ClienteId = contaInfo!.ClienteId;
-                criando = true;
+                novo = true;
+                registrosPorData[data] = registro;
+                registros.Add(registro);
             }
 
-            // Aplica cada transação do grupo
-            foreach (var (item, t) in grupo)
+            foreach (var t in grupo)
             {
-                t.Categoria = item.Categoria ?? t.Categoria;
-
+                // Sugestão automática só existe hoje pro lado das saídas — entrada sempre foi opcional
+                // categorizar (não bloqueia nada no DRE, que só classifica "Não Classificado" no lado
+                // das despesas). Por isso só a saída sem sugestão vira "pendente de categorização".
                 if (t.Tipo == "Entrada")
                 {
                     registro.Entradas.Add(new ItemFinanceiro
                     {
+                        Id = Guid.NewGuid(),
                         Descricao = t.Descricao,
                         Valor = t.Valor,
-                        Categoria = t.Categoria,
+                        FitId = t.FitId,
                     });
                     registro.SaldoFinal += t.Valor;
                 }
                 else
                 {
+                    var categoriaSugerida = SugerirCategoria(t.Tipo, t.Descricao);
+                    var pendente = categoriaSugerida == null;
+                    if (pendente) pendentes++;
+
                     registro.Saidas.Add(new ItemFinanceiroSaida
                     {
+                        Id = Guid.NewGuid(),
                         Descricao = t.Descricao,
                         Valor = t.Valor,
-                        Categoria = t.Categoria ?? "Importado",
+                        Categoria = categoriaSugerida ?? string.Empty,
                         Subcategoria = string.Empty,
+                        FitId = t.FitId,
+                        PendenteCategorizacao = pendente,
                     });
                     registro.SaldoFinal -= t.Valor;
                 }
 
-                t.Status = "Confirmada";
+                auditoria.Add(new TransacaoImportada
+                {
+                    Id = Guid.NewGuid(),
+                    ContaBancariaId = conta.Id,
+                    ClienteId = conta.ClienteId,
+                    Data = t.Data,
+                    Valor = t.Valor,
+                    Descricao = t.Descricao,
+                    FitId = t.FitId,
+                    Tipo = t.Tipo,
+                    Status = "Confirmada",
+                    ImportadoEm = DateTime.UtcNow,
+                });
             }
 
             registro.SalvoEm = DateTime.UtcNow;
             registro.AtualizadoEm = DateTime.UtcNow;
-
-            if (criando)
-                await _registroRepo.AdicionarAsync(registro);
-            else
-                await _registroRepo.AtualizarAsync(registro);
+            if (novo) await _registroRepo.AdicionarAsync(registro);
+            else await _registroRepo.AtualizarAsync(registro);
         }
 
-        // Marca ignoradas
-        foreach (var (_, t) in ignoradas)
-            t.Status = "Ignorada";
+        await _importRepo.AdicionarLoteAsync(auditoria);
 
-        // Atualiza status das transações
-        var toUpdate = confirmadas.Select(x => x.t).Concat(ignoradas.Select(x => x.t)).ToList();
-        await _importRepo.AtualizarLoteAsync(toUpdate);
+        return new ResultadoImportacaoDto
+        {
+            TotalImportadas = aImportar.Count,
+            TotalPendentesCategorizacao = pendentes,
+            TotalEntradas = aImportar.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
+            TotalSaidas = aImportar.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
+        };
+    }
+
+    // ── Categorização pendente (lançamentos já reais, só falta a categoria) ──────
+    public async Task<List<PendenteCategorizacaoDto>> ListarPendentesCategorizacaoAsync(
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil)
+    {
+        await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        var registros = await _registroRepo.ListarPorContaAsync(contaBancariaId);
+
+        return registros
+            .Where(r => !r.Excluido)
+            .OrderBy(r => r.Data)
+            .SelectMany(r => r.Saidas
+                .Where(s => s.PendenteCategorizacao)
+                .Select(s => new PendenteCategorizacaoDto
+                {
+                    Id = s.Id,
+                    Data = r.Data.ToString("yyyy-MM-dd"),
+                    Descricao = s.Descricao,
+                    Valor = s.Valor,
+                    Tipo = "Saida",
+                }))
+            .ToList();
+    }
+
+    public async Task AtualizarCategoriasAsync(
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, AtualizarCategoriaDto dto)
+    {
+        await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+
+        var porData = dto.Itens
+            .Where(i => DateOnly.TryParse(i.Data, out _))
+            .GroupBy(i => DateOnly.Parse(i.Data))
+            .ToList();
+
+        foreach (var grupo in porData)
+        {
+            var registro = await _registroRepo.ObterPorContaEDataAsync(contaBancariaId, grupo.Key);
+            if (registro == null) continue;
+
+            foreach (var item in grupo)
+            {
+                var saida = registro.Saidas.FirstOrDefault(s => s.Id == item.Id);
+                if (saida == null) continue;
+                saida.Categoria = item.Categoria;
+                saida.PendenteCategorizacao = false;
+            }
+
+            registro.SalvoEm = DateTime.UtcNow;
+            registro.AtualizadoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(registro);
+        }
     }
 
     // ── Sugestão de categoria por palavra-chave ────────────────────────────────
     // Dicionário simples e estático (palavra-chave → categoria já existente em /api/categorias).
-    // Só sugere para Saídas: o usuário confirma/troca na tela de revisão antes de virar lançamento.
+    // Só sugere para Saídas: o usuário confirma/troca depois se quiser.
     private static readonly (string Palavra, string Categoria)[] SugestoesPorPalavraChave =
     {
         ("posto", "Manutenção"),
@@ -256,68 +296,57 @@ public class ImportacaoService : IImportacaoService
         return conta;
     }
 
-    private async Task<List<TransacaoImportada>> ParsearOfx(Stream stream, ContaBancaria conta)
+    private static List<TransacaoParseada> ParsearArquivoValidando(IFormFile arquivo)
     {
-        var transacoes = OfxParser.Parse(stream);
-        var resultado = new List<TransacaoImportada>();
+        var ext = Path.GetExtension(arquivo.FileName).ToLowerInvariant();
+        if (ext is not ".ofx" and not ".csv" and not ".xlsx")
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                "Formato inválido. Envie um arquivo .ofx, .csv ou .xlsx.");
 
-        foreach (var t in transacoes)
+        List<TransacaoParseada> parseadas;
+        using (var stream = arquivo.OpenReadStream())
         {
-            // Dedup por FitId
-            if (t.FitId != null && await _importRepo.ExisteFitIdAsync(conta.Id, t.FitId))
-                continue;
-
-            resultado.Add(new TransacaoImportada
+            try
             {
-                Id = Guid.NewGuid(),
-                ContaBancariaId = conta.Id,
-                ClienteId = conta.ClienteId,
-                Data = t.Data,
-                Valor = t.Valor,
-                Descricao = t.Descricao,
-                Tipo = t.Tipo,
-                Categoria = SugerirCategoria(t.Tipo, t.Descricao),
-                FitId = t.FitId,
-                Status = "Pendente",
-                ImportadoEm = DateTime.UtcNow,
-            });
+                parseadas = ext switch
+                {
+                    ".ofx" => OfxParser.Parse(stream)
+                        .Select((t, i) => new TransacaoParseada(i, t.Data, t.Valor, t.Descricao, t.Tipo, t.FitId))
+                        .ToList(),
+                    ".xlsx" => XlsxParser.Parse(stream)
+                        .Select((t, i) => new TransacaoParseada(i, t.Data, t.Valor, t.Descricao, t.Tipo, null))
+                        .ToList(),
+                    _ => CsvParser.Parse(stream)
+                        .Select((t, i) => new TransacaoParseada(i, t.Data, t.Valor, t.Descricao, t.Tipo, null))
+                        .ToList(),
+                };
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, ex.Message);
+            }
         }
 
-        return resultado;
+        if (parseadas.Count == 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                "Nenhuma transação encontrada no arquivo. Verifique o formato.");
+
+        return parseadas;
     }
 
-    private async Task<List<TransacaoImportada>> ParsearPlanilha(
-        Stream stream, ContaBancaria conta, Func<Stream, List<TransacaoCsv>> parser)
+    // OFX: mesmo FITID já visto antes nesta conta (identificador único — não precisa de mais nada).
+    // CSV/XLSX (sem FITID): heurística de sempre — mesma data, valor (±0,01) e descrição parecida.
+    private static bool JaFoiImportada(TransacaoParseada t, List<TransacaoImportada> historico)
     {
-        var transacoes = parser(stream);
-        // Dedup: carrega importações já existentes para mesma conta
-        var existentes = await _importRepo.ListarPendentesPorContaAsync(conta.Id);
+        if (t.FitId != null)
+            return historico.Any(h => h.FitId == t.FitId);
 
-        return transacoes
-            .Where(t => !ExisteDuplicataImport(t, existentes))
-            .Select(t => new TransacaoImportada
-            {
-                Id = Guid.NewGuid(),
-                ContaBancariaId = conta.Id,
-                ClienteId = conta.ClienteId,
-                Data = t.Data,
-                Valor = t.Valor,
-                Descricao = t.Descricao,
-                Tipo = t.Tipo,
-                Categoria = SugerirCategoria(t.Tipo, t.Descricao),
-                Status = "Pendente",
-                ImportadoEm = DateTime.UtcNow,
-            })
-            .ToList();
+        return historico.Any(h =>
+            h.Data == t.Data &&
+            Math.Abs(h.Valor - t.Valor) < 0.01m &&
+            h.Tipo == t.Tipo &&
+            DescricaoSimilar(h.Descricao, t.Descricao));
     }
-
-    // Verifica se já existe transação importada com mesma data+valor+descrição similar
-    private static bool ExisteDuplicataImport(TransacaoCsv nova, List<TransacaoImportada> existentes) =>
-        existentes.Any(e =>
-            e.Data == nova.Data &&
-            Math.Abs(e.Valor - nova.Valor) < 0.01m &&
-            e.Tipo == nova.Tipo &&
-            DescricaoSimilar(e.Descricao, nova.Descricao));
 
     private static bool DescricaoSimilar(string a, string b)
     {
@@ -325,33 +354,4 @@ public class ImportacaoService : IImportacaoService
         var lb = b.ToUpperInvariant().Length >= 20 ? b[..20].ToUpperInvariant() : b.ToUpperInvariant();
         return la == lb;
     }
-
-    // Verifica se transação já existe nos registros diários reais
-    private static bool EhDuplicataEmRegistros(TransacaoImportada t, List<RegistroDiario> registros)
-    {
-        var doMesmoDia = registros.Where(r => r.Data == t.Data).ToList();
-        if (t.Tipo == "Entrada")
-            return doMesmoDia.Any(r => r.Entradas.Any(e =>
-                Math.Abs(e.Valor - t.Valor) < 0.01m &&
-                DescricaoSimilar(e.Descricao, t.Descricao)));
-        else
-            return doMesmoDia.Any(r => r.Saidas.Any(s =>
-                Math.Abs(s.Valor - t.Valor) < 0.01m &&
-                DescricaoSimilar(s.Descricao, t.Descricao)));
-    }
-
-    private static TransacaoImportadaDto MapToDto(TransacaoImportada t, List<RegistroDiario> registros) =>
-        new()
-        {
-            Id = t.Id,
-            ContaBancariaId = t.ContaBancariaId,
-            Data = t.Data.ToString("yyyy-MM-dd"),
-            Valor = t.Valor,
-            Descricao = t.Descricao,
-            Tipo = t.Tipo,
-            Status = t.Status,
-            Categoria = t.Categoria,
-            FitId = t.FitId,
-            Duplicada = EhDuplicataEmRegistros(t, registros),
-        };
 }

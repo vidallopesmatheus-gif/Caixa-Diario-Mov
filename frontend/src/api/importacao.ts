@@ -1,48 +1,77 @@
 import { apiFetch } from './client'
-import type { ApiResponse, TransacaoImportada } from '../types'
+import type { ApiResponse, PreviewTransacao, ResultadoImportacao, PendenteCategorizacao } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapTransacao(raw: any): TransacaoImportada {
+function mapPreview(raw: any): PreviewTransacao {
   return {
-    id: raw.id,
-    contaBancariaId: raw.contaBancariaId,
+    indice: raw.indice ?? 0,
     data: raw.data,
     valor: raw.valor ?? 0,
     descricao: raw.descricao ?? '',
     tipo: raw.tipo,
-    status: raw.status,
-    categoria: raw.categoria ?? undefined,
     fitId: raw.fitId ?? undefined,
-    duplicada: raw.duplicada ?? false,
+    jaImportada: raw.jaImportada ?? false,
   }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapPendente(raw: any): PendenteCategorizacao {
+  return {
+    id: raw.id,
+    data: raw.data,
+    descricao: raw.descricao ?? '',
+    valor: raw.valor ?? 0,
+    tipo: raw.tipo,
+  }
+}
+
+export const previewExtrato = async (contaId: string, arquivo: File): Promise<PreviewTransacao[]> => {
+  const form = new FormData()
+  form.append('arquivo', arquivo)
+  const res = await apiFetch<ApiResponse<{ transacoes: unknown[] }>>(
+    `/api/contas-bancarias/${contaId}/preview-extrato`,
+    { method: 'POST', body: form },
+  )
+  return (res.dados?.transacoes ?? []).map(mapPreview)
 }
 
 export const importarExtrato = async (
   contaId: string,
   arquivo: File,
-): Promise<TransacaoImportada[]> => {
+  opcoes?: { dataInicio?: string; dataFim?: string; indicesForcarInclusao?: number[] },
+): Promise<ResultadoImportacao> => {
   const form = new FormData()
   form.append('arquivo', arquivo)
-  const res = await apiFetch<ApiResponse<unknown[]>>(
+  if (opcoes?.dataInicio) form.append('dataInicio', opcoes.dataInicio)
+  if (opcoes?.dataFim) form.append('dataFim', opcoes.dataFim)
+  for (const i of opcoes?.indicesForcarInclusao ?? []) form.append('indicesForcarInclusao', String(i))
+
+  const res = await apiFetch<ApiResponse<unknown>>(
     `/api/contas-bancarias/${contaId}/importar-extrato`,
     { method: 'POST', body: form },
   )
-  return (res.dados ?? []).map(mapTransacao)
+  const d = res.dados as Record<string, unknown>
+  return {
+    totalImportadas: Number(d.totalImportadas ?? 0),
+    totalPendentesCategorizacao: Number(d.totalPendentesCategorizacao ?? 0),
+    totalEntradas: Number(d.totalEntradas ?? 0),
+    totalSaidas: Number(d.totalSaidas ?? 0),
+  }
 }
 
-export const listarPendentes = async (contaId: string): Promise<TransacaoImportada[]> => {
+export const listarPendentesCategorizacao = async (contaId: string): Promise<PendenteCategorizacao[]> => {
   const res = await apiFetch<ApiResponse<unknown[]>>(
-    `/api/contas-bancarias/${contaId}/transacoes-pendentes`,
+    `/api/contas-bancarias/${contaId}/pendentes-categorizacao`,
   )
-  return (res.dados ?? []).map(mapTransacao)
+  return (res.dados ?? []).map(mapPendente)
 }
 
-export const confirmarTransacoes = async (
+export const categorizarPendentes = async (
   contaId: string,
-  transacoes: Array<{ id: string; categoria?: string; ignorar: boolean }>,
+  itens: Array<{ id: string; data: string; categoria: string }>,
 ): Promise<void> => {
   await apiFetch<ApiResponse<null>>(
-    `/api/contas-bancarias/${contaId}/confirmar-transacoes`,
-    { method: 'POST', body: JSON.stringify({ transacoes }) },
+    `/api/contas-bancarias/${contaId}/categorizar-pendentes`,
+    { method: 'POST', body: JSON.stringify({ itens }) },
   )
 }

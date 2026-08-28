@@ -76,30 +76,63 @@ public class ContasBancariasController : ControllerBase
         return Ok(new ApiResponse<PendenciasContaDto> { Dados = pendencias });
     }
 
+    // ── Investimento: rendimento e vínculo com meta ────────────────────────────
+
+    [HttpPost("{contaId:guid}/rendimento")]
+    public async Task<IActionResult> RegistrarRendimento(Guid contaId, [FromBody] RegistrarRendimentoDto dto)
+    {
+        var conta = await _service.RegistrarRendimentoAsync(contaId, dto, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<ContaBancariaDto> { Dados = conta });
+    }
+
+    [HttpPost("{contaId:guid}/vincular-meta/{metaId:guid}")]
+    public async Task<IActionResult> VincularMeta(Guid contaId, Guid metaId)
+    {
+        var conta = await _service.VincularMetaAsync(contaId, metaId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<ContaBancariaDto> { Dados = conta });
+    }
+
+    [HttpPost("{contaId:guid}/desvincular-meta/{metaId:guid}")]
+    public async Task<IActionResult> DesvincularMeta(Guid contaId, Guid metaId)
+    {
+        var conta = await _service.DesvincularMetaAsync(contaId, metaId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<ContaBancariaDto> { Dados = conta });
+    }
+
     // ── Importação de extrato ──────────────────────────────────────────────────
+
+    [HttpPost("{contaId:guid}/preview-extrato")]
+    [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
+    public async Task<IActionResult> PreviewExtrato(Guid contaId, IFormFile arquivo)
+    {
+        var preview = await _importacaoService.PreviewAsync(contaId, ObterUsuarioId(), ObterPerfil(), arquivo);
+        return Ok(new ApiResponse<PreviewImportacaoDto> { Dados = preview });
+    }
 
     [HttpPost("{contaId:guid}/importar-extrato")]
     [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
-    public async Task<IActionResult> ImportarExtrato(Guid contaId, IFormFile arquivo)
+    public async Task<IActionResult> ImportarExtrato(
+        Guid contaId, IFormFile arquivo,
+        [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim,
+        [FromForm] List<int>? indicesForcarInclusao)
     {
-        var transacoes = await _importacaoService.ImportarArquivoAsync(
-            contaId, ObterUsuarioId(), ObterPerfil(), arquivo);
-        return Ok(new ApiResponse<List<TransacaoImportadaDto>> { Dados = transacoes });
+        var resultado = await _importacaoService.ImportarArquivoAsync(
+            contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim, indicesForcarInclusao);
+        return Ok(new ApiResponse<ResultadoImportacaoDto> { Dados = resultado });
     }
 
-    [HttpGet("{contaId:guid}/transacoes-pendentes")]
-    public async Task<IActionResult> ListarPendentes(Guid contaId)
+    [HttpGet("{contaId:guid}/pendentes-categorizacao")]
+    public async Task<IActionResult> ListarPendentesCategorizacao(Guid contaId)
     {
-        var transacoes = await _importacaoService.ListarPendentesAsync(
+        var pendentes = await _importacaoService.ListarPendentesCategorizacaoAsync(
             contaId, ObterUsuarioId(), ObterPerfil());
-        return Ok(new ApiResponse<List<TransacaoImportadaDto>> { Dados = transacoes });
+        return Ok(new ApiResponse<List<PendenteCategorizacaoDto>> { Dados = pendentes });
     }
 
-    [HttpPost("{contaId:guid}/confirmar-transacoes")]
-    public async Task<IActionResult> ConfirmarTransacoes(Guid contaId, [FromBody] ConfirmarTransacoesDto dto)
+    [HttpPost("{contaId:guid}/categorizar-pendentes")]
+    public async Task<IActionResult> CategorizarPendentes(Guid contaId, [FromBody] AtualizarCategoriaDto dto)
     {
-        await _importacaoService.ConfirmarTransacoesAsync(
-            contaId, ObterUsuarioId(), ObterPerfil(), dto);
+        await _importacaoService.AtualizarCategoriasAsync(contaId, ObterUsuarioId(), ObterPerfil(), dto);
         return Ok(new ApiResponse<object> { Dados = null });
     }
 }

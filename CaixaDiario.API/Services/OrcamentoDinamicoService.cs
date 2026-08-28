@@ -18,11 +18,12 @@ public class OrcamentoDinamicoService : IOrcamentoDinamicoService
         var registrosValidos = registros.Where(r => !r.Excluido).ToList();
 
         // Receita esperada = média dos últimos 3 meses
+        // (transferências entre contas e rendimento não contam como receita)
         var receitasMeses = Enumerable.Range(1, 3)
             .Select(i => hoje.AddMonths(-i))
             .Select(m => registrosValidos
                 .Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
-                .SelectMany(r => r.Entradas).Sum(e => e.Valor))
+                .SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor))
             .Where(v => v > 0)
             .ToList();
         var receitaEsperada = receitasMeses.Count > 0 ? receitasMeses.Average() : 0m;
@@ -54,10 +55,10 @@ public class OrcamentoDinamicoService : IOrcamentoDinamicoService
 
         var saldoLivre = receitaEsperada - compromissosFixos - aporteNecessario;
 
-        // Gasto variável atual (saídas do mês corrente)
+        // Gasto variável atual (saídas do mês corrente, exceto transferências/rendimento)
         var gastoVariavelAtual = registrosValidos
             .Where(r => r.Data.Year == anoAtual && r.Data.Month == mesAtual)
-            .SelectMany(r => r.Saidas).Sum(s => s.Valor);
+            .SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
 
         var ultrapassado = saldoLivre > 0 && gastoVariavelAtual > saldoLivre;
         var percentualUtilizado = saldoLivre > 0

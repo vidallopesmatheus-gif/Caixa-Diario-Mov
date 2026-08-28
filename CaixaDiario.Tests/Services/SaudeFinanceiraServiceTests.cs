@@ -162,4 +162,18 @@ public class SaudeFinanceiraServiceTests
         Assert.Equal("amarelo", resultado.RitmoMeta.Semaforo);
         Assert.Contains("Aposentadoria", resultado.RitmoMeta.Calculo);
     }
+
+    [Fact]
+    public void Calcular_IgnoraTransferenciasERendimentoNaTaxaDePoupanca()
+    {
+        var registro = CriarRegistro(Hoje, entradas: 1000m, saidas: 700m);
+        registro.Entradas.Add(new ItemFinanceiro { Descricao = "Resgate", Valor = 5000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
+        registro.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aporte", Valor = 2000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
+        registro.Entradas.Add(new ItemFinanceiro { Descricao = "Rendimento", Valor = 50m, Categoria = "Rendimento", TipoCusto = "Rendimento" });
+
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), new List<MetaAnual>());
+
+        // Mesmo resultado do teste acima (30%) — transferências/rendimento não entram na conta.
+        Assert.Equal(30m, resultado.TaxaPoupanca.Valor);
+    }
 }

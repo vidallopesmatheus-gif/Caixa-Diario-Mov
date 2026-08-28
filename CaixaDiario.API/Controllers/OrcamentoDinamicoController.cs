@@ -18,17 +18,20 @@ public class OrcamentoDinamicoController : ControllerBase
     private readonly IRegistroRepository _registroRepo;
     private readonly IContaRecorrenteRepository _contaRecorrenteRepo;
     private readonly IMetaRepository _metaRepo;
+    private readonly IMetaProgressoService _metaProgressoService;
 
     public OrcamentoDinamicoController(
         IOrcamentoDinamicoService orcamentoService,
         IRegistroRepository registroRepo,
         IContaRecorrenteRepository contaRecorrenteRepo,
-        IMetaRepository metaRepo)
+        IMetaRepository metaRepo,
+        IMetaProgressoService metaProgressoService)
     {
         _orcamentoService      = orcamentoService;
         _registroRepo          = registroRepo;
         _contaRecorrenteRepo   = contaRecorrenteRepo;
         _metaRepo              = metaRepo;
+        _metaProgressoService  = metaProgressoService;
     }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
@@ -43,6 +46,7 @@ public class OrcamentoDinamicoController : ControllerBase
         var registros   = await _registroRepo.ListarPorClienteAsync(clienteId);
         var recorrentes = await _contaRecorrenteRepo.ListarAtivasPorClienteAsync(clienteId);
         var metas       = await _metaRepo.ListarPorClienteAsync(clienteId);
+        await _metaProgressoService.AplicarSaldoDeContasVinculadasAsync(clienteId, metas);
 
         var resultado = _orcamentoService.Calcular(registros, recorrentes, metas);
         return Ok(new ApiResponse<OrcamentoDinamicoDto> { Dados = resultado });

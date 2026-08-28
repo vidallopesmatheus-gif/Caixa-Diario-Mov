@@ -17,10 +17,16 @@ public class MetricasControllerTests
     private readonly Mock<IMetricasService> _metricasMock = new();
     private readonly Mock<IRegistroRepository> _registroMock = new();
     private readonly Mock<IContaRecorrenteRepository> _contaMock = new();
+    private readonly Mock<ICategoriaRepository> _categoriaMock = new();
+
+    public MetricasControllerTests()
+    {
+        _categoriaMock.Setup(c => c.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
+    }
 
     private MetricasController CriarSut(Guid usuarioId, string perfil)
     {
-        var sut = new MetricasController(_metricasMock.Object, _registroMock.Object, _contaMock.Object);
+        var sut = new MetricasController(_metricasMock.Object, _registroMock.Object, _contaMock.Object, _categoriaMock.Object);
         var claims = new[] { new Claim("id", usuarioId.ToString()), new Claim("perfil", perfil) };
         sut.ControllerContext = new ControllerContext
         {
@@ -87,7 +93,7 @@ public class MetricasControllerTests
     {
         var clienteId = Guid.NewGuid();
         _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
-        _metricasMock.Setup(m => m.CalcularDre(It.IsAny<List<RegistroDiario>>())).Returns(new DreDto());
+        _metricasMock.Setup(m => m.CalcularDre(It.IsAny<List<RegistroDiario>>(), It.IsAny<IReadOnlyList<Categoria>>())).Returns(new DreDto());
 
         var result = await CriarSut(Guid.NewGuid(), "admin")
             .ObterDre(clienteId, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
@@ -110,8 +116,8 @@ public class MetricasControllerTests
         });
 
         List<RegistroDiario>? recebidos = null;
-        _metricasMock.Setup(m => m.CalcularDre(It.IsAny<List<RegistroDiario>>()))
-            .Callback<List<RegistroDiario>>(r => recebidos = r)
+        _metricasMock.Setup(m => m.CalcularDre(It.IsAny<List<RegistroDiario>>(), It.IsAny<IReadOnlyList<Categoria>>()))
+            .Callback<List<RegistroDiario>, IReadOnlyList<Categoria>?>((r, _) => recebidos = r)
             .Returns(new DreDto());
 
         await CriarSut(Guid.NewGuid(), "admin").ObterDre(clienteId, data, data, contaId);
@@ -134,7 +140,7 @@ public class MetricasControllerTests
     {
         var clienteId = Guid.NewGuid();
         _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
-        _metricasMock.Setup(m => m.CalcularIndicadores(It.IsAny<List<RegistroDiario>>(), It.IsAny<int>()))
+        _metricasMock.Setup(m => m.CalcularIndicadores(It.IsAny<List<RegistroDiario>>(), It.IsAny<int>(), It.IsAny<IReadOnlyList<Categoria>>()))
             .Returns(new IndicadoresDecisaoDto { Dre = new DreDto() });
 
         var result = await CriarSut(Guid.NewGuid(), "admin").ObterIndicadores(clienteId);

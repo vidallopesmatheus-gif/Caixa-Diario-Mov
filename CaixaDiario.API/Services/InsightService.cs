@@ -58,15 +58,16 @@ public class InsightService : IInsightService
         }
 
         // ── 2. Gasto do mês atual vs. média dos 3 meses anteriores ───────
+        // (transferências entre contas e rendimento não são gasto — ficam fora do alerta)
         var gastoMesAtual = registrosValidos
             .Where(r => r.Data.Year == anoAtual && r.Data.Month == mesAtual)
-            .SelectMany(r => r.Saidas).Sum(s => s.Valor);
+            .SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
 
         var gastosMesesAnteriores = Enumerable.Range(1, 3)
             .Select(i => hoje.AddMonths(-i))
             .Select(m => registrosValidos
                 .Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
-                .SelectMany(r => r.Saidas).Sum(s => s.Valor))
+                .SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor))
             .Where(v => v > 0)
             .ToList();
 
@@ -187,15 +188,19 @@ public class InsightService : IInsightService
         }
 
         // ── 5. Lucro do mês acima da média (insight positivo) ────────────
+        // (lucro operacional — transferências e rendimento de investimento ficam fora,
+        // senão o rendimento inflaria este "lucro" e o insight passaria a mensagem errada)
         var lucroMesAtual = registrosValidos
             .Where(r => r.Data.Year == anoAtual && r.Data.Month == mesAtual)
-            .Sum(r => r.Entradas.Sum(e => e.Valor) - r.Saidas.Sum(s => s.Valor));
+            .Sum(r => r.Entradas.Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor)
+                    - r.Saidas.Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor));
 
         var lucrosMeses = Enumerable.Range(1, 3)
             .Select(i => hoje.AddMonths(-i))
             .Select(m => registrosValidos
                 .Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
-                .Sum(r => r.Entradas.Sum(e => e.Valor) - r.Saidas.Sum(s => s.Valor)))
+                .Sum(r => r.Entradas.Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor)
+                        - r.Saidas.Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor)))
             .ToList();
 
         if (lucrosMeses.Any(l => l != 0))

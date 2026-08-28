@@ -5,7 +5,7 @@ import { fmtBRL } from '../../utils/format'
 import { obterIndicadores } from '../../api/metricas'
 import type { IndicadoresDecisao, CategoriaIndicador } from '../../api/metricas'
 import { useRegistros } from '../../hooks/useRegistros'
-import { leituraMargemDre } from '../../utils/leituras'
+import { leituraMargemDre, leituraPontoEquilibrio, leituraFolegoCaixa, leituraPrazoRecebimento } from '../../utils/leituras'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
@@ -81,7 +81,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   if (erro) return <p className="val-red">{erro}</p>
   if (!indicadores) return null
 
-  const { dre } = indicadores
+  const { dre, pontoEquilibrio, folegoCaixa, prazoRecebimento } = indicadores
   const ultimos6 = indicadores.evolucao.slice(-6)
   const ultimos12 = indicadores.evolucao.slice(-12)
   const mesesPositivos = ultimos6.filter(m => m.lucro > 0).length
@@ -144,6 +144,37 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   if (indicadores.variacaoReceitaAnoAnterior !== null) {
     const v = indicadores.variacaoReceitaAnoAnterior
     leituraTendencia += ` Comparado ao mesmo mês do ano passado, está ${v >= 0 ? `${v.toFixed(1)}% maior` : `${Math.abs(v).toFixed(1)}% menor`}.`
+  }
+
+  // Custo Fixo ÷ Receita: tendência dos últimos 6 meses — o sinal acionável é custo fixo subindo
+  // enquanto a receita fica estável ou cai (padrão que antecede aperto de caixa), não o valor isolado.
+  const custoFixoSerieAtiva = indicadores.custoFixoMensal.filter(m => m.receita > 0 || m.custoFixo > 0)
+  const custoFixoHistoricoSuficiente = custoFixoSerieAtiva.length >= 3
+
+  function direcaoSerie(valores: number[]): 'subindo' | 'caindo' | 'estável' {
+    const tendencia = regressaoLinear(valores)
+    if (tendencia.length < 2) return 'estável'
+    const slope = tendencia[tendencia.length - 1] - tendencia[0]
+    const media = valores.reduce((s, v) => s + v, 0) / valores.length
+    const limiar = Math.abs(media) * 0.05
+    return slope > limiar ? 'subindo' : slope < -limiar ? 'caindo' : 'estável'
+  }
+
+  const direcaoCustoFixo = custoFixoHistoricoSuficiente ? direcaoSerie(custoFixoSerieAtiva.map(m => m.custoFixo)) : 'estável'
+  const direcaoReceitaCF = custoFixoHistoricoSuficiente ? direcaoSerie(custoFixoSerieAtiva.map(m => m.receita)) : 'estável'
+  const mesAtualCustoFixo = custoFixoSerieAtiva[custoFixoSerieAtiva.length - 1]
+
+  let leituraCustoFixo = ''
+  if (custoFixoHistoricoSuficiente) {
+    if (direcaoCustoFixo === 'subindo' && direcaoReceitaCF !== 'subindo') {
+      leituraCustoFixo = '⚠️ Seu custo fixo está subindo enquanto a receita fica estável ou cai — esse é o padrão que costuma anteceder aperto de caixa. Cautela antes de assumir um custo fixo novo.'
+    } else if (direcaoCustoFixo === 'subindo') {
+      leituraCustoFixo = 'Seu custo fixo está subindo, mas a receita está acompanhando o crescimento.'
+    } else if (direcaoCustoFixo === 'caindo') {
+      leituraCustoFixo = 'Seu custo fixo está em queda nos últimos meses.'
+    } else {
+      leituraCustoFixo = 'Seu custo fixo está estável em relação aos últimos meses.'
+    }
   }
 
   function toggleCategoria(nome: string) {
@@ -280,6 +311,97 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
               </ResponsiveContainer>
             </div>
             <p className="ind-leitura">{leituraTendencia}</p>
+          </>
+        )}
+      </section>
+
+      {/* BLOCO 4 — Ponto de Equilíbrio */}
+      <section className="ind-bloco">
+        <h2 className="ind-pergunta">Quanto preciso vender pra não ter prejuízo?</h2>
+        {!pontoEquilibrio.disponivel ? (
+          <p className="ind-vazio">{pontoEquilibrio.motivoIndisponivel}</p>
+        ) : (
+          <>
+            <div className="ind-margem-card">
+              <div className="ind-margem-valor">{fmtBRL(pontoEquilibrio.valorMensal ?? 0)}<span style={{ fontSize: 14, fontWeight: 500, color: 'var(--tx3)' }}> /mês</span></div>
+              {pontoEquilibrio.valorPorDiaUtil !== null && (
+                <div className="ind-margem-leitura">
+                  {fmtBRL(pontoEquilibrio.valorPorDiaUtil)} por dia útil ({pontoEquilibrio.diasUteisNoMes} dias úteis neste mês)
+                </div>
+              )}
+            </div>
+            <p className="ind-leitura">{leituraPontoEquilibrio(pontoEquilibrio)}</p>
+          </>
+        )}
+      </section>
+
+      {/* BLOCO 5 — Fôlego de Caixa */}
+      <section className="ind-bloco">
+        <h2 className="ind-pergunta">Se parar de entrar dinheiro, quanto tempo eu duro?</h2>
+        {!folegoCaixa.disponivel ? (
+          <p className="ind-vazio">{folegoCaixa.motivoIndisponivel}</p>
+        ) : (
+          <>
+            <div className="ind-margem-card">
+              <div
+                className="ind-margem-valor"
+                style={{ color: folegoCaixa.faixa === 'critico' ? 'var(--danger)' : folegoCaixa.faixa === 'atencao' ? 'var(--warning)' : 'var(--success)' }}
+              >
+                {folegoCaixa.meses?.toFixed(1)} {folegoCaixa.meses === 1 ? 'mês' : 'meses'}
+              </div>
+              <div className="ind-margem-leitura">
+                Saldo disponível: {fmtBRL(folegoCaixa.saldoDisponivel)} · Custo fixo médio: {fmtBRL(folegoCaixa.custoFixoMedioMensal ?? 0)}/mês
+              </div>
+            </div>
+            <p className="ind-leitura">{leituraFolegoCaixa(folegoCaixa)}</p>
+          </>
+        )}
+      </section>
+
+      {/* BLOCO 6 — Custo Fixo ÷ Receita */}
+      <section className="ind-bloco">
+        <h2 className="ind-pergunta">Posso assumir um custo fixo novo?</h2>
+        {!custoFixoHistoricoSuficiente ? (
+          <p className="ind-vazio">
+            Ainda não há histórico suficiente (menos de 3 meses com movimento) para avaliar a tendência do custo fixo.
+          </p>
+        ) : (
+          <>
+            <div className="ind-margem-card">
+              <div className="ind-margem-valor">{fmtPct(mesAtualCustoFixo?.percentual ?? null)}<span style={{ fontSize: 14, fontWeight: 500, color: 'var(--tx3)' }}> da receita este mês</span></div>
+            </div>
+            <div className="ind-chart-card" style={{ height: 180, marginTop: 12 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={custoFixoSerieAtiva.map(m => ({ mes: mesLabel(m.mes), percentual: m.percentual }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
+                  <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 12 }} />
+                  <YAxis stroke="var(--tx3)" tick={{ fontSize: 12 }} tickFormatter={v => `${v}%`} />
+                  <Tooltip formatter={v => typeof v === 'number' ? `${v.toFixed(1)}%` : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
+                  <Line type="monotone" dataKey="percentual" name="Custo fixo / receita" stroke="#ffa94d" strokeWidth={2} dot={{ fill: '#ffa94d', r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="ind-leitura">{leituraCustoFixo}</p>
+          </>
+        )}
+      </section>
+
+      {/* BLOCO 7 — Prazo Médio de Recebimento */}
+      <section className="ind-bloco">
+        <h2 className="ind-pergunta">Meu problema é faturamento ou é recebimento?</h2>
+        {!prazoRecebimento.disponivel ? (
+          <p className="ind-vazio">{prazoRecebimento.motivoIndisponivel}</p>
+        ) : (
+          <>
+            <div className="ind-margem-card">
+              <div className="ind-margem-valor">
+                {prazoRecebimento.mediaDias! > 0 ? '+' : ''}{prazoRecebimento.mediaDias?.toFixed(1)} dias
+              </div>
+              <div className="ind-margem-leitura">
+                Com base em {prazoRecebimento.quantidadeAmostras} conta(s) a receber já baixadas
+              </div>
+            </div>
+            <p className="ind-leitura">{leituraPrazoRecebimento(prazoRecebimento)}</p>
           </>
         )}
       </section>

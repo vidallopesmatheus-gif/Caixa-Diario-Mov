@@ -197,12 +197,18 @@ public class RegistroService : IRegistroService
             if (nova.Pago && !pagaAntes)
             {
                 nova.DataBaixa = data;
-                delta += sinal * nova.Valor;
+                // Vinculada a um lançamento já existente: aquele dinheiro já está contado no saldo
+                // via o lançamento em si — aplicar o delta aqui duplicaria o valor.
+                if (!nova.LancamentoVinculadoId.HasValue)
+                    delta += sinal * nova.Valor;
             }
             else if (!nova.Pago && pagaAntes)
             {
                 nova.DataBaixa = null;
-                delta -= sinal * nova.Valor;
+                // Só reverte o delta se a baixa anterior realmente o aplicou (não vinculada).
+                if (!antes[i].LancamentoVinculadoId.HasValue)
+                    delta -= sinal * nova.Valor;
+                nova.LancamentoVinculadoId = null;
             }
             else if (nova.Pago && pagaAntes)
             {
@@ -214,13 +220,26 @@ public class RegistroService : IRegistroService
     }
 
     private static ItemFinanceiro MapItemDto(ItemFinanceiroDto d) =>
-        new() { Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, TipoCusto = d.TipoCusto };
+        new()
+        {
+            Id = d.Id, Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, TipoCusto = d.TipoCusto,
+            TransferenciaId = d.TransferenciaId, FitId = d.FitId, PendenteCategorizacao = d.PendenteCategorizacao,
+        };
 
     private static ItemFinanceiroSaida MapSaidaDto(ItemFinanceiroSaidaDto d) =>
-        new() { Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, Subcategoria = d.Subcategoria, TipoCusto = d.TipoCusto };
+        new()
+        {
+            Id = d.Id, Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, Subcategoria = d.Subcategoria,
+            TipoCusto = d.TipoCusto, TransferenciaId = d.TransferenciaId, FitId = d.FitId, PendenteCategorizacao = d.PendenteCategorizacao,
+        };
 
     private static ContaProvisionada MapContaDto(ContaProvisionadaDto d, Guid? contaBancariaId = null) =>
-        new() { Descricao = d.Descricao, Valor = d.Valor, DataVencimento = d.DataVencimento, Pago = d.Pago, Categoria = d.Categoria, RecorrenciaId = d.RecorrenciaId, DataBaixa = d.DataBaixa, ContaBancariaId = d.ContaBancariaId ?? contaBancariaId };
+        new()
+        {
+            Descricao = d.Descricao, Valor = d.Valor, DataVencimento = d.DataVencimento, Pago = d.Pago, Categoria = d.Categoria,
+            RecorrenciaId = d.RecorrenciaId, DataBaixa = d.DataBaixa, ContaBancariaId = d.ContaBancariaId ?? contaBancariaId,
+            LancamentoVinculadoId = d.LancamentoVinculadoId,
+        };
 
     private static List<ContaProvisionada> MesclarContas(IReadOnlyCollection<ContaProvisionada> existentes, IReadOnlyCollection<ContaProvisionada> entradas)
     {
@@ -243,6 +262,7 @@ public class RegistroService : IRegistroService
                     RecorrenciaId = entrada.RecorrenciaId,
                     DataBaixa = entrada.DataBaixa,
                     ContaBancariaId = entrada.ContaBancariaId,
+                    LancamentoVinculadoId = entrada.LancamentoVinculadoId,
                 });
                 continue;
             }
@@ -255,6 +275,7 @@ public class RegistroService : IRegistroService
             correspondencia.RecorrenciaId = entrada.RecorrenciaId;
             correspondencia.DataBaixa = correspondencia.DataBaixa ?? entrada.DataBaixa;
             correspondencia.ContaBancariaId = entrada.ContaBancariaId;
+            correspondencia.LancamentoVinculadoId = entrada.LancamentoVinculadoId ?? correspondencia.LancamentoVinculadoId;
             resultado.Add(correspondencia);
         }
 
@@ -279,6 +300,7 @@ public class RegistroService : IRegistroService
                 RecorrenciaId = entrada.RecorrenciaId,
                 DataBaixa = duplicada ? null : entrada.DataBaixa,
                 ContaBancariaId = entrada.ContaBancariaId,
+                LancamentoVinculadoId = duplicada ? null : entrada.LancamentoVinculadoId,
             };
         }).ToList();
     }
@@ -312,10 +334,18 @@ public class RegistroService : IRegistroService
         ContaBancariaId = r.ContaBancariaId,
         Data = r.Data,
         Inicio = r.Inicio,
-        Entradas = r.Entradas.Select(s => new ItemFinanceiroDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto }).ToList(),
-        Saidas = r.Saidas.Select(s => new ItemFinanceiroSaidaDto { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, Subcategoria = s.Subcategoria, TipoCusto = s.TipoCusto }).ToList(),
-        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ContaBancariaId = s.ContaBancariaId }).ToList(),
-        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ContaBancariaId = s.ContaBancariaId }).ToList(),
+        Entradas = r.Entradas.Select(s => new ItemFinanceiroDto
+        {
+            Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto,
+            TransferenciaId = s.TransferenciaId, FitId = s.FitId, PendenteCategorizacao = s.PendenteCategorizacao,
+        }).ToList(),
+        Saidas = r.Saidas.Select(s => new ItemFinanceiroSaidaDto
+        {
+            Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, Subcategoria = s.Subcategoria,
+            TipoCusto = s.TipoCusto, TransferenciaId = s.TransferenciaId, FitId = s.FitId, PendenteCategorizacao = s.PendenteCategorizacao,
+        }).ToList(),
+        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
+        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
         SaldoFinal = r.SaldoFinal,
         SalvoEm = r.SalvoEm
     };

@@ -46,7 +46,7 @@ export default function AtividadeRecente({ registros, contasBancarias, limite = 
     <div className="atividade-card">
       <div className="atividade-header">
         <h3 className="atividade-titulo">🧾 Atividade recente</h3>
-        <Link to="/historico" className="atividade-ver-todos">Ver todos →</Link>
+        <Link to="/relatorios/historico" className="atividade-ver-todos">Ver todos →</Link>
       </div>
 
       {linhas.length === 0 ? (

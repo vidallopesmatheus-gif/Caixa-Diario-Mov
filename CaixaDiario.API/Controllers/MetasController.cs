@@ -25,6 +25,13 @@ public class MetasController : ControllerBase
         return Ok(new ApiResponse<MetaAnualDto> { Dados = resultado });
     }
 
+    [HttpGet("{clienteId:guid}")]
+    public async Task<IActionResult> Listar(Guid clienteId)
+    {
+        var resultado = await _metaService.ListarMetasAsync(clienteId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<List<MetaAnualDto>> { Dados = resultado });
+    }
+
     [HttpPost]
     public async Task<IActionResult> Salvar([FromBody] SalvarMetaAnualDto dto)
     {

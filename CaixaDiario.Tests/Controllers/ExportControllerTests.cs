@@ -3,6 +3,7 @@ using CaixaDiario.API.Controllers;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
+using ClosedXML.Excel;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
@@ -98,6 +99,36 @@ public class ExportControllerTests
         var file = Assert.IsType<FileContentResult>(result);
         Assert.Equal("application/pdf", file.ContentType);
         Assert.NotEmpty(file.FileContents);
+    }
+
+    [Fact]
+    public async Task ExportarXlsx_ComTransferencia_NaoEntraNosTotaisDaAbaMetricas()
+    {
+        var clienteId = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, Data = new DateOnly(2026, 1, 5),
+                Inicio = 100m, SaldoFinal = 1300m,
+                Entradas = new()
+                {
+                    new ItemFinanceiro { Descricao = "Venda", Valor = 200m, Categoria = "Vendas", TipoCusto = "Receita" },
+                    new ItemFinanceiro { Descricao = "Transferência recebida", Valor = 1000m, Categoria = "Transferência", TipoCusto = "Transferencia" },
+                },
+                Saidas = new(),
+            },
+        };
+        SetupPeriodo(clienteId, registros);
+
+        var result = await CriarSut(Guid.NewGuid(), "admin")
+            .ExportarXlsx(clienteId, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+
+        var file = Assert.IsType<FileContentResult>(result);
+        using var ms = new MemoryStream(file.FileContents);
+        using var workbook = new XLWorkbook(ms);
+        var wsMetricas = workbook.Worksheet("Métricas");
+        Assert.Equal(200d, wsMetricas.Cell(2, 2).GetDouble()); // Total Entradas — só a venda, sem a transferência
     }
 
     [Fact]

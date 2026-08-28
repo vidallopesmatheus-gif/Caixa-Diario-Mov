@@ -12,27 +12,36 @@ function mapContaProvisionada(raw: any): ContaProvisionada {
     recorrenciaId: raw.RecorrenciaId ?? raw.recorrenciaId,
     dataBaixa: raw.DataBaixa ?? raw.dataBaixa,
     contaBancariaId: raw.ContaBancariaId ?? raw.contaBancariaId,
+    lancamentoVinculadoId: raw.LancamentoVinculadoId ?? raw.lancamentoVinculadoId ?? undefined,
   }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapItemFinanceiro(raw: any): ItemFinanceiro {
   return {
+    id: raw.Id ?? raw.id ?? undefined,
     descricao: raw.Descricao ?? raw.descricao ?? '',
     valor: raw.Valor ?? raw.valor ?? 0,
     categoria: raw.Categoria ?? raw.categoria,
     tipoCusto: raw.TipoCusto ?? raw.tipoCusto,
+    transferenciaId: raw.TransferenciaId ?? raw.transferenciaId ?? undefined,
+    fitId: raw.FitId ?? raw.fitId ?? undefined,
+    pendenteCategorizacao: raw.PendenteCategorizacao ?? raw.pendenteCategorizacao ?? false,
   }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapItemFinanceiroSaida(raw: any): ItemFinanceiroSaida {
   return {
+    id: raw.Id ?? raw.id ?? undefined,
     descricao: raw.Descricao ?? raw.descricao ?? '',
     valor: raw.Valor ?? raw.valor ?? 0,
     categoria: raw.Categoria ?? raw.categoria ?? 'Administrativas',
     subcategoria: raw.Subcategoria ?? raw.subcategoria ?? '',
     tipoCusto: raw.TipoCusto ?? raw.tipoCusto,
+    transferenciaId: raw.TransferenciaId ?? raw.transferenciaId ?? undefined,
+    fitId: raw.FitId ?? raw.fitId ?? undefined,
+    pendenteCategorizacao: raw.PendenteCategorizacao ?? raw.pendenteCategorizacao ?? false,
   }
 }
 
@@ -81,16 +90,23 @@ export const salvarRegistro = async (dto: {
     contaBancariaId: dto.contaBancariaId ?? null,
     data: dto.data,
     inicio: dto.saldoInicio,
-    entradas: dto.entradas.map(e => ({ Descricao: e.descricao, Valor: e.valor, Categoria: e.categoria, TipoCusto: e.tipoCusto })),
+    entradas: dto.entradas.map(e => ({
+      Id: e.id, Descricao: e.descricao, Valor: e.valor, Categoria: e.categoria, TipoCusto: e.tipoCusto,
+      TransferenciaId: e.transferenciaId, FitId: e.fitId, PendenteCategorizacao: e.pendenteCategorizacao,
+    })),
     saidas: dto.saidas.map(s => ({
+      Id: s.id,
       Descricao: s.descricao,
       Valor: s.valor,
       Categoria: s.categoria,
       Subcategoria: s.subcategoria || undefined,
       TipoCusto: s.tipoCusto,
+      TransferenciaId: s.transferenciaId,
+      FitId: s.fitId,
+      PendenteCategorizacao: s.pendenteCategorizacao,
     })),
-    contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ContaBancariaId: c.contaBancariaId })),
-    contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ContaBancariaId: c.contaBancariaId })),
+    contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ContaBancariaId: c.contaBancariaId, LancamentoVinculadoId: c.lancamentoVinculadoId })),
+    contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ContaBancariaId: c.contaBancariaId, LancamentoVinculadoId: c.lancamentoVinculadoId })),
     saldoFinal: dto.saldoConfirmado,
   }
   const res = await apiFetch<ApiResponse<unknown>>('/api/registros', {

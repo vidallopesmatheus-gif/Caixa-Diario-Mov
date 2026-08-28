@@ -9,8 +9,13 @@ namespace CaixaDiario.API.Services;
 public class MetaService : IMetaService
 {
     private readonly IMetaRepository _metaRepository;
+    private readonly IMetaProgressoService _metaProgressoService;
 
-    public MetaService(IMetaRepository metaRepository) => _metaRepository = metaRepository;
+    public MetaService(IMetaRepository metaRepository, IMetaProgressoService metaProgressoService)
+    {
+        _metaRepository = metaRepository;
+        _metaProgressoService = metaProgressoService;
+    }
 
     public async Task<MetaAnualDto> ObterMetaAsync(Guid clienteId, int ano, Guid usuarioLogadoId, string perfil)
     {
@@ -20,7 +25,22 @@ public class MetaService : IMetaService
         var meta = await _metaRepository.ObterPorClienteEAnoAsync(clienteId, ano)
             ?? throw new ApiException(404, CodigoRetorno.META_NAO_ENCONTRADA, "Meta não encontrada.");
 
+        // Se a meta estiver vinculada a uma conta de investimento, TotalInvestido passa a
+        // refletir o saldo real da conta em vez do valor gravado manualmente (não persiste).
+        var metas = new List<MetaAnual> { meta };
+        await _metaProgressoService.AplicarSaldoDeContasVinculadasAsync(clienteId, metas);
+
         return MapToDto(meta);
+    }
+
+    public async Task<List<MetaAnualDto>> ListarMetasAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
+    {
+        if (perfil == "cliente" && usuarioLogadoId != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+
+        var metas = await _metaRepository.ListarPorClienteAsync(clienteId);
+        await _metaProgressoService.AplicarSaldoDeContasVinculadasAsync(clienteId, metas);
+        return metas.OrderByDescending(m => m.Ano).Select(MapToDto).ToList();
     }
 
     public async Task<MetaAnualDto> SalvarMetaAsync(SalvarMetaAnualDto dto, Guid usuarioLogadoId, string perfil)
@@ -80,5 +100,6 @@ public class MetaService : IMetaService
         ValorSonho = m.ValorSonho, PrazoAnos = m.PrazoAnos,
         TaxaRetorno = m.TaxaRetorno, TotalInvestido = m.TotalInvestido,
         MargemPJ = m.MargemPJ, IconeSonho = m.IconeSonho,
+        ContaInvestimentoId = m.ContaInvestimentoId,
     };
 }

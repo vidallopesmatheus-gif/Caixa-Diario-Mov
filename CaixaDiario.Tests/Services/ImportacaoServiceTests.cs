@@ -22,13 +22,13 @@ public class ImportacaoServiceTests
         _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object);
     }
 
-    private static ContaBancaria CriarConta(Guid contaId, Guid clienteId) => new()
+    private static ContaBancaria CriarConta(Guid contaId, Guid clienteId, decimal saldoInicial = 0m) => new()
     {
         Id = contaId,
         ClienteId = clienteId,
         Nome = "Conta Teste",
         Tipo = "ContaCorrente",
-        SaldoInicial = 0m,
+        SaldoInicial = saldoInicial,
         Ativa = true,
         DataCriacao = DateTime.UtcNow,
     };
@@ -44,78 +44,331 @@ public class ImportacaoServiceTests
         return mock.Object;
     }
 
-    private void ConfigurarSemPendentesOuRegistros(Guid contaId)
+    private void ConfigurarSemHistoricoOuRegistros(Guid contaId)
     {
-        _importRepoMock.Setup(r => r.ListarPendentesPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>());
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>());
         _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
         _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
     }
 
+    // ── Preview ───────────────────────────────────────────────────────────────
+
     [Fact]
-    public async Task ImportarArquivoAsync_CsvComPalavraChaveNaDescricao_SugereCategoriaAutomaticamente()
+    public async Task PreviewAsync_ArquivoNovo_NenhumaTransacaoMarcadaComoJaImportada()
     {
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        ConfigurarSemPendentesOuRegistros(contaId);
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>());
 
-        var csv = "Data;Descricao;Valor\n26/07/2026;Posto Ipiranga Combustivel;-150,00\n";
+        var csv = "Data;Descricao;Valor\n26/07/2026;Venda balcao;500,00\n";
         var arquivo = CriarArquivoTexto("extrato.csv", csv);
 
-        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo);
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo);
 
-        var transacao = Assert.Single(resultado);
-        Assert.Equal("Saida", transacao.Tipo);
-        Assert.Equal("Manutenção", transacao.Categoria);
-        Assert.False(transacao.Duplicada);
+        var t = Assert.Single(resultado.Transacoes);
+        Assert.False(t.JaImportada);
+        Assert.Equal(0, t.Indice);
     }
 
     [Fact]
-    public async Task ImportarArquivoAsync_SemPalavraChaveConhecida_NaoSugereCategoria()
+    public async Task PreviewAsync_OfxComFitIdJaImportado_MarcaComoJaImportadaMasContinuaNaLista()
     {
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        ConfigurarSemPendentesOuRegistros(contaId);
-
-        var csv = "Data;Descricao;Valor\n26/07/2026;Transferencia recebida joao;500,00\n";
-        var arquivo = CriarArquivoTexto("extrato.csv", csv);
-
-        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo);
-
-        var transacao = Assert.Single(resultado);
-        Assert.Equal("Entrada", transacao.Tipo);
-        Assert.Null(transacao.Categoria);
-    }
-
-    [Fact]
-    public async Task ImportarArquivoAsync_TransacaoJaLancadaNoRegistroDiario_MarcaComoDuplicada()
-    {
-        var contaId = Guid.NewGuid();
-        var clienteId = Guid.NewGuid();
-        var data = new DateOnly(2026, 7, 26);
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        _importRepoMock.Setup(r => r.ListarPendentesPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>());
-        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
-        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>
         {
-            new()
-            {
-                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
-                Entradas = new(),
-                Saidas = new List<ItemFinanceiroSaida> { new() { Descricao = "Aluguel escritorio", Valor = 300m, Categoria = "Aluguel" } },
-                ContasReceber = new(), ContasPagar = new(),
-                CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
-            },
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, FitId = "2", Data = new DateOnly(2026, 7, 11), Valor = 50m, Descricao = "Ja importada", Tipo = "Saida", Status = "Confirmada" },
+        });
+
+        var ofx = "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-150.00<DTPOSTED>20260710<FITID>1<MEMO>Posto Ipiranga</STMTTRN>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-50.00<DTPOSTED>20260711<FITID>2<MEMO>Ja importada</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+        var arquivo = CriarArquivoTexto("extrato.ofx", ofx);
+
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo);
+
+        Assert.Equal(2, resultado.Transacoes.Count); // as duas continuam visíveis — nada é descartado no preview
+        Assert.False(resultado.Transacoes.Single(t => t.FitId == "1").JaImportada);
+        Assert.True(resultado.Transacoes.Single(t => t.FitId == "2").JaImportada);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_CsvComHeuristicaBatendoNoHistorico_MarcaComoJaImportada()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>
+        {
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, Data = new DateOnly(2026, 7, 26), Valor = 300m, Descricao = "Aluguel escritorio", Tipo = "Saida", Status = "Confirmada" },
         });
 
         var csv = "Data;Descricao;Valor\n26/07/2026;Aluguel escritorio;-300,00\n";
         var arquivo = CriarArquivoTexto("extrato.csv", csv);
 
-        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo);
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo);
 
-        var transacao = Assert.Single(resultado);
-        Assert.True(transacao.Duplicada);
+        Assert.True(Assert.Single(resultado.Transacoes).JaImportada);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ExtensaoInvalida_LancaExcecao()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var arquivo = CriarArquivoTexto("extrato.pdf", "conteudo qualquer");
+
+        await Assert.ThrowsAsync<ApiException>(() => _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo));
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ComUsuarioDeOutroCliente_LancaAcessoNegado()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        var arquivo = CriarArquivoTexto("extrato.csv", "Data;Descricao;Valor\n26/07/2026;Venda;100,00\n");
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.PreviewAsync(contaId, Guid.NewGuid(), "cliente", arquivo));
+
+        Assert.Equal(403, ex.StatusCode);
+    }
+
+    // ── Importar (lança direto no RegistroDiario) ────────────────────────────────
+
+    [Fact]
+    public async Task ImportarArquivoAsync_EntradaESaida_AfetaSaldoNaHoraSemPassoDeConfirmacao()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 100m));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Venda balcao;500,00\n26/07/2026;Posto Ipiranga;-150,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null);
+
+        Assert.NotNull(criado);
+        Assert.Equal(450m, criado!.SaldoFinal); // 100 + 500 - 150, sem nenhuma etapa de confirmação
+        Assert.Single(criado.Entradas);
+        Assert.Single(criado.Saidas);
+        Assert.Equal(2, resultado.TotalImportadas);
+        _importRepoMock.Verify(r => r.AdicionarLoteAsync(It.Is<IEnumerable<TransacaoImportada>>(l => l.Count() == 2)), Times.Once);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_SaidaComPalavraChave_JaSaiCategorizadaSemPendencia()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Posto Ipiranga Combustivel;-150,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null);
+
+        var saida = Assert.Single(criado!.Saidas);
+        Assert.Equal("Manutenção", saida.Categoria);
+        Assert.False(saida.PendenteCategorizacao);
+        Assert.Equal(0, resultado.TotalPendentesCategorizacao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_SaidaSemSugestao_EntraPendenteDeCategorizacaoMasAfetaSaldo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 1000m));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Pagamento diverso XYZ;-80,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null);
+
+        var saida = Assert.Single(criado!.Saidas);
+        Assert.True(saida.PendenteCategorizacao);
+        Assert.Equal(920m, criado.SaldoFinal); // o saldo já reflete a saída mesmo sem categoria
+        Assert.Equal(1, resultado.TotalPendentesCategorizacao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_EntradaSemCategoria_NuncaFicaPendente()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Pix recebido de cliente;300,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null);
+
+        var entrada = Assert.Single(criado!.Entradas);
+        Assert.False(entrada.PendenteCategorizacao);
+        Assert.Equal(0, resultado.TotalPendentesCategorizacao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ComIntervaloDeDatas_SoImportaTransacoesDentroDoIntervalo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n" +
+            "05/07/2026;Venda dia 5;100,00\n" +
+            "20/07/2026;Venda dia 20;200,00\n" +
+            "28/07/2026;Venda dia 28;300,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(
+            contaId, clienteId, "cliente", arquivo,
+            new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 15), null);
+
+        Assert.Equal(1, resultado.TotalImportadas);
+        Assert.Equal(100m, resultado.TotalEntradas);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_CenarioSobreposto_SegundaImportacaoSoTrazTransacoesNovas()
+    {
+        // Simula "importar 1-15, depois importar 1-30" via FITID: a segunda leva do mesmo arquivo
+        // (mesmos FITIDs 1 e 2 de antes, mais o novo FITID 3) só deve trazer o FITID 3.
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>
+        {
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, FitId = "1", Data = new DateOnly(2026, 7, 5), Valor = 150m, Descricao = "Posto Ipiranga", Tipo = "Saida", Status = "Confirmada" },
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, FitId = "2", Data = new DateOnly(2026, 7, 10), Valor = 200m, Descricao = "Venda", Tipo = "Entrada", Status = "Confirmada" },
+        });
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var ofxCompleto = "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-150.00<DTPOSTED>20260705<FITID>1<MEMO>Posto Ipiranga</STMTTRN>" +
+            "<STMTTRN><TRNTYPE>CREDIT<TRNAMT>200.00<DTPOSTED>20260710<FITID>2<MEMO>Venda</STMTTRN>" +
+            "<STMTTRN><TRNTYPE>CREDIT<TRNAMT>300.00<DTPOSTED>20260722<FITID>3<MEMO>Venda nova</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+        var arquivo = CriarArquivoTexto("extrato.ofx", ofxCompleto);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null);
+
+        Assert.Equal(1, resultado.TotalImportadas);
+        Assert.Equal(300m, resultado.TotalEntradas);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ForcandoInclusaoDeJaImportada_TrazMesmoAssim()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>
+        {
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, FitId = "1", Data = new DateOnly(2026, 7, 5), Valor = 150m, Descricao = "Posto Ipiranga", Tipo = "Saida", Status = "Confirmada" },
+        });
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var ofx = "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-150.00<DTPOSTED>20260705<FITID>1<MEMO>Posto Ipiranga</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+        var arquivo = CriarArquivoTexto("extrato.ofx", ofx);
+
+        // Sem forçar, não traz nada (e lança erro por ficar vazio)
+        var arquivoParaFalha = CriarArquivoTexto("extrato.ofx", ofx);
+        await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivoParaFalha, null, null, null));
+
+        // Forçando pelo índice (0 = única transação do arquivo), traz mesmo já tendo sido importada
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, new List<int> { 0 });
+
+        Assert.Equal(1, resultado.TotalImportadas);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_DiaComRegistroExistente_AcrescentaAoInvesDeDuplicarDia()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 26);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>());
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+
+        var registroExistente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 500m,
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 500m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroExistente });
+
+        RegistroDiario? atualizado = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => atualizado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Venda extra;100,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null);
+
+        Assert.NotNull(atualizado);
+        Assert.Equal(600m, atualizado!.SaldoFinal);
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_TodasJaImportadasENaoForcadas_LancaDadosInvalidos()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>
+        {
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, Data = new DateOnly(2026, 7, 26), Valor = 300m, Descricao = "Aluguel escritorio", Tipo = "Saida", Status = "Confirmada" },
+        });
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Aluguel escritorio;-300,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null));
+
+        Assert.Equal(400, ex.StatusCode);
     }
 
     [Fact]
@@ -124,7 +377,8 @@ public class ImportacaoServiceTests
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        ConfigurarSemPendentesOuRegistros(contaId);
+        ConfigurarSemHistoricoOuRegistros(contaId);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         using var workbook = new XLWorkbook();
         var ws = workbook.Worksheets.Add("Extrato");
@@ -144,12 +398,10 @@ public class ImportacaoServiceTests
         mock.Setup(f => f.OpenReadStream()).Returns(ms);
         mock.Setup(f => f.Length).Returns(ms.Length);
 
-        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", mock.Object);
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", mock.Object, null, null, null);
 
-        var transacao = Assert.Single(resultado);
-        Assert.Equal("Entrada", transacao.Tipo);
-        Assert.Equal(500m, transacao.Valor);
-        Assert.Equal("Recebimento Cliente", transacao.Descricao);
+        Assert.Equal(1, resultado.TotalImportadas);
+        Assert.Equal(500m, resultado.TotalEntradas);
     }
 
     [Fact]
@@ -161,8 +413,8 @@ public class ImportacaoServiceTests
 
         var arquivo = CriarArquivoTexto("extrato.pdf", "conteudo qualquer");
 
-        await Assert.ThrowsAsync<API.Exceptions.ApiException>(() =>
-            _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo));
+        await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null));
     }
 
     [Fact]
@@ -174,7 +426,7 @@ public class ImportacaoServiceTests
         var arquivo = CriarArquivoTexto("extrato.csv", "Data;Descricao;Valor\n");
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.ImportarArquivoAsync(contaId, Guid.NewGuid(), "cliente", arquivo));
+            _sut.ImportarArquivoAsync(contaId, Guid.NewGuid(), "cliente", arquivo, null, null, null));
 
         Assert.Equal(403, ex.StatusCode);
     }
@@ -187,7 +439,7 @@ public class ImportacaoServiceTests
         var arquivo = CriarArquivoTexto("extrato.csv", "Data;Descricao;Valor\n");
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.ImportarArquivoAsync(contaId, Guid.NewGuid(), "admin", arquivo));
+            _sut.ImportarArquivoAsync(contaId, Guid.NewGuid(), "admin", arquivo, null, null, null));
 
         Assert.Equal(404, ex.StatusCode);
     }
@@ -201,220 +453,95 @@ public class ImportacaoServiceTests
         var arquivo = CriarArquivoTexto("extrato.csv", "Data;Descricao;Valor\n");
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo));
+            _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, null));
 
         Assert.Equal(400, ex.StatusCode);
     }
 
+    // ── Categorização pendente ────────────────────────────────────────────────
+
     [Fact]
-    public async Task ImportarArquivoAsync_ArquivoOfx_ParseiaEDedupPorFitId()
+    public async Task ListarPendentesCategorizacaoAsync_RetornaApenasSaidasPendentes()
     {
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        ConfigurarSemPendentesOuRegistros(contaId);
-        _importRepoMock.Setup(r => r.ExisteFitIdAsync(contaId, "1")).ReturnsAsync(false);
-        _importRepoMock.Setup(r => r.ExisteFitIdAsync(contaId, "2")).ReturnsAsync(true);
 
-        var ofx = "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
-            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-150.00<DTPOSTED>20260710<FITID>1<MEMO>Posto Ipiranga</STMTTRN>" +
-            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-50.00<DTPOSTED>20260711<FITID>2<MEMO>Ja importada</STMTTRN>" +
-            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
-        var arquivo = CriarArquivoTexto("extrato.ofx", ofx);
-
-        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo);
-
-        var transacao = Assert.Single(resultado);
-        Assert.Equal("Saida", transacao.Tipo);
-        Assert.Equal("Manutenção", transacao.Categoria);
-        Assert.Equal(150m, transacao.Valor);
-        Assert.Equal("1", transacao.FitId);
-    }
-
-    [Fact]
-    public async Task ListarPendentesAsync_RetornaTransacoesPendentesDaConta()
-    {
-        var contaId = Guid.NewGuid();
-        var clienteId = Guid.NewGuid();
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        var pendente = new TransacaoImportada
+        var idPendente = Guid.NewGuid();
+        var registro = new RegistroDiario
         {
-            Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId,
-            Data = new DateOnly(2026, 7, 20), Valor = 100m, Descricao = "Venda", Tipo = "Entrada",
-            Status = "Pendente", ImportadoEm = DateTime.UtcNow,
-        };
-        _importRepoMock.Setup(r => r.ListarPendentesPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada> { pendente });
-        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
-
-        var resultado = await _sut.ListarPendentesAsync(contaId, clienteId, "cliente");
-
-        var dto = Assert.Single(resultado);
-        Assert.Equal(pendente.Id, dto.Id);
-    }
-
-    [Fact]
-    public async Task ConfirmarTransacoesAsync_ComTransacaoDeOutraConta_LancaAcessoNegado()
-    {
-        var contaId = Guid.NewGuid();
-        var clienteId = Guid.NewGuid();
-        var transacaoId = Guid.NewGuid();
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        _importRepoMock.Setup(r => r.ObterPorIdsAsync(It.IsAny<IEnumerable<Guid>>()))
-            .ReturnsAsync(new List<TransacaoImportada>
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = new DateOnly(2026, 7, 20),
+            Entradas = new() { new() { Id = Guid.NewGuid(), Descricao = "Venda", Valor = 100m } },
+            Saidas = new()
             {
-                new() { Id = transacaoId, ContaBancariaId = Guid.NewGuid(), ClienteId = clienteId, Tipo = "Entrada", Status = "Pendente" },
-            });
+                new() { Id = idPendente, Descricao = "Pagamento diverso", Valor = 80m, Categoria = "", PendenteCategorizacao = true },
+                new() { Id = Guid.NewGuid(), Descricao = "Aluguel", Valor = 300m, Categoria = "Aluguel", PendenteCategorizacao = false },
+            },
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 0m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
 
-        var dto = new ConfirmarTransacoesDto { Transacoes = new() { new() { Id = transacaoId } } };
+        var pendentes = await _sut.ListarPendentesCategorizacaoAsync(contaId, clienteId, "cliente");
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.ConfirmarTransacoesAsync(contaId, clienteId, "cliente", dto));
-
-        Assert.Equal(403, ex.StatusCode);
+        var p = Assert.Single(pendentes);
+        Assert.Equal(idPendente, p.Id);
+        Assert.Equal("Pagamento diverso", p.Descricao);
     }
 
+    // ── Atualizar categoria ───────────────────────────────────────────────────
+
     [Fact]
-    public async Task ConfirmarTransacoesAsync_ConfirmaEmDiaExistente_AtualizaSaldoERegistro()
+    public async Task AtualizarCategoriasAsync_ItemExistente_AtualizaCategoriaELimpaPendencia()
     {
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
         var data = new DateOnly(2026, 7, 20);
-        var entradaId = Guid.NewGuid();
-        var saidaId = Guid.NewGuid();
-
+        var itemId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
 
-        var registroExistente = new RegistroDiario
+        var registro = new RegistroDiario
         {
-            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 1000m,
-            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
-            SaldoFinal = 1000m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(),
+            Saidas = new() { new() { Id = itemId, Descricao = "Pagamento diverso", Valor = 80m, Categoria = "", PendenteCategorizacao = true } },
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 0m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
         };
-        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroExistente });
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
 
-        var transacoes = new List<TransacaoImportada>
-        {
-            new() { Id = entradaId, ContaBancariaId = contaId, ClienteId = clienteId, Data = data, Valor = 200m, Descricao = "Venda", Tipo = "Entrada", Status = "Pendente" },
-            new() { Id = saidaId, ContaBancariaId = contaId, ClienteId = clienteId, Data = data, Valor = 80m, Descricao = "Compra", Tipo = "Saida", Status = "Pendente" },
-        };
-        _importRepoMock.Setup(r => r.ObterPorIdsAsync(It.IsAny<IEnumerable<Guid>>())).ReturnsAsync(transacoes);
-
-        RegistroDiario? registroAtualizado = null;
+        RegistroDiario? atualizado = null;
         _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
-            .Callback<RegistroDiario>(r => registroAtualizado = r)
-            .ReturnsAsync((RegistroDiario r) => r);
+            .Callback<RegistroDiario>(r => atualizado = r).ReturnsAsync((RegistroDiario r) => r);
 
-        List<TransacaoImportada>? loteAtualizado = null;
-        _importRepoMock.Setup(r => r.AtualizarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>()))
-            .Callback<IEnumerable<TransacaoImportada>>(l => loteAtualizado = l.ToList())
-            .Returns(Task.CompletedTask);
-
-        var dto = new ConfirmarTransacoesDto
+        var dto = new AtualizarCategoriaDto
         {
-            Transacoes = new()
-            {
-                new() { Id = entradaId, Categoria = "Vendas" },
-                new() { Id = saidaId, Categoria = "Insumos" },
-            },
+            Itens = new() { new() { Id = itemId, Data = "2026-07-20", Categoria = "Material de Escritório" } },
         };
 
-        await _sut.ConfirmarTransacoesAsync(contaId, clienteId, "cliente", dto);
+        await _sut.AtualizarCategoriasAsync(contaId, clienteId, "cliente", dto);
 
-        Assert.NotNull(registroAtualizado);
-        Assert.Equal(1120m, registroAtualizado!.SaldoFinal);
-        Assert.Single(registroAtualizado.Entradas);
-        Assert.Single(registroAtualizado.Saidas);
-        _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
-
-        Assert.NotNull(loteAtualizado);
-        Assert.All(loteAtualizado!, t => Assert.Equal("Confirmada", t.Status));
+        Assert.NotNull(atualizado);
+        var saida = Assert.Single(atualizado!.Saidas);
+        Assert.Equal("Material de Escritório", saida.Categoria);
+        Assert.False(saida.PendenteCategorizacao);
     }
 
     [Fact]
-    public async Task ConfirmarTransacoesAsync_ComDiaNovoEIgnoradas_CriaRegistroEMarcaIgnorada()
+    public async Task AtualizarCategoriasAsync_DiaSemRegistro_NaoLancaExcecao()
     {
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
-        var diaAnterior = new DateOnly(2026, 7, 19);
-        var diaNovo = new DateOnly(2026, 7, 20);
-        var confirmarId = Guid.NewGuid();
-        var ignorarId = Guid.NewGuid();
-
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, It.IsAny<DateOnly>())).ReturnsAsync((RegistroDiario?)null);
 
-        var registroAnterior = new RegistroDiario
+        var dto = new AtualizarCategoriaDto
         {
-            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = diaAnterior, Inicio = 500m,
-            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
-            SaldoFinal = 700m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
-        };
-        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroAnterior });
-
-        var transacoes = new List<TransacaoImportada>
-        {
-            new() { Id = confirmarId, ContaBancariaId = contaId, ClienteId = clienteId, Data = diaNovo, Valor = 300m, Descricao = "Venda", Tipo = "Entrada", Status = "Pendente" },
-            new() { Id = ignorarId, ContaBancariaId = contaId, ClienteId = clienteId, Data = diaNovo, Valor = 40m, Descricao = "Duplicata", Tipo = "Saida", Status = "Pendente" },
-        };
-        _importRepoMock.Setup(r => r.ObterPorIdsAsync(It.IsAny<IEnumerable<Guid>>())).ReturnsAsync(transacoes);
-
-        RegistroDiario? registroCriado = null;
-        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
-            .Callback<RegistroDiario>(r => registroCriado = r)
-            .ReturnsAsync((RegistroDiario r) => r);
-
-        List<TransacaoImportada>? loteAtualizado = null;
-        _importRepoMock.Setup(r => r.AtualizarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>()))
-            .Callback<IEnumerable<TransacaoImportada>>(l => loteAtualizado = l.ToList())
-            .Returns(Task.CompletedTask);
-
-        var dto = new ConfirmarTransacoesDto
-        {
-            Transacoes = new()
-            {
-                new() { Id = confirmarId },
-                new() { Id = ignorarId, Ignorar = true },
-            },
+            Itens = new() { new() { Id = Guid.NewGuid(), Data = "2026-07-20", Categoria = "Aluguel" } },
         };
 
-        await _sut.ConfirmarTransacoesAsync(contaId, clienteId, "cliente", dto);
+        await _sut.AtualizarCategoriasAsync(contaId, clienteId, "cliente", dto);
 
-        Assert.NotNull(registroCriado);
-        Assert.Equal(clienteId, registroCriado!.ClienteId);
-        Assert.Equal(700m, registroCriado.Inicio);
-        Assert.Equal(1000m, registroCriado.SaldoFinal);
-        Assert.Single(registroCriado.Entradas);
-
-        Assert.NotNull(loteAtualizado);
-        Assert.Equal("Confirmada", loteAtualizado!.Single(t => t.Id == confirmarId).Status);
-        Assert.Equal("Ignorada", loteAtualizado.Single(t => t.Id == ignorarId).Status);
-    }
-
-    [Fact]
-    public async Task ConfirmarTransacoesAsync_IgnoraTransacoesJaConfirmadas()
-    {
-        var contaId = Guid.NewGuid();
-        var clienteId = Guid.NewGuid();
-        var data = new DateOnly(2026, 7, 20);
-        var jaConfirmadaId = Guid.NewGuid();
-
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
-        _importRepoMock.Setup(r => r.ObterPorIdsAsync(It.IsAny<IEnumerable<Guid>>())).ReturnsAsync(new List<TransacaoImportada>
-        {
-            new() { Id = jaConfirmadaId, ContaBancariaId = contaId, ClienteId = clienteId, Data = data, Valor = 100m, Descricao = "X", Tipo = "Entrada", Status = "Confirmada" },
-        });
-
-        List<TransacaoImportada>? loteAtualizado = null;
-        _importRepoMock.Setup(r => r.AtualizarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>()))
-            .Callback<IEnumerable<TransacaoImportada>>(l => loteAtualizado = l.ToList())
-            .Returns(Task.CompletedTask);
-
-        var dto = new ConfirmarTransacoesDto { Transacoes = new() { new() { Id = jaConfirmadaId } } };
-
-        await _sut.ConfirmarTransacoesAsync(contaId, clienteId, "cliente", dto);
-
-        Assert.Empty(loteAtualizado!);
-        _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
         _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
     }
 }

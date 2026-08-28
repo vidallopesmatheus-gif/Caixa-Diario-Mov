@@ -3,6 +3,7 @@ import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtDate, monthLabel } from '../../utils/format'
 import StatCard from '../../components/shared/StatCard'
 import Modal from '../../components/shared/Modal'
+import { ehOperacional } from '../../utils/lancamentos'
 import { useState } from 'react'
 
 interface Props { clienteIdOverride?: string }
@@ -18,8 +19,9 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
 
   const mesAtual = new Date().toISOString().slice(0, 7)
   const doMes = registros.filter(r => r.data.startsWith(mesAtual))
-  const totalEnt = doMes.reduce((s, r) => s + r.entradas.reduce((a, x) => a + x.valor, 0), 0)
-  const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a, x) => a + x.valor, 0), 0)
+  // Transferências entre contas e rendimento de investimento não são receita/despesa.
+  const totalEnt = doMes.reduce((s, r) => s + r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
+  const totalSai = doMes.reduce((s, r) => s + r.saidas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
   const ultimo = doMes[0]?.saldoConfirmado ?? 0
 
   async function handleDelete() {
@@ -42,8 +44,10 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
         {registros.map(r => {
-          const entTotal = r.entradas.reduce((a, x) => a + x.valor, 0)
-          const saiTotal = r.saidas.reduce((a, x) => a + x.valor, 0)
+          // Idem: o "lucro" do dia não deve contar transferências/rendimento — a lista de
+          // lançamentos abaixo (quando expandida) continua mostrando cada um individualmente.
+          const entTotal = r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0)
+          const saiTotal = r.saidas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0)
           const lucro = entTotal - saiTotal
           const isOpen = openId === r.id
 

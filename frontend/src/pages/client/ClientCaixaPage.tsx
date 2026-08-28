@@ -12,7 +12,26 @@ import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
 
-const novaSaida = (): ItemFinanceiroSaida => ({ descricao: '', valor: 0, categoria: '', subcategoria: '' })
+// Cada linha carrega sua própria conta de destino — default é a última usada na sessão (ou o
+// Caixa). Quem só movimenta dinheiro numa conta só nunca vê esse campo (seletor só aparece com 2+
+// contas ativas), então não precisa tocar em nada.
+type LinhaEntrada = ItemFinanceiro & { contaId: string }
+type LinhaSaida = ItemFinanceiroSaida & { contaId: string }
+
+// Id gerado no cliente pra todo lançamento novo nascer com identidade própria — sem isso, baixas
+// de Contas a Pagar/Receber não conseguem vincular com segurança a um lançamento manual específico.
+const novaEntrada = (contaId = ''): LinhaEntrada => ({ id: crypto.randomUUID(), descricao: '', valor: 0, contaId })
+const novaSaida = (contaId = ''): LinhaSaida => ({ id: crypto.randomUUID(), descricao: '', valor: 0, categoria: '', subcategoria: '', contaId })
+
+function agruparPorConta<T extends { contaId: string }>(itens: T[]): Map<string, T[]> {
+  const mapa = new Map<string, T[]>()
+  for (const item of itens) {
+    const lista = mapa.get(item.contaId)
+    if (lista) lista.push(item)
+    else mapa.set(item.contaId, [item])
+  }
+  return mapa
+}
 
 function fmtNum(n: number) {
   if (!n) return ''
@@ -29,8 +48,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
 
   const [data, setData] = useState(todayISO())
   const [inicio, setInicio] = useState(0)
-  const [entradas, setEntradas] = useState<ItemFinanceiro[]>([{ descricao: '', valor: 0 }])
-  const [saidas, setSaidas] = useState<ItemFinanceiroSaida[]>([novaSaida()])
+  const [entradas, setEntradas] = useState<LinhaEntrada[]>([novaEntrada()])
+  const [saidas, setSaidas] = useState<LinhaSaida[]>([novaSaida()])
   const [entradaDisplays, setEntradaDisplays] = useState<string[]>([''])
   const [saidaDisplays, setSaidaDisplays] = useState<string[]>([''])
   const [confirmado, setConfirmado] = useState('')
@@ -39,11 +58,13 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [catOpen, setCatOpen] = useState<{ tipo: 'entrada' | 'saida'; idx: number } | null>(null)
-  const [savedEntradas, setSavedEntradas] = useState<ItemFinanceiro[]>([])
-  const [savedSaidas, setSavedSaidas] = useState<ItemFinanceiroSaida[]>([])
+  const [savedEntradas, setSavedEntradas] = useState<LinhaEntrada[]>([])
+  const [savedSaidas, setSavedSaidas] = useState<LinhaSaida[]>([])
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [contaId, setContaId] = useState<string>('')
+  // Lembra a última conta usada na sessão — vira o default de cada linha nova.
+  const [ultimaContaUsada, setUltimaContaUsada] = useState<string>('')
 
   useEffect(() => {
     listarCategorias().then(setCategorias).catch(console.error)
@@ -55,7 +76,11 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       .then(cs => {
         setContas(cs)
         const ativas = cs.filter(c => c.ativa)
-        if (ativas.length > 0 && !contaId) setContaId(ativas[0].id)
+        if (ativas.length > 0 && !contaId) {
+          const caixa = ativas.find(c => c.tipo === 'Caixa') ?? ativas[0]
+          setContaId(caixa.id)
+          setUltimaContaUsada(caixa.id)
+        }
       })
       .catch(console.error)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,10 +109,10 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       if (ignore) return
       if (reg) {
         setInicio(reg.saldoInicio)
-        setSavedEntradas(reg.entradas)
-        setSavedSaidas(reg.saidas)
-        setEntradas([{ descricao: '', valor: 0 }])
-        setSaidas([novaSaida()])
+        setSavedEntradas(reg.entradas.map(e => ({ ...e, contaId })))
+        setSavedSaidas(reg.saidas.map(s => ({ ...s, contaId })))
+        setEntradas([novaEntrada(ultimaContaUsada || contaId)])
+        setSaidas([novaSaida(ultimaContaUsada || contaId)])
         setEntradaDisplays([''])
         setSaidaDisplays([''])
         setConfirmado(String(reg.saldoConfirmado))
@@ -96,8 +121,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setInicio(prev?.saldoConfirmado ?? 0)
         setSavedEntradas([])
         setSavedSaidas([])
-        setEntradas([{ descricao: '', valor: 0 }])
-        setSaidas([novaSaida()])
+        setEntradas([novaEntrada(ultimaContaUsada || contaId)])
+        setSaidas([novaSaida(ultimaContaUsada || contaId)])
         setEntradaDisplays([''])
         setSaidaDisplays([''])
         setConfirmado('')
@@ -113,7 +138,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSavedEntradas(prev => [...prev, item])
     setEntradas(prev => {
       const next = prev.filter((_, j) => j !== idx)
-      return next.length ? next : [{ descricao: '', valor: 0 }]
+      return next.length ? next : [novaEntrada(ultimaContaUsada)]
     })
     setEntradaDisplays(prev => {
       const next = prev.filter((_, j) => j !== idx)
@@ -128,7 +153,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSavedSaidas(prev => [...prev, item])
     setSaidas(prev => {
       const next = prev.filter((_, j) => j !== idx)
-      return next.length ? next : [novaSaida()]
+      return next.length ? next : [novaSaida(ultimaContaUsada)]
     })
     setSaidaDisplays(prev => {
       const next = prev.filter((_, j) => j !== idx)
@@ -149,14 +174,38 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setMsg('Selecione uma categoria para cada saída.')
         return
       }
-      const regAtual = await buscarPorData(data)
-      await salvar({
-        clienteId, contaBancariaId: contaId || undefined, data, saldoInicio: inicio,
-        entradas: todasEntradas, saidas: todasSaidas,
-        contasAReceber: regAtual?.contasAReceber ?? [],
-        contasAPagar: regAtual?.contasAPagar ?? [],
-        saldoConfirmado: confirmado === '' ? calculado : Number(confirmado),
-      })
+
+      // Cada linha pode ter sua própria conta — agrupa e salva um registro por conta envolvida,
+      // preservando os lançamentos e pendências que já existiam em cada uma.
+      const gruposEntrada = agruparPorConta(todasEntradas)
+      const gruposSaida = agruparPorConta(todasSaidas)
+      const contasEnvolvidas = new Set([...gruposEntrada.keys(), ...gruposSaida.keys()])
+      if (contasEnvolvidas.size === 0) contasEnvolvidas.add(contaId)
+
+      for (const grupoContaId of contasEnvolvidas) {
+        const entradasGrupo = gruposEntrada.get(grupoContaId) ?? []
+        const saidasGrupo = gruposSaida.get(grupoContaId) ?? []
+        const regExistente = await buscarPorData(data, grupoContaId)
+        const inicioGrupo = regExistente
+          ? regExistente.saldoInicio
+          : registros.filter(r => r.contaBancariaId === grupoContaId).find(r => r.data < data)?.saldoConfirmado ?? 0
+        const totalEntradasGrupo = entradasGrupo.reduce((s, x) => s + (Number(x.valor) || 0), 0)
+        const totalSaidasGrupo = saidasGrupo.reduce((s, x) => s + (Number(x.valor) || 0), 0)
+        const calculadoGrupo = inicioGrupo + totalEntradasGrupo - totalSaidasGrupo
+        const saldoConfirmadoGrupo = grupoContaId === contaId && confirmado !== ''
+          ? Number(confirmado)
+          : regExistente?.saldoConfirmado ?? calculadoGrupo
+
+        await salvar({
+          clienteId, contaBancariaId: grupoContaId, data, saldoInicio: inicioGrupo,
+          entradas: [...(regExistente?.entradas ?? []), ...entradasGrupo],
+          saidas: [...(regExistente?.saidas ?? []), ...saidasGrupo],
+          contasAReceber: regExistente?.contasAReceber ?? [],
+          contasAPagar: regExistente?.contasAPagar ?? [],
+          saldoConfirmado: saldoConfirmadoGrupo,
+        })
+      }
+
       setSaveSuccess(true)
       setMsg('Salvo com sucesso!')
     } catch (e: unknown) {
@@ -175,7 +224,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   function updateEntrada(i: number, field: keyof ItemFinanceiro, val: string) {
     setEntradas(prev => prev.map((x, j) => {
       if (j !== i) return x
-      const updated: ItemFinanceiro = { ...x, [field]: field === 'valor' ? Number(val) : val }
+      const updated: LinhaEntrada = { ...x, [field]: field === 'valor' ? Number(val) : val }
       if (field === 'categoria') { const tc = tipoCustoDe(val); if (tc) updated.tipoCusto = tc }
       return updated
     }))
@@ -184,10 +233,20 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   function updateSaida(i: number, field: keyof ItemFinanceiroSaida, val: string) {
     setSaidas(prev => prev.map((x, j) => {
       if (j !== i) return x
-      const updated: ItemFinanceiroSaida = { ...x, [field]: field === 'valor' ? Number(val) : val }
+      const updated: LinhaSaida = { ...x, [field]: field === 'valor' ? Number(val) : val }
       if (field === 'categoria') { const tc = tipoCustoDe(val); if (tc) updated.tipoCusto = tc }
       return updated
     }))
+  }
+
+  function updateEntradaConta(i: number, novaContaId: string) {
+    setEntradas(prev => prev.map((x, j) => j === i ? { ...x, contaId: novaContaId } : x))
+    setUltimaContaUsada(novaContaId)
+  }
+
+  function updateSaidaConta(i: number, novaContaId: string) {
+    setSaidas(prev => prev.map((x, j) => j === i ? { ...x, contaId: novaContaId } : x))
+    setUltimaContaUsada(novaContaId)
   }
 
   function handleSelectCat(nome: string) {
@@ -217,7 +276,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
           <span style={{ fontSize: 13, color: 'var(--tx3)' }}>Conta:</span>
           {contas.filter(c => c.ativa).map(c => (
-            <button key={c.id} type="button" onClick={() => setContaId(c.id)}
+            <button key={c.id} type="button" onClick={() => { setContaId(c.id); setUltimaContaUsada(c.id) }}
               style={{
                 padding: '5px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
                 border: '1px solid var(--bd)',
@@ -247,7 +306,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
             </div>
           )}
           {entradas.map((e, i) => (
-            <div key={i} className="lancamento-row has-rm">
+            <div key={i}>
+            <div className="lancamento-row has-rm">
               <input className="lancamento-desc" placeholder="Descrição" value={e.descricao}
                 onChange={ev => updateEntrada(i, 'descricao', ev.target.value)} />
               <div className="val-input-wrap">
@@ -292,9 +352,22 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                 setEntradaDisplays(prev => prev.filter((_, j) => j !== i))
               }}>✕</button>
             </div>
+            {contas.filter(c => c.ativa).length > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '-4px 0 8px 2px' }}>
+                <span style={{ fontSize: 11, color: 'var(--tx3)' }}>Conta:</span>
+                <select
+                  value={e.contaId || ultimaContaUsada}
+                  onChange={ev => updateEntradaConta(i, ev.target.value)}
+                  style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-input)', color: 'var(--tx1)' }}
+                >
+                  {contas.filter(c => c.ativa).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+              </div>
+            )}
+            </div>
           ))}
           <button className="btn-add-entrada" onClick={() => {
-            setEntradas(e => [...e, { descricao: '', valor: 0 }])
+            setEntradas(e => [...e, novaEntrada(ultimaContaUsada)])
             setEntradaDisplays(d => [...d, ''])
           }}>＋ Adicionar Entrada</button>
         </div>
@@ -312,7 +385,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
             </div>
           )}
           {saidas.map((s, i) => (
-            <div key={i} className="lancamento-row has-rm">
+            <div key={i}>
+            <div className="lancamento-row has-rm">
               <input className="lancamento-desc" placeholder="Descrição" value={s.descricao}
                 onChange={ev => updateSaida(i, 'descricao', ev.target.value)} />
               <div className="val-input-wrap">
@@ -362,9 +436,22 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                 setSaidaDisplays(prev => prev.filter((_, j) => j !== i))
               }}>✕</button>
             </div>
+            {contas.filter(c => c.ativa).length > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '-4px 0 8px 2px' }}>
+                <span style={{ fontSize: 11, color: 'var(--tx3)' }}>Conta:</span>
+                <select
+                  value={s.contaId || ultimaContaUsada}
+                  onChange={ev => updateSaidaConta(i, ev.target.value)}
+                  style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-input)', color: 'var(--tx1)' }}
+                >
+                  {contas.filter(c => c.ativa).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+              </div>
+            )}
+            </div>
           ))}
           <button className="btn-add-saida" onClick={() => {
-            setSaidas(s => [...s, novaSaida()])
+            setSaidas(s => [...s, novaSaida(ultimaContaUsada)])
             setSaidaDisplays(d => [...d, ''])
           }}>＋ Adicionar saída</button>
         </div>

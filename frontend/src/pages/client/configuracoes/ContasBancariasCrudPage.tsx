@@ -1,16 +1,14 @@
-import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../../contexts/AuthContext'
+import { useState, useEffect } from 'react'
+import { useAuth } from '../../../contexts/AuthContext'
 import {
   listarContasBancarias,
   criarContaBancaria,
   atualizarContaBancaria,
   inativarContaBancaria,
-} from '../../api/contasBancarias'
-import { importarExtrato } from '../../api/importacao'
-import { fmtBRL } from '../../utils/format'
-import type { ContaBancaria } from '../../types'
-import './ClientContasBancarias.css'
+} from '../../../api/contasBancarias'
+import { fmtBRL } from '../../../utils/format'
+import type { ContaBancaria } from '../../../types'
+import '../ClientContasBancarias.css'
 
 interface Props { clienteIdOverride?: string }
 
@@ -29,25 +27,22 @@ function parseBRL(s: string): number {
   return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0
 }
 
-export default function ClientContasBancariasPage({ clienteIdOverride }: Props) {
+/** Configurações → Contas Bancárias: cadastro (criar/editar/inativar). Operação fica na aba Banco. */
+export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
-  const navigate = useNavigate()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [msgOk, setMsgOk] = useState(true)
 
-  // Formulário de criação
   const [novoNome, setNovoNome] = useState('')
   const [novoTipo, setNovoTipo] = useState<string>('ContaCorrente')
   const [novoSaldoDisplay, setNovoSaldoDisplay] = useState('')
   const [novoSaldo, setNovoSaldo] = useState(0)
   const [criando, setCriando] = useState(false)
 
-  // Edição inline
   const [editId, setEditId] = useState<string | null>(null)
   const [editNome, setEditNome] = useState('')
   const [editTipo, setEditTipo] = useState('')
@@ -123,15 +118,6 @@ export default function ClientContasBancariasPage({ clienteIdOverride }: Props) 
     }
   }
 
-  async function handleImportar(contaId: string, arquivo: File) {
-    try {
-      await importarExtrato(contaId, arquivo)
-      navigate(`/extrato/${contaId}`)
-    } catch (e: unknown) {
-      showMsg(e instanceof Error ? e.message : 'Erro ao importar extrato.', false)
-    }
-  }
-
   async function handleInativar(id: string) {
     if (!confirm('Inativar esta conta? Os registros vinculados serão preservados.')) return
     try {
@@ -145,25 +131,11 @@ export default function ClientContasBancariasPage({ clienteIdOverride }: Props) 
 
   const ativas = contas.filter(c => c.ativa)
   const inativas = contas.filter(c => !c.ativa)
-  const saldoConsolidado = ativas.reduce((s, c) => s + c.saldoAtual, 0)
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
   return (
     <>
-      {/* Resumo consolidado */}
-      <div className="cb-resumo">
-        <div className="cb-resumo-item">
-          <span className="cb-resumo-label">Contas ativas</span>
-          <span className="cb-resumo-val">{ativas.length}</span>
-        </div>
-        <div className="cb-resumo-item">
-          <span className="cb-resumo-label">Saldo consolidado</span>
-          <span className="cb-resumo-val val-green">{fmtBRL(saldoConsolidado)}</span>
-        </div>
-      </div>
-
-      {/* Formulário de criação */}
       <div className="add-conta-form">
         <h4>＋ Nova Conta Bancária</h4>
         <div className="conta-form-row">
@@ -203,14 +175,12 @@ export default function ClientContasBancariasPage({ clienteIdOverride }: Props) 
         )}
       </div>
 
-      {/* Lista de contas ativas */}
       <div className="contas-section">
         <h3>🏦 Contas Ativas ({ativas.length})</h3>
         {ativas.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma conta ativa.</p>}
         {ativas.map(c => (
           <div key={c.id} className="cb-conta-item">
             {editId === c.id ? (
-              /* Modo edição */
               <div className="cb-edit-form">
                 <div className="conta-form-row">
                   <input
@@ -248,46 +218,16 @@ export default function ClientContasBancariasPage({ clienteIdOverride }: Props) 
                 </div>
               </div>
             ) : (
-              /* Modo visualização — card clicável leva ao extrato da conta */
-              <div
-                className="cb-conta-clicavel"
-                role="button"
-                tabIndex={0}
-                onClick={() => navigate(`/contas-bancarias/${c.id}`)}
-                onKeyDown={e => { if (e.key === 'Enter') navigate(`/contas-bancarias/${c.id}`) }}
-              >
+              <div className="cb-conta-clicavel" style={{ cursor: 'default' }}>
                 <div className="cb-conta-info">
                   <div className="cb-conta-nome">{c.nome}</div>
                   <div className="cb-conta-meta">
                     {TIPO_LABEL[c.tipo] ?? c.tipo}
                     {c.saldoInicial > 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`}
                   </div>
-                  <div className="cb-conta-resumo-mes">
-                    Este mês: <span className="val-green">+{fmtBRL(c.entradasMes)}</span>
-                    {' · '}
-                    <span className="val-red">-{fmtBRL(c.saidasMes)}</span>
-                  </div>
                 </div>
                 <div className="cb-conta-saldo val-green">{fmtBRL(c.saldoAtual)}</div>
-                <div className="cb-conta-acoes" onClick={e => e.stopPropagation()}>
-                  {/* Input de arquivo oculto por conta */}
-                  <input
-                    ref={el => { fileInputRefs.current[c.id] = el }}
-                    type="file"
-                    accept=".ofx,.csv,.xlsx"
-                    style={{ display: 'none' }}
-                    onChange={e => {
-                      const f = e.target.files?.[0]
-                      if (f) handleImportar(c.id, f)
-                      e.target.value = ''
-                    }}
-                  />
-                  <button
-                    className="cb-btn-editar"
-                    onClick={() => fileInputRefs.current[c.id]?.click()}
-                    title="Importar extrato OFX, CSV ou XLSX">
-                    ⬆️ Importar
-                  </button>
+                <div className="cb-conta-acoes">
                   <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
                   <button className="cb-btn-inativar" onClick={() => handleInativar(c.id)}>Inativar</button>
                 </div>
@@ -297,7 +237,6 @@ export default function ClientContasBancariasPage({ clienteIdOverride }: Props) 
         ))}
       </div>
 
-      {/* Lista de contas inativas */}
       {inativas.length > 0 && (
         <div className="contas-section">
           <h3 style={{ color: 'var(--tx3)' }}>⛔ Contas Inativas ({inativas.length})</h3>

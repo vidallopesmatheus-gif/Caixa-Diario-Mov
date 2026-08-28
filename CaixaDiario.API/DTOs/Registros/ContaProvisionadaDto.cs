@@ -10,4 +10,5 @@ public class ContaProvisionadaDto
     public Guid? RecorrenciaId { get; set; }
     public DateOnly? DataBaixa { get; set; }
     public Guid? ContaBancariaId { get; set; }
+    public Guid? LancamentoVinculadoId { get; set; }
 }

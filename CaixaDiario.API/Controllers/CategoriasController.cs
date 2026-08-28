@@ -1,55 +1,76 @@
+using CaixaDiario.API.DTOs.Categorias;
+using CaixaDiario.API.Responses;
+using CaixaDiario.API.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CaixaDiario.API.Controllers;
 
 [ApiController]
 [Route("api/categorias")]
+[Authorize]
 public class CategoriasController : ControllerBase
 {
-    private static readonly object _categorias = new
-    {
-        entradas = new[]
-        {
-            new { nome = "Vendas", tipoCusto = "Receita" },
-            new { nome = "Serviços Prestados", tipoCusto = "Receita" },
-            new { nome = "Outras Receitas", tipoCusto = "Receita" },
-        },
-        saidas = new[]
-        {
-            // Custos Diretos
-            new { grupo = "Custos Diretos", nome = "Insumos/Mercadoria", tipoCusto = "CustoVariavel" },
-            new { grupo = "Custos Diretos", nome = "Embalagens", tipoCusto = "CustoVariavel" },
-            new { grupo = "Custos Diretos", nome = "Comissões", tipoCusto = "CustoVariavel" },
-            // Pessoas
-            new { grupo = "Pessoas", nome = "Salários/Folha", tipoCusto = "CustoFixo" },
-            new { grupo = "Pessoas", nome = "Encargos", tipoCusto = "CustoFixo" },
-            new { grupo = "Pessoas", nome = "Benefícios", tipoCusto = "CustoFixo" },
-            new { grupo = "Pessoas", nome = "Pró-labore", tipoCusto = "CustoFixo" },
-            // Despesas Administrativas
-            new { grupo = "Despesas Administrativas", nome = "Aluguel", tipoCusto = "CustoFixo" },
-            new { grupo = "Despesas Administrativas", nome = "Energia/Água/Internet", tipoCusto = "CustoFixo" },
-            new { grupo = "Despesas Administrativas", nome = "Seguros", tipoCusto = "CustoFixo" },
-            new { grupo = "Despesas Administrativas", nome = "Manutenção", tipoCusto = "CustoFixo" },
-            new { grupo = "Despesas Administrativas", nome = "Material de Escritório", tipoCusto = "CustoFixo" },
-            // Marketing
-            new { grupo = "Marketing", nome = "Publicidade", tipoCusto = "CustoVariavel" },
-            new { grupo = "Marketing", nome = "Mídia paga", tipoCusto = "CustoVariavel" },
-            new { grupo = "Marketing", nome = "Material gráfico", tipoCusto = "CustoVariavel" },
-            // Impostos
-            new { grupo = "Impostos", nome = "Simples/DAS", tipoCusto = "CustoFixo" },
-            new { grupo = "Impostos", nome = "ISS", tipoCusto = "CustoFixo" },
-            new { grupo = "Impostos", nome = "Outros tributos", tipoCusto = "CustoFixo" },
-            // Financeiras
-            new { grupo = "Financeiras", nome = "Tarifas bancárias", tipoCusto = "CustoFixo" },
-            new { grupo = "Financeiras", nome = "Juros", tipoCusto = "CustoFixo" },
-            new { grupo = "Financeiras", nome = "IOF", tipoCusto = "CustoFixo" },
-            // Investimentos
-            new { grupo = "Investimentos", nome = "Equipamentos", tipoCusto = "CustoFixo" },
-            new { grupo = "Investimentos", nome = "Reformas", tipoCusto = "CustoFixo" },
-            new { grupo = "Investimentos", nome = "Software", tipoCusto = "CustoFixo" },
-        },
-    };
+    private readonly ICategoriaService _service;
 
+    public CategoriasController(ICategoriaService service) => _service = service;
+
+    // Formato legado consumido pelos formulários de lançamento — não envolve ApiResponse.
     [HttpGet]
-    public IActionResult Listar() => Ok(_categorias);
+    public async Task<IActionResult> Listar()
+    {
+        var categorias = await _service.ListarAgrupadasAsync();
+        return Ok(categorias);
+    }
+
+    [HttpGet("gerenciar")]
+    public async Task<IActionResult> ListarParaGerenciar()
+    {
+        var categorias = await _service.ListarParaGerenciarAsync();
+        return Ok(new ApiResponse<List<CategoriaDto>> { Dados = categorias });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Criar([FromBody] CriarCategoriaDto dto)
+    {
+        var criada = await _service.CriarAsync(dto);
+        return Ok(new ApiResponse<CategoriaDto> { Dados = criada });
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Atualizar(Guid id, [FromBody] AtualizarCategoriaDto dto)
+    {
+        var atualizada = await _service.AtualizarAsync(id, dto);
+        return Ok(new ApiResponse<CategoriaDto> { Dados = atualizada });
+    }
+
+    [HttpPost("{id:guid}/desativar")]
+    public async Task<IActionResult> Desativar(Guid id)
+    {
+        await _service.DesativarAsync(id);
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
+
+    [HttpPut("reordenar")]
+    public async Task<IActionResult> Reordenar([FromBody] ReordenarCategoriasDto dto)
+    {
+        await _service.ReordenarAsync(dto);
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Excluir(Guid id)
+    {
+        var resultado = await _service.ExcluirOuInformarUsoAsync(id);
+        if (!resultado.Excluida)
+            return Conflict(new ApiResponse<ExclusaoCategoriaResultDto> { Dados = resultado });
+        return Ok(new ApiResponse<ExclusaoCategoriaResultDto> { Dados = resultado });
+    }
+
+    [HttpPost("{id:guid}/migrar")]
+    public async Task<IActionResult> Migrar(Guid id, [FromBody] MigrarCategoriaDto dto)
+    {
+        await _service.MigrarLancamentosAsync(id, dto.ParaCategoriaId);
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
 }

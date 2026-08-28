@@ -17,6 +17,8 @@ public class AppDbContext : DbContext
     public DbSet<AuditLog> AuditLogs { get; set; }
     public DbSet<ContaBancaria> ContasBancarias { get; set; }
     public DbSet<TransacaoImportada> TransacoesImportadas { get; set; }
+    public DbSet<Categoria> Categorias { get; set; }
+    public DbSet<Transferencia> Transferencias { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -94,12 +96,18 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Ano).HasColumnName("ano");
             entity.Property(e => e.MetaReceita).HasColumnName("meta_receita").HasColumnType("decimal(18,2)");
             entity.Property(e => e.MetaLucro).HasColumnName("meta_lucro").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ContaInvestimentoId).HasColumnName("conta_investimento_id");
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em");
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
 
             entity.HasOne(e => e.Cliente)
                 .WithMany(u => u.MetasAnuais)
                 .HasForeignKey(e => e.ClienteId);
+
+            entity.HasOne(e => e.ContaInvestimento)
+                .WithMany()
+                .HasForeignKey(e => e.ContaInvestimentoId)
+                .IsRequired(false);
 
             entity.HasIndex(e => new { e.ClienteId, e.Ano }).IsUnique();
         });
@@ -185,6 +193,52 @@ public class AppDbContext : DbContext
             entity.Property(e => e.OcorridoEm).HasColumnName("ocorrido_em").HasDefaultValueSql("NOW()");
             entity.HasIndex(e => new { e.ClienteId, e.OcorridoEm });
             entity.HasIndex(e => new { e.Entidade, e.AcaoTipo });
+        });
+
+        modelBuilder.Entity<Categoria>(entity =>
+        {
+            entity.ToTable("categorias");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Nome).HasColumnName("nome").IsRequired();
+            entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired();
+            entity.Property(e => e.Grupo).HasColumnName("grupo");
+            entity.Property(e => e.Ordem).HasColumnName("ordem").HasDefaultValue(0);
+            entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+
+            entity.HasIndex(e => e.Nome).IsUnique();
+            entity.HasIndex(e => new { e.Ativa, e.Ordem });
+        });
+
+        modelBuilder.Entity<Transferencia>(entity =>
+        {
+            entity.ToTable("transferencias");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaOrigemId).HasColumnName("conta_origem_id");
+            entity.Property(e => e.ContaDestinoId).HasColumnName("conta_destino_id");
+            entity.Property(e => e.Data).HasColumnName("data");
+            entity.Property(e => e.Valor).HasColumnName("valor").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Descricao).HasColumnName("descricao");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+
+            entity.HasOne(e => e.Cliente)
+                .WithMany()
+                .HasForeignKey(e => e.ClienteId);
+
+            entity.HasOne(e => e.ContaOrigem)
+                .WithMany()
+                .HasForeignKey(e => e.ContaOrigemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ContaDestino)
+                .WithMany()
+                .HasForeignKey(e => e.ContaDestinoId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.ClienteId, e.Data });
         });
     }
 }

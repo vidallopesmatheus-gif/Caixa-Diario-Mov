@@ -12,6 +12,7 @@ import { listarContasBancarias } from '../../api/contasBancarias'
 import { obterDre } from '../../api/metricas'
 import type { Dre } from '../../api/metricas'
 import OrcamentoDinamicoCard from './OrcamentoDinamicoCard'
+import MetasResumoBlock from './dashboard/MetasResumoBlock'
 import ResumoStatusBar from './dashboard/ResumoStatusBar'
 import ResumoMetricCards from './dashboard/ResumoMetricCards'
 import AtencaoCard from './dashboard/AtencaoCard'
@@ -21,6 +22,7 @@ import type { ContaBancaria } from '../../types'
 import type { MetaAnual } from '../../types'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, ReferenceLine } from 'recharts'
 import { grupoDaCategoria, CORES_GRUPO } from '../../utils/categorias'
+import { ehOperacional } from '../../utils/lancamentos'
 import './ClientDashboard.css'
 import './dashboard/DashboardResumo.css'
 
@@ -153,14 +155,14 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const composicaoDespesas = useMemo(() => {
     const acc: Record<string, number> = {}
     for (const r of doPeriodo)
-      for (const s of r.saidas) {
+      for (const s of r.saidas.filter(ehOperacional)) {
         const grupo = grupoDaCategoria(s.categoria)
         acc[grupo] = (acc[grupo] ?? 0) + s.valor
       }
     return Object.entries(acc).map(([name, value]) => ({ name, value })).filter(d => d.value > 0)
   }, [doPeriodo])
 
-  const totalSaida = doPeriodo.reduce((s, r) => s + r.saidas.reduce((a, e) => a + e.valor, 0), 0)
+  const totalSaida = doPeriodo.reduce((s, r) => s + r.saidas.filter(ehOperacional).reduce((a, e) => a + e.valor, 0), 0)
 
   // Projeção por pagamentos cadastrados (contas a receber/pagar pendentes por mês)
   const projecaoPagamentos = useMemo(() => {
@@ -214,9 +216,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
       const prefixo = `${ano}-${String(mes).padStart(2, '0')}`
       const doMes = registros.filter(r => r.data.startsWith(prefixo))
-      const receitaReal = doMes.reduce((s, r) => s + r.entradas.reduce((a, e) => a + e.valor, 0), 0)
+      const receitaReal = doMes.reduce((s, r) => s + r.entradas.filter(ehOperacional).reduce((a, e) => a + e.valor, 0), 0)
       const lucroReal = doMes.reduce((s, r) =>
-        s + r.entradas.reduce((a, e) => a + e.valor, 0) - r.saidas.reduce((a, e) => a + e.valor, 0), 0)
+        s + r.entradas.filter(ehOperacional).reduce((a, e) => a + e.valor, 0) - r.saidas.filter(ehOperacional).reduce((a, e) => a + e.valor, 0), 0)
 
       const isPassado = ano < anoAtual || (ano === anoAtual && mes < mesAtual)
       const isAtual = ano === anoAtual && mes === mesAtual
@@ -419,6 +421,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   return (
     <>
+      {/* ══ Camada 0: resumo de Metas & Investimentos ══ */}
+      {clienteId && <MetasResumoBlock clienteId={clienteId} />}
+
       {/* ══ Camada 1: status — saldo consolidado + seletor de período/conta ══ */}
       <ResumoStatusBar
         contasBancarias={contasBancarias}
@@ -444,7 +449,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       )}
 
       {/* ══ Camada 3: precisa de atenção — insights + vencimentos, priorizados, clicáveis ══ */}
-      {clienteId && <AtencaoCard clienteId={clienteId} registros={registros} />}
+      {clienteId && <AtencaoCard clienteId={clienteId} registros={registros} contasBancarias={contasBancarias} />}
 
       {/* ══ Camada 4: saúde do negócio — gauges + margem do período ══ */}
       {clienteId && (
@@ -651,6 +656,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                       onBlur={() => { const n = parseBRL(editTotalInvestido); if (n) setEditTotalInvestido(fmtNum(n)) }}
                       placeholder="0,00" />
                   </div>
+                  {meta?.contaInvestimentoId && (
+                    <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 4 }}>
+                      🔗 Vinculada a uma conta de investimento — este valor é atualizado automaticamente pelo saldo da conta em Banco.
+                    </div>
+                  )}
                 </div>
                 <div className="meta-metodo-field">
                   <label className="meta-field-label">Prazo (anos)</label>

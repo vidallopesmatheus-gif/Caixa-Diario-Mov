@@ -13,13 +13,11 @@ export default function TabsBar() {
   const clientTabs = [
     { to: '/dashboard', label: 'Dashboard' },
     { to: '/caixa', label: 'Caixa' },
-    { to: '/contas-bancarias', label: 'Banco' },
+    { to: '/banco', label: 'Banco' },
     { to: '/contas', label: 'Contas' },
-    { to: '/dre', label: 'DRE' },
-    { to: '/projecao', label: 'Projeção' },
-    { to: '/grafico', label: 'Indicadores' },
-    { to: '/historico', label: 'Histórico' },
-    { to: '/exportar', label: 'Exportar' },
+    { to: '/resultados', label: 'Resultados' },
+    { to: '/relatorios', label: 'Relatórios' },
+    { to: '/configuracoes', label: 'Configurações' },
   ]
   const tabs = user.perfil === 'admin' ? adminTabs : clientTabs
 

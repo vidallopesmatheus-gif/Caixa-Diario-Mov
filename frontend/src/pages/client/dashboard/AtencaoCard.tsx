@@ -4,11 +4,12 @@ import { obterInsights } from '../../../api/insights'
 import type { Insight, InsightCategoria } from '../../../api/insights'
 import { getContasEmRisco } from '../../../utils/alertas'
 import { fmtBRL } from '../../../utils/format'
-import type { Registro } from '../../../types'
+import type { Registro, ContaBancaria } from '../../../types'
 
 interface Props {
   clienteId: string
   registros: Registro[]
+  contasBancarias: ContaBancaria[]
 }
 
 interface ItemAtencao {
@@ -20,14 +21,14 @@ interface ItemAtencao {
 }
 
 const ROTA_POR_CATEGORIA: Record<InsightCategoria, string | 'metas'> = {
-  saldo: '/projecao',
-  gasto: '/grafico',
-  lucro: '/grafico',
+  saldo: '/resultados/projecao',
+  gasto: '/resultados/indicadores',
+  lucro: '/resultados/indicadores',
   meta: 'metas',
-  geral: '/grafico',
+  geral: '/resultados/indicadores',
 }
 
-export default function AtencaoCard({ clienteId, registros }: Props) {
+export default function AtencaoCard({ clienteId, registros, contasBancarias }: Props) {
   const [insights, setInsights] = useState<Insight[]>([])
   const [carregado, setCarregado] = useState(false)
   const navigate = useNavigate()
@@ -61,6 +62,7 @@ export default function AtencaoCard({ clienteId, registros }: Props) {
   const vencidas = vencimentos.filter(v => v.vencida)
   const aVencer = vencimentos.filter(v => !v.vencida)
   const alertas = insights.filter(i => i.tipo === 'alerta')
+  const totalPendentesCategorizacao = contasBancarias.reduce((s, c) => s + c.pendentesCategorizacao, 0)
 
   const itens: ItemAtencao[] = [
     ...vencidas.map((v): ItemAtencao => ({
@@ -77,6 +79,13 @@ export default function AtencaoCard({ clienteId, registros }: Props) {
       urgente: true,
       onClick: () => irPara(a.categoria),
     })),
+    ...(totalPendentesCategorizacao > 0 ? [{
+      chave: 'pendentes-categorizacao',
+      texto: `${totalPendentesCategorizacao} lançamento(s) importado(s) aguardando categoria`,
+      detalhe: 'Já contam no saldo — só falta classificar',
+      urgente: false,
+      onClick: () => navigate('/banco'),
+    } as ItemAtencao] : []),
     ...aVencer.map((v): ItemAtencao => ({
       chave: `avencer-${v.registroData}-${v.tipo}-${v.index}`,
       texto: `${v.tipo === 'pagar' ? 'Conta a pagar' : 'Recebimento previsto'}: ${v.conta.descricao}`,
