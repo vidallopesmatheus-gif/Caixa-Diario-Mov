@@ -17,12 +17,18 @@ public class MetricasController : ControllerBase
     private readonly IMetricasService _metricasService;
     private readonly IRegistroRepository _registroRepo;
     private readonly IContaRecorrenteRepository _contaRecorrenteRepo;
+    private readonly ICategoriaRepository _categoriaRepo;
 
-    public MetricasController(IMetricasService metricasService, IRegistroRepository registroRepo, IContaRecorrenteRepository contaRecorrenteRepo)
+    public MetricasController(
+        IMetricasService metricasService,
+        IRegistroRepository registroRepo,
+        IContaRecorrenteRepository contaRecorrenteRepo,
+        ICategoriaRepository categoriaRepo)
     {
         _metricasService = metricasService;
         _registroRepo = registroRepo;
         _contaRecorrenteRepo = contaRecorrenteRepo;
+        _categoriaRepo = categoriaRepo;
     }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
@@ -79,7 +85,8 @@ public class MetricasController : ControllerBase
         if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
             filtrados = filtrados.Where(r => r.ContaBancariaId == contaBancariaId).ToList();
 
-        var resultado = _metricasService.CalcularDre(filtrados);
+        var categorias = await _categoriaRepo.ListarTodasAsync();
+        var resultado = _metricasService.CalcularDre(filtrados, categorias);
         return Ok(new ApiResponse<DreDto> { Dados = resultado });
     }
 
@@ -89,7 +96,8 @@ public class MetricasController : ControllerBase
         VerificarAcesso(clienteId);
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
         var registros = todos.Where(r => !r.Excluido).ToList();
-        var resultado = _metricasService.CalcularIndicadores(registros, mesesEvolucao);
+        var categorias = await _categoriaRepo.ListarTodasAsync();
+        var resultado = _metricasService.CalcularIndicadores(registros, mesesEvolucao, categorias);
         return Ok(new ApiResponse<IndicadoresDecisaoDto> { Dados = resultado });
     }
 }

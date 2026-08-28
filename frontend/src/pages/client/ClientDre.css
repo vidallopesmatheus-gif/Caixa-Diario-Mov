@@ -61,6 +61,22 @@
   cursor: pointer;
 }
 
+.dre-comparar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.dre-comparar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--tx1);
+  cursor: pointer;
+}
+
 .dre-loading,
 .dre-erro {
   color: var(--tx3);
@@ -81,11 +97,37 @@
   font-family: monospace;
 }
 
+.dre-corpo-comparativo {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.dre-cmp-cabecalho {
+  display: grid;
+  gap: 8px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--bd);
+  margin-bottom: 4px;
+}
+
+.dre-cmp-cabecalho-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tx3);
+  text-align: right;
+}
+
 .dre-linha {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 7px 0;
+}
+
+.dre-linha-cmp {
+  display: grid;
+  gap: 8px;
+  align-items: center;
 }
 
 .dre-linha-label {
@@ -99,8 +141,18 @@
 .dre-linha-valor {
   font-size: 14px;
   font-weight: 600;
-  min-width: 140px;
+  min-width: 160px;
   text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.3;
+}
+
+.dre-linha-pct {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tx3);
 }
 
 .dre-linha-receita .dre-linha-label {
@@ -112,15 +164,57 @@
   font-size: 15px;
 }
 
-.dre-linha-grupo {
+/* Linhas de composição (Deduções, Custos Variáveis, Despesas Fixas, ...) — clicáveis */
+.dre-linha-bucket {
   cursor: pointer;
   border-radius: 6px;
   padding: 7px 4px;
   transition: background .12s;
 }
 
-.dre-linha-grupo:hover {
+.dre-linha-bucket:hover {
   background: rgba(255,255,255,.04);
+}
+
+/* Linhas de subtotal (Receita Líquida, Margem de Contribuição, Resultado Operacional, Resultado Líquido) */
+.dre-linha-subtotal {
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 8px 6px;
+  margin: 2px 0;
+}
+
+.dre-linha-subtotal .dre-linha-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tx1);
+}
+
+.dre-linha-subtotal .dre-linha-valor,
+.dre-linha-subtotal .dre-cmp-cel-valor {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dre-linha[data-final="true"] {
+  border-top: 3px double var(--bd);
+  margin-top: 6px;
+  padding-top: 10px;
+}
+
+.dre-linha-alerta {
+  background: var(--danger-soft);
+}
+
+.dre-naoclass-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--danger);
+  background: rgba(220,38,38,.12);
+  border-radius: 4px;
+  padding: 1px 6px;
 }
 
 .dre-expand {
@@ -129,57 +223,124 @@
   width: 12px;
 }
 
-.dre-linha-cat {
-  padding: 4px 0 4px 28px;
+.dre-expand-bloco {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 4px 4px 8px 28px;
+}
+
+.dre-expand-periodo {
+  flex: 1;
+  min-width: 200px;
+}
+
+.dre-expand-periodo-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tx3);
+  margin-bottom: 4px;
+}
+
+.dre-cat-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 4px 6px;
+  text-align: left;
+  font-family: inherit;
+}
+
+.dre-cat-btn:hover {
+  background: rgba(255,255,255,.04);
 }
 
 .dre-cat-nome {
   font-size: 12px;
   color: var(--tx3);
+  flex: 1;
 }
 
 .dre-cat-valor {
   font-size: 12px;
   color: var(--tx3);
-  font-weight: 400;
-}
-
-.dre-linha-total-desp .dre-linha-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--tx2);
-}
-
-.dre-divisor {
-  border: none;
-  border-top: 1px solid var(--bd);
-  margin: 6px 0;
-}
-
-.dre-divisor-duplo {
-  border-top: 3px double var(--bd);
-  margin: 8px 0;
-}
-
-.dre-linha-resultado .dre-linha-label {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.dre-resultado-val {
-  font-size: 18px !important;
-  font-weight: 700 !important;
-}
-
-.dre-margem {
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--tx3);
+  font-weight: 500;
+  min-width: 90px;
   text-align: right;
 }
 
-.dre-vazio {
-  padding: 16px 0;
+.dre-cat-pct {
+  font-size: 11px;
   color: var(--tx3);
+  min-width: 50px;
+  text-align: right;
+}
+
+.dre-cmp-cel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.3;
+}
+
+.dre-cmp-cel-valor {
   font-size: 13px;
+  font-weight: 600;
+  color: var(--tx1);
+}
+
+.dre-cmp-cel-pct {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.dre-vazio-inline {
+  padding: 4px 6px;
+  color: var(--tx3);
+  font-size: 12px;
+}
+
+.dre-drill-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.dre-drill-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bd);
+}
+
+.dre-drill-data {
+  color: var(--tx3);
+  min-width: 70px;
+}
+
+.dre-drill-desc {
+  flex: 1;
+  color: var(--tx1);
+}
+
+.dre-drill-valor {
+  font-weight: 600;
+  text-align: right;
+  min-width: 100px;
+}
+
+@media (max-width: 600px) {
+  .dre-corpo { padding: 16px; }
+  .dre-expand-bloco { padding-left: 12px; }
 }

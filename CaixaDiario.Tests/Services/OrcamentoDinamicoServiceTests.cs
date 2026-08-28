@@ -122,4 +122,20 @@ public class OrcamentoDinamicoServiceTests
 
         Assert.Equal(0m, resultado.ReceitaEsperada);
     }
+
+    [Fact]
+    public void Calcular_IgnoraTransferenciasNaReceitaEsperadaENoGastoVariavel()
+    {
+        var mesComReceitaReal = CriarRegistro(Hoje.AddMonths(-1), entradas: 5000m);
+        // Resgate de investimento: entra como Entrada, mas não é receita de negócio.
+        mesComReceitaReal.Entradas.Add(new ItemFinanceiro { Descricao = "Resgate", Valor = 9000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
+
+        var mesAtual = CriarRegistro(Hoje);
+        mesAtual.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aporte", Valor = 3000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
+
+        var resultado = _sut.Calcular(new List<RegistroDiario> { mesComReceitaReal, mesAtual }, new List<ContaRecorrente>(), new List<MetaAnual>());
+
+        Assert.Equal(5000m, resultado.ReceitaEsperada);
+        Assert.Equal(0m, resultado.GastoVariavelAtual);
+    }
 }

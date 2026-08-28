@@ -75,6 +75,55 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("audit_logs", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.Categoria", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Ativa")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("ativa");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("Grupo")
+                        .HasColumnType("text")
+                        .HasColumnName("grupo");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("nome");
+
+                    b.Property<int>("Ordem")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("ordem");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tipo");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Nome")
+                        .IsUnique();
+
+                    b.HasIndex("Ativa", "Ordem");
+
+                    b.ToTable("categorias", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.ContaBancaria", b =>
                 {
                     b.Property<Guid>("Id")
@@ -213,9 +262,19 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("cliente_id");
 
+                    b.Property<Guid?>("ContaInvestimentoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_investimento_id");
+
                     b.Property<DateTime>("CriadoEm")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("criado_em");
+
+                    b.Property<string>("IconeSonho")
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("MargemPJ")
+                        .HasColumnType("numeric");
 
                     b.Property<int>("MesInicio")
                         .HasColumnType("integer");
@@ -238,12 +297,6 @@ namespace CaixaDiario.API.Migrations
                     b.Property<int>("PrazoAnos")
                         .HasColumnType("integer");
 
-                    b.Property<string>("IconeSonho")
-                        .HasColumnType("text");
-
-                    b.Property<decimal?>("MargemPJ")
-                        .HasColumnType("numeric");
-
                     b.Property<string>("Sonho")
                         .HasColumnType("text");
 
@@ -257,6 +310,8 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("numeric");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ContaInvestimentoId");
 
                     b.HasIndex("ClienteId", "Ano")
                         .IsUnique();
@@ -348,6 +403,117 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("registros_diarios", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.TransacaoImportada", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Categoria")
+                        .HasColumnType("text")
+                        .HasColumnName("categoria");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<Guid>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
+
+                    b.Property<DateOnly>("Data")
+                        .HasColumnType("date")
+                        .HasColumnName("data");
+
+                    b.Property<string>("Descricao")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("descricao");
+
+                    b.Property<string>("FitId")
+                        .HasColumnType("text")
+                        .HasColumnName("fit_id");
+
+                    b.Property<DateTime>("ImportadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("importado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Pendente")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Entrada")
+                        .HasColumnName("tipo");
+
+                    b.Property<decimal>("Valor")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContaBancariaId", "Status");
+
+                    b.ToTable("transacoes_importadas", (string)null);
+                });
+
+            modelBuilder.Entity("CaixaDiario.API.Models.Transferencia", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<Guid>("ContaDestinoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_destino_id");
+
+                    b.Property<Guid>("ContaOrigemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_origem_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateOnly>("Data")
+                        .HasColumnType("date")
+                        .HasColumnName("data");
+
+                    b.Property<string>("Descricao")
+                        .HasColumnType("text")
+                        .HasColumnName("descricao");
+
+                    b.Property<decimal>("Valor")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContaDestinoId");
+
+                    b.HasIndex("ContaOrigemId");
+
+                    b.HasIndex("ClienteId", "Data");
+
+                    b.ToTable("transferencias", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.Usuario", b =>
                 {
                     b.Property<Guid>("Id")
@@ -435,7 +601,13 @@ namespace CaixaDiario.API.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaInvestimento")
+                        .WithMany()
+                        .HasForeignKey("ContaInvestimentoId");
+
                     b.Navigation("Cliente");
+
+                    b.Navigation("ContaInvestimento");
                 });
 
             modelBuilder.Entity("CaixaDiario.API.Models.RegistroDiario", b =>
@@ -457,69 +629,6 @@ namespace CaixaDiario.API.Migrations
 
             modelBuilder.Entity("CaixaDiario.API.Models.TransacaoImportada", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("ContaBancariaId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("conta_bancaria_id");
-
-                    b.Property<Guid>("ClienteId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("cliente_id");
-
-                    b.Property<DateOnly>("Data")
-                        .HasColumnType("date")
-                        .HasColumnName("data");
-
-                    b.Property<decimal>("Valor")
-                        .HasColumnType("numeric(18,2)")
-                        .HasColumnName("valor");
-
-                    b.Property<string>("Descricao")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("descricao");
-
-                    b.Property<string>("FitId")
-                        .HasColumnType("text")
-                        .HasColumnName("fit_id");
-
-                    b.Property<string>("Tipo")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("Entrada")
-                        .HasColumnName("tipo");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("Pendente")
-                        .HasColumnName("status");
-
-                    b.Property<string>("Categoria")
-                        .HasColumnType("text")
-                        .HasColumnName("categoria");
-
-                    b.Property<DateTime>("ImportadoEm")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("importado_em")
-                        .HasDefaultValueSql("NOW()");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ContaBancariaId", "Status");
-
-                    b.ToTable("transacoes_importadas", (string)null);
-                });
-
-            modelBuilder.Entity("CaixaDiario.API.Models.TransacaoImportada", b =>
-                {
                     b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaBancaria")
                         .WithMany()
                         .HasForeignKey("ContaBancariaId")
@@ -527,6 +636,33 @@ namespace CaixaDiario.API.Migrations
                         .IsRequired();
 
                     b.Navigation("ContaBancaria");
+                });
+
+            modelBuilder.Entity("CaixaDiario.API.Models.Transferencia", b =>
+                {
+                    b.HasOne("CaixaDiario.API.Models.Usuario", "Cliente")
+                        .WithMany()
+                        .HasForeignKey("ClienteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaDestino")
+                        .WithMany()
+                        .HasForeignKey("ContaDestinoId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaOrigem")
+                        .WithMany()
+                        .HasForeignKey("ContaOrigemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Cliente");
+
+                    b.Navigation("ContaDestino");
+
+                    b.Navigation("ContaOrigem");
                 });
 
             modelBuilder.Entity("CaixaDiario.API.Models.ContaBancaria", b =>

@@ -18,8 +18,11 @@ public class MetaAnual
     public decimal TotalInvestido { get; set; }
     public decimal? MargemPJ { get; set; }
     public string? IconeSonho { get; set; }
+    // Conta de investimento cujo saldo alimenta automaticamente o progresso desta meta.
+    public Guid? ContaInvestimentoId { get; set; }
     public DateTime CriadoEm { get; set; }
     public DateTime AtualizadoEm { get; set; }
 
     public Usuario Cliente { get; set; } = null!;
+    public ContaBancaria? ContaInvestimento { get; set; }
 }

@@ -1,22 +1,26 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import LoginPage from './pages/LoginPage'
 import AdminOverviewPage from './pages/admin/AdminOverviewPage'
 import AdminClientsPage from './pages/admin/AdminClientsPage'
 import AdminCaixaPage from './pages/admin/AdminCaixaPage'
 import ClientCaixaPage from './pages/client/ClientCaixaPage'
-import ClientHistoricoPage from './pages/client/ClientHistoricoPage'
-import ClientGraficoPage from './pages/client/ClientGraficoPage'
 import ClientContasPage from './pages/client/ClientContasPage'
 import ClientDashboardPage from './pages/client/ClientDashboardPage'
-import ClientExportacaoPage from './pages/client/ClientExportacaoPage'
-import ClientContasBancariasPage from './pages/client/ClientContasBancariasPage'
+import ClientBancoPage from './pages/client/ClientBancoPage'
 import ClientContaDetalhePage from './pages/client/ClientContaDetalhePage'
 import ClientExtratoRevisaoPage from './pages/client/ClientExtratoRevisaoPage'
-import ClientDrePage from './pages/client/ClientDrePage'
-import ClientProjecaoPage from './pages/client/ClientProjecaoPage'
+import ResultadosPage from './pages/client/ResultadosPage'
+import RelatoriosPage from './pages/client/RelatoriosPage'
+import ConfiguracoesPage from './pages/client/ConfiguracoesPage'
 import Layout from './components/Layout/Layout'
 import InstallPrompt from './components/InstallPrompt'
+
+/** Redireciona uma rota antiga com :contaId para o novo path equivalente sob /banco. */
+function RedirectContaId({ para }: { para: (contaId: string) => string }) {
+  const { contaId } = useParams()
+  return <Navigate to={para(contaId ?? '')} replace />
+}
 
 function ProtectedRoutes() {
   const { user } = useAuth()
@@ -41,15 +45,32 @@ function ProtectedRoutes() {
         <Route path="/dashboard"  element={<ClientDashboardPage />} />
         <Route path="/caixa"      element={<ClientCaixaPage />} />
         <Route path="/contas"     element={<ClientContasPage />} />
-        <Route path="/historico"  element={<ClientHistoricoPage />} />
-        <Route path="/grafico"    element={<ClientGraficoPage />} />
-        <Route path="/exportar"         element={<ClientExportacaoPage />} />
-        <Route path="/contas-bancarias" element={<ClientContasBancariasPage />} />
-        <Route path="/contas-bancarias/:contaId" element={<ClientContaDetalhePage />} />
-        <Route path="/extrato/:contaId" element={<ClientExtratoRevisaoPage />} />
-        <Route path="/dre"       element={<ClientDrePage />} />
-        <Route path="/projecao" element={<ClientProjecaoPage />} />
-        <Route path="*"           element={<Navigate to="/dashboard" replace />} />
+
+        {/* Banco: operação (extrato, importação) — cadastro fica em Configurações */}
+        <Route path="/banco" element={<ClientBancoPage />} />
+        <Route path="/banco/:contaId" element={<ClientContaDetalhePage />} />
+        <Route path="/banco/extrato/:contaId" element={<ClientExtratoRevisaoPage />} />
+
+        {/* Resultados: DRE, Projeção, Indicadores (subabas na URL) */}
+        <Route path="/resultados/*" element={<ResultadosPage />} />
+
+        {/* Relatórios: Histórico, Exportar (subabas na URL) */}
+        <Route path="/relatorios/*" element={<RelatoriosPage />} />
+
+        {/* Configurações: Plano de Contas, Contas Bancárias (subabas na URL) */}
+        <Route path="/configuracoes/*" element={<ConfiguracoesPage />} />
+
+        {/* Redirects de compatibilidade — rotas antigas continuam funcionando */}
+        <Route path="/dre" element={<Navigate to="/resultados/dre" replace />} />
+        <Route path="/projecao" element={<Navigate to="/resultados/projecao" replace />} />
+        <Route path="/grafico" element={<Navigate to="/resultados/indicadores" replace />} />
+        <Route path="/historico" element={<Navigate to="/relatorios/historico" replace />} />
+        <Route path="/exportar" element={<Navigate to="/relatorios/exportar" replace />} />
+        <Route path="/contas-bancarias" element={<Navigate to="/banco" replace />} />
+        <Route path="/contas-bancarias/:contaId" element={<RedirectContaId para={id => `/banco/${id}`} />} />
+        <Route path="/extrato/:contaId" element={<RedirectContaId para={id => `/banco/extrato/${id}`} />} />
+
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Layout>
   )

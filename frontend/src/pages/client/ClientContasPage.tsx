@@ -12,9 +12,19 @@ interface Props { clienteIdOverride?: string }
 
 interface ContaView {
   registroData: string
+  // Conta bancária do RegistroDiario onde esta ContaProvisionada realmente vive — necessário pra
+  // localizar o registro sem ambiguidade quando existe mais de um registro na mesma data (uma por
+  // conta bancária diferente).
+  registroContaId?: string
   tipo: 'receber' | 'pagar'
   index: number
   conta: ContaProvisionada
+}
+
+interface LancamentoEncontrado {
+  id: string
+  descricao: string
+  valor: number
 }
 
 function fmtNum(n: number) {
@@ -53,6 +63,12 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     conta: ContaProvisionada
     registroData: string
   } | null>(null)
+
+  // ── Baixa (marcar como recebido/pago): permite trocar a conta e evita lançamento duplicado ──
+  const [modalBaixa, setModalBaixa] = useState(false)
+  const [baixaView, setBaixaView] = useState<ContaView | null>(null)
+  const [baixaContaId, setBaixaContaId] = useState('')
+  const [confirmandoBaixa, setConfirmandoBaixa] = useState(false)
 
   useEffect(() => {
     if (!clienteId) return
@@ -145,8 +161,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const todasContas = useMemo<ContaView[]>(() => {
     const acc: ContaView[] = []
     for (const reg of registros) {
-      reg.contasAReceber.forEach((c, i) => acc.push({ registroData: reg.data, tipo: 'receber', index: i, conta: c }))
-      reg.contasAPagar.forEach((c, i) => acc.push({ registroData: reg.data, tipo: 'pagar', index: i, conta: c }))
+      reg.contasAReceber.forEach((c, i) => acc.push({ registroData: reg.data, registroContaId: reg.contaBancariaId, tipo: 'receber', index: i, conta: c }))
+      reg.contasAPagar.forEach((c, i) => acc.push({ registroData: reg.data, registroContaId: reg.contaBancariaId, tipo: 'pagar', index: i, conta: c }))
     }
     return acc.sort((a, b) => {
       const da = a.conta.dataVencimento ?? a.registroData
@@ -161,17 +177,66 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const pagasList = todasContas.filter(c => c.tipo === 'pagar' && c.conta.pago)
   const contaSelecionada = contasBancarias.find(c => c.id === contaSelecionadaId)
 
-  async function togglePago(view: ContaView) {
+  function origemRegistro(view: ContaView) {
+    return registros.find(r => r.data === view.registroData && r.contaBancariaId === view.registroContaId)
+      ?? registros.find(r => r.data === view.registroData)
+  }
+
+  async function desfazerBaixa(view: ContaView) {
     if (!clienteId) return
-    const reg = registros.find(r => r.data === view.registroData)
+    const reg = origemRegistro(view)
     if (!reg) return
     await salvar({
-      clienteId, data: reg.data, saldoInicio: reg.saldoInicio,
+      clienteId, contaBancariaId: reg.contaBancariaId, data: reg.data, saldoInicio: reg.saldoInicio,
       entradas: reg.entradas, saidas: reg.saidas,
-      contasAReceber: reg.contasAReceber.map((c, i) => view.tipo === 'receber' && i === view.index ? { ...c, pago: !c.pago } : c),
-      contasAPagar: reg.contasAPagar.map((c, i) => view.tipo === 'pagar' && i === view.index ? { ...c, pago: !c.pago } : c),
+      contasAReceber: reg.contasAReceber.map((c, i) => view.tipo === 'receber' && i === view.index ? { ...c, pago: false, lancamentoVinculadoId: undefined } : c),
+      contasAPagar: reg.contasAPagar.map((c, i) => view.tipo === 'pagar' && i === view.index ? { ...c, pago: false, lancamentoVinculadoId: undefined } : c),
       saldoConfirmado: reg.saldoConfirmado,
     })
+  }
+
+  function togglePago(view: ContaView) {
+    if (view.conta.pago) { desfazerBaixa(view); return }
+    setBaixaView(view)
+    setBaixaContaId(view.conta.contaBancariaId || contaSelecionadaId)
+    setModalBaixa(true)
+  }
+
+  // Lançamento real (Entrada se receber, Saída se pagar) na conta+data escolhidas na baixa,
+  // com o mesmo valor — indício de que esse dinheiro já foi lançado por outro caminho.
+  const lancamentoDuplicado = useMemo<LancamentoEncontrado | null>(() => {
+    if (!baixaView) return null
+    const regDaConta = registros.find(r => r.data === baixaView.registroData && r.contaBancariaId === baixaContaId)
+    if (!regDaConta) return null
+    const itens = baixaView.tipo === 'receber' ? regDaConta.entradas : regDaConta.saidas
+    const item = itens.find(i => Math.abs(i.valor - baixaView.conta.valor) < 0.01)
+    return item ? { id: item.id ?? '', descricao: item.descricao, valor: item.valor } : null
+  }, [baixaView, baixaContaId, registros])
+
+  async function confirmarBaixa(vincular: boolean) {
+    if (!baixaView || !clienteId) return
+    const reg = origemRegistro(baixaView)
+    if (!reg) return
+    setConfirmandoBaixa(true)
+    try {
+      const lancamentoVinculadoId = vincular && lancamentoDuplicado?.id ? lancamentoDuplicado.id : undefined
+      await salvar({
+        clienteId, contaBancariaId: reg.contaBancariaId, data: reg.data, saldoInicio: reg.saldoInicio,
+        entradas: reg.entradas, saidas: reg.saidas,
+        contasAReceber: reg.contasAReceber.map((c, i) => baixaView.tipo === 'receber' && i === baixaView.index
+          ? { ...c, pago: true, contaBancariaId: baixaContaId, lancamentoVinculadoId } : c),
+        contasAPagar: reg.contasAPagar.map((c, i) => baixaView.tipo === 'pagar' && i === baixaView.index
+          ? { ...c, pago: true, contaBancariaId: baixaContaId, lancamentoVinculadoId } : c),
+        saldoConfirmado: reg.saldoConfirmado,
+      })
+      setMsg(vincular ? 'Baixa vinculada ao lançamento existente.' : 'Baixa confirmada.')
+      setModalBaixa(false)
+      setBaixaView(null)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setConfirmandoBaixa(false)
+    }
   }
 
   async function confirmarDuplicata(linkToExisting: boolean) {
@@ -202,8 +267,12 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
+  const contaCaixaPadrao = contasBancarias.find(c => c.tipo === 'Caixa') ?? contasBancarias[0]
+
   const renderConta = (view: ContaView) => {
-    const contaNome = contasBancarias.find(c => c.id === view.conta.contaBancariaId)?.nome ?? 'Conta padrão'
+    // Contas cadastradas antes de existir esse campo (contaBancariaId nulo) resolvem pra Caixa —
+    // nunca aparecem sem conta nenhuma.
+    const contaNome = contasBancarias.find(c => c.id === view.conta.contaBancariaId)?.nome ?? contaCaixaPadrao?.nome ?? 'Conta padrão'
 
     return (
     <div key={`${view.registroData}-${view.tipo}-${view.index}`} className={`conta-item ${view.conta.pago ? 'pago' : ''}`}>
@@ -374,6 +443,49 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         <p style={{ color: 'var(--tx3)', marginBottom: 8 }}>
           Encontramos uma conta parecida para a mesma descrição, valor e data{contaSelecionada ? ` em ${contaSelecionada.nome}` : ''}. Você pode vincular a entrada existente ou criar uma nova.
         </p>
+      </Modal>
+
+      <Modal
+        open={modalBaixa}
+        title={baixaView?.tipo === 'receber' ? '📥 Confirmar recebimento' : '📤 Confirmar pagamento'}
+        onClose={() => { setModalBaixa(false); setBaixaView(null) }}
+        footer={lancamentoDuplicado ? (
+          <>
+            <button className="btn-cancel" onClick={() => { setModalBaixa(false); setBaixaView(null) }}>Cancelar</button>
+            <button className="btn-confirm" onClick={() => confirmarBaixa(true)} disabled={confirmandoBaixa}>Vincular a esse lançamento</button>
+            <button className="btn-confirm" onClick={() => confirmarBaixa(false)} disabled={confirmandoBaixa}>Criar novo</button>
+          </>
+        ) : (
+          <>
+            <button className="btn-cancel" onClick={() => { setModalBaixa(false); setBaixaView(null) }}>Cancelar</button>
+            <button className="btn-confirm" onClick={() => confirmarBaixa(false)} disabled={confirmandoBaixa}>
+              {confirmandoBaixa ? 'Confirmando...' : 'Confirmar'}
+            </button>
+          </>
+        )}
+      >
+        {baixaView && (
+          <>
+            <div className="conta-info" style={{ marginBottom: 12 }}>
+              <div className="conta-desc">{baixaView.conta.descricao}</div>
+              <div className="conta-meta">{fmtBRL(baixaView.conta.valor)} · {fmtDate(baixaView.registroData)}</div>
+            </div>
+            <div className="inp-group">
+              <label>Conta bancária</label>
+              <select value={baixaContaId} onChange={e => setBaixaContaId(e.target.value)}>
+                {contasBancarias.filter(c => c.ativa).map(c => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+            </div>
+            {lancamentoDuplicado && (
+              <p style={{ color: 'var(--warning)', marginTop: 8, fontSize: 13 }}>
+                Já existe um lançamento de {fmtBRL(baixaView.conta.valor)} nesta conta nesta data
+                ("{lancamentoDuplicado.descricao}"). Vincular a baixa a esse lançamento ou criar um novo?
+              </p>
+            )}
+          </>
+        )}
       </Modal>
 
       {recorrentes.length > 0 && (

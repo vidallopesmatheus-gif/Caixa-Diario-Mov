@@ -87,11 +87,18 @@ export async function obterFluxoProjetado(clienteId: string, dias = 90): Promise
 export interface DreCategoria {
   nome: string
   total: number
+  percentual: number | null
 }
 
 export interface DreLinha {
   grupo: string
   total: number
+  categorias: DreCategoria[]
+}
+
+export interface DreLinhaVertical {
+  total: number
+  percentual: number | null
   categorias: DreCategoria[]
 }
 
@@ -101,6 +108,23 @@ export interface Dre {
   totalDespesas: number
   resultado: number
   margem: number | null
+
+  // Análise vertical (base: Receita Bruta = 100%)
+  receitaBrutaPercentual: number | null
+  deducoes: DreLinhaVertical
+  receitaLiquida: number
+  receitaLiquidaPercentual: number | null
+  custosVariaveis: DreLinhaVertical
+  margemContribuicao: number
+  margemContribuicaoPercentual: number | null
+  despesasFixas: DreLinhaVertical
+  resultadoOperacional: number
+  resultadoOperacionalPercentual: number | null
+  receitaFinanceira: DreLinhaVertical
+  despesasNaoOperacionais: DreLinhaVertical
+  naoClassificado: DreLinhaVertical
+  resultadoLiquido: number
+  resultadoLiquidoPercentual: number | null
 }
 
 export async function obterDre(
@@ -124,6 +148,40 @@ export interface CategoriaIndicador {
   variacaoPercentual: number | null
 }
 
+export interface PontoEquilibrio {
+  disponivel: boolean
+  motivoIndisponivel: string | null
+  valorMensal: number | null
+  valorPorDiaUtil: number | null
+  diasUteisNoMes: number | null
+  receitaAtual: number
+  distancia: number | null
+  distanciaPercentual: number | null
+}
+
+export interface FolegoCaixa {
+  disponivel: boolean
+  motivoIndisponivel: string | null
+  saldoDisponivel: number
+  custoFixoMedioMensal: number | null
+  meses: number | null
+  faixa: 'critico' | 'atencao' | 'confortavel' | 'indisponivel'
+}
+
+export interface CustoFixoMensal {
+  mes: string
+  receita: number
+  custoFixo: number
+  percentual: number | null
+}
+
+export interface PrazoRecebimento {
+  disponivel: boolean
+  motivoIndisponivel: string | null
+  mediaDias: number | null
+  quantidadeAmostras: number
+}
+
 export interface IndicadoresDecisao {
   dre: Dre
   custoFixo: number
@@ -134,6 +192,10 @@ export interface IndicadoresDecisao {
   mesesComAtividade: number
   variacaoReceitaMesAnterior: number | null
   variacaoReceitaAnoAnterior: number | null
+  pontoEquilibrio: PontoEquilibrio
+  folegoCaixa: FolegoCaixa
+  custoFixoMensal: CustoFixoMensal[]
+  prazoRecebimento: PrazoRecebimento
 }
 
 export async function obterIndicadores(clienteId: string, mesesEvolucao = 13): Promise<IndicadoresDecisao> {

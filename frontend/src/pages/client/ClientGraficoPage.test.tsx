@@ -43,10 +43,25 @@ function mesesEvolucao(n: number, receitaBase = 1000) {
 const mockIndicadores: IndicadoresDecisao = {
   dre: {
     receitaBruta: 1000,
-    gruposDespesa: [{ grupo: 'Despesas Administrativas', total: 400, categorias: [{ nome: 'Aluguel', total: 400 }] }],
+    gruposDespesa: [{ grupo: 'Despesas Administrativas', total: 400, categorias: [{ nome: 'Aluguel', total: 400, percentual: 40 }] }],
     totalDespesas: 400,
     resultado: 600,
     margem: 60,
+    receitaBrutaPercentual: 100,
+    deducoes: { total: 0, percentual: 0, categorias: [] },
+    receitaLiquida: 1000,
+    receitaLiquidaPercentual: 100,
+    custosVariaveis: { total: 0, percentual: 0, categorias: [] },
+    margemContribuicao: 1000,
+    margemContribuicaoPercentual: 100,
+    despesasFixas: { total: 400, percentual: 40, categorias: [{ nome: 'Aluguel', total: 400, percentual: 40 }] },
+    resultadoOperacional: 600,
+    resultadoOperacionalPercentual: 60,
+    receitaFinanceira: { total: 0, percentual: 0, categorias: [] },
+    despesasNaoOperacionais: { total: 0, percentual: 0, categorias: [] },
+    naoClassificado: { total: 0, percentual: 0, categorias: [] },
+    resultadoLiquido: 600,
+    resultadoLiquidoPercentual: 60,
   },
   custoFixo: 400,
   custoVariavel: 0,
@@ -58,6 +73,16 @@ const mockIndicadores: IndicadoresDecisao = {
   mesesComAtividade: 13,
   variacaoReceitaMesAnterior: 10,
   variacaoReceitaAnoAnterior: 25,
+  pontoEquilibrio: {
+    disponivel: true, motivoIndisponivel: null, valorMensal: 500, valorPorDiaUtil: 25,
+    diasUteisNoMes: 20, receitaAtual: 1000, distancia: 500, distanciaPercentual: 100,
+  },
+  folegoCaixa: {
+    disponivel: true, motivoIndisponivel: null, saldoDisponivel: 3000,
+    custoFixoMedioMensal: 400, meses: 7.5, faixa: 'confortavel',
+  },
+  custoFixoMensal: mesesEvolucao(6).map(e => ({ mes: e.mes, receita: e.receita, custoFixo: 400, percentual: 40 })),
+  prazoRecebimento: { disponivel: true, motivoIndisponivel: null, mediaDias: 2, quantidadeAmostras: 8 },
 }
 
 const mockRegistrosReturn = {

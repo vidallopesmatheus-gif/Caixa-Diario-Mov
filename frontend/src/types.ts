@@ -9,19 +9,32 @@ export interface Usuario {
   criadoPor?: string
 }
 
+export type TipoCusto = 'Receita' | 'CustoFixo' | 'CustoVariavel' | 'DespesaNaoOperacional'
+
 export interface ItemFinanceiro {
+  id?: string
   descricao: string
   valor: number
   categoria?: string
-  tipoCusto?: 'Receita' | 'CustoFixo' | 'CustoVariavel'
+  tipoCusto?: TipoCusto
+  // Preenchido só quando tipoCusto === 'Transferencia'; opaco pro usuário, só precisa sobreviver
+  // ao carregar/salvar de novo o dia (senão o estorno da transferência perde o vínculo).
+  transferenciaId?: string
+  // Opacos pro usuário — só precisam sobreviver ao carregar/salvar de novo o dia.
+  fitId?: string
+  pendenteCategorizacao?: boolean
 }
 
 export interface ItemFinanceiroSaida {
+  id?: string
   descricao: string
   valor: number
   categoria: string
   subcategoria: string
-  tipoCusto?: 'Receita' | 'CustoFixo' | 'CustoVariavel'
+  tipoCusto?: TipoCusto
+  transferenciaId?: string
+  fitId?: string
+  pendenteCategorizacao?: boolean
 }
 
 
@@ -34,6 +47,16 @@ export interface ContaProvisionada {
   recorrenciaId?: string
   dataBaixa?: string
   contaBancariaId?: string
+  // Preenchido quando a baixa foi vinculada a um lançamento (Entrada/Saída) já existente,
+  // em vez de gerar um novo — evita contar o mesmo dinheiro duas vezes no saldo.
+  lancamentoVinculadoId?: string
+}
+
+export interface MetaVinculada {
+  id: string
+  ano: number
+  sonho?: string
+  valorSonho: number
 }
 
 export interface ContaBancaria {
@@ -45,8 +68,15 @@ export interface ContaBancaria {
   saldoAtual: number
   entradasMes: number
   saidasMes: number
+  pendentesCategorizacao: number
   ativa: boolean
   dataCriacao: string
+  // Só vêm preenchidos quando tipo === 'Investimento'
+  totalAportado?: number
+  rendimentoAcumulado?: number
+  rentabilidadePercentual?: number | null
+  metasVinculadas?: MetaVinculada[]
+  progressoCombinadoPercentual?: number | null
 }
 
 export interface LancamentoExtrato {
@@ -55,6 +85,7 @@ export interface LancamentoExtrato {
   categoria?: string
   valor: number
   saldoAcumulado: number
+  pendenteCategorizacao: boolean
 }
 
 export interface PendenciasConta {
@@ -94,13 +125,23 @@ export interface ContaRecorrente {
 
 export interface CategoriaItem {
   nome: string
-  tipoCusto: 'Receita' | 'CustoFixo' | 'CustoVariavel'
+  tipoCusto: TipoCusto
   grupo?: string
 }
 
 export interface Categorias {
   entradas: CategoriaItem[]
   saidas: CategoriaItem[]
+}
+
+/** Categoria completa (Configurações > Plano de Contas), inclui inativas. */
+export interface CategoriaAdmin {
+  id: string
+  nome: string
+  tipo: TipoCusto
+  grupo?: string
+  ordem: number
+  ativa: boolean
 }
 
 export interface MetaAnual {
@@ -120,6 +161,7 @@ export interface MetaAnual {
   totalInvestido: number
   margemPJ?: number
   iconeSonho?: string
+  contaInvestimentoId?: string
 }
 
 export interface LoginResponse {
@@ -142,17 +184,31 @@ export interface ChatMessage {
   content: string
 }
 
-export interface TransacaoImportada {
-  id: string
-  contaBancariaId: string
+/** Transação encontrada no arquivo antes de qualquer persistência — só pré-visualização. */
+export interface PreviewTransacao {
+  indice: number
   data: string
   valor: number
   descricao: string
   tipo: 'Entrada' | 'Saida'
-  status: 'Pendente' | 'Confirmada' | 'Ignorada'
-  categoria?: string
   fitId?: string
-  duplicada: boolean
+  jaImportada: boolean
+}
+
+export interface ResultadoImportacao {
+  totalImportadas: number
+  totalPendentesCategorizacao: number
+  totalEntradas: number
+  totalSaidas: number
+}
+
+/** Lançamento já real (afeta saldo) que ainda não tem categoria. */
+export interface PendenteCategorizacao {
+  id: string
+  data: string
+  descricao: string
+  valor: number
+  tipo: 'Entrada' | 'Saida'
 }
 
 export interface ChatResponse {

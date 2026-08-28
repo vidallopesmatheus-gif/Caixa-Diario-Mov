@@ -125,6 +125,38 @@ public class RegistroServiceTests
     }
 
     [Fact]
+    public async Task SalvarAsync_ComLancamentoDeTransferencia_PreservaTransferenciaIdNoRoundTrip()
+    {
+        // Um dia com um lançamento de transferência já salvo (TransferenciaService) precisa
+        // sobreviver a um resave normal da tela de Caixa sem perder o vínculo — senão o Estornar
+        // não consegue mais achar a ponta certa pra remover (TransferenciaId some silenciosamente).
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var transferenciaId = Guid.NewGuid();
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId,
+            Data = hoje,
+            Entradas = new List<ItemFinanceiroDto>
+            {
+                new() { Descricao = "Transferência recebida", Valor = 500m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId },
+            },
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new(),
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        var entrada = Assert.Single(resultado.Entradas);
+        Assert.Equal(transferenciaId, entrada.TransferenciaId);
+    }
+
+    [Fact]
     public async Task SalvarAsync_ContaDuplicadaNaoAjustaSaldo()
     {
         var clienteId = Guid.NewGuid();
@@ -525,6 +557,86 @@ public class RegistroServiceTests
         Assert.Equal(1200m, resultado.SaldoFinal); // 1000 + 200 (reverte a saída)
         Assert.False(resultado.ContasPagar[0].Pago);
         Assert.Null(resultado.ContasPagar[0].DataBaixa);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_BaixarContaReceberVinculadaALancamentoExistente_NaoDuplicaOSaldo()
+    {
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var lancamentoId = Guid.NewGuid();
+        var existente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            // O dinheiro já está contado: entrada manual de 500 já bate com a "Venda A".
+            Entradas = new() { new() { Id = lancamentoId, Descricao = "Pix recebido", Valor = 500m } },
+            Saidas = new(),
+            ContasReceber = new List<ContaProvisionada> { new() { Descricao = "Venda A", Valor = 500m, Pago = false } },
+            ContasPagar = new(),
+            SaldoFinal = 1500m,
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = hoje,
+            Entradas = new List<ItemFinanceiroDto> { new() { Id = lancamentoId, Descricao = "Pix recebido", Valor = 500m } },
+            Saidas = new(),
+            ContasReceber = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Venda A", Valor = 500m, Pago = true, LancamentoVinculadoId = lancamentoId },
+            },
+            ContasPagar = new(),
+            SaldoFinal = 1500m, // frontend reenvia o saldo inalterado — a entrada já estava contada
+        };
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(1500m, resultado.SaldoFinal); // sem duplicar: não soma mais 500
+        Assert.True(resultado.ContasReceber[0].Pago);
+        Assert.Equal(lancamentoId, resultado.ContasReceber[0].LancamentoVinculadoId);
+        Assert.Equal(hoje, resultado.ContasReceber[0].DataBaixa);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_DesfazerBaixaVinculada_NaoAlteraSaldo()
+    {
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var ontem = hoje.AddDays(-1);
+        var lancamentoId = Guid.NewGuid();
+        var existente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new() { new() { Id = lancamentoId, Descricao = "Pix recebido", Valor = 500m } },
+            Saidas = new(),
+            ContasReceber = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Venda A", Valor = 500m, Pago = true, DataBaixa = ontem, LancamentoVinculadoId = lancamentoId },
+            },
+            ContasPagar = new(),
+            SaldoFinal = 1500m,
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = hoje,
+            Entradas = new List<ItemFinanceiroDto> { new() { Id = lancamentoId, Descricao = "Pix recebido", Valor = 500m } },
+            Saidas = new(),
+            ContasReceber = new List<ContaProvisionadaDto> { new() { Descricao = "Venda A", Valor = 500m, Pago = false } },
+            ContasPagar = new(),
+            SaldoFinal = 1500m,
+        };
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(1500m, resultado.SaldoFinal); // nada a reverter: a baixa vinculada nunca somou nada
+        Assert.False(resultado.ContasReceber[0].Pago);
+        Assert.Null(resultado.ContasReceber[0].DataBaixa);
+        Assert.Null(resultado.ContasReceber[0].LancamentoVinculadoId);
     }
 
     [Fact]

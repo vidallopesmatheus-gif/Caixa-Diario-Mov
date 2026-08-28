@@ -18,6 +18,9 @@ public class MetricasServiceTests
     private static ItemFinanceiro Item(string desc, decimal valor, string? categoria = null, string? tipoCusto = null) =>
         new() { Descricao = desc, Valor = valor, Categoria = categoria, TipoCusto = tipoCusto };
 
+    private static Categoria Cat(string nome, string tipo, string? grupo = null, int ordem = 0) =>
+        new() { Id = Guid.NewGuid(), Nome = nome, Tipo = tipo, Grupo = grupo, Ordem = ordem, Ativa = true };
+
     [Fact]
     public void CalcularPeriodo_SemCategorias_EbitdaNull()
     {
@@ -361,6 +364,185 @@ public class MetricasServiceTests
         Assert.Null(categoria.VariacaoPercentual);
     }
 
+    // ---- Ponto de Equilíbrio ----
+
+    [Fact]
+    public void CalcularIndicadores_PontoEquilibrio_CalculaValorMensalDiaUtilEDistancia()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reg = CriarRegistro(hoje,
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Insumos", 200m, "Insumos/Mercadoria", "CustoVariavel"),
+                Item("Aluguel", 300m, "Aluguel", "CustoFixo"),
+            });
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).PontoEquilibrio;
+
+        // MC = 1000 - 200 = 800 (80% da receita); PE = 300 / 0.8 = 375
+        Assert.True(resultado.Disponivel);
+        Assert.Equal(375m, resultado.ValorMensal);
+        Assert.Equal(1000m, resultado.ReceitaAtual);
+        Assert.Equal(625m, resultado.Distancia); // 1000 - 375
+        Assert.NotNull(resultado.DiasUteisNoMes);
+        Assert.Equal(Math.Round(375m / resultado.DiasUteisNoMes!.Value, 2), resultado.ValorPorDiaUtil);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_PontoEquilibrio_CustoVariavelMaiorQueReceita_Indisponivel()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reg = CriarRegistro(hoje,
+            new() { Item("Venda", 100m, "Vendas", "Receita") },
+            new() { Item("Insumos", 200m, "Insumos/Mercadoria", "CustoVariavel") });
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).PontoEquilibrio;
+
+        Assert.False(resultado.Disponivel);
+        Assert.Null(resultado.ValorMensal);
+        Assert.NotNull(resultado.MotivoIndisponivel);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_PontoEquilibrio_SemReceita_Indisponivel()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reg = CriarRegistro(hoje, new(), new() { Item("Aluguel", 300m, "Aluguel", "CustoFixo") });
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).PontoEquilibrio;
+
+        Assert.False(resultado.Disponivel);
+        Assert.NotNull(resultado.MotivoIndisponivel);
+    }
+
+    // ---- Fôlego de Caixa ----
+
+    [Fact]
+    public void CalcularIndicadores_FolegoCaixa_CalculaMesesEFaixaConfortavel()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var contaId = Guid.NewGuid();
+        var registros = new List<RegistroDiario>();
+        for (int i = 0; i < 3; i++)
+        {
+            var reg = CriarRegistro(hoje.AddMonths(-i),
+                new() { Item("Venda", 2000m, "Vendas", "Receita") },
+                new() { Item("Aluguel", 1000m, "Aluguel", "CustoFixo") },
+                saldoFinal: 5000m - i * 100);
+            reg.ContaBancariaId = contaId;
+            registros.Add(reg);
+        }
+
+        var resultado = _sut.CalcularIndicadores(registros).FolegoCaixa;
+
+        Assert.True(resultado.Disponivel);
+        Assert.Equal(1000m, resultado.CustoFixoMedioMensal);
+        Assert.Equal(5000m, resultado.SaldoDisponivel); // registro mais recente (mês atual) da conta
+        Assert.Equal(5.0m, resultado.Meses);
+        Assert.Equal("confortavel", resultado.Faixa);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_FolegoCaixa_SaldoBaixo_FaixaCritica()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var contaId = Guid.NewGuid();
+        var reg = CriarRegistro(hoje,
+            new() { Item("Venda", 2000m, "Vendas", "Receita") },
+            new() { Item("Aluguel", 1000m, "Aluguel", "CustoFixo") },
+            saldoFinal: 500m);
+        reg.ContaBancariaId = contaId;
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).FolegoCaixa;
+
+        Assert.True(resultado.Disponivel);
+        Assert.Equal(0.5m, resultado.Meses);
+        Assert.Equal("critico", resultado.Faixa);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_FolegoCaixa_SemCustoFixo_Indisponivel()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reg = CriarRegistro(hoje, new() { Item("Venda", 2000m, "Vendas", "Receita") }, new());
+        reg.ContaBancariaId = Guid.NewGuid();
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).FolegoCaixa;
+
+        Assert.False(resultado.Disponivel);
+        Assert.NotNull(resultado.MotivoIndisponivel);
+    }
+
+    // ---- Custo Fixo Mensal (série de 6 meses) ----
+
+    [Fact]
+    public void CalcularIndicadores_CustoFixoMensal_RetornaSeisMesesComPercentual()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reg = CriarRegistro(hoje,
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new() { Item("Aluguel", 400m, "Aluguel", "CustoFixo") });
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).CustoFixoMensal;
+
+        Assert.Equal(6, resultado.Count);
+        var mesAtual = resultado[^1];
+        Assert.Equal(1000m, mesAtual.Receita);
+        Assert.Equal(400m, mesAtual.CustoFixo);
+        Assert.Equal(40.0m, mesAtual.Percentual);
+    }
+
+    // ---- Prazo Médio de Recebimento ----
+
+    [Fact]
+    public void CalcularIndicadores_PrazoRecebimento_PoucasAmostras_Indisponivel()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reg = CriarRegistro(hoje, new(), new());
+        reg.ContasReceber = new()
+        {
+            new() { Descricao = "A", Valor = 100m, Pago = true, DataVencimento = hoje, DataBaixa = hoje },
+        };
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).PrazoRecebimento;
+
+        Assert.False(resultado.Disponivel);
+        Assert.Equal(1, resultado.QuantidadeAmostras);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_PrazoRecebimento_MaioriaMesmoDia_IndisponivelComMensagemExplicativa()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reg = CriarRegistro(hoje, new(), new());
+        reg.ContasReceber = Enumerable.Range(0, 6)
+            .Select(i => new ContaProvisionada { Descricao = $"C{i}", Valor = 100m, Pago = true, DataVencimento = hoje.AddDays(-i), DataBaixa = hoje.AddDays(-i) })
+            .ToList();
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).PrazoRecebimento;
+
+        Assert.False(resultado.Disponivel);
+        Assert.Contains("mesma data prevista", resultado.MotivoIndisponivel);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_PrazoRecebimento_ComAtrasoReal_CalculaMediaDias()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reg = CriarRegistro(hoje, new(), new());
+        var atrasos = new[] { 5, 10, 3, 7, 15 };
+        reg.ContasReceber = atrasos
+            .Select((d, i) => new ContaProvisionada { Descricao = $"C{i}", Valor = 100m, Pago = true, DataVencimento = hoje.AddDays(-30), DataBaixa = hoje.AddDays(-30 + d) })
+            .ToList();
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }).PrazoRecebimento;
+
+        Assert.True(resultado.Disponivel);
+        Assert.Equal(8.0m, resultado.MediaDias); // média de 5,10,3,7,15 = 8
+        Assert.Equal(5, resultado.QuantidadeAmostras);
+    }
+
     [Fact]
     public void CalcularIndicadores_ContaMesesComAtividadeCorretamente()
     {
@@ -691,5 +873,141 @@ public class MetricasServiceTests
 
         Assert.Equal(0m, resultado.ReceitaBruta);
         Assert.Null(resultado.Margem);
+    }
+
+    // ---- DRE: análise vertical (waterfall) ----
+
+    private static readonly List<Categoria> _planoDeContasTeste = new()
+    {
+        Cat("Vendas", "Receita"),
+        Cat("Simples/DAS", "CustoFixo", grupo: "Impostos"),
+        Cat("Insumos/Mercadoria", "CustoVariavel", grupo: "Custos Diretos"),
+        Cat("Aluguel", "CustoFixo", grupo: "Despesas Administrativas"),
+        Cat("Equipamentos", "DespesaNaoOperacional", grupo: "Investimentos"),
+    };
+
+    [Fact]
+    public void CalcularDre_AnaliseVertical_ClassificaCadaLinhaCorretamente()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("DAS", 60m, "Simples/DAS", "CustoFixo"),
+                Item("Insumos", 280m, "Insumos/Mercadoria", "CustoVariavel"),
+                Item("Aluguel", 400m, "Aluguel", "CustoFixo"),
+                Item("Notebook", 30m, "Equipamentos", "DespesaNaoOperacional"),
+                Item("Sem categoria", 10m, null, null),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
+
+        Assert.Equal(1000m, dre.ReceitaBruta);
+        Assert.Equal(100.0m, dre.ReceitaBrutaPercentual);
+
+        Assert.Equal(60m, dre.Deducoes.Total);
+        Assert.Equal(6.0m, dre.Deducoes.Percentual);
+        Assert.Equal(940m, dre.ReceitaLiquida);
+        Assert.Equal(94.0m, dre.ReceitaLiquidaPercentual);
+
+        Assert.Equal(280m, dre.CustosVariaveis.Total);
+        Assert.Equal(660m, dre.MargemContribuicao);
+        Assert.Equal(66.0m, dre.MargemContribuicaoPercentual);
+
+        Assert.Equal(400m, dre.DespesasFixas.Total);
+        Assert.Equal(260m, dre.ResultadoOperacional);
+        Assert.Equal(26.0m, dre.ResultadoOperacionalPercentual);
+
+        Assert.Equal(30m, dre.DespesasNaoOperacionais.Total);
+        Assert.Equal(10m, dre.NaoClassificado.Total);
+        Assert.Equal("Não Classificado", Assert.Single(dre.NaoClassificado.Categorias).Nome);
+
+        Assert.Equal(220m, dre.ResultadoLiquido);
+        Assert.Equal(22.0m, dre.ResultadoLiquidoPercentual);
+
+        // Reconciliação: a soma das 5 linhas da análise vertical bate com o total de despesas de sempre.
+        Assert.Equal(dre.TotalDespesas, dre.Deducoes.Total + dre.CustosVariaveis.Total + dre.DespesasFixas.Total
+            + dre.DespesasNaoOperacionais.Total + dre.NaoClassificado.Total);
+        Assert.Equal(dre.Resultado, dre.ResultadoLiquido);
+    }
+
+    [Fact]
+    public void CalcularDre_CategoriaNaoCadastradaNoPlanoDeContas_VaiParaNaoClassificado()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 500m, "Vendas", "Receita") },
+            new() { Item("Gasto estranho", 50m, "Categoria Removida", "CustoFixo") });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
+
+        Assert.Equal(0m, dre.DespesasFixas.Total);
+        Assert.Equal(50m, dre.NaoClassificado.Total);
+        Assert.Equal("Categoria Removida", Assert.Single(dre.NaoClassificado.Categorias).Nome);
+    }
+
+    [Fact]
+    public void CalcularDre_IgnoraTransferenciasERendimento_NaoEntramNemComoNaoClassificado()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new()
+            {
+                Item("Venda", 1000m, "Vendas", "Receita"),
+                Item("Resgate de investimento", 5000m, "Transferência", "Transferencia"),
+            },
+            new()
+            {
+                Item("Aluguel", 400m, "Aluguel", "CustoFixo"),
+                Item("Aporte para investimento", 2000m, "Transferência", "Transferencia"),
+                Item("Rendimento negativo", 30m, "Rendimento", "Rendimento"),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
+
+        Assert.Equal(1000m, dre.ReceitaBruta); // resgate (transferência) não entra na receita
+        Assert.Equal(400m, dre.TotalDespesas); // só o aluguel — transferência e rendimento ficam de fora
+        Assert.Equal(0m, dre.NaoClassificado.Total); // não viram "Não Classificado": são excluídos, não desconhecidos
+        Assert.Equal(600m, dre.Resultado);
+    }
+
+    [Fact]
+    public void CalcularDre_ComRendimento_MostraReceitaFinanceiraSeparadaEForaDaReceitaOperacional()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new()
+            {
+                Item("Venda", 1000m, "Vendas", "Receita"),
+                Item("Rendimento CDI", 100m, "Rendimento", "Rendimento"),
+            },
+            new()
+            {
+                Item("Aluguel", 400m, "Aluguel", "CustoFixo"),
+                Item("Rendimento negativo", 20m, "Rendimento", "Rendimento"),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
+
+        Assert.Equal(1000m, dre.ReceitaBruta); // rendimento não entra na receita operacional
+        Assert.Equal(600m, dre.ResultadoOperacional); // 1000 - 400, sem o rendimento
+        Assert.Equal(80m, dre.ReceitaFinanceira.Total); // 100 (rendimento) - 20 (rendimento negativo)
+        Assert.Equal(680m, dre.ResultadoLiquido); // 600 (operacional) + 80 (financeira)
+    }
+
+    [Fact]
+    public void CalcularDre_SemPlanoDeContas_UsaTipoCustoDoLancamentoEMapaFixoParaImpostos()
+    {
+        // Sem passar `categorias` (compat com chamadas antigas/testes): cai no TipoCusto gravado
+        // no lançamento e no mapa fixo histórico para reconhecer o grupo "Impostos".
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 200m, "Vendas", "Receita") },
+            new()
+            {
+                Item("DAS", 20m, "Simples/DAS", "CustoFixo"),
+                Item("Aluguel", 30m, "Aluguel", "CustoFixo"),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg });
+
+        Assert.Equal(20m, dre.Deducoes.Total);
+        Assert.Equal(30m, dre.DespesasFixas.Total);
     }
 }

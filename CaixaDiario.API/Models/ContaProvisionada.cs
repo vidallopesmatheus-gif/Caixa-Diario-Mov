@@ -10,4 +10,7 @@ public class ContaProvisionada
     public Guid? RecorrenciaId { get; set; }
     public DateOnly? DataBaixa { get; set; }
     public Guid? ContaBancariaId { get; set; }
+    // Preenchido quando a baixa foi vinculada a um lançamento (Entrada/Saída) já existente,
+    // em vez de gerar um novo — evita contar o mesmo dinheiro duas vezes no saldo.
+    public Guid? LancamentoVinculadoId { get; set; }
 }

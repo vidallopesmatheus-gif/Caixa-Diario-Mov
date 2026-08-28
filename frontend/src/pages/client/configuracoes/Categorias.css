@@ -1,0 +1,73 @@
+.cat-item {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cat-item.cat-inativa {
+  opacity: 0.6;
+}
+
+.cat-ordem-setas {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cat-ordem-setas button {
+  background: none;
+  border: 1px solid var(--bd);
+  border-radius: 4px;
+  color: var(--tx3);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.cat-ordem-setas button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.cat-info { flex: 1; min-width: 160px; }
+.cat-nome { font-size: 15px; font-weight: 600; color: var(--tx1); }
+.cat-meta { font-size: 12px; color: var(--tx3); margin-top: 2px; }
+
+.cat-acoes { display: flex; gap: 8px; }
+
+.cat-btn-excluir {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--danger);
+  background: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.cat-btn-excluir:hover { background: var(--danger-soft); }
+
+.cat-edit-form {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.cat-btn-cancelar {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg-card);
+  color: var(--tx1);
+  cursor: pointer;
+  font-size: 13px;
+}

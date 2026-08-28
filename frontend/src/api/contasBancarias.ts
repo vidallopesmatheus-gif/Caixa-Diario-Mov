@@ -12,8 +12,17 @@ function mapConta(raw: any): ContaBancaria {
     saldoAtual: raw.saldoAtual ?? 0,
     entradasMes: raw.entradasMes ?? 0,
     saidasMes: raw.saidasMes ?? 0,
+    pendentesCategorizacao: raw.pendentesCategorizacao ?? 0,
     ativa: raw.ativa ?? true,
     dataCriacao: raw.dataCriacao ?? '',
+    totalAportado: raw.totalAportado ?? undefined,
+    rendimentoAcumulado: raw.rendimentoAcumulado ?? undefined,
+    rentabilidadePercentual: raw.rentabilidadePercentual ?? undefined,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    metasVinculadas: raw.metasVinculadas?.map((m: any) => ({
+      id: m.id, ano: m.ano, sonho: m.sonho ?? undefined, valorSonho: m.valorSonho ?? 0,
+    })),
+    progressoCombinadoPercentual: raw.progressoCombinadoPercentual ?? undefined,
   }
 }
 
@@ -25,6 +34,7 @@ function mapLancamento(raw: any): LancamentoExtrato {
     categoria: raw.categoria ?? undefined,
     valor: raw.valor ?? 0,
     saldoAcumulado: raw.saldoAcumulado ?? 0,
+    pendenteCategorizacao: raw.pendenteCategorizacao ?? false,
   }
 }
 
@@ -100,4 +110,29 @@ export const obterPendenciasConta = async (contaId: string): Promise<PendenciasC
     recebiveis: (res.dados?.recebiveis ?? []).map(mapContaProvisionada),
     pagamentos: (res.dados?.pagamentos ?? []).map(mapContaProvisionada),
   }
+}
+
+export const registrarRendimento = async (
+  contaId: string,
+  dto: { data: string; valor: number; descricao?: string },
+): Promise<ContaBancaria> => {
+  const res = await apiFetch<ApiResponse<unknown>>(`/api/contas-bancarias/${contaId}/rendimento`, {
+    method: 'POST',
+    body: JSON.stringify(dto),
+  })
+  return mapConta(res.dados)
+}
+
+export const vincularMeta = async (contaId: string, metaId: string): Promise<ContaBancaria> => {
+  const res = await apiFetch<ApiResponse<unknown>>(`/api/contas-bancarias/${contaId}/vincular-meta/${metaId}`, {
+    method: 'POST',
+  })
+  return mapConta(res.dados)
+}
+
+export const desvincularMeta = async (contaId: string, metaId: string): Promise<ContaBancaria> => {
+  const res = await apiFetch<ApiResponse<unknown>>(`/api/contas-bancarias/${contaId}/desvincular-meta/${metaId}`, {
+    method: 'POST',
+  })
+  return mapConta(res.dados)
 }

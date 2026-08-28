@@ -20,12 +20,18 @@ function mapMeta(raw: any): MetaAnual {
     totalInvestido: raw.totalInvestido ?? 0,
     margemPJ: raw.margemPJ ?? undefined,
     iconeSonho: raw.iconeSonho ?? undefined,
+    contaInvestimentoId: raw.contaInvestimentoId ?? undefined,
   }
 }
 
 export const obterMeta = async (clienteId: string, ano: number): Promise<MetaAnual | null> => {
   const res = await apiFetch<ApiResponse<unknown>>(`/api/metas/${clienteId}/${ano}`)
   return res.dados ? mapMeta(res.dados) : null
+}
+
+export const listarMetas = async (clienteId: string): Promise<MetaAnual[]> => {
+  const res = await apiFetch<ApiResponse<unknown[]>>(`/api/metas/${clienteId}`)
+  return (res.dados ?? []).map(mapMeta)
 }
 
 export const salvarMeta = async (dto: {

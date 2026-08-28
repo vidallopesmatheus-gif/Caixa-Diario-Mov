@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Repositories.Interfaces;
+using CaixaDiario.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using QuestPDF.Fluent;
@@ -57,7 +58,11 @@ public class ExportController : ControllerBase
         int row = 2;
         foreach (var r in registros)
         {
-            var te = r.Entradas.Sum(e => e.Valor); var ts = r.Saidas.Sum(s => s.Valor);
+            // Transferências entre contas e rendimento de investimento não são receita/despesa — ficam
+            // de fora dos totais do relatório (a listagem "Por Categoria" abaixo continua trazendo cada
+            // lançamento individualmente, incluindo esses, como registro bruto do que aconteceu).
+            var te = r.Entradas.Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);
+            var ts = r.Saidas.Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
             ws1.Cell(row, 1).Value = r.Data.ToString("dd/MM/yyyy");
             ws1.Cell(row, 2).Value = (double)te; ws1.Cell(row, 3).Value = (double)ts;
             ws1.Cell(row, 4).Value = (double)(te - ts); ws1.Cell(row, 5).Value = (double)r.SaldoFinal;
@@ -94,8 +99,8 @@ public class ExportController : ControllerBase
         var ws3 = workbook.Worksheets.Add("Métricas");
         ws3.Cell(1, 1).Value = "Métrica"; ws3.Cell(1, 2).Value = "Valor";
         ws3.Row(1).Style.Font.Bold = true;
-        var totalEnt = registros.Sum(r => r.Entradas.Sum(e => e.Valor));
-        var totalSai = registros.Sum(r => r.Saidas.Sum(s => s.Valor));
+        var totalEnt = registros.Sum(r => r.Entradas.Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor));
+        var totalSai = registros.Sum(r => r.Saidas.Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor));
         ws3.Cell(2, 1).Value = "Total Entradas"; ws3.Cell(2, 2).Value = (double)totalEnt;
         ws3.Cell(3, 1).Value = "Total Saídas"; ws3.Cell(3, 2).Value = (double)totalSai;
         ws3.Cell(4, 1).Value = "Lucro Operacional"; ws3.Cell(4, 2).Value = (double)(totalEnt - totalSai);
@@ -169,8 +174,8 @@ public class ExportController : ControllerBase
 
                         foreach (var r in registros)
                         {
-                            var te = r.Entradas.Sum(e => e.Valor);
-                            var ts = r.Saidas.Sum(s => s.Valor);
+                            var te = r.Entradas.Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);
+                            var ts = r.Saidas.Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
                             table.Cell().Text(r.Data.ToString("dd/MM/yyyy"));
                             table.Cell().Text($"R$ {te:N2}");
                             table.Cell().Text($"R$ {ts:N2}");
@@ -179,8 +184,8 @@ public class ExportController : ControllerBase
                         }
                     });
 
-                    var totalE = registros.Sum(r => r.Entradas.Sum(e => e.Valor));
-                    var totalS = registros.Sum(r => r.Saidas.Sum(s => s.Valor));
+                    var totalE = registros.Sum(r => r.Entradas.Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor));
+                    var totalS = registros.Sum(r => r.Saidas.Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor));
                     col.Item().Text($"Total Entradas: R$ {totalE:N2} | Total Saídas: R$ {totalS:N2} | Lucro: R$ {totalE - totalS:N2}").Bold();
                 });
 

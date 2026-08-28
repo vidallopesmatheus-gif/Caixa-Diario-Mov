@@ -18,4 +18,5 @@ public class MetaAnualDto
     public decimal TotalInvestido { get; set; }
     public decimal? MargemPJ { get; set; }
     public string? IconeSonho { get; set; }
+    public Guid? ContaInvestimentoId { get; set; }
 }

@@ -143,6 +143,61 @@ public class InsightServiceTests
     }
 
     [Fact]
+    public void Calcular_ComTransferenciaGrandeNoMes_NaoContaComoGastoNoInsight()
+    {
+        var mesPassado1 = Hoje.AddMonths(-1);
+        var mesPassado2 = Hoje.AddMonths(-2);
+        var mesPassado3 = Hoje.AddMonths(-3);
+        var gastoOperacionalAtual = ValorParaExtrapolarPara(1000m); // igual à média — não deveria gerar alerta
+
+        var registroAtual = CriarRegistro(Hoje, saidas: gastoOperacionalAtual);
+        registroAtual.Saidas.Add(new ItemFinanceiroSaida
+        {
+            Descricao = "Transferência para investimento", Valor = 5000m,
+            Categoria = "Transferência", TipoCusto = "Transferencia",
+        });
+
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(mesPassado1, saidas: 1000m),
+            CriarRegistro(mesPassado2, saidas: 1000m),
+            CriarRegistro(mesPassado3, saidas: 1000m),
+            registroAtual,
+        };
+
+        var insights = _sut.Calcular(registros, new List<ContaRecorrente>(), null);
+
+        Assert.DoesNotContain(insights, i => i.Categoria == "gasto");
+    }
+
+    [Fact]
+    public void Calcular_ComRendimentoGrandeNoMes_NaoContaComoLucroNoInsight()
+    {
+        var mesPassado1 = Hoje.AddMonths(-1);
+        var mesPassado2 = Hoje.AddMonths(-2);
+        var mesPassado3 = Hoje.AddMonths(-3);
+        var receitaOperacionalAtual = ValorParaExtrapolarPara(1000m); // igual à média — não deveria gerar insight
+
+        var registroAtual = CriarRegistro(Hoje, entradas: receitaOperacionalAtual);
+        registroAtual.Entradas.Add(new ItemFinanceiro
+        {
+            Descricao = "Rendimento CDI", Valor = 5000m, Categoria = "Rendimento", TipoCusto = "Rendimento",
+        });
+
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(mesPassado1, entradas: 1000m),
+            CriarRegistro(mesPassado2, entradas: 1000m),
+            CriarRegistro(mesPassado3, entradas: 1000m),
+            registroAtual,
+        };
+
+        var insights = _sut.Calcular(registros, new List<ContaRecorrente>(), null);
+
+        Assert.DoesNotContain(insights, i => i.Categoria == "lucro");
+    }
+
+    [Fact]
     public void Calcular_ComMetaEmAtrasoENenhumaAnomaliaDeGasto_GeraAlertaDeAtraso()
     {
         var insights = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente>(), CriarMetaAtrasada());

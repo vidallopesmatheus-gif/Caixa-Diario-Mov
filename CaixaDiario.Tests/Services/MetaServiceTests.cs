@@ -11,9 +11,10 @@ namespace CaixaDiario.Tests.Services;
 public class MetaServiceTests
 {
     private readonly Mock<IMetaRepository> _repoMock = new();
+    private readonly Mock<IMetaProgressoService> _metaProgressoMock = new();
     private readonly MetaService _sut;
 
-    public MetaServiceTests() => _sut = new MetaService(_repoMock.Object);
+    public MetaServiceTests() => _sut = new MetaService(_repoMock.Object, _metaProgressoMock.Object);
 
     [Fact]
     public async Task Obter_ClienteAcessandoOutroCliente_LancaAcessoNegado()
@@ -43,6 +44,31 @@ public class MetaServiceTests
         _repoMock.Setup(r => r.ObterPorClienteEAnoAsync(clienteId, 2026)).ReturnsAsync(meta);
         var resultado = await _sut.ObterMetaAsync(clienteId, 2026, Guid.NewGuid(), "admin");
         Assert.Equal(120000m, resultado.MetaReceita);
+    }
+
+    [Fact]
+    public async Task ListarMetas_ClienteProprio_RetornaOrdenadoPorAnoDecrescente()
+    {
+        var clienteId = Guid.NewGuid();
+        var metas = new List<MetaAnual>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, Ano = 2025, MetaReceita = 1m, MetaLucro = 1m, CriadoEm = DateTime.UtcNow, AtualizadoEm = DateTime.UtcNow },
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, Ano = 2027, MetaReceita = 1m, MetaLucro = 1m, CriadoEm = DateTime.UtcNow, AtualizadoEm = DateTime.UtcNow },
+        };
+        _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(metas);
+
+        var resultado = await _sut.ListarMetasAsync(clienteId, clienteId, "cliente");
+
+        Assert.Equal(2027, resultado[0].Ano);
+        Assert.Equal(2025, resultado[1].Ano);
+    }
+
+    [Fact]
+    public async Task ListarMetas_ClienteAcessandoOutroCliente_LancaAcessoNegado()
+    {
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.ListarMetasAsync(Guid.NewGuid(), Guid.NewGuid(), "cliente"));
+        Assert.Equal(403, ex.StatusCode);
     }
 
     [Fact]

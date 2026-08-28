@@ -18,10 +18,11 @@ public class OrcamentoDinamicoControllerTests
     private readonly Mock<IRegistroRepository> _registroMock = new();
     private readonly Mock<IContaRecorrenteRepository> _contaMock = new();
     private readonly Mock<IMetaRepository> _metaMock = new();
+    private readonly Mock<IMetaProgressoService> _metaProgressoMock = new();
 
     private OrcamentoDinamicoController CriarSut(Guid usuarioId, string perfil)
     {
-        var sut = new OrcamentoDinamicoController(_orcamentoMock.Object, _registroMock.Object, _contaMock.Object, _metaMock.Object);
+        var sut = new OrcamentoDinamicoController(_orcamentoMock.Object, _registroMock.Object, _contaMock.Object, _metaMock.Object, _metaProgressoMock.Object);
         var claims = new[] { new Claim("id", usuarioId.ToString()), new Claim("perfil", perfil) };
         sut.ControllerContext = new ControllerContext
         {

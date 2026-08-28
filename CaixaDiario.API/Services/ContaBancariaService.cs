@@ -13,11 +13,13 @@ public class ContaBancariaService : IContaBancariaService
 
     private readonly IContaBancariaRepository _contaRepo;
     private readonly IRegistroRepository _registroRepo;
+    private readonly IMetaRepository _metaRepo;
 
-    public ContaBancariaService(IContaBancariaRepository contaRepo, IRegistroRepository registroRepo)
+    public ContaBancariaService(IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, IMetaRepository metaRepo)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
+        _metaRepo = metaRepo;
     }
 
     public async Task<List<ContaBancariaDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -25,7 +27,8 @@ public class ContaBancariaService : IContaBancariaService
         VerificarAcesso(clienteId, usuarioLogadoId, perfil);
         var contas = await _contaRepo.ListarPorClienteAsync(clienteId);
         var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
-        return contas.Select(c => MapToDto(c, registros)).ToList();
+        var metas = await _metaRepo.ListarPorClienteAsync(clienteId);
+        return contas.Select(c => MapToDto(c, registros, metas)).ToList();
     }
 
     public async Task<ContaBancariaDto> ObterPorIdAsync(Guid id, Guid usuarioLogadoId, string perfil)
@@ -34,7 +37,8 @@ public class ContaBancariaService : IContaBancariaService
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
         VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
         var registros = await _registroRepo.ListarPorContaAsync(id);
-        return MapToDto(conta, registros);
+        var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
+        return MapToDto(conta, registros, metas);
     }
 
     public async Task<ContaBancariaDto> CriarAsync(CriarContaBancariaDto dto, Guid usuarioLogadoId, string perfil)
@@ -55,7 +59,7 @@ public class ContaBancariaService : IContaBancariaService
         };
 
         var criada = await _contaRepo.AdicionarAsync(conta);
-        return MapToDto(criada, new List<Models.RegistroDiario>());
+        return MapToDto(criada, new List<RegistroDiario>(), new List<MetaAnual>());
     }
 
     public async Task<ContaBancariaDto> AtualizarAsync(Guid id, AtualizarContaBancariaDto dto, Guid usuarioLogadoId, string perfil)
@@ -73,7 +77,8 @@ public class ContaBancariaService : IContaBancariaService
 
         var atualizada = await _contaRepo.AtualizarAsync(conta);
         var registros = await _registroRepo.ListarPorContaAsync(id);
-        return MapToDto(atualizada, registros);
+        var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
+        return MapToDto(atualizada, registros, metas);
     }
 
     public async Task InativarAsync(Guid id, Guid usuarioLogadoId, string perfil)
@@ -141,6 +146,7 @@ public class ContaBancariaService : IContaBancariaService
                     Categoria = saida.Categoria,
                     Valor = -saida.Valor,
                     SaldoAcumulado = saldo,
+                    PendenteCategorizacao = saida.PendenteCategorizacao,
                 }));
             }
 
@@ -193,6 +199,83 @@ public class ContaBancariaService : IContaBancariaService
         return new PendenciasContaDto { Recebiveis = recebiveis, Pagamentos = pagamentos };
     }
 
+    public async Task<ContaBancariaDto> RegistrarRendimentoAsync(Guid contaId, RegistrarRendimentoDto dto, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+        if (conta.Tipo != "Investimento")
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Rendimento só pode ser registrado em conta do tipo Investimento.");
+        if (dto.Valor == 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Valor do rendimento não pode ser zero.");
+        if (dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
+
+        var (registro, novo) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, conta, dto.Data);
+        var descricao = string.IsNullOrWhiteSpace(dto.Descricao) ? "Rendimento" : dto.Descricao;
+
+        if (dto.Valor > 0)
+        {
+            registro.Entradas.Add(new ItemFinanceiro
+            {
+                Descricao = descricao, Valor = dto.Valor, Categoria = "Rendimento", TipoCusto = LancamentoFiltro.TipoRendimento,
+            });
+            registro.SaldoFinal += dto.Valor;
+        }
+        else
+        {
+            registro.Saidas.Add(new ItemFinanceiroSaida
+            {
+                Descricao = descricao, Valor = -dto.Valor, Categoria = "Rendimento", TipoCusto = LancamentoFiltro.TipoRendimento,
+            });
+            registro.SaldoFinal += dto.Valor; // dto.Valor já é negativo aqui
+        }
+        registro.SalvoEm = DateTime.UtcNow;
+        await RegistroDiaHelper.PersistirAsync(_registroRepo, registro, novo);
+
+        var registrosAtualizados = await _registroRepo.ListarPorContaAsync(contaId);
+        var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
+        return MapToDto(conta, registrosAtualizados, metas);
+    }
+
+    public async Task<ContaBancariaDto> VincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+        if (conta.Tipo != "Investimento")
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Só é possível vincular metas a uma conta do tipo Investimento.");
+
+        var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
+        var meta = metas.FirstOrDefault(m => m.Id == metaId)
+            ?? throw new ApiException(404, CodigoRetorno.META_NAO_ENCONTRADA, "Meta não encontrada.");
+
+        meta.ContaInvestimentoId = contaId;
+        await _metaRepo.SalvarAsync(meta);
+
+        var registros = await _registroRepo.ListarPorContaAsync(contaId);
+        var metasAtualizadas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
+        return MapToDto(conta, registros, metasAtualizadas);
+    }
+
+    public async Task<ContaBancariaDto> DesvincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+
+        var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
+        var meta = metas.FirstOrDefault(m => m.Id == metaId)
+            ?? throw new ApiException(404, CodigoRetorno.META_NAO_ENCONTRADA, "Meta não encontrada.");
+
+        meta.ContaInvestimentoId = null;
+        await _metaRepo.SalvarAsync(meta);
+
+        var registros = await _registroRepo.ListarPorContaAsync(contaId);
+        var metasAtualizadas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
+        return MapToDto(conta, registros, metasAtualizadas);
+    }
+
     private static ContaProvisionadaDto MapProvisionadaToDto(ContaProvisionada c) => new()
     {
         Descricao = c.Descricao,
@@ -211,7 +294,14 @@ public class ContaBancariaService : IContaBancariaService
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
     }
 
-    private static ContaBancariaDto MapToDto(ContaBancaria c, IEnumerable<Models.RegistroDiario> registros)
+    /// <summary>Saldo atual = SaldoFinal do registro mais recente da conta, ou SaldoInicial se não houver nenhum.</summary>
+    public static decimal ObterSaldoAtual(ContaBancaria conta, IEnumerable<RegistroDiario> registros) =>
+        registros
+            .Where(r => r.ContaBancariaId == conta.Id && !r.Excluido)
+            .OrderByDescending(r => r.Data)
+            .FirstOrDefault()?.SaldoFinal ?? conta.SaldoInicial;
+
+    private static ContaBancariaDto MapToDto(ContaBancaria c, IEnumerable<RegistroDiario> registros, IEnumerable<MetaAnual> metasDoCliente)
     {
         var regsOrdenados = registros
             .Where(r => r.ContaBancariaId == c.Id && !r.Excluido)
@@ -222,10 +312,11 @@ public class ContaBancariaService : IContaBancariaService
 
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var regsDoMes = regsOrdenados.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month);
-        var entradasMes = regsDoMes.SelectMany(r => r.Entradas).Sum(e => e.Valor);
-        var saidasMes = regsDoMes.SelectMany(r => r.Saidas).Sum(s => s.Valor);
+        // Transferências e rendimento não são receita/despesa — não entram nos cards de entradas/saídas do mês.
+        var entradasMes = regsDoMes.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);
+        var saidasMes = regsDoMes.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
 
-        return new ContaBancariaDto
+        var dto = new ContaBancariaDto
         {
             Id = c.Id,
             ClienteId = c.ClienteId,
@@ -235,8 +326,38 @@ public class ContaBancariaService : IContaBancariaService
             SaldoAtual = saldoAtual,
             EntradasMes = entradasMes,
             SaidasMes = saidasMes,
+            PendentesCategorizacao = regsOrdenados.Sum(r => r.Saidas.Count(s => s.PendenteCategorizacao)),
             Ativa = c.Ativa,
             DataCriacao = c.DataCriacao,
         };
+
+        if (c.Tipo == "Investimento")
+        {
+            var todasEntradas = regsOrdenados.SelectMany(r => r.Entradas).ToList();
+            var todasSaidas = regsOrdenados.SelectMany(r => r.Saidas).ToList();
+
+            var transferenciasIn = todasEntradas.Where(e => e.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(e => e.Valor);
+            var transferenciasOut = todasSaidas.Where(s => s.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(s => s.Valor);
+            dto.TotalAportado = c.SaldoInicial + transferenciasIn - transferenciasOut;
+
+            var rendimentoIn = todasEntradas.Where(e => e.TipoCusto == LancamentoFiltro.TipoRendimento).Sum(e => e.Valor);
+            var rendimentoOut = todasSaidas.Where(s => s.TipoCusto == LancamentoFiltro.TipoRendimento).Sum(s => s.Valor);
+            dto.RendimentoAcumulado = rendimentoIn - rendimentoOut;
+            dto.RentabilidadePercentual = dto.TotalAportado > 0
+                ? Math.Round(dto.RendimentoAcumulado.Value / dto.TotalAportado.Value * 100, 2)
+                : null;
+
+            var metasVinculadas = metasDoCliente.Where(m => m.ContaInvestimentoId == c.Id).ToList();
+            dto.MetasVinculadas = metasVinculadas
+                .Select(m => new MetaVinculadaDto { Id = m.Id, Ano = m.Ano, Sonho = m.Sonho, ValorSonho = m.ValorSonho })
+                .ToList();
+
+            var somaMetas = metasVinculadas.Sum(m => m.ValorSonho);
+            dto.ProgressoCombinadoPercentual = somaMetas > 0
+                ? Math.Round(Math.Min(1m, saldoAtual / somaMetas) * 100, 1)
+                : null;
+        }
+
+        return dto;
     }
 }

@@ -1,3 +1,50 @@
+/* ── Camada 0: resumo de metas & investimentos ────────────────────────── */
+.meta-resumo-bloco {
+  display: block; width: 100%; text-align: left;
+  background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 14px; cursor: pointer; font-family: inherit;
+}
+.meta-resumo-bloco:hover { border-color: var(--accent); }
+
+.meta-resumo-vazio {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+}
+.meta-resumo-vazio-icone { font-size: 20px; }
+.meta-resumo-vazio-texto { font-size: 13px; color: var(--tx3); }
+.meta-resumo-vazio-texto strong { color: var(--accent); }
+
+.meta-resumo-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap; margin-bottom: 8px;
+}
+.meta-resumo-titulo { font-size: 14px; font-weight: 700; color: var(--tx1); }
+
+.meta-resumo-chips { display: flex; gap: 6px; overflow-x: auto; max-width: 100%; }
+.meta-resumo-chip {
+  padding: 4px 10px; border-radius: 20px; border: 1px solid var(--bd); background: var(--bg);
+  color: var(--tx3); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.meta-resumo-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.meta-resumo-valores { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.meta-resumo-valores > span:first-child { font-size: 18px; font-weight: 800; color: var(--tx1); }
+.meta-resumo-de { font-size: 12px; font-weight: 500; color: var(--tx3); }
+.meta-resumo-pct { font-size: 16px; font-weight: 700; color: var(--accent); }
+
+.meta-resumo-barra { height: 8px; background: var(--bd); border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+.meta-resumo-barra-fill { height: 100%; background: var(--accent); transition: width .3s; }
+
+.meta-resumo-rodape {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 12px; color: var(--tx3); flex-wrap: wrap;
+}
+.meta-resumo-vinculo { margin-top: 8px; font-size: 11px; color: var(--tx3); }
+
+@media (max-width: 520px) {
+  .meta-resumo-bloco { padding: 12px 14px; }
+  .meta-resumo-valores > span:first-child { font-size: 16px; }
+}
+
 /* ── Camada 1: status bar ───────────────────────────────────────────── */
 .resumo-status-bar {
   display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;

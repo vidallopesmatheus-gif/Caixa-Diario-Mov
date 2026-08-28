@@ -3,6 +3,7 @@ import { useUsuarios } from '../../hooks/useUsuarios'
 import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
 import { fmtBRL } from '../../utils/format'
+import { ehOperacional } from '../../utils/lancamentos'
 import type { Usuario } from '../../types'
 import './Admin.css'
 
@@ -12,8 +13,9 @@ function ClientCard({ usuario }: { usuario: Usuario }) {
   const mesAtual = new Date().toISOString().slice(0, 7)
   const doMes = registros.filter(r => r.data.startsWith(mesAtual))
   const ultimo = registros[0]
-  const totalEnt = doMes.reduce((s, r) => s + r.entradas.reduce((a, x) => a + x.valor, 0), 0)
-  const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a, x) => a + x.valor, 0), 0)
+  // Transferências entre contas e rendimento de investimento não são receita/despesa.
+  const totalEnt = doMes.reduce((s, r) => s + r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
+  const totalSai = doMes.reduce((s, r) => s + r.saidas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
 
   return (
     <div className="ov-card">

@@ -47,6 +47,19 @@
 
 .tab-content { padding: 24px; }
 
+.subtabs-bar {
+  display: flex; gap: 4px; overflow-x: auto;
+  border-bottom: 1px solid var(--bd-sub);
+  margin-bottom: 16px;
+}
+.subtab-btn {
+  padding: 8px 14px; background: none; border: none;
+  color: var(--tx3); font-size: 13px; font-weight: 600;
+  cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.subtab-btn.active { color: var(--tx); border-bottom-color: var(--accent); }
+.subtab-btn:hover   { color: var(--btn-cancel-c); }
+
 @media (max-width: 600px) {
   .tabs-bar    { padding: 0 12px; }
   .tab-content { padding: 14px; }

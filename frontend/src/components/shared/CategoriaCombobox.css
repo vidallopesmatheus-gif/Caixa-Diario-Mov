@@ -1,0 +1,119 @@
+.cc-wrapper {
+  position: relative;
+  min-width: 170px;
+}
+
+.cc-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg);
+  color: var(--tx1);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.cc-lista {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+}
+
+.cc-opcao {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--tx1);
+}
+
+.cc-opcao-ativa {
+  background: var(--bg-hover, rgba(255,255,255,.08));
+}
+
+.cc-opcao-criar {
+  color: var(--accent, #4f9cff);
+  font-weight: 600;
+  border-top: 1px solid var(--bd);
+  margin-top: 2px;
+  padding-top: 8px;
+}
+
+.cc-vazio {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--tx3);
+}
+
+.cc-criar-form {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cc-criar-nome {
+  font-size: 12px;
+  color: var(--tx1);
+}
+
+.cc-criar-tipo {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--bd);
+  background: var(--bg);
+  color: var(--tx1);
+  font-size: 12px;
+}
+
+.cc-criar-erro {
+  font-size: 11px;
+  color: var(--danger, #ff6b6b);
+}
+
+.cc-criar-acoes {
+  display: flex;
+  gap: 6px;
+}
+
+.cc-btn-criar {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent, #4f9cff);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cc-btn-cancelar {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--bd);
+  background: transparent;
+  color: var(--tx3);
+  font-size: 12px;
+  cursor: pointer;
+}

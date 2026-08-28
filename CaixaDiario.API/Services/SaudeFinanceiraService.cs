@@ -29,8 +29,8 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
         List<RegistroDiario> reg, int ano, int mes)
     {
         var doMes = reg.Where(r => r.Data.Year == ano && r.Data.Month == mes).ToList();
-        var receita  = doMes.SelectMany(r => r.Entradas).Sum(e => e.Valor);
-        var despesas = doMes.SelectMany(r => r.Saidas).Sum(s => s.Valor);
+        var receita  = doMes.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);
+        var despesas = doMes.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
 
         if (receita <= 0)
             return Indisponivel("Taxa de Poupança",
@@ -59,7 +59,7 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
         var receitasMeses = Enumerable.Range(1, 3)
             .Select(i => hoje.AddMonths(-i))
             .Select(m => reg.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
-                           .SelectMany(r => r.Entradas).Sum(e => e.Valor))
+                           .SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor))
             .Where(v => v > 0).ToList();
         var receitaEsperada = receitasMeses.Count > 0 ? receitasMeses.Average() : 0m;
 
