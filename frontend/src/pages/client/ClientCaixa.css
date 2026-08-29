@@ -117,15 +117,16 @@
   background: var(--bg-card); border: 1px solid var(--bd);
   border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
 }
-.cat-group { margin-bottom: 18px; }
+.cat-group { margin-bottom: 10px; }
+.cat-group:last-child { margin-bottom: 0; }
 .cat-group-label {
   font-size: 10px; font-weight: 800; text-transform: uppercase;
-  letter-spacing: .8px; color: var(--tx3); padding-bottom: 6px;
-  margin-bottom: 8px; border-bottom: 2px solid;
+  letter-spacing: .8px; color: var(--tx3); padding-bottom: 4px;
+  margin-bottom: 5px; border-bottom: 2px solid;
 }
-.cat-items { display: flex; flex-wrap: wrap; gap: 8px; }
+.cat-items { display: flex; flex-wrap: wrap; gap: 5px; }
 .cat-item {
-  padding: 7px 14px; border-radius: 20px; border: 1px solid;
+  padding: 4px 11px; border-radius: 20px; border: 1px solid;
   background: transparent; font-size: 13px; cursor: pointer;
   transition: background 0.15s; color: var(--tx1);
 }

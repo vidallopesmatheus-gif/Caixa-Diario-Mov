@@ -38,4 +38,11 @@ public class MetasController : ControllerBase
         var resultado = await _metaService.SalvarMetaAsync(dto, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<MetaAnualDto> { Dados = resultado });
     }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Excluir(Guid id)
+    {
+        await _metaService.ExcluirMetaAsync(id, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
 }

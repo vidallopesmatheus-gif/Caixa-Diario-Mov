@@ -18,6 +18,10 @@ public class MetaAnual
     public decimal TotalInvestido { get; set; }
     public decimal? MargemPJ { get; set; }
     public string? IconeSonho { get; set; }
+    // Data real escolhida pelo usuário pra atingir o objetivo (modo "metodo"). Substitui o
+    // PrazoAnos relativo como fonte de verdade — PrazoAnos fica só como fallback de leitura
+    // pra metas antigas que ainda não passaram pelo backfill.
+    public DateOnly? DataAlvo { get; set; }
     // Conta de investimento cujo saldo alimenta automaticamente o progresso desta meta.
     public Guid? ContaInvestimentoId { get; set; }
     public DateTime CriadoEm { get; set; }

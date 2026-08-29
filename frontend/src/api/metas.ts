@@ -21,6 +21,7 @@ function mapMeta(raw: any): MetaAnual {
     margemPJ: raw.margemPJ ?? undefined,
     iconeSonho: raw.iconeSonho ?? undefined,
     contaInvestimentoId: raw.contaInvestimentoId ?? undefined,
+    dataAlvo: raw.dataAlvo ?? undefined,
   }
 }
 
@@ -35,6 +36,7 @@ export const listarMetas = async (clienteId: string): Promise<MetaAnual[]> => {
 }
 
 export const salvarMeta = async (dto: {
+  id?: string
   clienteId: string
   ano: number
   metaReceita: number
@@ -49,10 +51,16 @@ export const salvarMeta = async (dto: {
   totalInvestido?: number
   margemPJ?: number
   iconeSonho?: string
+  dataAlvo?: string
 }): Promise<MetaAnual> => {
   const res = await apiFetch<ApiResponse<unknown>>('/api/metas', {
     method: 'POST',
     body: JSON.stringify(dto),
   })
   return mapMeta(res.dados)
+}
+
+/** Remove um objetivo (modo "metodo"). A meta de faturamento mensal (modo "simples") não usa isso. */
+export const excluirMeta = async (id: string): Promise<void> => {
+  await apiFetch<ApiResponse<null>>(`/api/metas/${id}`, { method: 'DELETE' })
 }

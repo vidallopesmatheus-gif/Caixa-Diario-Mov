@@ -1,4 +1,4 @@
-import { fmtBRL } from './format'
+import { fmtBRL, fmtPct } from './format'
 import type { PontoEquilibrio, FolegoCaixa, PrazoRecebimento } from '../api/metricas'
 
 /** Leitura textual simples da margem do DRE, reaproveitada no Dashboard e nos Indicadores de Decisão. */
@@ -12,7 +12,7 @@ export function leituraMargemDre(margem: number | null): string {
 export function leituraPontoEquilibrio(pe: PontoEquilibrio): string {
   if (!pe.disponivel || pe.valorMensal === null) return pe.motivoIndisponivel ?? 'Sem dados suficientes para calcular.'
   const dist = pe.distancia ?? 0
-  const pct = pe.distanciaPercentual !== null ? ` (${Math.abs(pe.distanciaPercentual).toFixed(0)}%)` : ''
+  const pct = pe.distanciaPercentual !== null ? ` (${fmtPct(Math.abs(pe.distanciaPercentual))})` : ''
   if (dist >= 0) return `Faturando ${fmtBRL(pe.receitaAtual)}, você está ${fmtBRL(dist)}${pct} acima do ponto de equilíbrio.`
   return `Faturando ${fmtBRL(pe.receitaAtual)}, você está ${fmtBRL(Math.abs(dist))}${pct} abaixo do ponto de equilíbrio — operando no vermelho este mês.`
 }

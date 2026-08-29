@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
-import { fmtBRL, fmtDate, todayISO } from '../../utils/format'
+import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
 import { listarContasRecorrentes, criarContaRecorrente, desativarContaRecorrente } from '../../api/contasRecorrentes'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import Modal from '../../components/shared/Modal'
@@ -45,14 +45,15 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [desc, setDesc] = useState('')
   const [valorDisplay, setValorDisplay] = useState('')
   const [valor, setValor] = useState(0)
-  const [venc, setVenc] = useState('')
+  const [venc, setVenc] = useState(todayISO())
   const [isRecorrente, setIsRecorrente] = useState(false)
-  const [recInicio, setRecInicio] = useState('')
+  const [recInicio, setRecInicio] = useState(todayISO())
   const [recFim, setRecFim] = useState('')
   const [recPeriodicidade, setRecPeriodicidade] = useState('Mensal')
   const [recParcelas, setRecParcelas] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [msgOk, setMsgOk] = useState(true)
 
   const [recorrentes, setRecorrentes] = useState<ContaRecorrente[]>([])
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
@@ -85,8 +86,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   }, [contasBancarias, contaSelecionadaId])
 
   function resetForm() {
-    setDesc(''); setValorDisplay(''); setValor(0); setVenc('')
-    setRecInicio(''); setRecFim(''); setRecPeriodicidade('Mensal'); setRecParcelas('')
+    setDesc(''); setValorDisplay(''); setValor(0); setVenc(todayISO())
+    setRecInicio(todayISO()); setRecFim(''); setRecPeriodicidade('Mensal'); setRecParcelas('')
   }
 
   function encontrarDuplicata(conta: ContaProvisionada, registroData: string) {
@@ -107,7 +108,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     setMsg('')
     try {
       if (isRecorrente) {
-        if (!recInicio) { setMsg('Informe a data de início.'); return }
+        if (!recInicio) { setMsg('Informe a data de início.'); setMsgOk(false); return }
         const nova = await criarContaRecorrente({
           clienteId, descricao: desc, valor,
           tipo: tipo === 'receber' ? 'Receber' : 'Pagar',
@@ -117,15 +118,19 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         })
         setRecorrentes(prev => [...prev, nova])
         setMsg('Conta recorrente adicionada!')
+        setMsgOk(true)
       } else {
+        if (!contaSelecionadaId) { setMsg('Cadastre uma conta bancária em Configurações antes de continuar.'); setMsgOk(false); return }
         const hoje = todayISO()
-        const reg = registros.find(r => r.data === hoje)
+        // Precisa ser o registro da MESMA conta escolhida — senão a mesclagem pega
+        // entradas/saídas/pendências de uma conta diferente ou fica sem nenhuma base.
+        const reg = registros.find(r => r.data === hoje && r.contaBancariaId === contaSelecionadaId)
         const novaConta: ContaProvisionada = {
           descricao: desc,
           valor,
           dataVencimento: venc || undefined,
           pago: false,
-          contaBancariaId: contaSelecionadaId || undefined,
+          contaBancariaId: contaSelecionadaId,
         }
         const duplicata = encontrarDuplicata(novaConta, hoje)
         if (duplicata) {
@@ -134,7 +139,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           return
         }
         await salvar({
-          clienteId, data: hoje,
+          clienteId, contaBancariaId: contaSelecionadaId, data: hoje,
           saldoInicio: reg?.saldoInicio ?? 0,
           entradas: reg?.entradas ?? [],
           saidas: reg?.saidas ?? [],
@@ -143,10 +148,12 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           saldoConfirmado: reg?.saldoConfirmado ?? 0,
         })
         setMsg('Conta adicionada!')
+        setMsgOk(true)
       }
       resetForm()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
     } finally {
       setSaving(false)
     }
@@ -230,10 +237,12 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         saldoConfirmado: reg.saldoConfirmado,
       })
       setMsg(vincular ? 'Baixa vinculada ao lançamento existente.' : 'Baixa confirmada.')
+      setMsgOk(true)
       setModalBaixa(false)
       setBaixaView(null)
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
     } finally {
       setConfirmandoBaixa(false)
     }
@@ -242,27 +251,32 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   async function confirmarDuplicata(linkToExisting: boolean) {
     if (!pendingDuplicate || !clienteId) return
     const hoje = todayISO()
-    const reg = registros.find(r => r.data === hoje)
-    if (!reg) return
+    const contaAlvo = pendingDuplicate.conta.contaBancariaId || contaSelecionadaId
+    const reg = registros.find(r => r.data === hoje && r.contaBancariaId === contaAlvo)
 
-    if (!linkToExisting) {
-      await salvar({
-        clienteId, data: hoje,
-        saldoInicio: reg.saldoInicio,
-        entradas: reg.entradas,
-        saidas: reg.saidas,
-        contasAReceber: pendingDuplicate.tipo === 'receber' ? [...(reg.contasAReceber ?? []), pendingDuplicate.conta] : (reg.contasAReceber ?? []),
-        contasAPagar: pendingDuplicate.tipo === 'pagar' ? [...(reg.contasAPagar ?? []), pendingDuplicate.conta] : (reg.contasAPagar ?? []),
-        saldoConfirmado: reg.saldoConfirmado,
-      })
-      setMsg('Nova conta criada.')
-    } else {
-      setMsg('Conta semelhante já existente; nenhuma nova entrada foi criada.')
+    try {
+      if (!linkToExisting) {
+        await salvar({
+          clienteId, contaBancariaId: contaAlvo, data: hoje,
+          saldoInicio: reg?.saldoInicio ?? 0,
+          entradas: reg?.entradas ?? [],
+          saidas: reg?.saidas ?? [],
+          contasAReceber: pendingDuplicate.tipo === 'receber' ? [...(reg?.contasAReceber ?? []), pendingDuplicate.conta] : (reg?.contasAReceber ?? []),
+          contasAPagar: pendingDuplicate.tipo === 'pagar' ? [...(reg?.contasAPagar ?? []), pendingDuplicate.conta] : (reg?.contasAPagar ?? []),
+          saldoConfirmado: reg?.saldoConfirmado ?? 0,
+        })
+        setMsg('Nova conta criada.')
+      } else {
+        setMsg('Conta semelhante já existente; nenhuma nova entrada foi criada.')
+      }
+      setMsgOk(true)
+      setShowDuplicateModal(false)
+      setPendingDuplicate(null)
+      resetForm()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
     }
-
-    setShowDuplicateModal(false)
-    setPendingDuplicate(null)
-    resetForm()
   }
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
@@ -298,7 +312,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     )
   }
 
-  const podeAdicionar = !!desc && valor > 0 && (!isRecorrente || !!recInicio)
+  const podeAdicionar = !!desc && valor > 0 && (!isRecorrente || !!recInicio) && (isRecorrente || !!contaSelecionadaId)
 
   return (
     <>
@@ -340,8 +354,22 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
             />
           </div>
           {!isRecorrente && (
-            <input type="date" value={venc} onChange={e => setVenc(e.target.value)}
-              style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14 }} />
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <input type="date" value={venc} onChange={e => setVenc(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14 }} />
+              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                {[{ label: 'Hoje', dias: 0 }, { label: '+7d', dias: 7 }, { label: '+30d', dias: 30 }].map(a => (
+                  <button
+                    key={a.label}
+                    type="button"
+                    onClick={() => setVenc(addDays(todayISO(), a.dias))}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
@@ -393,7 +421,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           style={{ marginTop: 12 }}>
           {saving ? 'Salvando...' : isRecorrente ? '＋ Adicionar Recorrente' : '＋ Adicionar'}
         </button>
-        {msg && <div style={{ marginTop: 8, fontSize: 13, color: '#34c759' }}>{msg}</div>}
+        {msg && <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: msgOk ? '#34c759' : '#ff6b6b' }}>{msg}</div>}
       </div>
 
       <div className="contas-section">

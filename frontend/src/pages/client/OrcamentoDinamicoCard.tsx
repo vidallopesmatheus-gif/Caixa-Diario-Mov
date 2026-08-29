@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { obterOrcamentoDinamico } from '../../api/orcamentoDinamico'
 import type { OrcamentoDinamico } from '../../api/orcamentoDinamico'
-import { fmtBRL } from '../../utils/format'
+import { fmtBRL, fmtPct } from '../../utils/format'
 import './OrcamentoDinamicoCard.css'
 
 interface Props { clienteId: string }
@@ -48,7 +48,7 @@ export default function OrcamentoDinamicoCard({ clienteId }: Props) {
         Gasto variável até agora:{' '}
         <strong>{fmtBRL(dados.gastoVariavelAtual)}</strong>
         {dados.saldoLivre > 0 && (
-          <> ({dados.percentualUtilizado.toFixed(0)}% do limite)</>
+          <> ({fmtPct(dados.percentualUtilizado)} do limite)</>
         )}
       </p>
 

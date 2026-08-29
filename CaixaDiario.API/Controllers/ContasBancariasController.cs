@@ -103,9 +103,11 @@ public class ContasBancariasController : ControllerBase
 
     [HttpPost("{contaId:guid}/preview-extrato")]
     [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
-    public async Task<IActionResult> PreviewExtrato(Guid contaId, IFormFile arquivo)
+    public async Task<IActionResult> PreviewExtrato(
+        Guid contaId, IFormFile arquivo,
+        [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim)
     {
-        var preview = await _importacaoService.PreviewAsync(contaId, ObterUsuarioId(), ObterPerfil(), arquivo);
+        var preview = await _importacaoService.PreviewAsync(contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim);
         return Ok(new ApiResponse<PreviewImportacaoDto> { Dados = preview });
     }
 
@@ -113,11 +115,10 @@ public class ContasBancariasController : ControllerBase
     [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
     public async Task<IActionResult> ImportarExtrato(
         Guid contaId, IFormFile arquivo,
-        [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim,
-        [FromForm] List<int>? indicesForcarInclusao)
+        [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim)
     {
         var resultado = await _importacaoService.ImportarArquivoAsync(
-            contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim, indicesForcarInclusao);
+            contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim);
         return Ok(new ApiResponse<ResultadoImportacaoDto> { Dados = resultado });
     }
 

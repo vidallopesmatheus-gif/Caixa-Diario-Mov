@@ -143,4 +143,30 @@ public class CsvParserTests
 
         Assert.Throws<InvalidOperationException>(() => CsvParser.Parse(ParaStream(csv)));
     }
+
+    // ── Encoding (reproduz o bug: "débito" virando "dÃ©bito") ────────────────────────────
+
+    [Fact]
+    public void Parse_Utf8SemBom_DetectaUtf8PeloConteudo()
+    {
+        var csv = "Data;Descricao;Valor\n01/07/2026;Pagamento débito Agência;-50,00\n";
+        var bytes = Encoding.UTF8.GetBytes(csv);
+
+        var resultado = CsvParser.Parse(new MemoryStream(bytes));
+
+        var t = Assert.Single(resultado);
+        Assert.Equal("Pagamento débito Agência", t.Descricao);
+    }
+
+    [Fact]
+    public void Parse_Latin1_DetectaLatin1PorNaoSerUtf8Valido()
+    {
+        var csv = "Data;Descricao;Valor\n01/07/2026;Pagamento débito Agência;-50,00\n";
+        var bytes = Encoding.Latin1.GetBytes(csv);
+
+        var resultado = CsvParser.Parse(new MemoryStream(bytes));
+
+        var t = Assert.Single(resultado);
+        Assert.Equal("Pagamento débito Agência", t.Descricao);
+    }
 }

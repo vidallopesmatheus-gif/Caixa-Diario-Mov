@@ -53,3 +53,31 @@ export const listarTransferencias = async (clienteId: string): Promise<Transfere
 export const estornarTransferencia = async (id: string): Promise<void> => {
   await apiFetch<ApiResponse<null>>(`/api/transferencias/${id}`, { method: 'DELETE' })
 }
+
+/**
+ * Reclassifica um lançamento já existente (ex.: "Aplicação RDB" importado como saída) como
+ * Transferência — cria a perna contrapartida na conta informada, sem duplicar nem inflar o DRE.
+ */
+export const converterLancamentoEmTransferencia = async (dto: {
+  contaId: string
+  lancamentoId: string
+  data: string
+  tipo: 'Entrada' | 'Saida'
+  contaContrapartidaId: string
+  lancamentoContrapartidaId?: string
+  dataContrapartida?: string
+}): Promise<Transferencia> => {
+  const res = await apiFetch<ApiResponse<unknown>>('/api/transferencias/converter-lancamento', {
+    method: 'POST',
+    body: JSON.stringify({
+      ContaId: dto.contaId,
+      LancamentoId: dto.lancamentoId,
+      Data: dto.data,
+      Tipo: dto.tipo,
+      ContaContrapartidaId: dto.contaContrapartidaId,
+      LancamentoContrapartidaId: dto.lancamentoContrapartidaId,
+      DataContrapartida: dto.dataContrapartida,
+    }),
+  })
+  return mapTransferencia(res.dados)
+}

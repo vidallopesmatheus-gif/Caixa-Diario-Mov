@@ -10,10 +10,12 @@ import {
   desvincularMeta,
 } from '../../api/contasBancarias'
 import { previewExtrato, importarExtrato } from '../../api/importacao'
+import { converterLancamentoEmTransferencia } from '../../api/transferencias'
+import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { listarMetas, salvarMeta } from '../../api/metas'
-import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
+import { fmtBRL, fmtPct, fmtDate, todayISO, addDays } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
-import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, PreviewTransacao, ResultadoImportacao } from '../../types'
+import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao } from '../../types'
 import './ClientContas.css'
 import './ClientContaDetalhe.css'
 import './ClientContasBancarias.css'
@@ -47,14 +49,14 @@ export default function ClientContaDetalhePage() {
   const [pagamentos, setPagamentos] = useState<ContaProvisionada[]>([])
   const [loadingPendencias, setLoadingPendencias] = useState(true)
 
-  // ── Importação de extrato: preview + intervalo de datas + resolução de duplicatas ────
+  // ── Importação de extrato: escolhe arquivo + intervalo, vê resumo, confirma tudo de uma vez ──
+  // (Sem seleção linha a linha — a deduplicação por FITID/heurística roda automaticamente.)
   const [arquivoImportar, setArquivoImportar] = useState<File | null>(null)
-  const [previewTransacoes, setPreviewTransacoes] = useState<PreviewTransacao[]>([])
+  const [resumoImportacao, setResumoImportacao] = useState<ResumoImportacao | null>(null)
   const [previewCarregando, setPreviewCarregando] = useState(false)
   const [modalImportar, setModalImportar] = useState(false)
   const [dataInicioImport, setDataInicioImport] = useState('')
   const [dataFimImport, setDataFimImport] = useState('')
-  const [forcarInclusao, setForcarInclusao] = useState<Set<number>>(new Set())
   const [importando, setImportando] = useState(false)
   const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
 
@@ -67,6 +69,14 @@ export default function ClientContaDetalhePage() {
   const [rendDescricao, setRendDescricao] = useState('')
   const [salvandoRendimento, setSalvandoRendimento] = useState(false)
 
+  // ── Reclassificar lançamento como Transferência (fato permutativo) ──────────
+  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
+  const [lancamentoParaTransferencia, setLancamentoParaTransferencia] = useState<LancamentoExtrato | null>(null)
+  const [contaContrapartidaId, setContaContrapartidaId] = useState('')
+  const [candidatoContrapartida, setCandidatoContrapartida] = useState<LancamentoExtrato | null>(null)
+  const [buscandoCandidato, setBuscandoCandidato] = useState(false)
+  const [convertendo, setConvertendo] = useState(false)
+
   const [modalVincular, setModalVincular] = useState(false)
   const [metasDisponiveis, setMetasDisponiveis] = useState<MetaAnual[]>([])
   const [metaSelecionadaId, setMetaSelecionadaId] = useState('')
@@ -78,7 +88,10 @@ export default function ClientContaDetalhePage() {
     if (!clienteId || !contaId) return
     setLoadingConta(true)
     listarContasBancarias(clienteId)
-      .then(lista => setConta(lista.find(c => c.id === contaId) ?? null))
+      .then(lista => {
+        setContasBancarias(lista)
+        setConta(lista.find(c => c.id === contaId) ?? null)
+      })
       .catch(() => setMsg('Erro ao carregar dados da conta.'))
       .finally(() => setLoadingConta(false))
   }, [clienteId, contaId])
@@ -114,13 +127,11 @@ export default function ClientContaDetalhePage() {
     setPreviewCarregando(true)
     setArquivoImportar(arquivo)
     setResultadoImportacao(null)
-    setForcarInclusao(new Set())
     try {
-      const transacoes = await previewExtrato(contaId, arquivo)
-      setPreviewTransacoes(transacoes)
-      const datas = transacoes.map(t => t.data).sort()
-      setDataInicioImport(datas[0] ?? todayISO())
-      setDataFimImport(datas[datas.length - 1] ?? todayISO())
+      const resumo = await previewExtrato(contaId, arquivo)
+      setDataInicioImport(resumo.dataInicioArquivo || todayISO())
+      setDataFimImport(resumo.dataFimArquivo || todayISO())
+      setResumoImportacao(resumo)
       setModalImportar(true)
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao ler o arquivo.')
@@ -129,19 +140,18 @@ export default function ClientContaDetalhePage() {
     }
   }
 
-  const transacoesNoIntervalo = previewTransacoes.filter(
-    t => t.data >= dataInicioImport && t.data <= dataFimImport
-  )
-  const jaImportadasNoIntervalo = transacoesNoIntervalo.filter(t => t.jaImportada)
-  const novasNoIntervalo = transacoesNoIntervalo.filter(t => !t.jaImportada || forcarInclusao.has(t.indice))
-
-  function toggleForcarInclusao(indice: number) {
-    setForcarInclusao(prev => {
-      const next = new Set(prev)
-      if (next.has(indice)) next.delete(indice)
-      else next.add(indice)
-      return next
-    })
+  async function handleAlterarIntervaloImportacao(novoInicio: string, novoFim: string) {
+    setDataInicioImport(novoInicio)
+    setDataFimImport(novoFim)
+    if (!contaId || !arquivoImportar || !novoInicio || !novoFim) return
+    setPreviewCarregando(true)
+    try {
+      setResumoImportacao(await previewExtrato(contaId, arquivoImportar, { dataInicio: novoInicio, dataFim: novoFim }))
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao calcular resumo da importação.')
+    } finally {
+      setPreviewCarregando(false)
+    }
   }
 
   async function handleConfirmarImportacao() {
@@ -152,17 +162,57 @@ export default function ClientContaDetalhePage() {
       const resultado = await importarExtrato(contaId, arquivoImportar, {
         dataInicio: dataInicioImport,
         dataFim: dataFimImport,
-        indicesForcarInclusao: Array.from(forcarInclusao),
       })
       setResultadoImportacao(resultado)
       setModalImportar(false)
       setArquivoImportar(null)
+      setResumoImportacao(null)
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao importar extrato.')
     } finally {
       setImportando(false)
+    }
+  }
+
+  function abrirModalTransferencia(lancamento: LancamentoExtrato) {
+    setLancamentoParaTransferencia(lancamento)
+    setContaContrapartidaId('')
+    setCandidatoContrapartida(null)
+    setMsg('')
+  }
+
+  useEffect(() => {
+    if (!lancamentoParaTransferencia || !contaContrapartidaId) { setCandidatoContrapartida(null); return }
+    let cancelado = false
+    const tipoOriginal = lancamentoParaTransferencia.valor >= 0 ? 'Entrada' : 'Saida'
+    setBuscandoCandidato(true)
+    buscarCandidatoContrapartida(contaContrapartidaId, lancamentoParaTransferencia.data, Math.abs(lancamentoParaTransferencia.valor), tipoOriginal)
+      .then(candidato => { if (!cancelado) setCandidatoContrapartida(candidato) })
+      .finally(() => { if (!cancelado) setBuscandoCandidato(false) })
+    return () => { cancelado = true }
+  }, [lancamentoParaTransferencia, contaContrapartidaId])
+
+  async function confirmarTransferencia(vincular: boolean) {
+    if (!lancamentoParaTransferencia?.id || !contaId || !contaContrapartidaId) return
+    setConvertendo(true)
+    setMsg('')
+    try {
+      await converterLancamentoEmTransferencia({
+        contaId, lancamentoId: lancamentoParaTransferencia.id, data: lancamentoParaTransferencia.data,
+        tipo: lancamentoParaTransferencia.valor >= 0 ? 'Entrada' : 'Saida',
+        contaContrapartidaId,
+        lancamentoContrapartidaId: vincular && candidatoContrapartida?.id ? candidatoContrapartida.id : undefined,
+        dataContrapartida: vincular ? candidatoContrapartida?.data : undefined,
+      })
+      setLancamentoParaTransferencia(null)
+      carregarConta()
+      carregarExtrato()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao converter em transferência.')
+    } finally {
+      setConvertendo(false)
     }
   }
 
@@ -280,7 +330,7 @@ export default function ClientContaDetalhePage() {
       </div>
 
       {conta.pendentesCategorizacao > 0 && (
-        <div className="cd-msg" style={{ cursor: 'pointer' }} onClick={() => navigate(`/banco/extrato/${contaId}`)}>
+        <div className="cd-msg cd-msg-aviso" style={{ cursor: 'pointer' }} onClick={() => navigate(`/banco/extrato/${contaId}`)}>
           🏷️ {conta.pendentesCategorizacao} lançamento(s) aguardando categoria — clique para categorizar
         </div>
       )}
@@ -308,7 +358,7 @@ export default function ClientContaDetalhePage() {
       </div>
 
       {resultadoImportacao && (
-        <div className="cd-msg">
+        <div className="cd-msg cd-msg-sucesso">
           ✅ {resultadoImportacao.totalImportadas} lançamento(s) importado(s)
           {resultadoImportacao.totalPendentesCategorizacao > 0 && (
             <> — {resultadoImportacao.totalPendentesCategorizacao} sem categoria sugerida (
@@ -344,7 +394,7 @@ export default function ClientContaDetalhePage() {
           <div className="cb-resumo-item">
             <span className="cb-resumo-label">Rentabilidade no período</span>
             <span className={`cb-resumo-val ${(conta.rentabilidadePercentual ?? 0) >= 0 ? 'val-green' : 'val-red'}`}>
-              {conta.rentabilidadePercentual != null ? `${conta.rentabilidadePercentual.toFixed(2)}%` : '—'}
+              {conta.rentabilidadePercentual != null ? fmtPct(conta.rentabilidadePercentual) : '—'}
             </span>
           </div>
         </div>
@@ -357,7 +407,7 @@ export default function ClientContaDetalhePage() {
             <>
               {conta.progressoCombinadoPercentual !== null && conta.progressoCombinadoPercentual !== undefined && (
                 <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 8 }}>
-                  Progresso combinado: <strong style={{ color: 'var(--tx1)' }}>{conta.progressoCombinadoPercentual.toFixed(1)}%</strong> do saldo desta conta em relação à soma das metas vinculadas.
+                  Progresso combinado: <strong style={{ color: 'var(--tx1)' }}>{fmtPct(conta.progressoCombinadoPercentual)}</strong> do saldo desta conta em relação à soma das metas vinculadas.
                 </p>
               )}
               {conta.metasVinculadas.map(m => (
@@ -414,7 +464,19 @@ export default function ClientContaDetalhePage() {
               {lancamentos.map((l, i) => (
                 <div key={`${l.data}-${i}`} className="cd-extrato-linha">
                   <span>{fmtDate(l.data)}</span>
-                  <span>{l.descricao}</span>
+                  <span>
+                    {l.descricao}
+                    {l.id && l.categoria !== 'Transferência' && (
+                      <button
+                        type="button"
+                        onClick={() => abrirModalTransferencia(l)}
+                        title="Não é receita nem despesa — é uma transferência entre contas"
+                        style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
+                      >
+                        🔁 é transferência?
+                      </button>
+                    )}
+                  </span>
                   <span className="cd-categoria">
                     {l.pendenteCategorizacao ? (
                       <span style={{ color: 'var(--warning)' }} title="Sem categoria — afeta o saldo normalmente, só falta classificar">
@@ -520,7 +582,7 @@ export default function ClientContaDetalhePage() {
               <option key={m.id} value={m.id}>{m.sonho || `Meta ${m.ano}`} — {fmtBRL(m.valorSonho)}</option>
             ))}
           </select>
-          <button className="btn-add-conta" style={{ marginTop: 8 }} onClick={handleVincularExistente} disabled={!metaSelecionadaId || salvandoVinculo}>
+          <button className="btn-add-conta" style={{ marginTop: 8, width: '100%' }} onClick={handleVincularExistente} disabled={!metaSelecionadaId || salvandoVinculo}>
             {salvandoVinculo ? 'Vinculando...' : 'Vincular esta meta'}
           </button>
         </div>
@@ -539,7 +601,7 @@ export default function ClientContaDetalhePage() {
                 onChange={e => setNovoValorSonho(e.target.value.replace(/[^\d,]/g, ''))} />
             </div>
           </div>
-          <button className="btn-add-conta" onClick={handleCriarEVincular} disabled={!novoValorSonho || salvandoVinculo}>
+          <button className="btn-add-conta" style={{ width: '100%' }} onClick={handleCriarEVincular} disabled={!novoValorSonho || salvandoVinculo}>
             {salvandoVinculo ? 'Criando...' : '＋ Criar e vincular'}
           </button>
         </div>
@@ -552,50 +614,94 @@ export default function ClientContaDetalhePage() {
         footer={
           <>
             <button className="btn-cancel" onClick={() => setModalImportar(false)}>Cancelar</button>
-            <button className="btn-confirm" onClick={handleConfirmarImportacao} disabled={importando || novasNoIntervalo.length === 0}>
-              {importando ? 'Importando...' : `Importar ${novasNoIntervalo.length} transação(ões)`}
+            <button
+              className="btn-confirm"
+              onClick={handleConfirmarImportacao}
+              disabled={importando || previewCarregando || !resumoImportacao || resumoImportacao.totalNovas === 0}
+            >
+              {importando ? 'Importando...' : `Importar ${resumoImportacao?.totalNovas ?? 0} transação(ões)`}
             </button>
           </>
         }
       >
         <div className="inp-group">
           <label>Importar do dia</label>
-          <input type="date" value={dataInicioImport} onChange={e => setDataInicioImport(e.target.value)} />
+          <input type="date" value={dataInicioImport} onChange={e => handleAlterarIntervaloImportacao(e.target.value, dataFimImport)} />
         </div>
         <div className="inp-group">
           <label>Até o dia</label>
-          <input type="date" value={dataFimImport} onChange={e => setDataFimImport(e.target.value)} />
+          <input type="date" value={dataFimImport} onChange={e => handleAlterarIntervaloImportacao(dataInicioImport, e.target.value)} />
         </div>
 
-        <p style={{ fontSize: 13, color: 'var(--tx3)', margin: '12px 0' }}>
-          {transacoesNoIntervalo.length} transação(ões) encontrada(s) no intervalo selecionado
-          {jaImportadasNoIntervalo.length > 0 && ` — ${jaImportadasNoIntervalo.length} já importada(s) antes`}.
-          {' '}<strong style={{ color: 'var(--tx1)' }}>{novasNoIntervalo.length}</strong> serão importadas agora.
-        </p>
-
-        {jaImportadasNoIntervalo.length > 0 && (
-          <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--bd)', borderRadius: 8, padding: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx3)', textTransform: 'uppercase', marginBottom: 6 }}>
-              Já importadas antes — desmarcadas por padrão
-            </div>
-            {jaImportadasNoIntervalo.map(t => (
-              <label key={t.indice} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  checked={forcarInclusao.has(t.indice)}
-                  onChange={() => toggleForcarInclusao(t.indice)}
-                />
-                <span style={{ color: 'var(--tx3)', minWidth: 70 }}>{fmtDate(t.data)}</span>
-                <span style={{ flex: 1 }}>{t.descricao}</span>
-                <span className={t.tipo === 'Entrada' ? 'val-green' : 'val-red'}>
-                  {t.tipo === 'Entrada' ? '+' : '-'}{fmtBRL(t.valor)}
-                </span>
-              </label>
-            ))}
-            <p style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 6 }}>
-              Marque só se tiver certeza de que é uma transação diferente (ex: duas compras idênticas no mesmo dia).
+        {previewCarregando ? (
+          <p style={{ fontSize: 13, color: 'var(--tx3)', margin: '12px 0' }}>Calculando resumo...</p>
+        ) : resumoImportacao && (
+          <div style={{ fontSize: 13, color: 'var(--tx3)', margin: '12px 0' }}>
+            <p>
+              <strong style={{ color: 'var(--tx1)' }}>{resumoImportacao.totalEncontradas}</strong> transação(ões) encontrada(s) no intervalo selecionado
+              {resumoImportacao.totalJaImportadas > 0 && (
+                <> — <strong style={{ color: 'var(--tx1)' }}>{resumoImportacao.totalJaImportadas}</strong> já importada(s) antes (ignoradas automaticamente)</>
+              )}.
             </p>
+            <p>
+              <strong style={{ color: '#34c759' }}>{resumoImportacao.totalNovas}</strong> serão importadas agora
+              {resumoImportacao.totalNovas > 0 && (
+                <> · <span className="val-green">+{fmtBRL(resumoImportacao.totalEntradas)}</span> em entradas · <span className="val-red">-{fmtBRL(resumoImportacao.totalSaidas)}</span> em saídas</>
+              )}.
+            </p>
+            {resumoImportacao.totalNovas > 0 && (
+              <p style={{ fontSize: 12 }}>Entram como <strong>pendentes de categorização</strong> — categorize depois na tela de categorização.</p>
+            )}
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!lancamentoParaTransferencia}
+        title="🔁 Classificar como Transferência"
+        onClose={() => setLancamentoParaTransferencia(null)}
+        footer={
+          candidatoContrapartida ? (
+            <>
+              <button className="btn-cancel" onClick={() => setLancamentoParaTransferencia(null)}>Cancelar</button>
+              <button className="btn-cancel" onClick={() => confirmarTransferencia(false)} disabled={convertendo}>Criar novo mesmo assim</button>
+              <button className="btn-confirm" onClick={() => confirmarTransferencia(true)} disabled={convertendo}>
+                {convertendo ? 'Vinculando...' : 'Vincular a esse lançamento'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn-cancel" onClick={() => setLancamentoParaTransferencia(null)}>Cancelar</button>
+              <button className="btn-confirm" onClick={() => confirmarTransferencia(false)} disabled={convertendo || !contaContrapartidaId}>
+                {convertendo ? 'Convertendo...' : 'Confirmar'}
+              </button>
+            </>
+          )
+        }
+      >
+        {lancamentoParaTransferencia && (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+              "{lancamentoParaTransferencia.descricao}" · {fmtBRL(Math.abs(lancamentoParaTransferencia.valor))} · {fmtDate(lancamentoParaTransferencia.data)}
+              <br />Não é {lancamentoParaTransferencia.valor >= 0 ? 'receita' : 'despesa'}: o dinheiro {lancamentoParaTransferencia.valor >= 0 ? 'veio de' : 'foi para'} outra conta. Qual?
+            </p>
+            <div className="inp-group">
+              <label>Conta {lancamentoParaTransferencia.valor >= 0 ? 'de origem' : 'de destino'}</label>
+              <select value={contaContrapartidaId} onChange={e => setContaContrapartidaId(e.target.value)}>
+                <option value="">Selecione...</option>
+                {contasBancarias.filter(c => c.ativa && c.id !== contaId).map(c => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+            </div>
+            {buscandoCandidato && <p style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 8 }}>Procurando lançamento correspondente...</p>}
+            {candidatoContrapartida && (
+              <p style={{ fontSize: 13, color: 'var(--warning)', marginTop: 8 }}>
+                Já existe um lançamento parecido nessa conta: "{candidatoContrapartida.descricao}" de {fmtBRL(Math.abs(candidatoContrapartida.valor))} em {fmtDate(candidatoContrapartida.data)}.
+                Vincular a ele evita duplicar a transferência.
+              </p>
+            )}
+          </>
         )}
       </Modal>
     </>

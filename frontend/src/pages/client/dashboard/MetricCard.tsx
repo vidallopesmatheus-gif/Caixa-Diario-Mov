@@ -1,5 +1,5 @@
 import Sparkline from '../../../components/shared/Sparkline'
-import { fmtBRL } from '../../../utils/format'
+import { fmtBRL, fmtPct } from '../../../utils/format'
 
 interface Props {
   label: string
@@ -31,7 +31,7 @@ export default function MetricCard({ label, valor, variacaoPct, comparativoLabel
         <span className={`resumo-metric-variacao ${variacaoClasse}`}>
           {variacaoPct === null
             ? (carregando ? '' : `sem base de comparação`)
-            : `${seta} ${Math.abs(variacaoPct).toFixed(1)}% ${comparativoLabel}`}
+            : `${seta} ${fmtPct(Math.abs(variacaoPct))} ${comparativoLabel}`}
         </span>
         {serie.length >= 2 && (
           <Sparkline valores={serie} cor={variacaoClasse === 'val-red' ? '#ff3b30' : variacaoClasse === 'val-green' ? '#34c759' : undefined} />

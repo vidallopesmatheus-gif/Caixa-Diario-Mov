@@ -22,7 +22,9 @@ public class MetaService : IMetaService
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
 
-        var meta = await _metaRepository.ObterPorClienteEAnoAsync(clienteId, ano)
+        // Só a meta "simples" (Meta de Faturamento Mensal) ainda é 1-por-ano — objetivos (modo
+        // "metodo") são vários por cliente e são buscados/editados por Id via ListarMetasAsync.
+        var meta = await _metaRepository.ObterMetaSimplesPorClienteEAnoAsync(clienteId, ano)
             ?? throw new ApiException(404, CodigoRetorno.META_NAO_ENCONTRADA, "Meta não encontrada.");
 
         // Se a meta estiver vinculada a uma conta de investimento, TotalInvestido passa a
@@ -48,7 +50,28 @@ public class MetaService : IMetaService
         if (perfil == "cliente" && usuarioLogadoId != dto.ClienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
 
-        var existente = await _metaRepository.ObterPorClienteEAnoAsync(dto.ClienteId, dto.Ano);
+        if (dto.ModoMeta == "metodo" && dto.DataAlvo == null)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe a data planejada do objetivo.");
+
+        // "simples" (Meta de Faturamento Mensal) continua 1-por-ano, identificada por (Cliente,
+        // Ano). "metodo" (objetivo) não tem mais essa identidade — cada um é uma linha própria,
+        // localizada pelo Id explícito; sem Id, é sempre um objetivo novo.
+        MetaAnual? existente;
+        if (dto.ModoMeta == "simples")
+        {
+            existente = await _metaRepository.ObterMetaSimplesPorClienteEAnoAsync(dto.ClienteId, dto.Ano);
+        }
+        else if (dto.Id.HasValue)
+        {
+            existente = await _metaRepository.ObterPorIdAsync(dto.Id.Value)
+                ?? throw new ApiException(404, CodigoRetorno.META_NAO_ENCONTRADA, "Objetivo não encontrado.");
+            if (existente.ClienteId != dto.ClienteId)
+                throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+        }
+        else
+        {
+            existente = null;
+        }
 
         if (existente != null)
         {
@@ -64,6 +87,7 @@ public class MetaService : IMetaService
             existente.TotalInvestido = dto.TotalInvestido;
             existente.MargemPJ = dto.MargemPJ;
             existente.IconeSonho = dto.IconeSonho;
+            existente.DataAlvo = dto.DataAlvo;
             existente.AtualizadoEm = DateTime.UtcNow;
             return MapToDto(await _metaRepository.SalvarAsync(existente));
         }
@@ -85,10 +109,21 @@ public class MetaService : IMetaService
             TotalInvestido = dto.TotalInvestido,
             MargemPJ = dto.MargemPJ,
             IconeSonho = dto.IconeSonho,
+            DataAlvo = dto.DataAlvo,
             CriadoEm = DateTime.UtcNow,
             AtualizadoEm = DateTime.UtcNow
         };
         return MapToDto(await _metaRepository.SalvarAsync(nova));
+    }
+
+    public async Task ExcluirMetaAsync(Guid id, Guid usuarioLogadoId, string perfil)
+    {
+        var meta = await _metaRepository.ObterPorIdAsync(id)
+            ?? throw new ApiException(404, CodigoRetorno.META_NAO_ENCONTRADA, "Meta não encontrada.");
+        if (perfil == "cliente" && usuarioLogadoId != meta.ClienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+
+        await _metaRepository.RemoverAsync(meta);
     }
 
     private static MetaAnualDto MapToDto(MetaAnual m) => new()
@@ -101,5 +136,6 @@ public class MetaService : IMetaService
         TaxaRetorno = m.TaxaRetorno, TotalInvestido = m.TotalInvestido,
         MargemPJ = m.MargemPJ, IconeSonho = m.IconeSonho,
         ContaInvestimentoId = m.ContaInvestimentoId,
+        DataAlvo = m.DataAlvo,
     };
 }

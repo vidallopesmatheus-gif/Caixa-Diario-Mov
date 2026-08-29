@@ -25,14 +25,19 @@ function diffMeses(inicio: Date, fim: Date): number {
 export function calcularRitmoMeta(meta: MetaAnual): RitmoMeta {
   const vf = meta.valorSonho
   const taxa = meta.taxaRetorno
-  const prazoTotalMeses = meta.prazoAnos * 12
   const investido = meta.totalInvestido
   const percentual = vf > 0 ? (investido / vf) * 100 : 0
 
   const dataInicio = meta.salvoEm ? new Date(meta.salvoEm) : null
-  const dataAlvo = dataInicio && prazoTotalMeses > 0
-    ? new Date(dataInicio.getFullYear(), dataInicio.getMonth() + prazoTotalMeses, dataInicio.getDate())
-    : null
+  // dataAlvo é a data real escolhida pelo usuário pro objetivo. Metas antigas, criadas antes
+  // desse campo existir, caem no prazoAnos relativo (contado a partir de quando foram salvas)
+  // como fallback — sem isso perderiam o prazo/ritmo já configurado.
+  const dataAlvo = meta.dataAlvo
+    ? new Date(meta.dataAlvo + 'T12:00:00')
+    : (dataInicio && meta.prazoAnos > 0
+        ? new Date(dataInicio.getFullYear(), dataInicio.getMonth() + meta.prazoAnos * 12, dataInicio.getDate())
+        : null)
+  const prazoTotalMeses = dataInicio && dataAlvo ? diffMeses(dataInicio, dataAlvo) : 0
 
   if (!vf || vf <= 0) return { status: 'sem-dados', percentual: 0, dataAlvo: null }
   if (investido >= vf) return { status: 'atingida', percentual, dataAlvo }

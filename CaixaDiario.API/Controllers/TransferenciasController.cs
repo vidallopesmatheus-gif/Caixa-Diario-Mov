@@ -38,4 +38,11 @@ public class TransferenciasController : ControllerBase
         await _service.EstornarAsync(id, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<object> { Dados = null });
     }
+
+    [HttpPost("converter-lancamento")]
+    public async Task<IActionResult> ConverterLancamento([FromBody] ConverterLancamentoEmTransferenciaDto dto)
+    {
+        var criada = await _service.ConverterLancamentoAsync(dto, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<TransferenciaDto> { Dados = criada });
+    }
 }

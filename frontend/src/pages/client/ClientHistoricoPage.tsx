@@ -1,6 +1,6 @@
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
-import { fmtBRL, fmtDate, monthLabel } from '../../utils/format'
+import { fmtBRL, fmtDate, monthLabel, addMonths } from '../../utils/format'
 import StatCard from '../../components/shared/StatCard'
 import Modal from '../../components/shared/Modal'
 import { ehOperacional } from '../../utils/lancamentos'
@@ -17,12 +17,14 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
   const [motivo, setMotivo] = useState('')
   const [erroDelete, setErroDelete] = useState('')
 
-  const mesAtual = new Date().toISOString().slice(0, 7)
-  const doMes = registros.filter(r => r.data.startsWith(mesAtual))
+  const mesAtualReal = new Date().toISOString().slice(0, 7)
+  const [mesSelecionado, setMesSelecionado] = useState(mesAtualReal)
+  const doMes = registros.filter(r => r.data.startsWith(mesSelecionado))
   // Transferências entre contas e rendimento de investimento não são receita/despesa.
   const totalEnt = doMes.reduce((s, r) => s + r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
   const totalSai = doMes.reduce((s, r) => s + r.saidas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
   const ultimo = doMes[0]?.saldoConfirmado ?? 0
+  const podeAvancar = mesSelecionado < mesAtualReal
 
   async function handleDelete() {
     if (!delData) return
@@ -35,15 +37,46 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
 
   return (
     <>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14 }}>
+        <button
+          aria-label="Mês anterior"
+          onClick={() => setMesSelecionado(m => addMonths(m, -1))}
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 16, width: 32, height: 32, cursor: 'pointer' }}
+        >
+          ‹
+        </button>
+        <input
+          type="month"
+          value={mesSelecionado}
+          max={mesAtualReal}
+          onChange={e => e.target.value && setMesSelecionado(e.target.value)}
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 13, padding: '5px 10px' }}
+        />
+        <button
+          aria-label="Próximo mês"
+          disabled={!podeAvancar}
+          onClick={() => setMesSelecionado(m => addMonths(m, 1))}
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 8, color: podeAvancar ? 'var(--tx1)' : 'var(--tx3)', fontSize: 16, width: 32, height: 32, cursor: podeAvancar ? 'pointer' : 'default', opacity: podeAvancar ? 1 : 0.5 }}
+        >
+          ›
+        </button>
+      </div>
+
       <div className="stats-grid">
-        <StatCard label="📅 Mês atual" value={monthLabel(mesAtual)} className="val-blue" />
+        <StatCard label="📅 Mês selecionado" value={monthLabel(mesSelecionado)} className="val-blue" />
         <StatCard label="📤 Total entradas" value={fmtBRL(totalEnt)} className="val-green" />
         <StatCard label="💸 Total saídas" value={fmtBRL(totalSai)} className="val-red" />
         <StatCard label="💰 Último saldo" value={fmtBRL(ultimo)} className="val-green" />
       </div>
 
+      {doMes.length === 0 && (
+        <p style={{ color: 'var(--tx3)', textAlign: 'center', marginTop: 24 }}>
+          Nenhum lançamento em {monthLabel(mesSelecionado)}.
+        </p>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-        {registros.map(r => {
+        {doMes.map(r => {
           // Idem: o "lucro" do dia não deve contar transferências/rendimento — a lista de
           // lançamentos abaixo (quando expandida) continua mostrando cada um individualmente.
           const entTotal = r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0)

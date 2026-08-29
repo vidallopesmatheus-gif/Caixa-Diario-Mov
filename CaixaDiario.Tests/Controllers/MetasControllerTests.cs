@@ -53,4 +53,16 @@ public class MetasControllerTests
         var body = Assert.IsType<ApiResponse<MetaAnualDto>>(ok.Value);
         Assert.Equal(2026, body.Dados!.Ano);
     }
+
+    [Fact]
+    public async Task Excluir_ChamaServicoERetornaOk()
+    {
+        var metaId = Guid.NewGuid();
+        _serviceMock.Setup(s => s.ExcluirMetaAsync(metaId, _usuarioId, "admin")).Returns(Task.CompletedTask);
+
+        var result = await _sut.Excluir(metaId);
+
+        Assert.IsType<OkObjectResult>(result);
+        _serviceMock.Verify(s => s.ExcluirMetaAsync(metaId, _usuarioId, "admin"), Times.Once);
+    }
 }

@@ -1,16 +1,16 @@
 import { apiFetch } from './client'
-import type { ApiResponse, PreviewTransacao, ResultadoImportacao, PendenteCategorizacao } from '../types'
+import type { ApiResponse, ResumoImportacao, ResultadoImportacao, PendenteCategorizacao } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapPreview(raw: any): PreviewTransacao {
+function mapResumo(raw: any): ResumoImportacao {
   return {
-    indice: raw.indice ?? 0,
-    data: raw.data,
-    valor: raw.valor ?? 0,
-    descricao: raw.descricao ?? '',
-    tipo: raw.tipo,
-    fitId: raw.fitId ?? undefined,
-    jaImportada: raw.jaImportada ?? false,
+    totalEncontradas: raw.totalEncontradas ?? 0,
+    totalJaImportadas: raw.totalJaImportadas ?? 0,
+    totalNovas: raw.totalNovas ?? 0,
+    totalEntradas: raw.totalEntradas ?? 0,
+    totalSaidas: raw.totalSaidas ?? 0,
+    dataInicioArquivo: raw.dataInicioArquivo ?? '',
+    dataFimArquivo: raw.dataFimArquivo ?? '',
   }
 }
 
@@ -25,26 +25,31 @@ function mapPendente(raw: any): PendenteCategorizacao {
   }
 }
 
-export const previewExtrato = async (contaId: string, arquivo: File): Promise<PreviewTransacao[]> => {
+export const previewExtrato = async (
+  contaId: string,
+  arquivo: File,
+  opcoes?: { dataInicio?: string; dataFim?: string },
+): Promise<ResumoImportacao> => {
   const form = new FormData()
   form.append('arquivo', arquivo)
-  const res = await apiFetch<ApiResponse<{ transacoes: unknown[] }>>(
+  if (opcoes?.dataInicio) form.append('dataInicio', opcoes.dataInicio)
+  if (opcoes?.dataFim) form.append('dataFim', opcoes.dataFim)
+  const res = await apiFetch<ApiResponse<unknown>>(
     `/api/contas-bancarias/${contaId}/preview-extrato`,
     { method: 'POST', body: form },
   )
-  return (res.dados?.transacoes ?? []).map(mapPreview)
+  return mapResumo(res.dados)
 }
 
 export const importarExtrato = async (
   contaId: string,
   arquivo: File,
-  opcoes?: { dataInicio?: string; dataFim?: string; indicesForcarInclusao?: number[] },
+  opcoes?: { dataInicio?: string; dataFim?: string },
 ): Promise<ResultadoImportacao> => {
   const form = new FormData()
   form.append('arquivo', arquivo)
   if (opcoes?.dataInicio) form.append('dataInicio', opcoes.dataInicio)
   if (opcoes?.dataFim) form.append('dataFim', opcoes.dataFim)
-  for (const i of opcoes?.indicesForcarInclusao ?? []) form.append('indicesForcarInclusao', String(i))
 
   const res = await apiFetch<ApiResponse<unknown>>(
     `/api/contas-bancarias/${contaId}/importar-extrato`,
