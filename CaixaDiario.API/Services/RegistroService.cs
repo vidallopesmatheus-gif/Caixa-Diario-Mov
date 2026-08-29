@@ -163,13 +163,21 @@ public class RegistroService : IRegistroService
     }
 
     // Resolve a ContaBancariaId: usa a fornecida ou busca o Caixa padrão do cliente.
+    // Nunca devolve Guid.Empty — RegistroDiario.ContaBancariaId tem FK pra contas_bancarias, e
+    // gravar Guid.Empty ali derruba a query com violação de FK (500 genérico pro usuário, sem
+    // pista nenhuma do que houve). Se não há conta explícita nem Caixa cadastrada, o problema é
+    // de dados (cliente sem nenhuma conta bancária) — melhor um erro claro do que uma FK quebrada.
     private async Task<Guid> ResolverContaPadraoAsync(Guid clienteId, Guid? contaBancariaId)
     {
         if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
             return contaBancariaId.Value;
 
         var caixa = await _contaBancariaRepository.ObterCaixaPadraoAsync(clienteId);
-        return caixa?.Id ?? Guid.Empty;
+        if (caixa != null)
+            return caixa.Id;
+
+        throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+            "Nenhuma conta bancária padrão (Caixa) encontrada para este cliente. Cadastre uma conta bancária em Configurações antes de continuar.");
     }
 
     private static List<ContaProvisionada> AplicarBaixaAutomatica(List<ContaProvisionada> contas, DateOnly data)

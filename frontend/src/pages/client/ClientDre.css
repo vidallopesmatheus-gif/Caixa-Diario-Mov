@@ -94,7 +94,6 @@
   border-radius: 14px;
   padding: 24px;
   max-width: 680px;
-  font-family: monospace;
 }
 
 .dre-corpo-comparativo {
@@ -117,10 +116,14 @@
   text-align: right;
 }
 
+/* Tabela de 3 colunas: descrição | valor | percentual. Larguras fixas nas colunas numéricas
+   (não "auto") pra que os números fiquem alinhados de linha em linha, como numa tabela real —
+   cada .dre-linha é um grid independente, então só alinha se todas usarem os mesmos tamanhos. */
 .dre-linha {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr 130px 64px;
+  column-gap: 12px;
+  align-items: baseline;
   padding: 7px 0;
 }
 
@@ -141,18 +144,17 @@
 .dre-linha-valor {
   font-size: 14px;
   font-weight: 600;
-  min-width: 160px;
   text-align: right;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  line-height: 1.3;
+  color: var(--tx1);
+  font-variant-numeric: tabular-nums;
 }
 
 .dre-linha-pct {
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--tx3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .dre-linha-receita .dre-linha-label {
@@ -160,7 +162,8 @@
   font-weight: 700;
 }
 
-.dre-linha-receita .dre-linha-valor {
+.dre-linha-receita .dre-linha-valor,
+.dre-linha-receita .dre-linha-pct {
   font-size: 15px;
 }
 
@@ -191,9 +194,14 @@
 }
 
 .dre-linha-subtotal .dre-linha-valor,
+.dre-linha-subtotal .dre-linha-pct,
 .dre-linha-subtotal .dre-cmp-cel-valor {
   font-size: 15px;
   font-weight: 700;
+}
+
+.dre-linha-subtotal .dre-linha-pct {
+  color: var(--tx1);
 }
 
 .dre-linha[data-final="true"] {
@@ -296,7 +304,7 @@
 }
 
 .dre-cmp-cel-pct {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--accent);
 }

@@ -80,6 +80,8 @@ export interface ContaBancaria {
 }
 
 export interface LancamentoExtrato {
+  // Ausente nas linhas sintéticas de recebimento/pagamento de Contas a Pagar/Receber.
+  id?: string
   data: string
   descricao: string
   categoria?: string
@@ -162,6 +164,8 @@ export interface MetaAnual {
   margemPJ?: number
   iconeSonho?: string
   contaInvestimentoId?: string
+  /** Data real escolhida pra atingir o objetivo (modo "metodo") — "YYYY-MM-DD". */
+  dataAlvo?: string
 }
 
 export interface LoginResponse {
@@ -185,14 +189,15 @@ export interface ChatMessage {
 }
 
 /** Transação encontrada no arquivo antes de qualquer persistência — só pré-visualização. */
-export interface PreviewTransacao {
-  indice: number
-  data: string
-  valor: number
-  descricao: string
-  tipo: 'Entrada' | 'Saida'
-  fitId?: string
-  jaImportada: boolean
+/** Resumo agregado do arquivo antes de importar — sem lista linha a linha. */
+export interface ResumoImportacao {
+  totalEncontradas: number
+  totalJaImportadas: number
+  totalNovas: number
+  totalEntradas: number
+  totalSaidas: number
+  dataInicioArquivo: string
+  dataFimArquivo: string
 }
 
 export interface ResultadoImportacao {

@@ -10,9 +10,14 @@ public static class OfxParser
 {
     public static List<TransacaoOfx> Parse(Stream stream)
     {
-        // Lê o conteúdo detectando encoding (OFX 1.x frequentemente usa ISO-8859-1)
-        using var reader = new StreamReader(stream, Encoding.Latin1, detectEncodingFromByteOrderMarks: true);
-        var content = reader.ReadToEnd();
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        var bytes = ms.ToArray();
+
+        // Usa o CHARSET/ENCODING declarado no cabeçalho OFX; sem declaração, detecta pelo
+        // conteúdo (extratos brasileiros vêm tanto em UTF-8 quanto em Latin-1/Windows-1252).
+        var encoding = EncodingDetector.DetectarOfx(bytes);
+        var content = encoding.GetString(bytes).TrimStart('﻿');
 
         // OFX 2.x começa com declaração XML
         if (content.TrimStart().StartsWith("<?xml", StringComparison.OrdinalIgnoreCase))

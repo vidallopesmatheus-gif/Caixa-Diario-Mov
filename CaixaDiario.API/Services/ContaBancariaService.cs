@@ -115,6 +115,7 @@ public class ContaBancariaService : IContaBancariaService
                 saldo += entrada.Valor;
                 linhas.Add((r.Data, new LancamentoExtratoDto
                 {
+                    Id = entrada.Id == Guid.Empty ? null : entrada.Id,
                     Data = r.Data.ToString("yyyy-MM-dd"),
                     Descricao = entrada.Descricao,
                     Categoria = entrada.Categoria,
@@ -141,6 +142,7 @@ public class ContaBancariaService : IContaBancariaService
                 saldo -= saida.Valor;
                 linhas.Add((r.Data, new LancamentoExtratoDto
                 {
+                    Id = saida.Id == Guid.Empty ? null : saida.Id,
                     Data = r.Data.ToString("yyyy-MM-dd"),
                     Descricao = saida.Descricao,
                     Categoria = saida.Categoria,

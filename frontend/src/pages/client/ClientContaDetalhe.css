@@ -79,12 +79,18 @@
   color: var(--accent);
 }
 
+/* Cor padrão é erro — é o caso mais comum desta classe (msg de estado local do componente,
+   sempre populada a partir de catch). Sucesso/aviso usam um modificador explícito, nunca
+   herdam a cor de erro por padrão. */
 .cd-msg {
   margin-bottom: 12px;
   font-size: 13px;
   font-weight: 600;
   color: #ff6b6b;
 }
+
+.cd-msg-sucesso { color: #34c759; }
+.cd-msg-aviso { color: var(--warning); }
 
 .cd-tabs {
   display: flex;

@@ -8,7 +8,14 @@ public static class CsvParser
 {
     public static List<TransacaoCsv> Parse(Stream stream)
     {
-        using var reader = new StreamReader(stream, Encoding.Latin1, detectEncodingFromByteOrderMarks: true);
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        var bytes = ms.ToArray();
+
+        // CSV não tem cabeçalho de encoding como o OFX — detecta pelo conteúdo (UTF-8 válido
+        // ou Latin-1/Windows-1252 legado, evitando forçar Latin-1 e corromper arquivos UTF-8).
+        var encoding = EncodingDetector.DetectarPorConteudo(bytes);
+        using var reader = new StreamReader(new MemoryStream(bytes), encoding, detectEncodingFromByteOrderMarks: true);
         var linhas = new List<string>();
         while (!reader.EndOfStream)
         {

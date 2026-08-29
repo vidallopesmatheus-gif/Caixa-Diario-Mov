@@ -1,7 +1,7 @@
-import { fmtBRL, fmtDate, todayISO, addDays, monthLabel } from './format'
+import { fmtBRL, fmtPct, fmtDate, todayISO, addDays, monthLabel } from './format'
 
 test('fmtBRL formata valor em reais', () => {
-  expect(fmtBRL(1234.5)).toBe('R$ 1.234,50')
+  expect(fmtBRL(1234.5)).toBe('R$ 1.234,50')
 })
 
 test('fmtDate converte ISO para dd/mm/yyyy', () => {
@@ -23,4 +23,16 @@ test('monthLabel retorna mês abreviado', () => {
 
 test('todayISO retorna formato YYYY-MM-DD', () => {
   expect(todayISO()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+})
+
+test('fmtBRL arredonda dízimas de ponto flutuante', () => {
+  expect(fmtBRL(5560.079999999999)).toContain('5.560,08')
+})
+
+test('fmtPct formata com vírgula decimal, não ponto', () => {
+  expect(fmtPct(12.3)).toBe('12,3%')
+})
+
+test('fmtPct aceita número de casas decimais customizado', () => {
+  expect(fmtPct(12.345, 2)).toBe('12,35%')
 })

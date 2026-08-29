@@ -1,18 +1,60 @@
-.cat-item {
-  background: var(--bg-card);
+/* ── Busca ─────────────────────────────────────────────────────────────── */
+.cat-busca-wrap { margin: 14px 0; }
+.cat-busca-input {
+  width: 100%;
+  max-width: 340px;
+  padding: 8px 12px;
+  border-radius: 8px;
   border: 1px solid var(--bd);
-  border-radius: 10px;
-  padding: 12px 16px;
-  margin-bottom: 10px;
+  background: var(--bg);
+  color: var(--tx1);
+  font-size: 13px;
+}
+
+/* ── Grupos recolhíveis ────────────────────────────────────────────────── */
+.cat-grupo { margin-bottom: 6px; }
+
+.cat-grupo-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--bd);
+  padding: 10px 4px 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--tx3);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cat-grupo-seta { font-size: 11px; width: 10px; }
+
+/* ── Lista compacta: uma linha por categoria ──────────────────────────── */
+.cat-lista-compacta { display: flex; flex-direction: column; }
+
+.cat-item-compacta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--bd);
   flex-wrap: wrap;
 }
 
-.cat-item.cat-inativa {
-  opacity: 0.6;
-}
+.cat-item-compacta:last-child { border-bottom: none; }
+
+.cat-item-compacta.cat-inativa { opacity: 0.6; }
+
+.cat-nome-compacta { flex: 1; min-width: 140px; font-size: 13px; color: var(--tx1); }
+.cat-tipo-compacta { font-size: 12px; color: var(--tx3); min-width: 130px; }
+
+.cat-acoes-compactas { display: flex; gap: 6px; margin-left: auto; }
 
 .cat-ordem-setas {
   display: flex;
@@ -35,12 +77,6 @@
   opacity: 0.3;
   cursor: default;
 }
-
-.cat-info { flex: 1; min-width: 160px; }
-.cat-nome { font-size: 15px; font-weight: 600; color: var(--tx1); }
-.cat-meta { font-size: 12px; color: var(--tx3); margin-top: 2px; }
-
-.cat-acoes { display: flex; gap: 8px; }
 
 .cat-btn-excluir {
   padding: 6px 14px;

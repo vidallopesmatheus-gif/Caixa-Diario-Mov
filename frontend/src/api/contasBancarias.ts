@@ -29,6 +29,7 @@ function mapConta(raw: any): ContaBancaria {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapLancamento(raw: any): LancamentoExtrato {
   return {
+    id: raw.id ?? undefined,
     data: raw.data,
     descricao: raw.descricao ?? '',
     categoria: raw.categoria ?? undefined,

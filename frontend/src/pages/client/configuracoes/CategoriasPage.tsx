@@ -21,6 +21,9 @@ const TIPO_LABEL: Record<TipoCusto, string> = {
   DespesaNaoOperacional: 'Despesa Não Operacional',
 }
 
+// Mesma ordem usada no seed do Plano de Contas — grupos sem nome caem em "Outros".
+const GRUPO_ORDEM = ['Custos Diretos', 'Pessoas', 'Despesas Administrativas', 'Marketing', 'Impostos', 'Financeiras', 'Investimentos', 'Outros']
+
 export default function CategoriasPage() {
   const [categorias, setCategorias] = useState<CategoriaAdmin[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,6 +43,18 @@ export default function CategoriasPage() {
   const [destinoMigracao, setDestinoMigracao] = useState('')
   const [migrando, setMigrando] = useState(false)
 
+  const [busca, setBusca] = useState('')
+  const [gruposColapsados, setGruposColapsados] = useState<Set<string>>(new Set())
+
+  function toggleGrupo(nome: string) {
+    setGruposColapsados(prev => {
+      const next = new Set(prev)
+      if (next.has(nome)) next.delete(nome)
+      else next.add(nome)
+      return next
+    })
+  }
+
   useEffect(() => { carregar() }, [])
 
   function carregar() {
@@ -58,6 +73,34 @@ export default function CategoriasPage() {
 
   const ativas = useMemo(() => categorias.filter(c => c.ativa).sort((a, b) => a.ordem - b.ordem), [categorias])
   const inativas = useMemo(() => categorias.filter(c => !c.ativa), [categorias])
+  // Índice na lista FLAT de ativas (não a filtrada/agrupada) — as setas ▲▼ reordenam globalmente,
+  // então o estado desabilitado precisa continuar refletindo a posição real, não a exibida.
+  const indicePorId = useMemo(() => new Map(ativas.map((c, i) => [c.id, i])), [ativas])
+
+  const buscaNormalizada = busca.trim().toLowerCase()
+  const ativasFiltradas = useMemo(
+    () => buscaNormalizada ? ativas.filter(c => c.nome.toLowerCase().includes(buscaNormalizada)) : ativas,
+    [ativas, buscaNormalizada]
+  )
+  const inativasFiltradas = useMemo(
+    () => buscaNormalizada ? inativas.filter(c => c.nome.toLowerCase().includes(buscaNormalizada)) : inativas,
+    [inativas, buscaNormalizada]
+  )
+
+  // Receita não tem grupo — fica em seção própria. As demais são agrupadas pelo campo `grupo`
+  // (categorias sem grupo definido, ex.: criadas manualmente, caem em "Outros").
+  const receitasAtivas = useMemo(() => ativasFiltradas.filter(c => c.tipo === 'Receita'), [ativasFiltradas])
+  const gruposDespesas = useMemo(() => {
+    const porGrupo = new Map<string, CategoriaAdmin[]>()
+    for (const c of ativasFiltradas) {
+      if (c.tipo === 'Receita') continue
+      const chave = c.grupo ?? 'Outros'
+      const lista = porGrupo.get(chave)
+      if (lista) lista.push(c)
+      else porGrupo.set(chave, [c])
+    }
+    return GRUPO_ORDEM.filter(g => porGrupo.has(g)).map(nome => ({ nome, itens: porGrupo.get(nome)! }))
+  }, [ativasFiltradas])
 
   async function handleCriar() {
     if (!novoNome.trim()) return
@@ -177,6 +220,39 @@ export default function CategoriasPage() {
     ? ativas.filter(c => c.id !== emUso.categoria.id && c.tipo === emUso.categoria.tipo)
     : []
 
+  function renderCategoriaAtiva(c: CategoriaAdmin) {
+    const i = indicePorId.get(c.id) ?? 0
+    if (editId === c.id) {
+      return (
+        <div key={c.id} className="cat-item-compacta cat-edit-form">
+          <input value={editNome} onChange={e => setEditNome(e.target.value)} style={{ flex: 2 }} />
+          <select value={editTipo} onChange={e => setEditTipo(e.target.value as TipoCusto)} style={{ flex: 1, minWidth: 180 }}>
+            {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
+          </select>
+          <button className="btn-add-conta" onClick={handleSalvarEdit} disabled={salvandoEdit}>
+            {salvandoEdit ? 'Salvando...' : '✔ Salvar'}
+          </button>
+          <button onClick={() => setEditId(null)} className="cat-btn-cancelar">Cancelar</button>
+        </div>
+      )
+    }
+    return (
+      <div key={c.id} className="cat-item-compacta">
+        <div className="cat-ordem-setas">
+          <button disabled={i === 0} onClick={() => handleMover(c.id, -1)} title="Mover para cima">▲</button>
+          <button disabled={i === ativas.length - 1} onClick={() => handleMover(c.id, 1)} title="Mover para baixo">▼</button>
+        </div>
+        <span className="cat-nome-compacta">{c.nome}</span>
+        <span className="cat-tipo-compacta">{TIPO_LABEL[c.tipo]}</span>
+        <div className="cat-acoes-compactas">
+          <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
+          <button className="cb-btn-inativar" onClick={() => handleDesativar(c.id)}>Desativar</button>
+          <button className="cat-btn-excluir" onClick={() => handleExcluir(c)}>Excluir</button>
+        </div>
+      </div>
+    )
+  }
+
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
   return (
@@ -206,58 +282,62 @@ export default function CategoriasPage() {
         )}
       </div>
 
-      <div className="contas-section">
-        <h3>Categorias Ativas ({ativas.length})</h3>
-        {ativas.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma categoria ativa.</p>}
-        {ativas.map((c, i) => (
-          <div key={c.id} className="cat-item">
-            {editId === c.id ? (
-              <div className="cat-edit-form">
-                <input value={editNome} onChange={e => setEditNome(e.target.value)} style={{ flex: 2 }} />
-                <select value={editTipo} onChange={e => setEditTipo(e.target.value as TipoCusto)} style={{ flex: 1, minWidth: 180 }}>
-                  {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
-                </select>
-                <button className="btn-add-conta" onClick={handleSalvarEdit} disabled={salvandoEdit}>
-                  {salvandoEdit ? 'Salvando...' : '✔ Salvar'}
-                </button>
-                <button onClick={() => setEditId(null)} className="cat-btn-cancelar">Cancelar</button>
-              </div>
-            ) : (
-              <>
-                <div className="cat-ordem-setas">
-                  <button disabled={i === 0} onClick={() => handleMover(c.id, -1)} title="Mover para cima">▲</button>
-                  <button disabled={i === ativas.length - 1} onClick={() => handleMover(c.id, 1)} title="Mover para baixo">▼</button>
-                </div>
-                <div className="cat-info">
-                  <div className="cat-nome">{c.nome}</div>
-                  <div className="cat-meta">{TIPO_LABEL[c.tipo]}{c.grupo ? ` · ${c.grupo}` : ''}</div>
-                </div>
-                <div className="cat-acoes">
-                  <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
-                  <button className="cb-btn-inativar" onClick={() => handleDesativar(c.id)}>Desativar</button>
-                  <button className="cat-btn-excluir" onClick={() => handleExcluir(c)}>Excluir</button>
-                </div>
-              </>
-            )}
-          </div>
-        ))}
+      <div className="cat-busca-wrap">
+        <input
+          type="search"
+          placeholder="🔎 Buscar categoria por nome..."
+          value={busca}
+          onChange={e => setBusca(e.target.value)}
+          className="cat-busca-input"
+        />
       </div>
 
-      {inativas.length > 0 && (
-        <div className="contas-section">
-          <h3 style={{ color: 'var(--tx3)' }}>⛔ Categorias Inativas ({inativas.length})</h3>
-          {inativas.map(c => (
-            <div key={c.id} className="cat-item cat-inativa">
-              <div className="cat-info">
-                <div className="cat-nome" style={{ color: 'var(--tx3)' }}>{c.nome}</div>
-                <div className="cat-meta">{TIPO_LABEL[c.tipo]} · Inativa</div>
-              </div>
-              <div className="cat-acoes">
-                <button className="cb-btn-editar" onClick={() => handleReativar(c)}>Reativar</button>
-                <button className="cat-btn-excluir" onClick={() => handleExcluir(c)}>Excluir</button>
-              </div>
+      <div className="contas-section">
+        <h3>Receita ({receitasAtivas.length})</h3>
+        {receitasAtivas.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma categoria de receita{buscaNormalizada ? ' encontrada.' : '.'}</p>}
+        <div className="cat-lista-compacta">
+          {receitasAtivas.map(renderCategoriaAtiva)}
+        </div>
+      </div>
+
+      <div className="contas-section">
+        <h3>Custos e Despesas ({ativasFiltradas.length - receitasAtivas.length})</h3>
+        {gruposDespesas.length === 0 && (
+          <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma categoria{buscaNormalizada ? ' encontrada.' : ' ativa.'}</p>
+        )}
+        {gruposDespesas.map(grupo => {
+          const colapsado = gruposColapsados.has(grupo.nome)
+          return (
+            <div key={grupo.nome} className="cat-grupo">
+              <button type="button" className="cat-grupo-header" onClick={() => toggleGrupo(grupo.nome)}>
+                <span className="cat-grupo-seta">{colapsado ? '▸' : '▾'}</span>
+                {grupo.nome} ({grupo.itens.length})
+              </button>
+              {!colapsado && (
+                <div className="cat-lista-compacta">
+                  {grupo.itens.map(renderCategoriaAtiva)}
+                </div>
+              )}
             </div>
-          ))}
+          )
+        })}
+      </div>
+
+      {inativasFiltradas.length > 0 && (
+        <div className="contas-section">
+          <h3 style={{ color: 'var(--tx3)' }}>⛔ Categorias Inativas ({inativasFiltradas.length})</h3>
+          <div className="cat-lista-compacta">
+            {inativasFiltradas.map(c => (
+              <div key={c.id} className="cat-item-compacta cat-inativa">
+                <span className="cat-nome-compacta" style={{ color: 'var(--tx3)' }}>{c.nome}</span>
+                <span className="cat-tipo-compacta">{TIPO_LABEL[c.tipo]}</span>
+                <div className="cat-acoes-compactas">
+                  <button className="cb-btn-editar" onClick={() => handleReativar(c)}>Reativar</button>
+                  <button className="cat-btn-excluir" onClick={() => handleExcluir(c)}>Excluir</button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { listarMetas } from '../../../api/metas'
-import { fmtBRL } from '../../../utils/format'
+import { fmtBRL, fmtPct } from '../../../utils/format'
 import { calcularRitmoMeta } from '../../../utils/metaRitmo'
 import type { MetaAnual } from '../../../types'
 
@@ -110,7 +110,7 @@ export default function MetasResumoBlock({ clienteId }: Props) {
 
       <div className="meta-resumo-valores">
         <span>{fmtBRL(meta.totalInvestido)} <span className="meta-resumo-de">de {fmtBRL(meta.valorSonho)}</span></span>
-        <span className="meta-resumo-pct">{ritmo.percentual.toFixed(1)}%</span>
+        <span className="meta-resumo-pct">{fmtPct(ritmo.percentual)}</span>
       </div>
 
       <div className="meta-resumo-barra">

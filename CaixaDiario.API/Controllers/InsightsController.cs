@@ -42,7 +42,13 @@ public class InsightsController : ControllerBase
 
         var registros   = await _registroRepo.ListarPorClienteAsync(clienteId);
         var recorrentes = await _contaRecorrenteRepo.ListarAtivasPorClienteAsync(clienteId);
-        var meta        = await _metaRepo.ObterPorClienteEAnoAsync(clienteId, DateTime.UtcNow.Year);
+        // Um cliente pode ter vários objetivos (modo "metodo") simultâneos agora — os insights
+        // olham pro mais urgente (data-alvo mais próxima), já que só cabe um nessa análise.
+        var metas       = await _metaRepo.ListarPorClienteAsync(clienteId);
+        var meta        = metas
+            .Where(m => m.ModoMeta == "metodo")
+            .OrderBy(m => m.DataAlvo ?? DateOnly.MaxValue)
+            .FirstOrDefault();
 
         var insights = _insightService.Calcular(registros, recorrentes, meta);
         return Ok(new ApiResponse<List<InsightDto>> { Dados = insights });

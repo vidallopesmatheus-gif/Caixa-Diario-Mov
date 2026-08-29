@@ -3,11 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { listarPendentesCategorizacao, categorizarPendentes } from '../../api/importacao'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { listarCategorias } from '../../api/categorias'
+import { converterLancamentoEmTransferencia } from '../../api/transferencias'
+import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { fmtBRL } from '../../utils/format'
 import { useAuth } from '../../contexts/AuthContext'
 import { agruparPorDescricaoSimilar } from '../../utils/descricaoSimilar'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
-import type { Categorias, CategoriaAdmin, PendenteCategorizacao } from '../../types'
+import Modal from '../../components/shared/Modal'
+import type { Categorias, CategoriaAdmin, PendenteCategorizacao, ContaBancaria, LancamentoExtrato } from '../../types'
 import './ClientExtratoRevisao.css'
 
 function fmtData(iso: string): string {
@@ -21,12 +24,20 @@ export default function ClientExtratoRevisaoPage() {
 
   const [pendentes, setPendentes] = useState<PendenteCategorizacao[]>([])
   const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
+  const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
   const [nomeConta, setNomeConta] = useState('')
   const [loading, setLoading] = useState(true)
   const [salvandoIds, setSalvandoIds] = useState<Set<string>>(new Set())
   const [msg, setMsg] = useState('')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [categoriaLote, setCategoriaLote] = useState('')
+
+  // ── Reclassificar como Transferência (fato permutativo — não é receita nem despesa) ──────────
+  const [itemParaTransferencia, setItemParaTransferencia] = useState<PendenteCategorizacao | null>(null)
+  const [contaContrapartidaId, setContaContrapartidaId] = useState('')
+  const [candidatoContrapartida, setCandidatoContrapartida] = useState<LancamentoExtrato | null>(null)
+  const [buscandoCandidato, setBuscandoCandidato] = useState(false)
+  const [convertendo, setConvertendo] = useState(false)
 
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const clienteId = user?.usuarioId ?? ''
@@ -42,6 +53,7 @@ export default function ClientExtratoRevisaoPage() {
       ])
       setPendentes(pend)
       setCategorias(cats)
+      setContasBancarias(contas)
       setNomeConta(contas.find(c => c.id === contaId)?.nome ?? '')
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao carregar lançamentos pendentes.')
@@ -111,6 +123,43 @@ export default function ClientExtratoRevisaoPage() {
     setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupo }] }))
   }
 
+  function abrirModalTransferencia(item: PendenteCategorizacao) {
+    setItemParaTransferencia(item)
+    setContaContrapartidaId('')
+    setCandidatoContrapartida(null)
+    setMsg('')
+  }
+
+  useEffect(() => {
+    if (!itemParaTransferencia || !contaContrapartidaId) { setCandidatoContrapartida(null); return }
+    let cancelado = false
+    setBuscandoCandidato(true)
+    buscarCandidatoContrapartida(contaContrapartidaId, itemParaTransferencia.data, itemParaTransferencia.valor, 'Saida')
+      .then(candidato => { if (!cancelado) setCandidatoContrapartida(candidato) })
+      .finally(() => { if (!cancelado) setBuscandoCandidato(false) })
+    return () => { cancelado = true }
+  }, [itemParaTransferencia, contaContrapartidaId])
+
+  async function confirmarTransferencia(vincular: boolean) {
+    if (!itemParaTransferencia || !contaId || !contaContrapartidaId) return
+    setConvertendo(true)
+    setMsg('')
+    try {
+      await converterLancamentoEmTransferencia({
+        contaId, lancamentoId: itemParaTransferencia.id, data: itemParaTransferencia.data,
+        tipo: 'Saida', contaContrapartidaId,
+        lancamentoContrapartidaId: vincular && candidatoContrapartida?.id ? candidatoContrapartida.id : undefined,
+        dataContrapartida: vincular ? candidatoContrapartida?.data : undefined,
+      })
+      setPendentes(prev => prev.filter(p => p.id !== itemParaTransferencia.id))
+      setItemParaTransferencia(null)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao converter em transferência.')
+    } finally {
+      setConvertendo(false)
+    }
+  }
+
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
   return (
@@ -174,6 +223,7 @@ export default function ClientExtratoRevisaoPage() {
                     onCategoriaCriada={handleCategoriaCriada}
                     onNavigate={navegarFoco}
                     registerInputRef={registerInputRef}
+                    onMarcarTransferencia={() => abrirModalTransferencia(item)}
                   />
                 )
               }
@@ -206,6 +256,7 @@ export default function ClientExtratoRevisaoPage() {
                         onCategoriaCriada={handleCategoriaCriada}
                         onNavigate={navegarFoco}
                         registerInputRef={registerInputRef}
+                        onMarcarTransferencia={() => abrirModalTransferencia(item)}
                       />
                     ))}
                   </div>
@@ -215,6 +266,55 @@ export default function ClientExtratoRevisaoPage() {
           </div>
         </>
       )}
+
+      <Modal
+        open={!!itemParaTransferencia}
+        title="🔁 Classificar como Transferência"
+        onClose={() => setItemParaTransferencia(null)}
+        footer={
+          candidatoContrapartida ? (
+            <>
+              <button className="er-btn-lote" onClick={() => setItemParaTransferencia(null)}>Cancelar</button>
+              <button className="er-btn-lote" onClick={() => confirmarTransferencia(false)} disabled={convertendo}>Criar novo mesmo assim</button>
+              <button className="btn-save" onClick={() => confirmarTransferencia(true)} disabled={convertendo}>
+                {convertendo ? 'Vinculando...' : 'Vincular a esse lançamento'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="er-btn-lote" onClick={() => setItemParaTransferencia(null)}>Cancelar</button>
+              <button className="btn-save" onClick={() => confirmarTransferencia(false)} disabled={convertendo || !contaContrapartidaId}>
+                {convertendo ? 'Convertendo...' : 'Confirmar'}
+              </button>
+            </>
+          )
+        }
+      >
+        {itemParaTransferencia && (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+              "{itemParaTransferencia.descricao}" · {fmtBRL(itemParaTransferencia.valor)} · {fmtData(itemParaTransferencia.data)}
+              <br />Não é despesa: o dinheiro saiu desta conta e foi para outra. Pra qual conta foi?
+            </p>
+            <div className="inp-group">
+              <label>Conta de destino</label>
+              <select value={contaContrapartidaId} onChange={e => setContaContrapartidaId(e.target.value)}>
+                <option value="">Selecione...</option>
+                {contasBancarias.filter(c => c.ativa && c.id !== contaId).map(c => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+            </div>
+            {buscandoCandidato && <p style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 8 }}>Procurando lançamento correspondente...</p>}
+            {candidatoContrapartida && (
+              <p style={{ fontSize: 13, color: 'var(--warning)', marginTop: 8 }}>
+                Já existe um lançamento parecido nessa conta: "{candidatoContrapartida.descricao}" de {fmtBRL(Math.abs(candidatoContrapartida.valor))} em {fmtData(candidatoContrapartida.data)}.
+                Vincular a ele evita duplicar a transferência.
+              </p>
+            )}
+          </>
+        )}
+      </Modal>
     </>
   )
 }
@@ -229,11 +329,12 @@ interface ExtratoLinhaPendenteProps {
   onCategoriaCriada: (categoria: CategoriaAdmin) => void
   onNavigate: (id: string, direcao: 'up' | 'down') => void
   registerInputRef: (id: string, el: HTMLInputElement | null) => void
+  onMarcarTransferencia: () => void
 }
 
 function ExtratoLinhaPendente({
   item, categoriasDisponiveis, selecionado, salvando,
-  onToggleSelecionado, onCategorizar, onCategoriaCriada, onNavigate, registerInputRef,
+  onToggleSelecionado, onCategorizar, onCategoriaCriada, onNavigate, registerInputRef, onMarcarTransferencia,
 }: ExtratoLinhaPendenteProps) {
   return (
     <div className="er-item">
@@ -258,6 +359,9 @@ function ExtratoLinhaPendente({
         placeholder={salvando ? 'Salvando...' : 'Categoria'}
         onNavigate={dir => onNavigate(item.id, dir)}
       />
+      <button type="button" className="er-btn-toggle" title="Não é despesa — é uma transferência entre contas" onClick={onMarcarTransferencia}>
+        🔁 Transferência
+      </button>
     </div>
   )
 }

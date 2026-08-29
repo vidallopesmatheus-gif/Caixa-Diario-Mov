@@ -13,48 +13,62 @@ public class ImportacaoService : IImportacaoService
     private readonly IContaBancariaRepository _contaRepo;
     private readonly ITransacaoImportadaRepository _importRepo;
     private readonly IRegistroRepository _registroRepo;
+    private readonly ICategoriaRepository _categoriaRepo;
 
     public ImportacaoService(
         IContaBancariaRepository contaRepo,
         ITransacaoImportadaRepository importRepo,
-        IRegistroRepository registroRepo)
+        IRegistroRepository registroRepo,
+        ICategoriaRepository categoriaRepo)
     {
         _contaRepo = contaRepo;
         _importRepo = importRepo;
         _registroRepo = registroRepo;
+        _categoriaRepo = categoriaRepo;
     }
 
     // Representação unificada de uma linha do arquivo, independente do formato de origem.
-    // Indice = posição no arquivo, na mesma ordem em que o parser encontrou — é o que o preview
-    // devolve e o que a confirmação usa para "forçar inclusão" de uma linha já importada antes.
+    // Indice = posição no arquivo, na mesma ordem em que o parser encontrou.
     private record TransacaoParseada(int Indice, DateOnly Data, decimal Valor, string Descricao, string Tipo, string? FitId);
 
-    // ── Preview (não persiste nada) ──────────────────────────────────────────────
+    // ── Preview (não persiste nada) — resumo agregado, sem listar linha por linha ────────────
     public async Task<PreviewImportacaoDto> PreviewAsync(
-        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo)
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
+        DateOnly? dataInicio, DateOnly? dataFim)
     {
         await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
-        var parseadas = ParsearArquivoValidando(arquivo);
+        var todasParseadas = ParsearArquivoValidando(arquivo);
 
-        var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
-        var dtos = parseadas.Select(t => new PreviewTransacaoDto
+        var dataInicioArquivo = todasParseadas.Min(t => t.Data);
+        var dataFimArquivo = todasParseadas.Max(t => t.Data);
+
+        var parseadas = todasParseadas;
+        if (dataInicio.HasValue) parseadas = parseadas.Where(t => t.Data >= dataInicio.Value).ToList();
+        if (dataFim.HasValue) parseadas = parseadas.Where(t => t.Data <= dataFim.Value).ToList();
+
+        var registrosAtivos = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
+            .Where(r => !r.Excluido)
+            .ToList();
+
+        var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos);
+        var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
+
+        return new PreviewImportacaoDto
         {
-            Indice = t.Indice,
-            Data = t.Data.ToString("yyyy-MM-dd"),
-            Valor = t.Valor,
-            Descricao = t.Descricao,
-            Tipo = t.Tipo,
-            FitId = t.FitId,
-            JaImportada = JaFoiImportada(t, historico),
-        }).ToList();
-
-        return new PreviewImportacaoDto { Transacoes = dtos };
+            TotalEncontradas = parseadas.Count,
+            TotalJaImportadas = jaImportadas.Count,
+            TotalNovas = novas.Count,
+            TotalEntradas = novas.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
+            TotalSaidas = novas.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
+            DataInicioArquivo = dataInicioArquivo.ToString("yyyy-MM-dd"),
+            DataFimArquivo = dataFimArquivo.ToString("yyyy-MM-dd"),
+        };
     }
 
     // ── Importar (lança direto no RegistroDiario — afeta saldo na hora) ──────────
     public async Task<ResultadoImportacaoDto> ImportarArquivoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
-        DateOnly? dataInicio, DateOnly? dataFim, List<int>? indicesForcarInclusao)
+        DateOnly? dataInicio, DateOnly? dataFim)
     {
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
         var parseadas = ParsearArquivoValidando(arquivo);
@@ -62,21 +76,19 @@ public class ImportacaoService : IImportacaoService
         if (dataInicio.HasValue) parseadas = parseadas.Where(t => t.Data >= dataInicio.Value).ToList();
         if (dataFim.HasValue) parseadas = parseadas.Where(t => t.Data <= dataFim.Value).ToList();
 
-        var forcar = (indicesForcarInclusao ?? new()).ToHashSet();
-        var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
-
-        var aImportar = parseadas
-            .Where(t => forcar.Contains(t.Indice) || !JaFoiImportada(t, historico))
-            .ToList();
-
-        if (aImportar.Count == 0)
-            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
-                "Nenhuma transação nova para importar no intervalo selecionado.");
-
         var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
+
+        var jaImportadas = IdentificarJaImportadas(parseadas, registros);
+        var aImportar = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
+
+        if (aImportar.Count == 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                "Nenhuma transação nova para importar no intervalo selecionado — todas já foram importadas antes.");
+
         var registrosPorData = registros.ToDictionary(r => r.Data);
+        var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
         var auditoria = new List<TransacaoImportada>();
         var pendentes = 0;
 
@@ -140,6 +152,11 @@ public class ImportacaoService : IImportacaoService
                     var categoriaSugerida = SugerirCategoria(t.Tipo, t.Descricao);
                     var pendente = categoriaSugerida == null;
                     if (pendente) pendentes++;
+                    // A sugestão por palavra-chave devolve um nome de categoria já cadastrado no
+                    // Plano de Contas — sem resolver o TipoCusto aqui, o lançamento nunca entraria
+                    // como custo fixo/variável no DRE mesmo tendo uma categoria "certa" atribuída.
+                    var tipoCustoSugerido = categoriaSugerida != null && categoriasPorNome.TryGetValue(categoriaSugerida, out var tc)
+                        ? tc : null;
 
                     registro.Saidas.Add(new ItemFinanceiroSaida
                     {
@@ -148,6 +165,7 @@ public class ImportacaoService : IImportacaoService
                         Valor = t.Valor,
                         Categoria = categoriaSugerida ?? string.Empty,
                         Subcategoria = string.Empty,
+                        TipoCusto = tipoCustoSugerido,
                         FitId = t.FitId,
                         PendenteCategorizacao = pendente,
                     });
@@ -214,6 +232,13 @@ public class ImportacaoService : IImportacaoService
     {
         await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
 
+        // O TipoCusto (Receita/CustoFixo/CustoVariavel) é resolvido aqui a partir do Plano de
+        // Contas, nunca confiado ao payload do cliente — é ele, e não o nome da categoria, que
+        // o DRE/Indicadores usam pra classificar o lançamento (ver LancamentoFiltro/MetricasService).
+        // Sem isso, categorizar (ou criar categoria nova) marcava o nome certo mas o lançamento
+        // continuava sem TipoCusto, "perdendo" a classificação escolhida.
+        var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
+
         var porData = dto.Itens
             .Where(i => DateOnly.TryParse(i.Data, out _))
             .GroupBy(i => DateOnly.Parse(i.Data))
@@ -229,9 +254,14 @@ public class ImportacaoService : IImportacaoService
                 var saida = registro.Saidas.FirstOrDefault(s => s.Id == item.Id);
                 if (saida == null) continue;
                 saida.Categoria = item.Categoria;
+                if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCusto))
+                    saida.TipoCusto = tipoCusto;
                 saida.PendenteCategorizacao = false;
             }
 
+            // Reatribui a lista — Saidas é jsonb sem value comparer configurado, então o EF só
+            // detecta a mudança se a referência da lista mudar, não se um item dela for só mutado.
+            registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas);
             registro.SalvoEm = DateTime.UtcNow;
             registro.AtualizadoEm = DateTime.UtcNow;
             await _registroRepo.AtualizarAsync(registro);
@@ -334,24 +364,68 @@ public class ImportacaoService : IImportacaoService
         return parseadas;
     }
 
-    // OFX: mesmo FITID já visto antes nesta conta (identificador único — não precisa de mais nada).
-    // CSV/XLSX (sem FITID): heurística de sempre — mesma data, valor (±0,01) e descrição parecida.
-    private static bool JaFoiImportada(TransacaoParseada t, List<TransacaoImportada> historico)
+    // "Já importada" é decidido contra o LANÇAMENTO REAL (Entradas/Saidas dos registros não
+    // excluídos), nunca contra um histórico à parte — assim, se o registro foi excluído (o usuário
+    // desfez o dia), a transação deixa de contar como já importada e pode ser trazida de novo.
+    //
+    // OFX: mesmo FITID já presente num lançamento real (identificador único — não precisa de mais nada).
+    //
+    // CSV/XLSX (sem FITID): heurística de data + valor + descrição — mas por CONTAGEM de
+    // ocorrências, não por simples existência. Duas transações legítimas idênticas no mesmo dia
+    // (duas consultas de mesmo valor, dois Pix iguais) só viram duplicata até o limite de quantas
+    // JÁ EXISTEM de fato no razão da conta; a partir daí, ocorrências extras no arquivo entram
+    // como novas transações. Um `.Any()` simples (o que existia antes) marcaria a segunda
+    // ocorrência legítima como duplicata só por ela parecer com a primeira — a diferença de
+    // quantidade (multiset) é o que resolve isso sem precisar perguntar nada ao usuário.
+    private static HashSet<int> IdentificarJaImportadas(List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos)
     {
-        if (t.FitId != null)
-            return historico.Any(h => h.FitId == t.FitId);
+        var jaImportadas = new HashSet<int>();
 
-        return historico.Any(h =>
-            h.Data == t.Data &&
-            Math.Abs(h.Valor - t.Valor) < 0.01m &&
-            h.Tipo == t.Tipo &&
-            DescricaoSimilar(h.Descricao, t.Descricao));
+        foreach (var t in parseadas.Where(t => t.FitId != null))
+        {
+            var existe = t.Tipo == "Entrada"
+                ? registrosAtivos.Any(r => r.Entradas.Any(e => e.FitId == t.FitId))
+                : registrosAtivos.Any(r => r.Saidas.Any(s => s.FitId == t.FitId));
+            if (existe) jaImportadas.Add(t.Indice);
+        }
+
+        var disponivelNoRazao = new Dictionary<(DateOnly Data, string Tipo, decimal Valor, string Descricao), int>();
+        foreach (var r in registrosAtivos)
+        {
+            foreach (var e in r.Entradas)
+                IncrementarOcorrencia(disponivelNoRazao, r.Data, "Entrada", e.Valor, e.Descricao);
+            foreach (var s in r.Saidas)
+                IncrementarOcorrencia(disponivelNoRazao, r.Data, "Saida", s.Valor, s.Descricao);
+        }
+
+        foreach (var t in parseadas.Where(t => t.FitId == null))
+        {
+            var chave = ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao);
+            if (disponivelNoRazao.TryGetValue(chave, out var restante) && restante > 0)
+            {
+                disponivelNoRazao[chave] = restante - 1;
+                jaImportadas.Add(t.Indice);
+            }
+        }
+
+        return jaImportadas;
     }
 
-    private static bool DescricaoSimilar(string a, string b)
+    private static void IncrementarOcorrencia(
+        Dictionary<(DateOnly, string, decimal, string), int> mapa, DateOnly data, string tipo, decimal valor, string descricao)
     {
-        var la = a.ToUpperInvariant().Length >= 20 ? a[..20].ToUpperInvariant() : a.ToUpperInvariant();
-        var lb = b.ToUpperInvariant().Length >= 20 ? b[..20].ToUpperInvariant() : b.ToUpperInvariant();
-        return la == lb;
+        var chave = ChaveOcorrencia(data, tipo, valor, descricao);
+        mapa[chave] = mapa.GetValueOrDefault(chave) + 1;
+    }
+
+    // Arredondar o valor pra 2 casas equivale à antiga tolerância de ±0,01 usada na comparação
+    // (valores monetários já vêm nessa precisão) — e permite usar a tupla como chave de dicionário.
+    private static (DateOnly, string, decimal, string) ChaveOcorrencia(DateOnly data, string tipo, decimal valor, string descricao) =>
+        (data, tipo, Math.Round(valor, 2), NormalizarDescricao(descricao));
+
+    private static string NormalizarDescricao(string descricao)
+    {
+        var upper = descricao.ToUpperInvariant();
+        return upper.Length >= 20 ? upper[..20] : upper;
     }
 }

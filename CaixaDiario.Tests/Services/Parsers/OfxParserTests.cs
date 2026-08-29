@@ -85,4 +85,48 @@ public class OfxParserTests
 
         Assert.Empty(resultado);
     }
+
+    // ── Encoding (reproduz o bug: "débito" virando "dÃ©bito") ────────────────────────────
+
+    [Fact]
+    public void Parse_ComCabecalhoCharset1252_DecodificaAcentuacaoCorretamente()
+    {
+        var ofx = "OFXHEADER:100\nDATA:OFXSGML\nVERSION:102\nSECURITY:NONE\nENCODING:USASCII\nCHARSET:1252\n\n" +
+            "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-10.00<DTPOSTED>20260701<MEMO>Pagamento débito Agência</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+        // CHARSET:1252 declarado -> conteúdo deve ser lido como Latin-1/Windows-1252 (byte único por acento).
+        var bytes = Encoding.Latin1.GetBytes(ofx);
+
+        var resultado = OfxParser.Parse(new MemoryStream(bytes));
+
+        var t = Assert.Single(resultado);
+        Assert.Equal("Pagamento débito Agência", t.Descricao);
+    }
+
+    [Fact]
+    public void Parse_Utf8SemDeclaracaoDeEncoding_DetectaUtf8PeloConteudo()
+    {
+        var ofx = "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-10.00<DTPOSTED>20260701<MEMO>Aplicação RDB Transferência</STMTTRN>";
+        var bytes = Encoding.UTF8.GetBytes(ofx);
+
+        var resultado = OfxParser.Parse(new MemoryStream(bytes));
+
+        var t = Assert.Single(resultado);
+        Assert.Equal("Aplicação RDB Transferência", t.Descricao);
+    }
+
+    [Fact]
+    public void Parse_Latin1SemDeclaracaoDeEncoding_DetectaLatin1PorNaoSerUtf8Valido()
+    {
+        var ofx = "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-10.00<DTPOSTED>20260701<MEMO>Aplicação RDB Transferência</STMTTRN>";
+        // Bytes Latin-1 com acentuação não formam UTF-8 válido -> deve cair para Latin-1, nunca
+        // corromper para "AplicaÃ§Ã£o" (que é o sintoma de ler bytes UTF-8 como Latin-1 — o oposto).
+        var bytes = Encoding.Latin1.GetBytes(ofx);
+
+        var resultado = OfxParser.Parse(new MemoryStream(bytes));
+
+        var t = Assert.Single(resultado);
+        Assert.Equal("Aplicação RDB Transferência", t.Descricao);
+    }
 }

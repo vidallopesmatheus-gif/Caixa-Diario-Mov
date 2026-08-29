@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Registro } from '../../types'
 import { LISTA_CATEGORIAS } from '../../config/categorias'
-import { fmtBRL } from '../../utils/format'
+import { fmtBRL, fmtPct } from '../../utils/format'
 import './RelatorioCategoriasCard.css'
 
 interface Props {
@@ -45,7 +45,7 @@ export default function RelatorioCategoriasCard({ registros }: Props) {
       <div className="relcat-lista">
         {LISTA_CATEGORIAS.map(cat => {
           const valor = totais[cat]
-          const pct = totalGeral > 0 ? Math.round((valor / totalGeral) * 100) : 0
+          const pct = totalGeral > 0 ? (valor / totalGeral) * 100 : 0
           const largura = Math.round((valor / maxValor) * 100)
           return (
             <div key={cat} className={`relcat-row ${valor === 0 ? 'relcat-zero' : ''}`}>
@@ -54,7 +54,7 @@ export default function RelatorioCategoriasCard({ registros }: Props) {
                 <div className="relcat-barra" style={{ width: `${largura}%` }} />
               </div>
               <span className="relcat-valor">{fmtBRL(valor)}</span>
-              <span className="relcat-pct">{pct}%</span>
+              <span className="relcat-pct">{fmtPct(pct)}</span>
             </div>
           )
         })}

@@ -11,8 +11,11 @@ public class MetaRepository : IMetaRepository
 
     public MetaRepository(AppDbContext context) => _context = context;
 
-    public async Task<MetaAnual?> ObterPorClienteEAnoAsync(Guid clienteId, int ano) =>
-        await _context.MetasAnuais.FirstOrDefaultAsync(m => m.ClienteId == clienteId && m.Ano == ano);
+    public async Task<MetaAnual?> ObterMetaSimplesPorClienteEAnoAsync(Guid clienteId, int ano) =>
+        await _context.MetasAnuais.FirstOrDefaultAsync(m => m.ClienteId == clienteId && m.Ano == ano && m.ModoMeta == "simples");
+
+    public async Task<MetaAnual?> ObterPorIdAsync(Guid id) =>
+        await _context.MetasAnuais.FindAsync(id);
 
     public async Task<List<MetaAnual>> ListarPorClienteAsync(Guid clienteId) =>
         await _context.MetasAnuais.Where(m => m.ClienteId == clienteId).ToListAsync();
@@ -26,5 +29,11 @@ public class MetaRepository : IMetaRepository
             _context.MetasAnuais.Update(meta);
         await _context.SaveChangesAsync();
         return meta;
+    }
+
+    public async Task RemoverAsync(MetaAnual meta)
+    {
+        _context.MetasAnuais.Remove(meta);
+        await _context.SaveChangesAsync();
     }
 }

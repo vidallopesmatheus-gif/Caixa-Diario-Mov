@@ -99,6 +99,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ContaInvestimentoId).HasColumnName("conta_investimento_id");
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em");
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
+            entity.Property(e => e.DataAlvo).HasColumnName("data_alvo");
 
             entity.HasOne(e => e.Cliente)
                 .WithMany(u => u.MetasAnuais)
@@ -109,7 +110,11 @@ public class AppDbContext : DbContext
                 .HasForeignKey(e => e.ContaInvestimentoId)
                 .IsRequired(false);
 
-            entity.HasIndex(e => new { e.ClienteId, e.Ano }).IsUnique();
+            // Só o modo "simples" (Meta de Faturamento Mensal) é 1-por-ano-civil; o modo "metodo"
+            // (objetivos) pode ter N metas simultâneas pro mesmo cliente, independente do ano.
+            entity.HasIndex(e => new { e.ClienteId, e.Ano })
+                .IsUnique()
+                .HasFilter("\"ModoMeta\" = 'simples'");
         });
 
         modelBuilder.Entity<ContaRecorrente>(entity =>

@@ -1,5 +1,6 @@
 import SaudeFinanceiraGauges from '../SaudeFinanceiraGauges'
 import { leituraMargemDre } from '../../../utils/leituras'
+import { fmtPct } from '../../../utils/format'
 
 interface Props {
   clienteId: string
@@ -14,7 +15,7 @@ export default function SaudeNegocioBlock({ clienteId, margem }: Props) {
       <div className="saude-margem-card">
         <span className="saude-margem-label">Margem do período</span>
         <span className="saude-margem-valor">
-          {margem === undefined ? '' : margem === null ? '—' : `${margem.toFixed(1)}%`}
+          {margem === undefined ? '' : margem === null ? '—' : fmtPct(margem)}
         </span>
         {margem !== undefined && (
           <p className="saude-margem-leitura">{leituraMargemDre(margem)}</p>

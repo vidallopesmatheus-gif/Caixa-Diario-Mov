@@ -3,10 +3,10 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { useMetricas } from '../../hooks/useMetricas'
 import StatCard from '../../components/shared/StatCard'
-import { fmtBRL, todayISO } from '../../utils/format'
+import { fmtBRL, fmtPct, todayISO } from '../../utils/format'
 import { calcularJanelaPeriodo } from '../../utils/periodo'
 import type { PeriodoOpcao } from '../../utils/periodo'
-import { obterMeta, salvarMeta } from '../../api/metas'
+import { obterMeta, salvarMeta, listarMetas, excluirMeta } from '../../api/metas'
 import { obterSelicAtual } from '../../api/selic'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { obterDre } from '../../api/metricas'
@@ -37,6 +37,12 @@ function fmtNum(n: number) {
 }
 function parseBRL(s: string): number {
   return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0
+}
+function mesesEntre(inicio: Date, fim: Date): number {
+  return (fim.getFullYear() - inicio.getFullYear()) * 12 + (fim.getMonth() - inicio.getMonth())
+}
+function parseDataAlvo(iso: string): Date | null {
+  return iso ? new Date(iso + 'T12:00:00') : null
 }
 
 export default function ClientDashboardPage({ clienteIdOverride }: Props) {
@@ -108,15 +114,20 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [editPeriodoMeses, setEditPeriodoMeses] = useState(12)
   const [savingMeta, setSavingMeta] = useState(false)
   const [metaMsg, setMetaMsg] = useState('')
-  // Meu Sonho / Investimentos
+  const [metaMsgOk, setMetaMsgOk] = useState(true)
+  // Objetivos financeiros (modo "metodo") — vários simultâneos, cada um com valor + data-alvo
+  // próprios. objetivoSelecionadoId === null significa "formulário de objetivo novo".
+  const [objetivos, setObjetivos] = useState<MetaAnual[]>([])
+  const [objetivoSelecionadoId, setObjetivoSelecionadoId] = useState<string | null>(null)
   const [editSonho, setEditSonho] = useState('')
-  const [editModoMeta, setEditModoMeta] = useState<'simples' | 'metodo'>('simples')
   const [editValorSonho, setEditValorSonho] = useState('')
-  const [editPrazoAnos, setEditPrazoAnos] = useState('')
+  const [editDataAlvo, setEditDataAlvo] = useState('')
   const [editTaxaRetorno, setEditTaxaRetorno] = useState('')
   const [editTotalInvestido, setEditTotalInvestido] = useState('')
   const [editMargemPJ, setEditMargemPJ] = useState('')
   const [editIconeSonho, setEditIconeSonho] = useState('')
+  const [savingObjetivo, setSavingObjetivo] = useState(false)
+  const [objetivoMsg, setObjetivoMsg] = useState('')
   const [selic, setSelic] = useState(10.5)
   const [simAporteExtra, setSimAporteExtra] = useState('')
 
@@ -134,18 +145,38 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           setEditLucro(fmtNum(m.metaLucro))
           setEditMesInicio(m.mesInicio ?? 1)
           setEditPeriodoMeses(m.periodoMeses ?? 12)
-          setEditSonho(m.sonho ?? '')
-          setEditModoMeta(m.modoMeta ?? 'simples')
-          setEditValorSonho(m.valorSonho ? fmtNum(m.valorSonho) : '')
-          setEditPrazoAnos(m.prazoAnos ? String(m.prazoAnos) : '')
-          setEditTaxaRetorno(m.taxaRetorno ? String(m.taxaRetorno) : '')
-          setEditTotalInvestido(m.totalInvestido ? fmtNum(m.totalInvestido) : '')
-          setEditMargemPJ(m.margemPJ ? String(m.margemPJ) : '')
-          setEditIconeSonho(m.iconeSonho ?? '')
         }
       })
       .catch(console.error)
   }, [clienteId, anoAtual])
+
+  function selecionarObjetivo(o: MetaAnual | null) {
+    setObjetivoSelecionadoId(o?.id ?? null)
+    setEditSonho(o?.sonho ?? '')
+    setEditValorSonho(o?.valorSonho ? fmtNum(o.valorSonho) : '')
+    setEditDataAlvo(o?.dataAlvo ?? '')
+    setEditTaxaRetorno(o?.taxaRetorno ? String(o.taxaRetorno) : '')
+    setEditTotalInvestido(o?.totalInvestido ? fmtNum(o.totalInvestido) : '')
+    setEditMargemPJ(o?.margemPJ ? String(o.margemPJ) : '')
+    setEditIconeSonho(o?.iconeSonho ?? '')
+    setObjetivoMsg('')
+  }
+
+  const carregarObjetivos = async (manterSelecao = true) => {
+    if (!clienteId) return
+    const todas = await listarMetas(clienteId)
+    const metodo = todas.filter(m => m.modoMeta === 'metodo')
+    setObjetivos(metodo)
+    const selecionadaAindaExiste = manterSelecao && metodo.some(o => o.id === objetivoSelecionadoId)
+    if (!selecionadaAindaExiste) selecionarObjetivo(metodo[0] ?? null)
+  }
+
+  useEffect(() => {
+    carregarObjetivos(false).catch(console.error)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId])
+
+  const objetivoSelecionado = objetivos.find(o => o.id === objetivoSelecionadoId) ?? null
 
   const doPeriodo = useMemo(() =>
     registrosFiltrados.filter(r => r.data >= de && r.data <= ate),
@@ -257,9 +288,17 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     return { alvo, real, pct, faltante, atingida: real >= alvo }
   }, [planejamento])
 
+  // Meses entre hoje e a data planejada — substitui o antigo "prazo em anos" digitado pelo
+  // usuário; vem de uma data real agora, então funciona também para objetivos de curto prazo
+  // (poucos meses), que um número inteiro de anos não conseguia representar com precisão.
+  const mesesAteAlvo = useMemo(() => {
+    const alvo = parseDataAlvo(editDataAlvo)
+    return alvo ? Math.max(0, mesesEntre(new Date(), alvo)) : 0
+  }, [editDataAlvo])
+
   const aporteMensal = useMemo(() => {
     const vf = parseBRL(editValorSonho)
-    const n = Number(editPrazoAnos) * 12
+    const n = mesesAteAlvo
     const taxa = Number(editTaxaRetorno)
     const investido = parseBRL(editTotalInvestido)
     if (!vf || !n || !taxa) return null
@@ -268,7 +307,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     const fvNecessario = vf - fvAtual
     if (fvNecessario <= 0) return 0
     return (fvNecessario * i) / (Math.pow(1 + i, n) - 1)
-  }, [editValorSonho, editPrazoAnos, editTaxaRetorno, editTotalInvestido])
+  }, [editValorSonho, mesesAteAlvo, editTaxaRetorno, editTotalInvestido])
 
   const projecaoSelic = useMemo(() => {
     const base = parseBRL(editTotalInvestido)
@@ -282,7 +321,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   const trajetorias = useMemo(() => {
     const taxa = Number(editTaxaRetorno)
-    const prazo = Number(editPrazoAnos)
+    const prazo = Math.ceil(mesesAteAlvo / 12)
     const investido = parseBRL(editTotalInvestido)
     if (!prazo || !taxa || !investido) return null
     const ap = aporteMensal ?? 0
@@ -305,7 +344,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       realista: Math.round(real[idx]),
       otimista: Math.round(otim[idx]),
     }))
-  }, [editTaxaRetorno, editPrazoAnos, editTotalInvestido, aporteMensal])
+  }, [editTaxaRetorno, mesesAteAlvo, editTotalInvestido, aporteMensal])
 
   const tempoAteMeta = useMemo(() => {
     const vf = parseBRL(editValorSonho)
@@ -353,15 +392,16 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   }, [editTotalInvestido, totalSaida, de, ate])
 
   const atrasadaNaSonho = useMemo(() => {
-    if (editModoMeta !== 'metodo' || aporteMensal === null || aporteMensal <= 0) return null
-    if (!meta?.salvoEm) return null
+    if (aporteMensal === null || aporteMensal <= 0) return null
+    if (!objetivoSelecionado?.salvoEm) return null
     const vf = parseBRL(editValorSonho)
-    const prazoTotal = Number(editPrazoAnos) * 12
+    const alvo = parseDataAlvo(editDataAlvo)
+    const dataMeta = new Date(objetivoSelecionado.salvoEm)
+    const prazoTotal = alvo ? mesesEntre(dataMeta, alvo) : 0
     const taxa = Number(editTaxaRetorno)
     const investido = parseBRL(editTotalInvestido)
     if (!vf || prazoTotal < 2 || !taxa) return null
     const i = Math.pow(1 + taxa / 100, 1 / 12) - 1
-    const dataMeta = new Date(meta.salvoEm)
     const agora = new Date()
     const mesesDecorridos = (agora.getFullYear() - dataMeta.getFullYear()) * 12 + (agora.getMonth() - dataMeta.getMonth())
     if (mesesDecorridos <= 0) return null
@@ -385,7 +425,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       novoPrazoMeses: mesesExtra,
       aporteOriginal: aporteMensal,
     }
-  }, [meta, editModoMeta, editValorSonho, editPrazoAnos, editTaxaRetorno, editTotalInvestido, aporteMensal])
+  }, [objetivoSelecionado, editValorSonho, editDataAlvo, editTaxaRetorno, editTotalInvestido, aporteMensal])
 
   async function handleSaveMeta() {
     if (!clienteId) return
@@ -399,21 +439,68 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         metaLucro: parseBRL(editLucro),
         mesInicio: editMesInicio,
         periodoMeses: editPeriodoMeses,
+        modoMeta: 'simples',
+      })
+      setMeta(saved)
+      setMetaMsgOk(true)
+      setMetaMsg('Meta salva!')
+    } catch (e: unknown) {
+      setMetaMsgOk(false)
+      setMetaMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSavingMeta(false)
+    }
+  }
+
+  async function handleSaveObjetivo() {
+    if (!clienteId) return
+    if (!editDataAlvo) { setObjetivoMsg('Informe a data planejada do objetivo.'); return }
+    setSavingObjetivo(true)
+    setObjetivoMsg('')
+    try {
+      const alvo = parseDataAlvo(editDataAlvo)!
+      // PrazoAnos (anos inteiros) segue sendo enviado só como campo legado — quem manda agora
+      // é DataAlvo, mas outras análises que ainda leem PrazoAnos continuam funcionando.
+      const prazoAnosLegado = Math.max(1, Math.ceil(mesesEntre(new Date(), alvo) / 12))
+      const saved = await salvarMeta({
+        id: objetivoSelecionadoId ?? undefined,
+        clienteId,
+        ano: alvo.getFullYear(),
+        metaReceita: 0,
+        metaLucro: 0,
+        mesInicio: 1,
+        periodoMeses: 12,
         sonho: editSonho,
-        modoMeta: editModoMeta,
+        modoMeta: 'metodo',
         valorSonho: parseBRL(editValorSonho),
-        prazoAnos: Number(editPrazoAnos) || 0,
+        dataAlvo: editDataAlvo,
+        prazoAnos: prazoAnosLegado,
         taxaRetorno: Number(editTaxaRetorno) || 0,
         totalInvestido: parseBRL(editTotalInvestido),
         margemPJ: editMargemPJ ? Number(editMargemPJ) : undefined,
         iconeSonho: editIconeSonho || undefined,
       })
-      setMeta(saved)
-      setMetaMsg('Meta salva!')
+      await carregarObjetivos(false)
+      selecionarObjetivo(saved)
+      setObjetivoMsg('Objetivo salvo!')
     } catch (e: unknown) {
-      setMetaMsg(e instanceof Error ? e.message : String(e))
+      setObjetivoMsg(e instanceof Error ? e.message : String(e))
     } finally {
-      setSavingMeta(false)
+      setSavingObjetivo(false)
+    }
+  }
+
+  async function handleExcluirObjetivo() {
+    if (!objetivoSelecionadoId) return
+    if (!window.confirm('Excluir este objetivo? Essa ação não pode ser desfeita.')) return
+    setSavingObjetivo(true)
+    try {
+      await excluirMeta(objetivoSelecionadoId)
+      await carregarObjetivos(false)
+    } catch (e: unknown) {
+      setObjetivoMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSavingObjetivo(false)
     }
   }
 
@@ -468,7 +555,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           {metricas.ebitda && (
             <StatCard
               label={`📊 EBITDA ${metricas.ebitda.semaforo === 'verde' ? '🟢' : metricas.ebitda.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
-              value={`${fmtBRL(metricas.ebitda.valor)} (${((metricas.ebitda.percentual ?? 0) * 100).toFixed(1)}%)`}
+              value={`${fmtBRL(metricas.ebitda.valor)} (${fmtPct((metricas.ebitda.percentual ?? 0) * 100)})`}
               className={metricas.ebitda.semaforo === 'verde' ? 'val-green' : metricas.ebitda.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
             />
           )}
@@ -483,7 +570,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           {metricas.primeCost?.percentual != null && (
             <StatCard
               label={`🍽️ Prime Cost ${metricas.primeCost.semaforo === 'verde' ? '🟢' : metricas.primeCost.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
-              value={`${((metricas.primeCost.percentual) * 100).toFixed(1)}%`}
+              value={fmtPct(metricas.primeCost.percentual * 100)}
               className={metricas.primeCost.semaforo === 'verde' ? 'val-green' : metricas.primeCost.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
             />
           )}
@@ -556,7 +643,15 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           <div style={{ height: 260 }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={composicaoDespesas} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+                <Pie
+                  data={composicaoDespesas}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  label={({ percent }: { percent?: number }) => fmtPct((percent ?? 0) * 100)}
+                >
                   {composicaoDespesas.map((d) => <Cell key={d.name} fill={CORES_GRUPO[d.name] ?? '#888'} />)}
                 </Pie>
                 <Tooltip formatter={(v) => typeof v === 'number' ? fmtBRL(v) : String(v)} />
@@ -582,7 +677,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 14, fontWeight: 600 }}>
             <span style={{ color: metaMesAtual.atingida ? '#34c759' : 'var(--tx1)' }}>
-              {metaMesAtual.pct.toFixed(1)}% atingido
+              {fmtPct(metaMesAtual.pct)} atingido
             </span>
             <span style={{ color: metaMesAtual.atingida ? '#34c759' : '#ff9500' }}>
               {metaMesAtual.atingida ? '✅ Meta batida!' : `Faltam ${fmtBRL(metaMesAtual.faltante)}`}
@@ -592,22 +687,41 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       )}
 
       <div className="meta-card" id="metas-investimentos">
-        <h3>🎯 Metas & Investimentos {anoAtual}</h3>
+        <h3>🎯 Objetivos financeiros</h3>
+
+        {/* ── Lista de objetivos já cadastrados + novo ── */}
+        <div className="meta-modo-tabs">
+          {objetivos.map(o => (
+            <button
+              key={o.id}
+              className={`meta-modo-btn ${objetivoSelecionadoId === o.id ? 'active' : ''}`}
+              onClick={() => selecionarObjetivo(o)}
+            >
+              {o.iconeSonho ? `${o.iconeSonho} ` : ''}{o.sonho || 'Objetivo sem nome'}
+            </button>
+          ))}
+          <button
+            className={`meta-modo-btn ${objetivoSelecionadoId === null ? 'active' : ''}`}
+            onClick={() => selecionarObjetivo(null)}
+          >
+            + Novo objetivo
+          </button>
+        </div>
 
         {/* ── Meu Sonho ── */}
         <div className="meta-sonho-block">
-          <label className="meta-field-label">💭 Meu Sonho</label>
+          <label className="meta-field-label">💭 Qual é o objetivo?</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input
               type="text"
               className="meta-sonho-input"
               style={{ flex: 1 }}
-              placeholder="Ex: Ter R$ 1.000.000 investidos, aposentadoria antecipada..."
+              placeholder="Ex: Macbook, viagem, reserva de emergência..."
               value={editSonho}
               onChange={e => setEditSonho(e.target.value)}
             />
             <div style={{ display: 'flex', gap: 4 }}>
-              {(['🚗', '✈️', '🏠', '⭐'] as const).map(icone => (
+              {(['🚗', '✈️', '🏠', '💻', '⭐'] as const).map(icone => (
                 <button
                   key={icone}
                   type="button"
@@ -621,175 +735,186 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               ))}
             </div>
           </div>
-          <div className="meta-modo-tabs">
-            <button
-              className={`meta-modo-btn ${editModoMeta === 'simples' ? 'active' : ''}`}
-              onClick={() => setEditModoMeta('simples')}>
-              Meta simples
-            </button>
-            <button
-              className={`meta-modo-btn ${editModoMeta === 'metodo' ? 'active' : ''}`}
-              onClick={() => setEditModoMeta('metodo')}>
-              Meta com método
-            </button>
-          </div>
 
-          {editModoMeta === 'metodo' && (
-            <div className="meta-metodo-fields">
-              <div className="meta-metodo-row">
-                <div className="meta-metodo-field">
-                  <label className="meta-field-label">Valor do sonho</label>
-                  <div className="val-input-wrap">
-                    <span className="val-prefix">R$</span>
-                    <input type="text" inputMode="decimal" value={editValorSonho}
-                      onChange={e => setEditValorSonho(e.target.value)}
-                      onBlur={() => { const n = parseBRL(editValorSonho); if (n) setEditValorSonho(fmtNum(n)) }}
-                      placeholder="1.000.000,00" />
-                  </div>
+          <div className="meta-metodo-fields">
+            <div className="meta-metodo-row">
+              <div className="meta-metodo-field">
+                <label className="meta-field-label">Valor do objetivo (quanto custa)</label>
+                <div className="val-input-wrap">
+                  <span className="val-prefix">R$</span>
+                  <input type="text" inputMode="decimal" value={editValorSonho}
+                    onChange={e => setEditValorSonho(e.target.value)}
+                    onBlur={() => { const n = parseBRL(editValorSonho); if (n) setEditValorSonho(fmtNum(n)) }}
+                    placeholder="1.000.000,00" />
                 </div>
-                <div className="meta-metodo-field">
-                  <label className="meta-field-label">Já investido</label>
-                  <div className="val-input-wrap">
-                    <span className="val-prefix">R$</span>
-                    <input type="text" inputMode="decimal" value={editTotalInvestido}
-                      onChange={e => setEditTotalInvestido(e.target.value)}
-                      onBlur={() => { const n = parseBRL(editTotalInvestido); if (n) setEditTotalInvestido(fmtNum(n)) }}
-                      placeholder="0,00" />
+              </div>
+              <div className="meta-metodo-field">
+                <label className="meta-field-label">Já investido</label>
+                <div className="val-input-wrap">
+                  <span className="val-prefix">R$</span>
+                  <input type="text" inputMode="decimal" value={editTotalInvestido}
+                    onChange={e => setEditTotalInvestido(e.target.value)}
+                    onBlur={() => { const n = parseBRL(editTotalInvestido); if (n) setEditTotalInvestido(fmtNum(n)) }}
+                    placeholder="0,00" />
+                </div>
+                {objetivoSelecionado?.contaInvestimentoId && (
+                  <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 4 }}>
+                    🔗 Vinculada a uma conta de investimento — este valor é atualizado automaticamente pelo saldo da conta em Banco.
                   </div>
-                  {meta?.contaInvestimentoId && (
-                    <div style={{ fontSize: 11, color: 'var(--tx3)', marginTop: 4 }}>
-                      🔗 Vinculada a uma conta de investimento — este valor é atualizado automaticamente pelo saldo da conta em Banco.
+                )}
+              </div>
+              <div className="meta-metodo-field">
+                <label className="meta-field-label">Data planejada (quando quer alcançar)</label>
+                <input type="date" value={editDataAlvo}
+                  onChange={e => setEditDataAlvo(e.target.value)}
+                  style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
+              </div>
+              <div className="meta-metodo-field">
+                <label className="meta-field-label">Taxa retorno (% a.a.) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>SELIC: {fmtPct(selic)}</span></label>
+                <input type="text" inputMode="decimal" value={editTaxaRetorno}
+                  onChange={e => setEditTaxaRetorno(e.target.value)} placeholder={selic.toFixed(1)}
+                  style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
+              </div>
+              <div className="meta-metodo-field">
+                <label className="meta-field-label">
+                  Margem PJ (%) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>% da receita que vira aporte</span>
+                </label>
+                <input type="text" inputMode="decimal" value={editMargemPJ}
+                  onChange={e => setEditMargemPJ(e.target.value)} placeholder="20"
+                  style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
+              </div>
+            </div>
+
+            {aporteMensal !== null && (
+              <div className="meta-aporte-result">
+                <div style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 4 }}>
+                  Para atingir {fmtBRL(parseBRL(editValorSonho))} até {editDataAlvo ? new Date(editDataAlvo + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : '—'} com {editTaxaRetorno}% a.a.:
+                </div>
+                {aporteMensal === 0
+                  ? <div style={{ fontSize: 16, fontWeight: 700, color: '#34c759' }}>✅ Seu capital atual já atinge a meta no prazo!</div>
+                  : <>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: '#0a84ff' }}>
+                        Aporte mensal necessário: <span>{fmtBRL(aporteMensal)}</span>
+                      </div>
+                      {editMargemPJ && Number(editMargemPJ) > 0 && (
+                        <div style={{ fontSize: 13, color: 'var(--tx3)', marginTop: 6 }}>
+                          💼 Com margem PJ de {editMargemPJ}%, você precisa faturar{' '}
+                          <strong style={{ color: 'var(--tx1)' }}>
+                            {fmtBRL(aporteMensal / (Number(editMargemPJ) / 100))}
+                          </strong>{' '}
+                          adicionalmente por mês.
+                        </div>
+                      )}
+                    </>
+                }
+              </div>
+            )}
+
+            {tempoAteMeta !== null && (
+              <div className="meta-tempo-meta">
+                {tempoAteMeta.meses === 0
+                  ? <span style={{ color: '#34c759', fontWeight: 700 }}>✅ Você já atingiu sua meta!</span>
+                  : <>
+                      <span>⏱ Tempo estimado até a meta: </span>
+                      <strong style={{ color: '#34c759' }}>
+                        {tempoAteMeta.anos > 0 ? `${tempoAteMeta.anos} ano${tempoAteMeta.anos > 1 ? 's' : ''}` : ''}
+                        {tempoAteMeta.anos > 0 && tempoAteMeta.mesesRest > 0 ? ' e ' : ''}
+                        {tempoAteMeta.mesesRest > 0 ? `${tempoAteMeta.mesesRest} mês${tempoAteMeta.mesesRest > 1 ? 'es' : ''}` : ''}
+                      </strong>
+                    </>
+                }
+              </div>
+            )}
+
+            {aporteMensal !== null && aporteMensal > 0 && (
+              <div className="meta-simulador">
+                <label className="meta-field-label">Simulador — e se eu aportar R$ a mais por mês?</label>
+                <div className="meta-simulador-row">
+                  <div className="val-input-wrap" style={{ flex: 1, minWidth: 130 }}>
+                    <span className="val-prefix">R$</span>
+                    <input type="text" inputMode="decimal" value={simAporteExtra}
+                      onChange={e => setSimAporteExtra(e.target.value)}
+                      onBlur={() => { const n = parseBRL(simAporteExtra); if (n) setSimAporteExtra(fmtNum(n)) }}
+                      placeholder="500,00" />
+                  </div>
+                  {simTempoComExtra && (
+                    <div className="meta-sim-result">
+                      {simTempoComExtra.ganhoMeses > 0
+                        ? <>
+                            Chegaria em{' '}
+                            <strong style={{ color: '#0a84ff' }}>
+                              {simTempoComExtra.anos > 0 ? `${simTempoComExtra.anos}a ` : ''}{simTempoComExtra.mesesRest}m
+                            </strong>
+                            {' '}·{' '}
+                            <span style={{ color: '#34c759' }}>ganho de {simTempoComExtra.ganhoMeses} meses!</span>
+                          </>
+                        : 'Pouca diferença no prazo'
+                      }
                     </div>
                   )}
                 </div>
-                <div className="meta-metodo-field">
-                  <label className="meta-field-label">Prazo (anos)</label>
-                  <input type="text" inputMode="numeric" value={editPrazoAnos}
-                    onChange={e => setEditPrazoAnos(e.target.value)} placeholder="10"
-                    style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
-                </div>
-                <div className="meta-metodo-field">
-                  <label className="meta-field-label">Taxa retorno (% a.a.) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>SELIC: {selic.toFixed(1)}%</span></label>
-                  <input type="text" inputMode="decimal" value={editTaxaRetorno}
-                    onChange={e => setEditTaxaRetorno(e.target.value)} placeholder={selic.toFixed(1)}
-                    style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
-                </div>
-                <div className="meta-metodo-field">
-                  <label className="meta-field-label">
-                    Margem PJ (%) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>% da receita que vira aporte</span>
-                  </label>
-                  <input type="text" inputMode="decimal" value={editMargemPJ}
-                    onChange={e => setEditMargemPJ(e.target.value)} placeholder="20"
-                    style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
+              </div>
+            )}
+
+            {atrasadaNaSonho?.atrasada && (
+              <div className="meta-recovery-card">
+                <div className="meta-recovery-title">⚠️ Meta com atraso detectado</div>
+                <p className="meta-recovery-desc">
+                  Passaram-se <strong>{atrasadaNaSonho.mesesDecorridos} meses</strong> desde que você definiu esta meta.
+                  Seu aporte necessário subiu. Escolha como recuperar:
+                </p>
+                <div className="meta-recovery-options">
+                  <div className="meta-recovery-option">
+                    <div className="meta-recovery-option-label">Opção 1 · Manter prazo</div>
+                    <div className="meta-recovery-option-val">
+                      {fmtBRL(atrasadaNaSonho.aporteNecessarioAgora)}
+                      <span style={{ fontSize: 13, fontWeight: 400 }}>/mês</span>
+                    </div>
+                    <div className="meta-recovery-option-desc">Novo aporte para chegar à meta no prazo original</div>
+                  </div>
+                  <div className="meta-recovery-sep">ou</div>
+                  <div className="meta-recovery-option">
+                    <div className="meta-recovery-option-label">Opção 2 · Manter aporte</div>
+                    <div className="meta-recovery-option-val">
+                      +{Math.ceil(Math.max(0, atrasadaNaSonho.novoPrazoMeses - atrasadaNaSonho.mesesRestantes) / 12 * 10) / 10}a
+                      <span style={{ fontSize: 13, fontWeight: 400 }}> a mais</span>
+                    </div>
+                    <div className="meta-recovery-option-desc">
+                      Aportar {fmtBRL(atrasadaNaSonho.aporteOriginal)}/mês → meta em{' '}
+                      {Math.floor(atrasadaNaSonho.novoPrazoMeses / 12)}a{' '}
+                      {atrasadaNaSonho.novoPrazoMeses % 12}m
+                    </div>
+                  </div>
                 </div>
               </div>
-
-              {aporteMensal !== null && (
-                <div className="meta-aporte-result">
-                  <div style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 4 }}>
-                    Para atingir {fmtBRL(parseBRL(editValorSonho))} em {editPrazoAnos} anos com {editTaxaRetorno}% a.a.:
-                  </div>
-                  {aporteMensal === 0
-                    ? <div style={{ fontSize: 16, fontWeight: 700, color: '#34c759' }}>✅ Seu capital atual já atinge a meta no prazo!</div>
-                    : <>
-                        <div style={{ fontSize: 22, fontWeight: 800, color: '#0a84ff' }}>
-                          Aporte mensal necessário: <span>{fmtBRL(aporteMensal)}</span>
-                        </div>
-                        {editMargemPJ && Number(editMargemPJ) > 0 && (
-                          <div style={{ fontSize: 13, color: 'var(--tx3)', marginTop: 6 }}>
-                            💼 Com margem PJ de {editMargemPJ}%, você precisa faturar{' '}
-                            <strong style={{ color: 'var(--tx1)' }}>
-                              {fmtBRL(aporteMensal / (Number(editMargemPJ) / 100))}
-                            </strong>{' '}
-                            adicionalmente por mês.
-                          </div>
-                        )}
-                      </>
-                  }
-                </div>
-              )}
-
-              {tempoAteMeta !== null && (
-                <div className="meta-tempo-meta">
-                  {tempoAteMeta.meses === 0
-                    ? <span style={{ color: '#34c759', fontWeight: 700 }}>✅ Você já atingiu sua meta!</span>
-                    : <>
-                        <span>⏱ Tempo estimado até a meta: </span>
-                        <strong style={{ color: '#34c759' }}>
-                          {tempoAteMeta.anos > 0 ? `${tempoAteMeta.anos} ano${tempoAteMeta.anos > 1 ? 's' : ''}` : ''}
-                          {tempoAteMeta.anos > 0 && tempoAteMeta.mesesRest > 0 ? ' e ' : ''}
-                          {tempoAteMeta.mesesRest > 0 ? `${tempoAteMeta.mesesRest} mês${tempoAteMeta.mesesRest > 1 ? 'es' : ''}` : ''}
-                        </strong>
-                      </>
-                  }
-                </div>
-              )}
-
-              {aporteMensal !== null && aporteMensal > 0 && (
-                <div className="meta-simulador">
-                  <label className="meta-field-label">Simulador — e se eu aportar R$ a mais por mês?</label>
-                  <div className="meta-simulador-row">
-                    <div className="val-input-wrap" style={{ flex: 1, minWidth: 130 }}>
-                      <span className="val-prefix">R$</span>
-                      <input type="text" inputMode="decimal" value={simAporteExtra}
-                        onChange={e => setSimAporteExtra(e.target.value)}
-                        onBlur={() => { const n = parseBRL(simAporteExtra); if (n) setSimAporteExtra(fmtNum(n)) }}
-                        placeholder="500,00" />
-                    </div>
-                    {simTempoComExtra && (
-                      <div className="meta-sim-result">
-                        {simTempoComExtra.ganhoMeses > 0
-                          ? <>
-                              Chegaria em{' '}
-                              <strong style={{ color: '#0a84ff' }}>
-                                {simTempoComExtra.anos > 0 ? `${simTempoComExtra.anos}a ` : ''}{simTempoComExtra.mesesRest}m
-                              </strong>
-                              {' '}·{' '}
-                              <span style={{ color: '#34c759' }}>ganho de {simTempoComExtra.ganhoMeses} meses!</span>
-                            </>
-                          : 'Pouca diferença no prazo'
-                        }
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {atrasadaNaSonho?.atrasada && (
-                <div className="meta-recovery-card">
-                  <div className="meta-recovery-title">⚠️ Meta com atraso detectado</div>
-                  <p className="meta-recovery-desc">
-                    Passaram-se <strong>{atrasadaNaSonho.mesesDecorridos} meses</strong> desde que você definiu esta meta.
-                    Seu aporte necessário subiu. Escolha como recuperar:
-                  </p>
-                  <div className="meta-recovery-options">
-                    <div className="meta-recovery-option">
-                      <div className="meta-recovery-option-label">Opção 1 · Manter prazo</div>
-                      <div className="meta-recovery-option-val">
-                        {fmtBRL(atrasadaNaSonho.aporteNecessarioAgora)}
-                        <span style={{ fontSize: 13, fontWeight: 400 }}>/mês</span>
-                      </div>
-                      <div className="meta-recovery-option-desc">Novo aporte para chegar à meta no prazo original</div>
-                    </div>
-                    <div className="meta-recovery-sep">ou</div>
-                    <div className="meta-recovery-option">
-                      <div className="meta-recovery-option-label">Opção 2 · Manter aporte</div>
-                      <div className="meta-recovery-option-val">
-                        +{Math.ceil(Math.max(0, atrasadaNaSonho.novoPrazoMeses - atrasadaNaSonho.mesesRestantes) / 12 * 10) / 10}a
-                        <span style={{ fontSize: 13, fontWeight: 400 }}> a mais</span>
-                      </div>
-                      <div className="meta-recovery-option-desc">
-                        Aportar {fmtBRL(atrasadaNaSonho.aporteOriginal)}/mês → meta em{' '}
-                        {Math.floor(atrasadaNaSonho.novoPrazoMeses / 12)}a{' '}
-                        {atrasadaNaSonho.novoPrazoMeses % 12}m
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+          <button className="btn-meta" onClick={handleSaveObjetivo} disabled={savingObjetivo}>
+            {savingObjetivo ? 'Salvando...' : objetivoSelecionadoId ? '💾 Salvar objetivo' : '➕ Criar objetivo'}
+          </button>
+          {objetivoSelecionadoId && (
+            <button className="btn-meta" style={{ background: 'transparent', color: '#ff6b6b', border: '1px solid #ff6b6b' }}
+              onClick={handleExcluirObjetivo} disabled={savingObjetivo}>
+              🗑 Excluir
+            </button>
+          )}
+          {objetivoMsg && <span style={{ fontSize: 13, color: objetivoMsg === 'Objetivo salvo!' ? '#34c759' : '#ff6b6b' }}>{objetivoMsg}</span>}
+        </div>
+        {objetivoSelecionado?.salvoEm && (
+          <div className="meta-salvo-em">
+            Projeção calculada a partir de {new Date(objetivoSelecionado.salvoEm).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+          </div>
+        )}
+      </div>
+
+      <div className="meta-card">
+        <h3>📈 Meta de Faturamento Mensal {anoAtual}</h3>
+        <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 10 }}>
+          Acompanhamento mensal de receita e lucro reais contra um alvo — independente dos objetivos acima.
+        </p>
 
         <div className="meta-period-row">
           <div className="meta-period-field">
@@ -836,7 +961,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           <button className="btn-meta" onClick={handleSaveMeta} disabled={savingMeta}>
             {savingMeta ? 'Salvando...' : '💾 Salvar metas'}
           </button>
-          {metaMsg && <span style={{ fontSize: 13, color: '#34c759' }}>{metaMsg}</span>}
+          {metaMsg && <span style={{ fontSize: 13, color: metaMsgOk ? '#34c759' : '#ff6b6b' }}>{metaMsg}</span>}
         </div>
         {meta?.salvoEm && (
           <div className="meta-salvo-em">
@@ -845,13 +970,13 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         )}
       </div>
 
-      {trajetorias && editModoMeta === 'metodo' && (
+      {trajetorias && (
         <div className="meta-card">
           <h3>📊 Trajetória do Patrimônio</h3>
           <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 10 }}>
-            3 cenários: <span style={{ color: '#ff6b6b' }}>pessimista ({(Number(editTaxaRetorno) - 3).toFixed(1)}%)</span>,{' '}
-            <span style={{ color: '#0a84ff' }}>realista ({editTaxaRetorno}%)</span> e{' '}
-            <span style={{ color: '#34c759' }}>otimista ({(Number(editTaxaRetorno) + 3).toFixed(1)}% a.a.)</span>
+            3 cenários: <span style={{ color: '#ff6b6b' }}>pessimista ({fmtPct(Number(editTaxaRetorno) - 3)})</span>,{' '}
+            <span style={{ color: '#0a84ff' }}>realista ({fmtPct(Number(editTaxaRetorno))})</span> e{' '}
+            <span style={{ color: '#34c759' }}>otimista ({fmtPct(Number(editTaxaRetorno) + 3)} a.a.)</span>
           </p>
           <div style={{ height: 240 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -876,7 +1001,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
       {projecaoSelic && (
         <div className="meta-card">
-          <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({selic.toFixed(2)}% a.a.)</span></h3>
+          <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({fmtPct(selic, 2)} a.a.)</span></h3>
           <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
             Capital de {fmtBRL(Number(editTotalInvestido))} composto à SELIC, sem aportes adicionais.
           </p>
@@ -902,7 +1027,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
             <div style={{ width: `${fireNumber.pct}%`, height: '100%', background: fireNumber.atingido ? '#34c759' : '#0a84ff', transition: 'width .3s' }} />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
-            <span style={{ color: 'var(--tx3)' }}>{fireNumber.pct.toFixed(1)}% da independência financeira</span>
+            <span style={{ color: 'var(--tx3)' }}>{fmtPct(fireNumber.pct)} da independência financeira</span>
             <span style={{ color: fireNumber.atingido ? '#34c759' : '#ff9500' }}>
               {fireNumber.atingido
                 ? '🎉 FIRE atingido!'

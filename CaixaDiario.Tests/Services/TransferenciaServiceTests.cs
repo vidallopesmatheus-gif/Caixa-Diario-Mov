@@ -159,4 +159,229 @@ public class TransferenciaServiceTests
         Assert.Equal(404, ex.StatusCode);
         Assert.Equal(CodigoRetorno.TRANSFERENCIA_NAO_ENCONTRADA, ex.Codigo);
     }
+
+    // ── ConverterLancamentoAsync: reclassifica um lançamento já real como Transferência ──────────
+
+    [Fact]
+    public async Task ConverterLancamentoAsync_SaidaExistente_RelabelaOrigemECriaEntradaNaContrapartida()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = CriarConta(clienteId, "Conta Corrente", tipo: "ContaCorrente", saldoInicial: 1000m);
+        var contaInvestimento = CriarConta(clienteId, "CDI Nubank", tipo: "Investimento", saldoInicial: 0m);
+        var data = new DateOnly(2026, 8, 20);
+        var lancamentoId = Guid.NewGuid();
+
+        var registroOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 1500m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1000m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = lancamentoId, Descricao = "Aplicação RDB", Valor = 500m, Categoria = "", PendenteCategorizacao = true } },
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCorrente.Id)).ReturnsAsync(contaCorrente);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimento.Id)).ReturnsAsync(contaInvestimento);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCorrente.Id, data)).ReturnsAsync(registroOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaInvestimento.Id, data)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaInvestimento.Id)).ReturnsAsync(new List<RegistroDiario>());
+
+        RegistroDiario? registroDestinoCriado = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(registroOrigem)).ReturnsAsync(registroOrigem);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => registroDestinoCriado = r).ReturnsAsync((RegistroDiario r) => r);
+        _transferenciaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Transferencia>())).ReturnsAsync((Transferencia t) => t);
+
+        var dto = new ConverterLancamentoEmTransferenciaDto
+        {
+            ContaId = contaCorrente.Id, LancamentoId = lancamentoId, Data = data, Tipo = "Saida",
+            ContaContrapartidaId = contaInvestimento.Id,
+        };
+
+        var resultado = await _sut.ConverterLancamentoAsync(dto, clienteId, "cliente");
+
+        // A ponta original só é relabelada — valor e efeito no saldo (já aplicado antes) não mudam.
+        var saidaOriginal = Assert.Single(registroOrigem.Saidas);
+        Assert.Equal("Transferencia", saidaOriginal.TipoCusto);
+        Assert.Equal("Transferência", saidaOriginal.Categoria);
+        Assert.False(saidaOriginal.PendenteCategorizacao);
+        Assert.Equal(500m, saidaOriginal.Valor);
+        Assert.Equal(1000m, registroOrigem.SaldoFinal); // inalterado
+
+        Assert.NotNull(registroDestinoCriado);
+        var entradaDestino = Assert.Single(registroDestinoCriado!.Entradas);
+        Assert.Equal("Transferencia", entradaDestino.TipoCusto);
+        Assert.Equal(500m, entradaDestino.Valor);
+        Assert.Equal(500m, registroDestinoCriado.SaldoFinal); // 0 + 500
+        Assert.Equal(saidaOriginal.TransferenciaId, entradaDestino.TransferenciaId);
+
+        Assert.Equal(contaCorrente.Id, resultado.ContaOrigemId);
+        Assert.Equal(contaInvestimento.Id, resultado.ContaDestinoId);
+        Assert.Equal(500m, resultado.Valor);
+    }
+
+    [Fact]
+    public async Task ConverterLancamentoAsync_EntradaExistente_RelabelaOrigemECriaSaidaNaContrapartida()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = CriarConta(clienteId, "Conta Corrente", tipo: "ContaCorrente", saldoInicial: 500m);
+        var contaInvestimento = CriarConta(clienteId, "CDI Nubank", tipo: "Investimento", saldoInicial: 1000m);
+        var data = new DateOnly(2026, 8, 20);
+        var lancamentoId = Guid.NewGuid();
+
+        var registroOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 300m,
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 800m,
+            Entradas = new() { new ItemFinanceiro { Id = lancamentoId, Descricao = "Resgate RDB", Valor = 500m } },
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCorrente.Id)).ReturnsAsync(contaCorrente);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimento.Id)).ReturnsAsync(contaInvestimento);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCorrente.Id, data)).ReturnsAsync(registroOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaInvestimento.Id, data)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaInvestimento.Id)).ReturnsAsync(new List<RegistroDiario>());
+
+        RegistroDiario? registroDestinoCriado = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(registroOrigem)).ReturnsAsync(registroOrigem);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => registroDestinoCriado = r).ReturnsAsync((RegistroDiario r) => r);
+        _transferenciaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Transferencia>())).ReturnsAsync((Transferencia t) => t);
+
+        var dto = new ConverterLancamentoEmTransferenciaDto
+        {
+            ContaId = contaCorrente.Id, LancamentoId = lancamentoId, Data = data, Tipo = "Entrada",
+            ContaContrapartidaId = contaInvestimento.Id,
+        };
+
+        var resultado = await _sut.ConverterLancamentoAsync(dto, clienteId, "cliente");
+
+        var entradaOriginal = Assert.Single(registroOrigem.Entradas);
+        Assert.Equal("Transferencia", entradaOriginal.TipoCusto);
+        Assert.Equal(800m, registroOrigem.SaldoFinal); // inalterado
+
+        Assert.NotNull(registroDestinoCriado);
+        var saidaDestino = Assert.Single(registroDestinoCriado!.Saidas);
+        Assert.Equal("Transferencia", saidaDestino.TipoCusto);
+        Assert.Equal(500m, saidaDestino.Valor);
+        Assert.Equal(500m, registroDestinoCriado.SaldoFinal); // 1000 - 500
+
+        Assert.Equal(contaInvestimento.Id, resultado.ContaOrigemId);
+        Assert.Equal(contaCorrente.Id, resultado.ContaDestinoId);
+    }
+
+    [Fact]
+    public async Task ConverterLancamentoAsync_ComLancamentoContrapartidaExistente_VinculaSemCriarNovo()
+    {
+        // Cenário do risco de duplicação: o extrato da conta de investimento já foi importado e já
+        // trouxe a entrada correspondente — vincular às duas pontas já existentes, sem criar nada novo.
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = CriarConta(clienteId, "Conta Corrente", tipo: "ContaCorrente", saldoInicial: 1000m);
+        var contaInvestimento = CriarConta(clienteId, "CDI Nubank", tipo: "Investimento", saldoInicial: 0m);
+        var data = new DateOnly(2026, 8, 20);
+        var lancamentoId = Guid.NewGuid();
+        var lancamentoContrapartidaId = Guid.NewGuid();
+
+        var registroOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 1500m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1000m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = lancamentoId, Descricao = "Aplicação RDB", Valor = 500m, Categoria = "", PendenteCategorizacao = true } },
+        };
+        var registroContrapartida = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaInvestimento.Id, Data = data, Inicio = 0m,
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 500m,
+            Entradas = new() { new ItemFinanceiro { Id = lancamentoContrapartidaId, Descricao = "Aplicação recebida", Valor = 500m } },
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCorrente.Id)).ReturnsAsync(contaCorrente);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimento.Id)).ReturnsAsync(contaInvestimento);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCorrente.Id, data)).ReturnsAsync(registroOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaInvestimento.Id, data)).ReturnsAsync(registroContrapartida);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _transferenciaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Transferencia>())).ReturnsAsync((Transferencia t) => t);
+
+        var dto = new ConverterLancamentoEmTransferenciaDto
+        {
+            ContaId = contaCorrente.Id, LancamentoId = lancamentoId, Data = data, Tipo = "Saida",
+            ContaContrapartidaId = contaInvestimento.Id, LancamentoContrapartidaId = lancamentoContrapartidaId, DataContrapartida = data,
+        };
+
+        var resultado = await _sut.ConverterLancamentoAsync(dto, clienteId, "cliente");
+
+        // Saldo da contrapartida inalterado — a entrada já estava lá, não foi criada de novo.
+        Assert.Equal(500m, registroContrapartida.SaldoFinal);
+        var entradaContrapartida = Assert.Single(registroContrapartida.Entradas);
+        Assert.Equal("Transferencia", entradaContrapartida.TipoCusto);
+        Assert.Equal(1000m, registroOrigem.SaldoFinal); // também inalterado
+
+        var saidaOriginal = Assert.Single(registroOrigem.Saidas);
+        Assert.Equal(saidaOriginal.TransferenciaId, entradaContrapartida.TransferenciaId);
+        Assert.Equal(resultado.Id, saidaOriginal.TransferenciaId);
+
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ConverterLancamentoAsync_ContaContrapartidaIgualAOriginal_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId, "Conta Corrente");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+
+        var dto = new ConverterLancamentoEmTransferenciaDto
+        {
+            ContaId = conta.Id, LancamentoId = Guid.NewGuid(), Data = new DateOnly(2026, 8, 20), Tipo = "Saida",
+            ContaContrapartidaId = conta.Id,
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ConverterLancamentoAsync(dto, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task ConverterLancamentoAsync_LancamentoInexistente_LancaNaoEncontrado()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId, "Conta Corrente");
+        var contrapartida = CriarConta(clienteId, "CDI Nubank", tipo: "Investimento");
+        var data = new DateOnly(2026, 8, 20);
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contrapartida.Id)).ReturnsAsync(contrapartida);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data,
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+        });
+
+        var dto = new ConverterLancamentoEmTransferenciaDto
+        {
+            ContaId = conta.Id, LancamentoId = Guid.NewGuid(), Data = data, Tipo = "Saida",
+            ContaContrapartidaId = contrapartida.Id,
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ConverterLancamentoAsync(dto, clienteId, "cliente"));
+
+        Assert.Equal(404, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConverterLancamentoAsync_ClienteAcessandoOutroCliente_LancaAcessoNegado()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId, "Conta Corrente");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+
+        var dto = new ConverterLancamentoEmTransferenciaDto
+        {
+            ContaId = conta.Id, LancamentoId = Guid.NewGuid(), Data = new DateOnly(2026, 8, 20), Tipo = "Saida",
+            ContaContrapartidaId = Guid.NewGuid(),
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ConverterLancamentoAsync(dto, Guid.NewGuid(), "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
+    }
 }

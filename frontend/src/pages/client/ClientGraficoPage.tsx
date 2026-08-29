@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import StatCard from '../../components/shared/StatCard'
-import { fmtBRL } from '../../utils/format'
+import { fmtBRL, fmtPct as fmtPctBase } from '../../utils/format'
 import { obterIndicadores } from '../../api/metricas'
 import type { IndicadoresDecisao, CategoriaIndicador } from '../../api/metricas'
 import { useRegistros } from '../../hooks/useRegistros'
@@ -22,8 +22,7 @@ function mesLabel(mes: string): string {
 }
 
 function fmtPct(v: number | null): string {
-  if (v === null) return '—'
-  return `${v.toFixed(1)}%`
+  return v === null ? '—' : fmtPctBase(v)
 }
 
 /** Regressão linear simples (mínimos quadrados) sobre uma série de valores igualmente espaçados. */
@@ -139,11 +138,11 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   let leituraTendencia = `Sua receita está em tendência de ${direcao} nos meses com movimento.`
   if (indicadores.variacaoReceitaMesAnterior !== null) {
     const v = indicadores.variacaoReceitaMesAnterior
-    leituraTendencia += ` Este mês está ${v >= 0 ? `${v.toFixed(1)}% maior` : `${Math.abs(v).toFixed(1)}% menor`} que o mês passado.`
+    leituraTendencia += ` Este mês está ${v >= 0 ? `${fmtPctBase(v)} maior` : `${fmtPctBase(Math.abs(v))} menor`} que o mês passado.`
   }
   if (indicadores.variacaoReceitaAnoAnterior !== null) {
     const v = indicadores.variacaoReceitaAnoAnterior
-    leituraTendencia += ` Comparado ao mesmo mês do ano passado, está ${v >= 0 ? `${v.toFixed(1)}% maior` : `${Math.abs(v).toFixed(1)}% menor`}.`
+    leituraTendencia += ` Comparado ao mesmo mês do ano passado, está ${v >= 0 ? `${fmtPctBase(v)} maior` : `${fmtPctBase(Math.abs(v))} menor`}.`
   }
 
   // Custo Fixo ÷ Receita: tendência dos últimos 6 meses — o sinal acionável é custo fixo subindo
@@ -208,7 +207,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
         </div>
 
         <div className="ind-margem-card">
-          <div className="ind-margem-valor">{dre.margem !== null ? `${dre.margem.toFixed(1)}%` : '—'}</div>
+          <div className="ind-margem-valor">{fmtPct(dre.margem)}</div>
           <div className="ind-margem-leitura">{leituraMargem}</div>
         </div>
 
@@ -376,7 +375,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
                   <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 12 }} />
                   <YAxis stroke="var(--tx3)" tick={{ fontSize: 12 }} tickFormatter={v => `${v}%`} />
-                  <Tooltip formatter={v => typeof v === 'number' ? `${v.toFixed(1)}%` : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
+                  <Tooltip formatter={v => typeof v === 'number' ? fmtPctBase(v) : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
                   <Line type="monotone" dataKey="percentual" name="Custo fixo / receita" stroke="#ffa94d" strokeWidth={2} dot={{ fill: '#ffa94d', r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>

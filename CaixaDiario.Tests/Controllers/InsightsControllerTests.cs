@@ -36,7 +36,7 @@ public class InsightsControllerTests
         var clienteId = Guid.NewGuid();
         _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
         _contaMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaRecorrente>());
-        _metaMock.Setup(r => r.ObterPorClienteEAnoAsync(clienteId, It.IsAny<int>())).ReturnsAsync((MetaAnual?)null);
+        _metaMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual>());
         _insightMock.Setup(s => s.Calcular(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<ContaRecorrente>>(), It.IsAny<MetaAnual?>()))
             .Returns(new List<InsightDto>());
 
@@ -52,13 +52,35 @@ public class InsightsControllerTests
         var clienteId = Guid.NewGuid();
         _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
         _contaMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaRecorrente>());
-        _metaMock.Setup(r => r.ObterPorClienteEAnoAsync(clienteId, It.IsAny<int>())).ReturnsAsync((MetaAnual?)null);
+        _metaMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual>());
         _insightMock.Setup(s => s.Calcular(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<ContaRecorrente>>(), It.IsAny<MetaAnual?>()))
             .Returns(new List<InsightDto>());
 
         var result = await CriarSut(clienteId, "cliente").ObterInsights(clienteId);
 
         Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ObterInsights_VariosObjetivos_UsaODataAlvoMaisProximo()
+    {
+        // Com vários objetivos simultâneos (modo "metodo"), os insights só olham pra um —
+        // o mais urgente (data-alvo mais próxima), não o primeiro da lista nem o mais recente.
+        var clienteId = Guid.NewGuid();
+        var maisProximo = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, ModoMeta = "metodo", DataAlvo = new DateOnly(2026, 12, 1), Sonho = "Macbook" };
+        var maisDistante = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, ModoMeta = "metodo", DataAlvo = new DateOnly(2030, 1, 1), Sonho = "Aposentadoria" };
+        _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
+        _contaMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaRecorrente>());
+        _metaMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual> { maisDistante, maisProximo });
+
+        MetaAnual? metaRecebida = null;
+        _insightMock.Setup(s => s.Calcular(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<ContaRecorrente>>(), It.IsAny<MetaAnual?>()))
+            .Callback<List<RegistroDiario>, List<ContaRecorrente>, MetaAnual?>((_, _, m) => metaRecebida = m)
+            .Returns(new List<InsightDto>());
+
+        await CriarSut(clienteId, "cliente").ObterInsights(clienteId);
+
+        Assert.Equal("Macbook", metaRecebida?.Sonho);
     }
 
     [Fact]

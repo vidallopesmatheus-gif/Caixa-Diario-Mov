@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { obterDre } from '../../api/metricas'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { useRegistros } from '../../hooks/useRegistros'
-import { fmtBRL, fmtDate } from '../../utils/format'
+import { fmtBRL, fmtPct, fmtDate } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
 import type { Dre, DreCategoria } from '../../api/metricas'
 import type { ContaBancaria } from '../../types'
@@ -50,9 +50,8 @@ function deslocarPeriodo(tipo: TipoPeriodo, ano: number, mes: number, deslocamen
   return { ano: Math.floor(indiceAbsoluto / 12), mes: (((indiceAbsoluto % 12) + 12) % 12) + 1 }
 }
 
-function fmtPct(v: number | null): string {
-  if (v === null) return '—'
-  return `${v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+function fmtPctOuTraco(v: number | null): string {
+  return v === null ? '—' : fmtPct(v)
 }
 
 interface LinhaWaterfall {
@@ -292,15 +291,15 @@ export default function ClientDrePage() {
                   </span>
 
                   {!modoComparativo ? (
-                    <span className="dre-linha-valor">
-                      {fmtBRL(linhaBase.total)}
-                      <span className="dre-linha-pct">{fmtPct(linhaBase.percentual)}</span>
-                    </span>
+                    <>
+                      <span className="dre-linha-valor">{fmtBRL(linhaBase.total)}</span>
+                      <span className="dre-linha-pct">{fmtPctOuTraco(linhaBase.percentual)}</span>
+                    </>
                   ) : (
                     linhasPorPeriodo.map((l, i) => (
                       <span key={periodosComDre[i].periodo.chave} className="dre-cmp-cel">
                         <span className="dre-cmp-cel-valor">{fmtBRL(l.total)}</span>
-                        <span className="dre-cmp-cel-pct">{fmtPct(l.percentual)}</span>
+                        <span className="dre-cmp-cel-pct">{fmtPctOuTraco(l.percentual)}</span>
                       </span>
                     ))
                   )}
@@ -324,7 +323,7 @@ export default function ClientDrePage() {
                               >
                                 <span className="dre-cat-nome">{cat.nome}</span>
                                 <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
-                                <span className="dre-cat-pct">{fmtPct(cat.percentual)}</span>
+                                <span className="dre-cat-pct">{fmtPctOuTraco(cat.percentual)}</span>
                               </button>
                             ))
                           )}
