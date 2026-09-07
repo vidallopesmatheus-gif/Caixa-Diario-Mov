@@ -39,4 +39,10 @@ public class ContaBancariaRepository : IContaBancariaRepository
         await _context.SaveChangesAsync();
         return conta;
     }
+
+    public async Task RemoverAsync(ContaBancaria conta)
+    {
+        _context.ContasBancarias.Remove(conta);
+        await _context.SaveChangesAsync();
+    }
 }

@@ -9,4 +9,5 @@ public interface IContaBancariaRepository
     Task<ContaBancaria?> ObterCaixaPadraoAsync(Guid clienteId);
     Task<ContaBancaria> AdicionarAsync(ContaBancaria conta);
     Task<ContaBancaria> AtualizarAsync(ContaBancaria conta);
+    Task RemoverAsync(ContaBancaria conta);
 }

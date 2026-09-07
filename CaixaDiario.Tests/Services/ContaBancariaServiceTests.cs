@@ -13,12 +13,21 @@ public class ContaBancariaServiceTests
     private readonly Mock<IContaBancariaRepository> _contaRepoMock = new();
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
     private readonly Mock<IMetaRepository> _metaRepoMock = new();
+    private readonly Mock<ITransferenciaRepository> _transferenciaRepoMock = new();
+    private readonly Mock<ITransacaoImportadaRepository> _transacaoImportadaRepoMock = new();
     private readonly ContaBancariaService _sut;
 
     public ContaBancariaServiceTests()
     {
         _metaRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<MetaAnual>());
-        _sut = new ContaBancariaService(_contaRepoMock.Object, _registroRepoMock.Object, _metaRepoMock.Object);
+        // Default "sem vínculo nenhum" — testes de ExcluirOuInativarAsync sobrescrevem o que precisarem.
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ContarTodosPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(0);
+        _transferenciaRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Transferencia>());
+        _transacaoImportadaRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<TransacaoImportada>());
+        _sut = new ContaBancariaService(
+            _contaRepoMock.Object, _registroRepoMock.Object, _metaRepoMock.Object,
+            _transferenciaRepoMock.Object, _transacaoImportadaRepoMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid id, Guid clienteId, decimal saldoInicial = 1000m) => new()
@@ -333,36 +342,120 @@ public class ContaBancariaServiceTests
     }
 
     [Fact]
-    public async Task InativarAsync_ComConta_MarcaComoInativaEPersiste()
+    public async Task ExcluirOuInativarAsync_SemNenhumVinculo_ExcluiDeVerdade()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 1m);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+
+        var resultado = await _sut.ExcluirOuInativarAsync(conta.Id, clienteId, "cliente");
+
+        Assert.True(resultado.Excluida);
+        Assert.Equal(0, resultado.TotalVinculos);
+        _contaRepoMock.Verify(r => r.RemoverAsync(conta), Times.Once);
+        _contaRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<ContaBancaria>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExcluirOuInativarAsync_ComDiaDeRegistro_ApenasInativaEInformaContagem()
     {
         var clienteId = Guid.NewGuid();
         var conta = CriarConta(Guid.NewGuid(), clienteId);
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
         _contaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<ContaBancaria>())).ReturnsAsync((ContaBancaria c) => c);
+        // Inclui um dia soft-deletado (Excluido=true) — ContarTodosPorContaAsync não filtra isso,
+        // por isso é ele (e não ListarPorContaAsync) que decide se a conta pode ser excluída de verdade.
+        _registroRepoMock.Setup(r => r.ContarTodosPorContaAsync(conta.Id)).ReturnsAsync(2);
 
-        await _sut.InativarAsync(conta.Id, clienteId, "cliente");
+        var resultado = await _sut.ExcluirOuInativarAsync(conta.Id, clienteId, "cliente");
 
+        Assert.False(resultado.Excluida);
+        Assert.Equal(2, resultado.DiasComLancamento);
+        Assert.Equal(2, resultado.TotalVinculos);
         _contaRepoMock.Verify(r => r.AtualizarAsync(It.Is<ContaBancaria>(c => !c.Ativa)), Times.Once);
+        _contaRepoMock.Verify(r => r.RemoverAsync(It.IsAny<ContaBancaria>()), Times.Never);
     }
 
     [Fact]
-    public async Task InativarAsync_ComContaInexistente_LancaNaoEncontrado()
+    public async Task ExcluirOuInativarAsync_ComContaProvisionadaEmRegistroDeOutraConta_ContaComoVinculo()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId);
+        var outraContaId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _contaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<ContaBancaria>())).ReturnsAsync((ContaBancaria c) => c);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = outraContaId, Data = new DateOnly(2026, 7, 1),
+                Entradas = new(), Saidas = new(),
+                ContasReceber = new List<ContaProvisionada> { new() { Descricao = "A receber", Valor = 100m, ContaBancariaId = conta.Id } },
+                ContasPagar = new(),
+                CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+            },
+        });
+
+        var resultado = await _sut.ExcluirOuInativarAsync(conta.Id, clienteId, "cliente");
+
+        Assert.False(resultado.Excluida);
+        Assert.Equal(1, resultado.ContasProvisionadas);
+    }
+
+    [Fact]
+    public async Task ExcluirOuInativarAsync_ComTransferenciaComoOrigemOuDestino_ContaComoVinculo()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _contaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<ContaBancaria>())).ReturnsAsync((ContaBancaria c) => c);
+        _transferenciaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<Transferencia>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaOrigemId = conta.Id, ContaDestinoId = Guid.NewGuid(), Data = new DateOnly(2026, 7, 1), Valor = 50m },
+        });
+
+        var resultado = await _sut.ExcluirOuInativarAsync(conta.Id, clienteId, "cliente");
+
+        Assert.False(resultado.Excluida);
+        Assert.Equal(1, resultado.Transferencias);
+    }
+
+    [Fact]
+    public async Task ExcluirOuInativarAsync_ComMetaVinculada_ContaComoVinculo()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _contaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<ContaBancaria>())).ReturnsAsync((ContaBancaria c) => c);
+        _metaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaInvestimentoId = conta.Id, CriadoEm = DateTime.UtcNow, AtualizadoEm = DateTime.UtcNow },
+        });
+
+        var resultado = await _sut.ExcluirOuInativarAsync(conta.Id, clienteId, "cliente");
+
+        Assert.False(resultado.Excluida);
+        Assert.Equal(1, resultado.MetasVinculadas);
+    }
+
+    [Fact]
+    public async Task ExcluirOuInativarAsync_ComContaInexistente_LancaNaoEncontrado()
     {
         var id = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(id)).ReturnsAsync((ContaBancaria?)null);
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.InativarAsync(id, Guid.NewGuid(), "admin"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirOuInativarAsync(id, Guid.NewGuid(), "admin"));
 
         Assert.Equal(404, ex.StatusCode);
     }
 
     [Fact]
-    public async Task InativarAsync_ComUsuarioDeOutroCliente_LancaAcessoNegado()
+    public async Task ExcluirOuInativarAsync_ComUsuarioDeOutroCliente_LancaAcessoNegado()
     {
         var conta = CriarConta(Guid.NewGuid(), Guid.NewGuid());
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.InativarAsync(conta.Id, Guid.NewGuid(), "cliente"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirOuInativarAsync(conta.Id, Guid.NewGuid(), "cliente"));
 
         Assert.Equal(403, ex.StatusCode);
     }
