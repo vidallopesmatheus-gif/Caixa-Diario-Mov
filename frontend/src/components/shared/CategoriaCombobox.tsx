@@ -135,7 +135,7 @@ const CategoriaCombobox = forwardRef<HTMLInputElement, CategoriaComboboxProps>(f
         </ul>
       )}
       {criando && (
-        <div className="cc-criar-form" onMouseDown={e => e.preventDefault()}>
+        <div className="cc-criar-form">
           <div className="cc-criar-nome">Nova categoria: <strong>{texto.trim()}</strong></div>
           <select className="cc-criar-tipo" value={tipoNova} onChange={e => setTipoNova(e.target.value as TipoCusto)}>
             <option value="Receita">Receita</option>
