@@ -379,7 +379,7 @@ public class ImportacaoServiceTests
     }
 
     [Fact]
-    public async Task ImportarArquivoAsync_EntradaSemCategoria_NuncaFicaPendente()
+    public async Task ImportarArquivoAsync_EntradaSemCategoria_FicaPendente()
     {
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
@@ -396,8 +396,8 @@ public class ImportacaoServiceTests
         var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
 
         var entrada = Assert.Single(criado!.Entradas);
-        Assert.False(entrada.PendenteCategorizacao);
-        Assert.Equal(0, resultado.TotalPendentesCategorizacao);
+        Assert.True(entrada.PendenteCategorizacao);
+        Assert.Equal(1, resultado.TotalPendentesCategorizacao);
     }
 
     [Fact]
@@ -670,20 +670,25 @@ public class ImportacaoServiceTests
     // ── Categorização pendente ────────────────────────────────────────────────
 
     [Fact]
-    public async Task ListarPendentesCategorizacaoAsync_RetornaApenasSaidasPendentes()
+    public async Task ListarPendentesCategorizacaoAsync_RetornaEntradasEQuandoPendentes()
     {
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
 
-        var idPendente = Guid.NewGuid();
+        var idEntradaPendente = Guid.NewGuid();
+        var idSaidaPendente = Guid.NewGuid();
         var registro = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = new DateOnly(2026, 7, 20),
-            Entradas = new() { new() { Id = Guid.NewGuid(), Descricao = "Venda", Valor = 100m } },
+            Entradas = new()
+            {
+                new() { Id = idEntradaPendente, Descricao = "Pix recebido de cliente", Valor = 300m, PendenteCategorizacao = true },
+                new() { Id = Guid.NewGuid(), Descricao = "Venda", Valor = 100m, Categoria = "Vendas", PendenteCategorizacao = false },
+            },
             Saidas = new()
             {
-                new() { Id = idPendente, Descricao = "Pagamento diverso", Valor = 80m, Categoria = "", PendenteCategorizacao = true },
+                new() { Id = idSaidaPendente, Descricao = "Pagamento diverso", Valor = 80m, Categoria = "", PendenteCategorizacao = true },
                 new() { Id = Guid.NewGuid(), Descricao = "Aluguel", Valor = 300m, Categoria = "Aluguel", PendenteCategorizacao = false },
             },
             ContasReceber = new(), ContasPagar = new(),
@@ -693,9 +698,13 @@ public class ImportacaoServiceTests
 
         var pendentes = await _sut.ListarPendentesCategorizacaoAsync(contaId, clienteId, "cliente");
 
-        var p = Assert.Single(pendentes);
-        Assert.Equal(idPendente, p.Id);
-        Assert.Equal("Pagamento diverso", p.Descricao);
+        Assert.Equal(2, pendentes.Count);
+        var entrada = Assert.Single(pendentes, p => p.Id == idEntradaPendente);
+        Assert.Equal("Entrada", entrada.Tipo);
+        Assert.Equal("Pix recebido de cliente", entrada.Descricao);
+        var saida = Assert.Single(pendentes, p => p.Id == idSaidaPendente);
+        Assert.Equal("Saida", saida.Tipo);
+        Assert.Equal("Pagamento diverso", saida.Descricao);
     }
 
     // ── Atualizar categoria ───────────────────────────────────────────────────
@@ -777,6 +786,46 @@ public class ImportacaoServiceTests
         var saida = Assert.Single(atualizado!.Saidas);
         Assert.Equal("Frete", saida.Categoria);
         Assert.Equal("CustoVariavel", saida.TipoCusto);
+    }
+
+    [Fact]
+    public async Task AtualizarCategoriasAsync_ItemEntrada_AtualizaCategoriaELimpaPendencia()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        var itemId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>
+        {
+            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita" },
+        });
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new() { new() { Id = itemId, Descricao = "Pix recebido de cliente", Valor = 300m, PendenteCategorizacao = true } },
+            Saidas = new(),
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 0m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
+
+        RegistroDiario? atualizado = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => atualizado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new AtualizarCategoriaDto
+        {
+            Itens = new() { new() { Id = itemId, Data = "2026-07-20", Categoria = "Vendas" } },
+        };
+
+        await _sut.AtualizarCategoriasAsync(contaId, clienteId, "cliente", dto);
+
+        var entrada = Assert.Single(atualizado!.Entradas);
+        Assert.Equal("Vendas", entrada.Categoria);
+        Assert.Equal("Receita", entrada.TipoCusto);
+        Assert.False(entrada.PendenteCategorizacao);
     }
 
     [Fact]

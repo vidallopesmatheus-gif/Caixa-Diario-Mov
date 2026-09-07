@@ -66,6 +66,13 @@ export default function ClientExtratoRevisaoPage() {
 
   const grupos = useMemo(() => agruparPorDescricaoSimilar(pendentes), [pendentes])
 
+  const tiposSelecionados = useMemo(() => {
+    const tipos = new Set(pendentes.filter(p => selecionados.has(p.id)).map(p => p.tipo))
+    return tipos
+  }, [pendentes, selecionados])
+  const loteMisto = tiposSelecionados.size > 1
+  const categoriasLote = tiposSelecionados.has('Entrada') && !loteMisto ? categorias.entradas : categorias.saidas
+
   const ordemFoco = useMemo(() => grupos.flatMap(g => g.itens.map(i => i.id)), [grupos])
 
   function registerInputRef(id: string, el: HTMLInputElement | null) {
@@ -120,7 +127,9 @@ export default function ClientExtratoRevisaoPage() {
   }
 
   function handleCategoriaCriada(nova: CategoriaAdmin) {
-    setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupo }] }))
+    const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupo }
+    if (nova.tipo === 'Receita') setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
+    else setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
   }
 
   function abrirModalTransferencia(item: PendenteCategorizacao) {
@@ -134,7 +143,7 @@ export default function ClientExtratoRevisaoPage() {
     if (!itemParaTransferencia || !contaContrapartidaId) { setCandidatoContrapartida(null); return }
     let cancelado = false
     setBuscandoCandidato(true)
-    buscarCandidatoContrapartida(contaContrapartidaId, itemParaTransferencia.data, itemParaTransferencia.valor, 'Saida')
+    buscarCandidatoContrapartida(contaContrapartidaId, itemParaTransferencia.data, itemParaTransferencia.valor, itemParaTransferencia.tipo)
       .then(candidato => { if (!cancelado) setCandidatoContrapartida(candidato) })
       .finally(() => { if (!cancelado) setBuscandoCandidato(false) })
     return () => { cancelado = true }
@@ -147,7 +156,7 @@ export default function ClientExtratoRevisaoPage() {
     try {
       await converterLancamentoEmTransferencia({
         contaId, lancamentoId: itemParaTransferencia.id, data: itemParaTransferencia.data,
-        tipo: 'Saida', contaContrapartidaId,
+        tipo: itemParaTransferencia.tipo, contaContrapartidaId,
         lancamentoContrapartidaId: vincular && candidatoContrapartida?.id ? candidatoContrapartida.id : undefined,
         dataContrapartida: vincular ? candidatoContrapartida?.data : undefined,
       })
@@ -194,28 +203,35 @@ export default function ClientExtratoRevisaoPage() {
               className="er-cat-select"
               value={categoriaLote}
               onChange={e => setCategoriaLote(e.target.value)}
+              disabled={loteMisto}
             >
               <option value="">Categoria para selecionadas...</option>
-              {categorias.saidas.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+              {categoriasLote.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
             </select>
             <button
               className="er-btn-lote"
               onClick={aplicarCategoriaLote}
-              disabled={!categoriaLote || selecionados.size === 0}
+              disabled={!categoriaLote || selecionados.size === 0 || loteMisto}
             >
               Aplicar a {selecionados.size} selecionada(s)
             </button>
+            {loteMisto && (
+              <span className="er-msg-erro" style={{ marginLeft: 8 }}>
+                Selecione só entradas ou só saídas por vez para categorizar em lote.
+              </span>
+            )}
           </div>
 
           <div className="er-lista">
             {grupos.map(g => {
               if (g.itens.length === 1) {
                 const item = g.itens[0]
+                const categoriasItem = item.tipo === 'Entrada' ? categorias.entradas : categorias.saidas
                 return (
                   <ExtratoLinhaPendente
                     key={item.id}
                     item={item}
-                    categoriasDisponiveis={categorias.saidas}
+                    categoriasDisponiveis={categoriasItem}
                     selecionado={selecionados.has(item.id)}
                     salvando={salvandoIds.has(item.id)}
                     onToggleSelecionado={toggleSelecionado}
@@ -228,6 +244,9 @@ export default function ClientExtratoRevisaoPage() {
                 )
               }
 
+              // Todo grupo tem um único tipo — agruparPorDescricaoSimilar particiona por tipo antes de comparar.
+              const tipoGrupo = g.itens[0].tipo
+              const categoriasGrupo = tipoGrupo === 'Entrada' ? categorias.entradas : categorias.saidas
               return (
                 <div className="er-grupo" key={g.chave}>
                   <div className="er-grupo-header">
@@ -235,11 +254,11 @@ export default function ClientExtratoRevisaoPage() {
                       {g.itens.length} lançamentos parecidos: "{g.itens[0].descricao}"
                     </span>
                     <CategoriaCombobox
-                      categorias={categorias.saidas}
+                      categorias={categoriasGrupo}
                       value=""
                       onChange={cat => aplicarCategoria(g.itens, cat)}
                       onCategoriaCriada={handleCategoriaCriada}
-                      tipoPadraoNovaCategoria="CustoVariavel"
+                      tipoPadraoNovaCategoria={tipoGrupo === 'Entrada' ? 'Receita' : 'CustoVariavel'}
                       placeholder="Categorizar todo o grupo..."
                     />
                   </div>
@@ -248,7 +267,7 @@ export default function ClientExtratoRevisaoPage() {
                       <ExtratoLinhaPendente
                         key={item.id}
                         item={item}
-                        categoriasDisponiveis={categorias.saidas}
+                        categoriasDisponiveis={categoriasGrupo}
                         selecionado={selecionados.has(item.id)}
                         salvando={salvandoIds.has(item.id)}
                         onToggleSelecionado={toggleSelecionado}
@@ -294,10 +313,13 @@ export default function ClientExtratoRevisaoPage() {
           <>
             <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
               "{itemParaTransferencia.descricao}" · {fmtBRL(itemParaTransferencia.valor)} · {fmtData(itemParaTransferencia.data)}
-              <br />Não é despesa: o dinheiro saiu desta conta e foi para outra. Pra qual conta foi?
+              <br />
+              {itemParaTransferencia.tipo === 'Entrada'
+                ? 'Não é receita: o dinheiro veio de outra conta sua. De qual conta veio?'
+                : 'Não é despesa: o dinheiro saiu desta conta e foi para outra. Pra qual conta foi?'}
             </p>
             <div className="inp-group">
-              <label>Conta de destino</label>
+              <label>{itemParaTransferencia.tipo === 'Entrada' ? 'Conta de origem' : 'Conta de destino'}</label>
               <select value={contaContrapartidaId} onChange={e => setContaContrapartidaId(e.target.value)}>
                 <option value="">Selecione...</option>
                 {contasBancarias.filter(c => c.ativa && c.id !== contaId).map(c => (
@@ -348,14 +370,16 @@ function ExtratoLinhaPendente({
       <div className="er-item-info">
         <div className="er-item-desc">{item.descricao}</div>
       </div>
-      <div className="er-item-valor val-red">-{fmtBRL(item.valor)}</div>
+      <div className={`er-item-valor ${item.tipo === 'Entrada' ? 'val-green' : 'val-red'}`}>
+        {item.tipo === 'Entrada' ? '+' : '-'}{fmtBRL(item.valor)}
+      </div>
       <CategoriaCombobox
         ref={el => registerInputRef(item.id, el)}
         categorias={categoriasDisponiveis}
         value=""
         onChange={onCategorizar}
         onCategoriaCriada={onCategoriaCriada}
-        tipoPadraoNovaCategoria="CustoVariavel"
+        tipoPadraoNovaCategoria={item.tipo === 'Entrada' ? 'Receita' : 'CustoVariavel'}
         placeholder={salvando ? 'Salvando...' : 'Categoria'}
         onNavigate={dir => onNavigate(item.id, dir)}
       />

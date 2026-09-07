@@ -133,17 +133,20 @@ public class ImportacaoService : IImportacaoService
 
             foreach (var t in grupo)
             {
-                // Sugestão automática só existe hoje pro lado das saídas — entrada sempre foi opcional
-                // categorizar (não bloqueia nada no DRE, que só classifica "Não Classificado" no lado
-                // das despesas). Por isso só a saída sem sugestão vira "pendente de categorização".
+                // Entrada não tem sugestão por palavra-chave (venda, serviço, transferência recebida
+                // e resgate de investimento têm o mesmo verbo "recebido"/"pix" no extrato — só o
+                // usuário sabe distinguir). Por isso toda entrada importada entra pendente também:
+                // sem isso, receita real e dinheiro que só mudou de lugar ficavam indistinguíveis no DRE.
                 if (t.Tipo == "Entrada")
                 {
+                    pendentes++;
                     registro.Entradas.Add(new ItemFinanceiro
                     {
                         Id = Guid.NewGuid(),
                         Descricao = t.Descricao,
                         Valor = t.Valor,
                         FitId = t.FitId,
+                        PendenteCategorizacao = true,
                     });
                     registro.SaldoFinal += t.Valor;
                 }
@@ -214,16 +217,26 @@ public class ImportacaoService : IImportacaoService
         return registros
             .Where(r => !r.Excluido)
             .OrderBy(r => r.Data)
-            .SelectMany(r => r.Saidas
-                .Where(s => s.PendenteCategorizacao)
-                .Select(s => new PendenteCategorizacaoDto
+            .SelectMany(r => r.Entradas
+                .Where(e => e.PendenteCategorizacao)
+                .Select(e => new PendenteCategorizacaoDto
                 {
-                    Id = s.Id,
+                    Id = e.Id,
                     Data = r.Data.ToString("yyyy-MM-dd"),
-                    Descricao = s.Descricao,
-                    Valor = s.Valor,
-                    Tipo = "Saida",
-                }))
+                    Descricao = e.Descricao,
+                    Valor = e.Valor,
+                    Tipo = "Entrada",
+                })
+                .Concat(r.Saidas
+                    .Where(s => s.PendenteCategorizacao)
+                    .Select(s => new PendenteCategorizacaoDto
+                    {
+                        Id = s.Id,
+                        Data = r.Data.ToString("yyyy-MM-dd"),
+                        Descricao = s.Descricao,
+                        Valor = s.Valor,
+                        Tipo = "Saida",
+                    })))
             .ToList();
     }
 
@@ -252,15 +265,26 @@ public class ImportacaoService : IImportacaoService
             foreach (var item in grupo)
             {
                 var saida = registro.Saidas.FirstOrDefault(s => s.Id == item.Id);
-                if (saida == null) continue;
-                saida.Categoria = item.Categoria;
-                if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCusto))
-                    saida.TipoCusto = tipoCusto;
-                saida.PendenteCategorizacao = false;
+                if (saida != null)
+                {
+                    saida.Categoria = item.Categoria;
+                    if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCustoSaida))
+                        saida.TipoCusto = tipoCustoSaida;
+                    saida.PendenteCategorizacao = false;
+                    continue;
+                }
+
+                var entrada = registro.Entradas.FirstOrDefault(e => e.Id == item.Id);
+                if (entrada == null) continue;
+                entrada.Categoria = item.Categoria;
+                if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCustoEntrada))
+                    entrada.TipoCusto = tipoCustoEntrada;
+                entrada.PendenteCategorizacao = false;
             }
 
-            // Reatribui a lista — Saidas é jsonb sem value comparer configurado, então o EF só
-            // detecta a mudança se a referência da lista mudar, não se um item dela for só mutado.
+            // Reatribui as listas — Entradas/Saidas são jsonb sem value comparer configurado, então
+            // o EF só detecta a mudança se a referência da lista mudar, não se um item dela for só mutado.
+            registro.Entradas = new List<ItemFinanceiro>(registro.Entradas);
             registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas);
             registro.SalvoEm = DateTime.UtcNow;
             registro.AtualizadoEm = DateTime.UtcNow;
