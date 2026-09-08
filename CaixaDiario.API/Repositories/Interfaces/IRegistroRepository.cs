@@ -11,4 +11,7 @@ public interface IRegistroRepository
     Task<RegistroDiario> AdicionarAsync(RegistroDiario registro);
     Task<RegistroDiario> AtualizarAsync(RegistroDiario registro);
     Task<List<RegistroDiario>> ListarPorPeriodoAsync(Guid clienteId, DateOnly de, DateOnly ate);
+    // Inclui registros com Excluido=true — usado antes de apagar uma conta bancária de verdade,
+    // pra não deixar um dia soft-deletado com FK pra uma conta que não existe mais.
+    Task<int> ContarTodosPorContaAsync(Guid contaBancariaId);
 }

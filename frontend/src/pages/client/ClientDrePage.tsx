@@ -5,14 +5,32 @@ import { listarContasBancarias } from '../../api/contasBancarias'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtPct, fmtDate } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
-import type { Dre, DreCategoria } from '../../api/metricas'
-import type { ContaBancaria } from '../../types'
+import type { Dre, DreBloco } from '../../api/metricas'
+import type { ContaBancaria, Bloco } from '../../types'
 import './ClientDre.css'
 
 type TipoPeriodo = 'mes' | 'trimestre' | 'ano'
-type BucketKey = 'deducoes' | 'custosVariaveis' | 'despesasFixas' | 'receitaFinanceira' | 'despesasNaoOperacionais' | 'naoClassificado'
 
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+// Cor de identidade de cada bloco — reaproveita a paleta já usada em CORES_GRUPO (dashboard).
+const BLOCO_COR: Record<Bloco, string> = {
+  'RECEITAS OPERACIONAIS': '#63e6be',
+  'DEDUÇÕES DA RECEITA': '#e599f7',
+  'CUSTOS OPERACIONAIS': '#ff6b6b',
+  'DESPESAS OPERACIONAIS': '#ffa94d',
+  'ATIVIDADES DE INVESTIMENTO': '#74c0fc',
+  'ATIVIDADES DE FINANCIAMENTO': '#a9e34b',
+}
+
+const BLOCO_PREFIXO: Record<Bloco, string> = {
+  'RECEITAS OPERACIONAIS': '',
+  'DEDUÇÕES DA RECEITA': '(-) ',
+  'CUSTOS OPERACIONAIS': '(-) ',
+  'DESPESAS OPERACIONAIS': '(-) ',
+  'ATIVIDADES DE INVESTIMENTO': '(±) ',
+  'ATIVIDADES DE FINANCIAMENTO': '(±) ',
+}
 
 function periodoParaDatas(tipo: TipoPeriodo, ano: number, mes: number): { de: string; ate: string } {
   if (tipo === 'mes') {
@@ -54,29 +72,10 @@ function fmtPctOuTraco(v: number | null): string {
   return v === null ? '—' : fmtPct(v)
 }
 
-interface LinhaWaterfall {
-  key: string
-  label: string
-  tipo: 'plain' | 'bucket' | 'subtotal'
-  total: number
-  percentual: number | null
-  categorias?: DreCategoria[]
-}
-
-function linhasWaterfall(dre: Dre): LinhaWaterfall[] {
-  return [
-    { key: 'receitaBruta', label: 'RECEITA BRUTA', tipo: 'plain', total: dre.receitaBruta, percentual: dre.receitaBrutaPercentual },
-    { key: 'deducoes', label: '(-) Deduções/Impostos', tipo: 'bucket', total: dre.deducoes.total, percentual: dre.deducoes.percentual, categorias: dre.deducoes.categorias },
-    { key: 'receitaLiquida', label: '= RECEITA LÍQUIDA', tipo: 'subtotal', total: dre.receitaLiquida, percentual: dre.receitaLiquidaPercentual },
-    { key: 'custosVariaveis', label: '(-) Custos Variáveis', tipo: 'bucket', total: dre.custosVariaveis.total, percentual: dre.custosVariaveis.percentual, categorias: dre.custosVariaveis.categorias },
-    { key: 'margemContribuicao', label: '= MARGEM DE CONTRIBUIÇÃO', tipo: 'subtotal', total: dre.margemContribuicao, percentual: dre.margemContribuicaoPercentual },
-    { key: 'despesasFixas', label: '(-) Despesas Fixas', tipo: 'bucket', total: dre.despesasFixas.total, percentual: dre.despesasFixas.percentual, categorias: dre.despesasFixas.categorias },
-    { key: 'resultadoOperacional', label: '= RESULTADO OPERACIONAL', tipo: 'subtotal', total: dre.resultadoOperacional, percentual: dre.resultadoOperacionalPercentual },
-    { key: 'receitaFinanceira', label: '(+) Receita Financeira (rendimento)', tipo: 'bucket', total: dre.receitaFinanceira.total, percentual: dre.receitaFinanceira.percentual, categorias: dre.receitaFinanceira.categorias },
-    { key: 'despesasNaoOperacionais', label: '(-) Despesas Não Operacionais', tipo: 'bucket', total: dre.despesasNaoOperacionais.total, percentual: dre.despesasNaoOperacionais.percentual, categorias: dre.despesasNaoOperacionais.categorias },
-    { key: 'naoClassificado', label: '(-) Não Classificado', tipo: 'bucket', total: dre.naoClassificado.total, percentual: dre.naoClassificado.percentual, categorias: dre.naoClassificado.categorias },
-    { key: 'resultadoLiquido', label: '= RESULTADO LÍQUIDO', tipo: 'subtotal', total: dre.resultadoLiquido, percentual: dre.resultadoLiquidoPercentual },
-  ]
+/** Largura da barra de proporção — participação absoluta sobre a Receita Bruta, sempre 0–100. */
+function larguraBarra(percentual: number | null): number {
+  if (percentual === null) return 0
+  return Math.min(100, Math.abs(percentual))
 }
 
 interface Periodo {
@@ -91,6 +90,33 @@ interface Drill {
   de: string
   ate: string
   categoriaNome: string
+}
+
+type LinhaTipo = 'bloco' | 'subtotal'
+interface LinhaDre {
+  key: string
+  tipo: LinhaTipo
+  label: string
+  bloco?: Bloco
+  final?: boolean
+}
+
+const LINHAS: LinhaDre[] = [
+  { key: 'RECEITAS OPERACIONAIS', tipo: 'bloco', label: 'Receitas Operacionais', bloco: 'RECEITAS OPERACIONAIS' },
+  { key: 'DEDUÇÕES DA RECEITA', tipo: 'bloco', label: 'Deduções da Receita', bloco: 'DEDUÇÕES DA RECEITA' },
+  { key: 'CUSTOS OPERACIONAIS', tipo: 'bloco', label: 'Custos Operacionais', bloco: 'CUSTOS OPERACIONAIS' },
+  { key: 'margemContribuicao', tipo: 'subtotal', label: 'Margem de Contribuição' },
+  { key: 'DESPESAS OPERACIONAIS', tipo: 'bloco', label: 'Despesas Operacionais', bloco: 'DESPESAS OPERACIONAIS' },
+  { key: 'resultadoOperacional', tipo: 'subtotal', label: 'Resultado Operacional' },
+  { key: 'ATIVIDADES DE INVESTIMENTO', tipo: 'bloco', label: 'Atividades de Investimento', bloco: 'ATIVIDADES DE INVESTIMENTO' },
+  { key: 'ATIVIDADES DE FINANCIAMENTO', tipo: 'bloco', label: 'Atividades de Financiamento', bloco: 'ATIVIDADES DE FINANCIAMENTO' },
+  { key: 'resultadoLiquido', tipo: 'subtotal', label: 'Resultado Líquido', final: true },
+]
+
+function valorEPercentualSubtotal(dre: Dre, key: string): { total: number; percentual: number | null } {
+  if (key === 'margemContribuicao') return { total: dre.margemContribuicao, percentual: dre.margemContribuicaoPercentual }
+  if (key === 'resultadoOperacional') return { total: dre.resultadoOperacional, percentual: dre.resultadoOperacionalPercentual }
+  return { total: dre.resultadoLiquido, percentual: dre.resultadoLiquidoPercentual }
 }
 
 export default function ClientDrePage() {
@@ -110,9 +136,8 @@ export default function ClientDrePage() {
   const [dresPorPeriodo, setDresPorPeriodo] = useState<Record<string, Dre>>({})
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState('')
-  const [expanded, setExpanded] = useState<Record<BucketKey, boolean>>({
-    deducoes: false, custosVariaveis: false, despesasFixas: false, receitaFinanceira: false, despesasNaoOperacionais: false, naoClassificado: false,
-  })
+  const [blocosExpandidos, setBlocosExpandidos] = useState<Set<Bloco>>(new Set())
+  const [gruposExpandidos, setGruposExpandidos] = useState<Set<string>>(new Set())
   const [drill, setDrill] = useState<Drill | null>(null)
 
   useEffect(() => {
@@ -151,8 +176,22 @@ export default function ClientDrePage() {
 
   useEffect(() => { carregar() }, [carregar])
 
-  function toggleBucket(key: BucketKey) {
-    setExpanded(prev => ({ ...prev, [key]: !prev[key] }))
+  function toggleBloco(bloco: Bloco) {
+    setBlocosExpandidos(prev => {
+      const next = new Set(prev)
+      if (next.has(bloco)) next.delete(bloco)
+      else next.add(bloco)
+      return next
+    })
+  }
+
+  function toggleGrupo(chave: string) {
+    setGruposExpandidos(prev => {
+      const next = new Set(prev)
+      if (next.has(chave)) next.delete(chave)
+      else next.add(chave)
+      return next
+    })
   }
 
   function abrirLancamentos(periodo: Periodo, categoriaNome: string) {
@@ -165,15 +204,13 @@ export default function ClientDrePage() {
     for (const r of registros) {
       if (r.data < drill.de || r.data > drill.ate) continue
       if (contaFiltro && r.contaBancariaId !== contaFiltro) continue
-      // A Receita Financeira é a única linha do lado das entradas (rendimento) — as demais
-      // continuam vindo só das saídas, como sempre.
       for (const e of r.entradas) {
         const nomeEfetivo = e.categoria && e.categoria.trim() ? e.categoria : 'Não Classificado'
         if (nomeEfetivo === drill.categoriaNome) linhas.push({ data: r.data, descricao: e.descricao, valor: e.valor })
       }
       for (const s of r.saidas) {
         const nomeEfetivo = s.categoria && s.categoria.trim() ? s.categoria : 'Não Classificado'
-        if (nomeEfetivo === drill.categoriaNome) linhas.push({ data: r.data, descricao: s.descricao, valor: s.valor })
+        if (nomeEfetivo === drill.categoriaNome) linhas.push({ data: r.data, descricao: s.descricao, valor: -s.valor })
       }
     }
     return linhas.sort((a, b) => a.data.localeCompare(b.data))
@@ -186,13 +223,27 @@ export default function ClientDrePage() {
   const todasCarregadas = periodosComDre.every(p => p.dre)
   const modoComparativo = periodos.length > 1
 
+  function encontrarBloco(dre: Dre, bloco: Bloco): DreBloco {
+    return dre.blocos.find(b => b.bloco === bloco) ?? { bloco, total: 0, percentual: 0, grupos: [] }
+  }
+
+  const naoClassificadoTotal = todasCarregadas
+    ? periodosComDre.reduce((acc, p) => {
+        const soma = p.dre.blocos
+          .flatMap(b => b.grupos)
+          .filter(g => g.nome === 'Não Classificado')
+          .reduce((s, g) => s + Math.abs(g.total), 0)
+        return acc + soma
+      }, 0)
+    : 0
+
   return (
     <>
       <div className="dre-header">
         <div>
-          <h2 className="dre-titulo">📑 DRE — Análise Vertical</h2>
+          <h2 className="dre-titulo">📑 Demonstrativo de Resultado (DRE)</h2>
           <div className="dre-subtitulo">
-            Demonstrativo de Resultado · % sobre Receita Bruta (base = 100%)
+            Bloco → Grupo → Categoria · % sobre Receita Operacional (base = 100%)
           </div>
         </div>
       </div>
@@ -251,85 +302,136 @@ export default function ClientDrePage() {
       {loading && <p className="dre-loading">Calculando...</p>}
       {erro && <p className="dre-erro">{erro}</p>}
 
+      {todasCarregadas && !loading && naoClassificadoTotal > 0 && (
+        <div className="dre-alerta-global">
+          ⚠ Há lançamentos <strong>Não Classificados</strong> somando {fmtBRL(naoClassificadoTotal)} no período — categorize-os em "Categorizar Lançamentos" para um DRE mais preciso.
+        </div>
+      )}
+
       {todasCarregadas && !loading && (
         <div className={`dre-corpo${modoComparativo ? ' dre-corpo-comparativo' : ''}`}>
           {modoComparativo && (
             <div
               className="dre-cmp-cabecalho"
-              style={{ gridTemplateColumns: `minmax(180px,1.4fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` }}
+              style={{ gridTemplateColumns: `minmax(200px,1.6fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` }}
             >
               <span />
               {periodosComDre.map(p => <span key={p.periodo.chave} className="dre-cmp-cabecalho-label">{p.periodo.label}</span>)}
             </div>
           )}
 
-          {linhasWaterfall(periodosComDre[0].dre).map((linhaBase, idx) => {
-            const bucketKey = linhaBase.tipo === 'bucket' ? (linhaBase.key as BucketKey) : null
-            const linhasPorPeriodo = periodosComDre.map(p => linhasWaterfall(p.dre)[idx])
-            const alertaNaoClassificado = bucketKey === 'naoClassificado' && linhaBase.total > 0
-
-            return (
-              <div key={linhaBase.key}>
+          {LINHAS.map(linha => {
+            if (linha.tipo === 'subtotal') {
+              const valores = periodosComDre.map(p => valorEPercentualSubtotal(p.dre, linha.key))
+              const principal = valores[0]
+              const corPositivoNegativo = principal.total >= 0 ? 'var(--success)' : 'var(--danger)'
+              return (
                 <div
-                  className={[
-                    'dre-linha',
-                    linhaBase.tipo === 'plain' ? 'dre-linha-receita' : '',
-                    linhaBase.tipo === 'subtotal' ? 'dre-linha-subtotal' : '',
-                    bucketKey ? 'dre-linha-bucket' : '',
-                    alertaNaoClassificado ? 'dre-linha-alerta' : '',
-                    modoComparativo ? 'dre-linha-cmp' : '',
-                  ].filter(Boolean).join(' ')}
-                  style={modoComparativo ? { gridTemplateColumns: `minmax(180px,1.4fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` } : undefined}
-                  onClick={bucketKey ? () => toggleBucket(bucketKey) : undefined}
-                  role={bucketKey ? 'button' : undefined}
-                  data-final={linhaBase.key === 'resultadoLiquido' ? 'true' : undefined}
+                  key={linha.key}
+                  className={`dre-linha dre-linha-subtotal${linha.final ? ' dre-linha-final' : ''}${modoComparativo ? ' dre-linha-cmp' : ''}`}
+                  style={modoComparativo ? { gridTemplateColumns: `minmax(200px,1.6fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` } : undefined}
                 >
-                  <span className="dre-linha-label">
-                    {bucketKey && <span className="dre-expand">{expanded[bucketKey] ? '▾' : '▸'}</span>}
-                    {linhaBase.label}
-                    {alertaNaoClassificado && <span className="dre-naoclass-badge">verifique</span>}
-                  </span>
-
+                  <span className="dre-linha-label">{linha.label}</span>
                   {!modoComparativo ? (
                     <>
-                      <span className="dre-linha-valor">{fmtBRL(linhaBase.total)}</span>
-                      <span className="dre-linha-pct">{fmtPctOuTraco(linhaBase.percentual)}</span>
+                      <span className="dre-linha-valor" style={linha.final ? { color: corPositivoNegativo } : undefined}>{fmtBRL(principal.total)}</span>
+                      <span className="dre-linha-pct">{fmtPctOuTraco(principal.percentual)}</span>
                     </>
                   ) : (
-                    linhasPorPeriodo.map((l, i) => (
+                    valores.map((v, i) => (
                       <span key={periodosComDre[i].periodo.chave} className="dre-cmp-cel">
-                        <span className="dre-cmp-cel-valor">{fmtBRL(l.total)}</span>
-                        <span className="dre-cmp-cel-pct">{fmtPctOuTraco(l.percentual)}</span>
+                        <span className="dre-cmp-cel-valor" style={linha.final ? { color: v.total >= 0 ? 'var(--success)' : 'var(--danger)' } : undefined}>{fmtBRL(v.total)}</span>
+                        <span className="dre-cmp-cel-pct">{fmtPctOuTraco(v.percentual)}</span>
                       </span>
                     ))
                   )}
                 </div>
+              )
+            }
 
-                {bucketKey && expanded[bucketKey] && (
+            const bloco = linha.bloco!
+            const cor = BLOCO_COR[bloco]
+            const blocosPorPeriodo = periodosComDre.map(p => encontrarBloco(p.dre, bloco))
+            const principal = blocosPorPeriodo[0]
+            const expandido = blocosExpandidos.has(bloco)
+            const vazio = blocosPorPeriodo.every(b => b.grupos.length === 0)
+
+            return (
+              <div key={linha.key} className="dre-bloco-wrap">
+                <div
+                  className={`dre-linha dre-linha-bloco${modoComparativo ? ' dre-linha-cmp' : ''}${vazio ? ' dre-linha-vazia' : ''}`}
+                  style={{
+                    borderLeft: `4px solid ${cor}`,
+                    ...(modoComparativo ? { gridTemplateColumns: `minmax(200px,1.6fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` } : {}),
+                  }}
+                  onClick={vazio ? undefined : () => toggleBloco(bloco)}
+                  role={vazio ? undefined : 'button'}
+                >
+                  <span className="dre-linha-label">
+                    {!vazio && <span className="dre-expand">{expandido ? '▾' : '▸'}</span>}
+                    <span className="dre-bloco-nome" style={{ color: cor }}>{BLOCO_PREFIXO[bloco]}{linha.label.toUpperCase()}</span>
+                  </span>
+                  {!modoComparativo ? (
+                    <>
+                      <span className="dre-linha-valor">{fmtBRL(principal.total)}</span>
+                      <span className="dre-linha-pct">{fmtPctOuTraco(principal.percentual)}</span>
+                    </>
+                  ) : (
+                    blocosPorPeriodo.map((b, i) => (
+                      <span key={periodosComDre[i].periodo.chave} className="dre-cmp-cel">
+                        <span className="dre-cmp-cel-valor">{fmtBRL(b.total)}</span>
+                        <span className="dre-cmp-cel-pct">{fmtPctOuTraco(b.percentual)}</span>
+                      </span>
+                    ))
+                  )}
+                </div>
+                <div className="dre-barra-trilho">
+                  <div className="dre-barra-preenchida" style={{ width: `${larguraBarra(principal.percentual)}%`, background: cor }} />
+                </div>
+
+                {expandido && !vazio && (
                   <div className="dre-expand-bloco">
-                    {periodosComDre.map((p, i) => {
-                      const cats = linhasPorPeriodo[i].categorias ?? []
-                      return (
-                        <div key={p.periodo.chave} className="dre-expand-periodo">
-                          {modoComparativo && <div className="dre-expand-periodo-label">{p.periodo.label}</div>}
-                          {cats.length === 0 ? (
-                            <div className="dre-vazio-inline">Nenhum lançamento nesta linha.</div>
-                          ) : (
-                            cats.map(cat => (
-                              <button
-                                key={cat.nome}
-                                className="dre-cat-btn"
-                                onClick={() => abrirLancamentos(p.periodo, cat.nome)}
-                              >
-                                <span className="dre-cat-nome">{cat.nome}</span>
-                                <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
-                                <span className="dre-cat-pct">{fmtPctOuTraco(cat.percentual)}</span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      )
-                    })}
+                    {blocosPorPeriodo.map((b, pIdx) => (
+                      <div key={periodosComDre[pIdx].periodo.chave} className="dre-expand-periodo">
+                        {modoComparativo && <div className="dre-expand-periodo-label">{periodosComDre[pIdx].periodo.label}</div>}
+                        {b.grupos.length === 0 ? (
+                          <div className="dre-vazio-inline">Nenhum lançamento neste bloco.</div>
+                        ) : (
+                          b.grupos.map(grupo => {
+                            const chaveGrupo = `${bloco}::${grupo.nome}`
+                            const grupoAberto = gruposExpandidos.has(chaveGrupo)
+                            return (
+                              <div key={grupo.nome} className="dre-grupo-wrap">
+                                <button type="button" className="dre-grupo-linha" onClick={() => toggleGrupo(chaveGrupo)}>
+                                  <span className="dre-expand dre-expand-grupo">{grupoAberto ? '▾' : '▸'}</span>
+                                  <span className="dre-grupo-nome">{grupo.nome}</span>
+                                  <span className="dre-grupo-valor">{fmtBRL(grupo.total)}</span>
+                                  <span className="dre-grupo-pct">{fmtPctOuTraco(grupo.percentual)}</span>
+                                </button>
+                                <div className="dre-barra-trilho dre-barra-trilho-grupo">
+                                  <div className="dre-barra-preenchida" style={{ width: `${larguraBarra(grupo.percentual)}%`, background: cor, opacity: 0.6 }} />
+                                </div>
+                                {grupoAberto && (
+                                  <div className="dre-cat-lista">
+                                    {grupo.categorias.map(cat => (
+                                      <button
+                                        key={cat.nome}
+                                        className={`dre-cat-btn${cat.nome === 'Não Classificado' ? ' dre-cat-btn-alerta' : ''}`}
+                                        onClick={() => abrirLancamentos(periodosComDre[pIdx].periodo, cat.nome)}
+                                      >
+                                        <span className="dre-cat-nome">{cat.nome}</span>
+                                        <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
+                                        <span className="dre-cat-pct">{fmtPctOuTraco(cat.percentual)}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -351,7 +453,7 @@ export default function ClientDrePage() {
               <div key={i} className="dre-drill-item">
                 <span className="dre-drill-data">{fmtDate(l.data)}</span>
                 <span className="dre-drill-desc">{l.descricao}</span>
-                <span className="dre-drill-valor">{fmtBRL(l.valor)}</span>
+                <span className="dre-drill-valor" style={{ color: l.valor >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(l.valor)}</span>
               </div>
             ))}
           </div>

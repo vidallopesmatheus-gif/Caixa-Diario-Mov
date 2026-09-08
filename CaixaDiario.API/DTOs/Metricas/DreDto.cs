@@ -22,6 +22,24 @@ public class DreLinhaVerticalDto
     public List<DreCategoriaDto> Categorias { get; set; } = new();
 }
 
+/// <summary>Nível "Grupo" da árvore Bloco → Grupo → Categoria do demonstrativo de 3 níveis.</summary>
+public class DreGrupoDto
+{
+    public string Nome { get; set; } = string.Empty;
+    public decimal Total { get; set; }
+    public decimal? Percentual { get; set; }
+    public List<DreCategoriaDto> Categorias { get; set; } = new();
+}
+
+/// <summary>Nível "Bloco" (fixo — RECEITAS OPERACIONAIS, DEDUÇÕES DA RECEITA, ...) do demonstrativo.</summary>
+public class DreBlocoDto
+{
+    public string Bloco { get; set; } = string.Empty;
+    public decimal Total { get; set; }
+    public decimal? Percentual { get; set; }
+    public List<DreGrupoDto> Grupos { get; set; } = new();
+}
+
 public class DreDto
 {
     public decimal ReceitaBruta { get; set; }
@@ -46,6 +64,13 @@ public class DreDto
     public DreLinhaVerticalDto ReceitaFinanceira { get; set; } = new();
     public DreLinhaVerticalDto DespesasNaoOperacionais { get; set; } = new();
     public DreLinhaVerticalDto NaoClassificado { get; set; } = new();
+    // Sinal líquido (entrada − saída) por natureza — podem ser positivos (captação, rendimento) ou
+    // negativos (amortização, aquisição de imobilizado); nunca assumidos como saída.
+    public DreLinhaVerticalDto AtividadesInvestimento { get; set; } = new();
+    public DreLinhaVerticalDto AtividadesFinanciamento { get; set; } = new();
     public decimal ResultadoLiquido { get; set; }
     public decimal? ResultadoLiquidoPercentual { get; set; }
+
+    /// <summary>Demonstrativo hierárquico de 3 níveis (Bloco → Grupo → Categoria) para a tela de DRE.</summary>
+    public List<DreBlocoDto> Blocos { get; set; } = new();
 }

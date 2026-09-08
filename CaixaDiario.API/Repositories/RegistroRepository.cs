@@ -45,6 +45,9 @@ public class RegistroRepository : IRegistroRepository
         return registro;
     }
 
+    public async Task<int> ContarTodosPorContaAsync(Guid contaBancariaId) =>
+        await _context.RegistrosDiarios.CountAsync(r => r.ContaBancariaId == contaBancariaId);
+
     public async Task<List<RegistroDiario>> ListarPorPeriodoAsync(Guid clienteId, DateOnly de, DateOnly ate) =>
         await _context.RegistrosDiarios
             .Where(r => r.ClienteId == clienteId && !r.Excluido && r.Data >= de && r.Data <= ate)

@@ -18,13 +18,6 @@ public class TransferenciasController : ControllerBase
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
     private string ObterPerfil() => User.FindFirst("perfil")!.Value;
 
-    [HttpPost]
-    public async Task<IActionResult> Criar([FromBody] CriarTransferenciaDto dto)
-    {
-        var criada = await _service.CriarAsync(dto, ObterUsuarioId(), ObterPerfil());
-        return Ok(new ApiResponse<TransferenciaDto> { Dados = criada });
-    }
-
     [HttpGet("{clienteId:guid}")]
     public async Task<IActionResult> Listar(Guid clienteId)
     {
@@ -33,9 +26,9 @@ public class TransferenciasController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Estornar(Guid id)
+    public async Task<IActionResult> DesfazerClassificacao(Guid id)
     {
-        await _service.EstornarAsync(id, ObterUsuarioId(), ObterPerfil());
+        await _service.DesfazerClassificacaoAsync(id, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<object> { Dados = null });
     }
 

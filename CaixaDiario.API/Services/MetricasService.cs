@@ -233,17 +233,23 @@ public class MetricasService : IMetricasService
         Dictionary<string, int>? mapaOrdem = null;
 
         Dictionary<string, string>? mapaTipo = null;
+        // Nome da categoria → Bloco do grupo (só populado quando o grupo tem Bloco definido — planos
+        // de contas migrados pra hierarquia nova). Tem prioridade sobre o mapaGrupo/mapaTipo abaixo.
+        Dictionary<string, string> mapaBloco = new(StringComparer.OrdinalIgnoreCase);
 
         if (categorias is { Count: > 0 })
         {
             mapaGrupo = categorias
-                .Where(c => !string.IsNullOrWhiteSpace(c.Grupo))
-                .ToDictionary(c => c.Nome, c => c.Grupo!, StringComparer.OrdinalIgnoreCase);
+                .Where(c => !string.IsNullOrWhiteSpace(c.Grupo?.Nome))
+                .ToDictionary(c => c.Nome, c => c.Grupo!.Nome, StringComparer.OrdinalIgnoreCase);
             mapaOrdem = categorias.ToDictionary(c => c.Nome, c => c.Ordem, StringComparer.OrdinalIgnoreCase);
             mapaTipo = categorias.ToDictionary(c => c.Nome, c => c.Tipo, StringComparer.OrdinalIgnoreCase);
+            mapaBloco = categorias
+                .Where(c => !string.IsNullOrWhiteSpace(c.Grupo?.Bloco))
+                .ToDictionary(c => c.Nome, c => c.Grupo!.Bloco, StringComparer.OrdinalIgnoreCase);
             ordemGrupos = categorias
-                .Where(c => !string.IsNullOrWhiteSpace(c.Grupo))
-                .GroupBy(c => c.Grupo!, StringComparer.OrdinalIgnoreCase)
+                .Where(c => !string.IsNullOrWhiteSpace(c.Grupo?.Nome))
+                .GroupBy(c => c.Grupo!.Nome, StringComparer.OrdinalIgnoreCase)
                 .OrderBy(g => g.Min(c => c.Ordem))
                 .Select(g => g.Key)
                 .Append("Outros")
@@ -305,17 +311,57 @@ public class MetricasService : IMetricasService
         {
             var nomeCat = string.IsNullOrWhiteSpace(saida.Categoria) ? "Não Classificado" : saida.Categoria;
             var grupo = mapaGrupo.TryGetValue(saida.Categoria ?? "", out var g) ? g : null;
+            var bloco = mapaBloco.TryGetValue(saida.Categoria ?? "", out var b) ? b : null;
             var tipo = mapaTipo != null
                 ? (mapaTipo.TryGetValue(saida.Categoria ?? "", out var t) ? t : null)
                 : saida.TipoCusto;
 
-            var bucket = string.Equals(grupo, "Impostos", StringComparison.OrdinalIgnoreCase) ? deducoesCats
+            // Bloco (Plano de Contas migrado pra hierarquia nova) manda quando disponível; senão
+            // cai no critério histórico por Tipo + nome de grupo "Impostos".
+            var bucket = bloco == Blocos.DeducoesDaReceita ? deducoesCats
+                : bloco == Blocos.CustosOperacionais ? custosVariaveisCats
+                : bloco == Blocos.DespesasOperacionais ? despesasFixasCats
+                : bloco != null ? naoClassificadoCats
+                : string.Equals(grupo, "Impostos", StringComparison.OrdinalIgnoreCase) ? deducoesCats
                 : tipo == "CustoVariavel" ? custosVariaveisCats
                 : tipo == "CustoFixo" ? despesasFixasCats
                 : tipo == "DespesaNaoOperacional" ? despesasNaoOperacionaisCats
                 : naoClassificadoCats;
 
             bucket[nomeCat] = (bucket.TryGetValue(nomeCat, out var v) ? v : 0m) + saida.Valor;
+        }
+
+        // ---- Atividades de Investimento / Financiamento: fato modificativo pós-operacional ----
+        // Mesmo padrão do Rendimento acima: nunca passam pelo filtro EhOperacional (excluídas de
+        // saidasOperacionais/entradas), e o sinal vem de ser entrada (+) ou saída (-), não do Tipo —
+        // uma categoria de investimento pode ser captação (entrada) ou aquisição (saída).
+        DreLinhaVerticalDto MontarLinhaAtividade(string tipoCusto)
+        {
+            var cats = new Dictionary<string, decimal>();
+            foreach (var entrada in registros.SelectMany(r => r.Entradas).Where(e => e.TipoCusto == tipoCusto))
+            {
+                var nome = string.IsNullOrWhiteSpace(entrada.Categoria) ? "Não Classificado" : entrada.Categoria;
+                cats[nome] = (cats.TryGetValue(nome, out var v) ? v : 0m) + entrada.Valor;
+            }
+            foreach (var saida in registros.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == tipoCusto))
+            {
+                var nome = string.IsNullOrWhiteSpace(saida.Categoria) ? "Não Classificado" : saida.Categoria;
+                cats[nome] = (cats.TryGetValue(nome, out var v) ? v : 0m) - saida.Valor;
+            }
+            var total = cats.Values.Sum();
+            return new DreLinhaVerticalDto
+            {
+                Total = total,
+                Percentual = receitaBruta > 0 ? Math.Round(total / receitaBruta * 100, 1) : null,
+                Categorias = cats
+                    .OrderByDescending(kv => Math.Abs(kv.Value))
+                    .Select(kv => new DreCategoriaDto
+                    {
+                        Nome = kv.Key, Total = kv.Value,
+                        Percentual = receitaBruta > 0 ? Math.Round(kv.Value / receitaBruta * 100, 1) : null,
+                    })
+                    .ToList(),
+            };
         }
 
         decimal? Percentual(decimal valor) => receitaBruta > 0 ? Math.Round(valor / receitaBruta * 100, 1) : null;
@@ -343,7 +389,15 @@ public class MetricasService : IMetricasService
         var receitaFinanceira = MontarLinhaVertical(receitaFinanceiraCats);
         var despesasNaoOperacionais = MontarLinhaVertical(despesasNaoOperacionaisCats);
         var naoClassificado = MontarLinhaVertical(naoClassificadoCats);
-        var resultadoLiquido = resultadoOperacional + receitaFinanceira.Total - despesasNaoOperacionais.Total - naoClassificado.Total;
+        var atividadesInvestimento = MontarLinhaAtividade(LancamentoFiltro.TipoInvestimento);
+        var atividadesFinanciamento = MontarLinhaAtividade(LancamentoFiltro.TipoFinanciamento);
+        var resultadoLiquido = resultadoOperacional + receitaFinanceira.Total - despesasNaoOperacionais.Total
+            - naoClassificado.Total + atividadesInvestimento.Total + atividadesFinanciamento.Total;
+
+        var entradasOperacionais = registros.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).ToList();
+        var blocos = MontarBlocos(
+            entradasOperacionais, saidasOperacionais, receitaBruta, mapaBloco, mapaGrupo, mapaOrdem,
+            receitaFinanceiraCats, atividadesInvestimento, atividadesFinanciamento);
 
         return new DreDto
         {
@@ -366,9 +420,89 @@ public class MetricasService : IMetricasService
             ReceitaFinanceira = receitaFinanceira,
             DespesasNaoOperacionais = despesasNaoOperacionais,
             NaoClassificado = naoClassificado,
+            AtividadesInvestimento = atividadesInvestimento,
+            AtividadesFinanciamento = atividadesFinanciamento,
             ResultadoLiquido = resultadoLiquido,
             ResultadoLiquidoPercentual = Percentual(resultadoLiquido),
+            Blocos = blocos,
         };
+    }
+
+    // ── Estrutura hierárquica Bloco → Grupo → Categoria (demonstrativo de 3 níveis) ──────────────
+    private static List<DreBlocoDto> MontarBlocos(
+        List<ItemFinanceiro> entradasOperacionais, List<ItemFinanceiroSaida> saidasOperacionais, decimal receitaBruta,
+        Dictionary<string, string> mapaBloco, Dictionary<string, string> mapaGrupo, Dictionary<string, int>? mapaOrdem,
+        Dictionary<string, decimal> receitaFinanceiraCats,
+        DreLinhaVerticalDto atividadesInvestimento, DreLinhaVerticalDto atividadesFinanciamento)
+    {
+        decimal? Percentual(decimal valor) => receitaBruta > 0 ? Math.Round(valor / receitaBruta * 100, 1) : null;
+        const string semGrupo = "Não Classificado";
+
+        // grupo -> categoria -> total, por bloco
+        var porBloco = Blocos.Ordem.ToDictionary(b => b, _ => new Dictionary<string, Dictionary<string, decimal>>());
+
+        void Lancar(string bloco, string? nomeCategoria, decimal valorComSinal)
+        {
+            var grupo = mapaGrupo.TryGetValue(nomeCategoria ?? "", out var g) ? g : semGrupo;
+            var cat = string.IsNullOrWhiteSpace(nomeCategoria) ? "Não Classificado" : nomeCategoria;
+            var porGrupo = porBloco[bloco];
+            if (!porGrupo.TryGetValue(grupo, out var cats)) { cats = new(); porGrupo[grupo] = cats; }
+            cats[cat] = (cats.TryGetValue(cat, out var v) ? v : 0m) + valorComSinal;
+        }
+
+        // Entradas operacionais já vêm sem Transferência/Rendimento/Investimento/Financiamento
+        // (excluídos por EhOperacional antes daqui) — o que sobra é sempre Receita Operacional.
+        foreach (var entrada in entradasOperacionais)
+            Lancar(Blocos.ReceitasOperacionais, entrada.Categoria, entrada.Valor);
+        foreach (var saida in saidasOperacionais)
+        {
+            var bloco = mapaBloco.TryGetValue(saida.Categoria ?? "", out var b) ? b
+                : string.Equals(mapaGrupo.TryGetValue(saida.Categoria ?? "", out var g0) ? g0 : null, "Impostos", StringComparison.OrdinalIgnoreCase)
+                    ? Blocos.DeducoesDaReceita
+                    : Blocos.DespesasOperacionais;
+            Lancar(bloco, saida.Categoria, -saida.Valor);
+        }
+        // Rendimento de investimento entra como grupo dedicado dentro de Atividades de Investimento —
+        // mesma fonte de dado da linha ReceitaFinanceira, só reorganizada na árvore hierárquica.
+        foreach (var (nome, valor) in receitaFinanceiraCats)
+        {
+            var porGrupo = porBloco[Blocos.AtividadesDeInvestimento];
+            const string grupoRendimento = "Rendimento de Investimentos";
+            if (!porGrupo.TryGetValue(grupoRendimento, out var cats)) { cats = new(); porGrupo[grupoRendimento] = cats; }
+            cats[nome] = (cats.TryGetValue(nome, out var v) ? v : 0m) + valor;
+        }
+        foreach (var cat in atividadesInvestimento.Categorias)
+            Lancar(Blocos.AtividadesDeInvestimento, cat.Nome, cat.Total);
+        foreach (var cat in atividadesFinanciamento.Categorias)
+            Lancar(Blocos.AtividadesDeFinanciamento, cat.Nome, cat.Total);
+
+        // Todos os 6 blocos sempre aparecem, mesmo com total zero — a estrutura do demonstrativo
+        // é fixa, não varia por período (evita a tela "pular" linhas de um mês pro outro).
+        var resultado = new List<DreBlocoDto>();
+        foreach (var bloco in Blocos.Ordem)
+        {
+            var gruposDoBloco = porBloco[bloco];
+
+            var grupos = gruposDoBloco
+                .OrderBy(kv => mapaOrdem != null && kv.Value.Keys.Any(mapaOrdem.ContainsKey)
+                    ? kv.Value.Keys.Where(mapaOrdem.ContainsKey).Min(k => mapaOrdem[k]) : int.MaxValue)
+                .ThenByDescending(kv => Math.Abs(kv.Value.Values.Sum()))
+                .Select(kv =>
+                {
+                    var categorias = kv.Value
+                        .OrderBy(c => mapaOrdem != null && mapaOrdem.TryGetValue(c.Key, out var o) ? o : int.MaxValue)
+                        .ThenByDescending(c => Math.Abs(c.Value))
+                        .Select(c => new DreCategoriaDto { Nome = c.Key, Total = c.Value, Percentual = Percentual(c.Value) })
+                        .ToList();
+                    var totalGrupo = categorias.Sum(c => c.Total);
+                    return new DreGrupoDto { Nome = kv.Key, Total = totalGrupo, Percentual = Percentual(totalGrupo), Categorias = categorias };
+                })
+                .ToList();
+
+            var totalBloco = grupos.Sum(g => g.Total);
+            resultado.Add(new DreBlocoDto { Bloco = bloco, Total = totalBloco, Percentual = Percentual(totalBloco), Grupos = grupos });
+        }
+        return resultado;
     }
 
     public IndicadoresDecisaoDto CalcularIndicadores(List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null)
@@ -389,8 +523,8 @@ public class MetricasService : IMetricasService
         // anteriores) e agrega % da receita + comparação com a média dos 3 meses anteriores, extrapolando
         // o mês atual (parcial) para o mês cheio. Não depende da forma interna do DRE (dre.GruposDespesa).
         var mapaGrupoRanking = categorias is { Count: > 0 }
-            ? categorias.Where(c => !string.IsNullOrWhiteSpace(c.Grupo))
-                .ToDictionary(c => c.Nome, c => c.Grupo!, StringComparer.OrdinalIgnoreCase)
+            ? categorias.Where(c => !string.IsNullOrWhiteSpace(c.Grupo?.Nome))
+                .ToDictionary(c => c.Nome, c => c.Grupo!.Nome, StringComparer.OrdinalIgnoreCase)
             : _mapaGrupo;
 
         var totalMesAtual = SomarSaidasPorCategoria(doMesAtual);

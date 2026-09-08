@@ -14,12 +14,18 @@ public class ContaBancariaService : IContaBancariaService
     private readonly IContaBancariaRepository _contaRepo;
     private readonly IRegistroRepository _registroRepo;
     private readonly IMetaRepository _metaRepo;
+    private readonly ITransferenciaRepository _transferenciaRepo;
+    private readonly ITransacaoImportadaRepository _transacaoImportadaRepo;
 
-    public ContaBancariaService(IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, IMetaRepository metaRepo)
+    public ContaBancariaService(
+        IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, IMetaRepository metaRepo,
+        ITransferenciaRepository transferenciaRepo, ITransacaoImportadaRepository transacaoImportadaRepo)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _metaRepo = metaRepo;
+        _transferenciaRepo = transferenciaRepo;
+        _transacaoImportadaRepo = transacaoImportadaRepo;
     }
 
     public async Task<List<ContaBancariaDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -81,14 +87,45 @@ public class ContaBancariaService : IContaBancariaService
         return MapToDto(atualizada, registros, metas);
     }
 
-    public async Task InativarAsync(Guid id, Guid usuarioLogadoId, string perfil)
+    // Conta sem nenhum vínculo (lançamento, conta a pagar/receber, transferência, transação
+    // importada ou meta) é removida de verdade — senão, só inativa (preserva histórico/DRE/saldos).
+    public async Task<ExclusaoContaBancariaResultDto> ExcluirOuInativarAsync(Guid id, Guid usuarioLogadoId, string perfil)
     {
         var conta = await _contaRepo.ObterPorIdAsync(id)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
         VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
 
+        // Conta a pagar/receber e transferências não têm FK própria na conta (a primeira vive
+        // dentro do jsonb de outro RegistroDiario) — por isso o cliente inteiro é varrido, do
+        // mesmo jeito que ObterPendenciasAsync já faz.
+        var registrosDoCliente = await _registroRepo.ListarPorClienteAsync(conta.ClienteId);
+        var contasProvisionadas = registrosDoCliente
+            .SelectMany(r => r.ContasReceber.Concat(r.ContasPagar))
+            .Count(cp => cp.ContaBancariaId == id);
+
+        var transferencias = (await _transferenciaRepo.ListarPorClienteAsync(conta.ClienteId))
+            .Count(t => t.ContaOrigemId == id || t.ContaDestinoId == id);
+
+        var resultado = new ExclusaoContaBancariaResultDto
+        {
+            DiasComLancamento = await _registroRepo.ContarTodosPorContaAsync(id),
+            ContasProvisionadas = contasProvisionadas,
+            Transferencias = transferencias,
+            TransacoesImportadas = (await _transacaoImportadaRepo.ListarPorContaAsync(id)).Count,
+            MetasVinculadas = (await _metaRepo.ListarPorClienteAsync(conta.ClienteId)).Count(m => m.ContaInvestimentoId == id),
+        };
+
+        if (resultado.TotalVinculos == 0)
+        {
+            await _contaRepo.RemoverAsync(conta);
+            resultado.Excluida = true;
+            return resultado;
+        }
+
         conta.Ativa = false;
         await _contaRepo.AtualizarAsync(conta);
+        resultado.Excluida = false;
+        return resultado;
     }
 
     public async Task<List<LancamentoExtratoDto>> ObterExtratoAsync(
@@ -121,6 +158,7 @@ public class ContaBancariaService : IContaBancariaService
                     Categoria = entrada.Categoria,
                     Valor = entrada.Valor,
                     SaldoAcumulado = saldo,
+                    TransferenciaId = entrada.TransferenciaId,
                 }));
             }
 
@@ -149,6 +187,7 @@ public class ContaBancariaService : IContaBancariaService
                     Valor = -saida.Valor,
                     SaldoAcumulado = saldo,
                     PendenteCategorizacao = saida.PendenteCategorizacao,
+                    TransferenciaId = saida.TransferenciaId,
                 }));
             }
 

@@ -10,7 +10,7 @@ import {
   desvincularMeta,
 } from '../../api/contasBancarias'
 import { previewExtrato, importarExtrato } from '../../api/importacao'
-import { converterLancamentoEmTransferencia } from '../../api/transferencias'
+import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { listarMetas, salvarMeta } from '../../api/metas'
 import { fmtBRL, fmtPct, fmtDate, todayISO, addDays } from '../../utils/format'
@@ -173,6 +173,18 @@ export default function ClientContaDetalhePage() {
       setMsg(e instanceof Error ? e.message : 'Erro ao importar extrato.')
     } finally {
       setImportando(false)
+    }
+  }
+
+  async function handleDesfazerTransferencia(transferenciaId: string) {
+    if (!confirm('Desfazer esta classificação como Transferência? O lançamento volta a ficar sem categoria (pendente) — o dinheiro continua lançado, só a classificação muda.')) return
+    setMsg('')
+    try {
+      await desfazerClassificacaoTransferencia(transferenciaId)
+      carregarConta()
+      carregarExtrato()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao desfazer classificação.')
     }
   }
 
@@ -474,6 +486,16 @@ export default function ClientContaDetalhePage() {
                         style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
                       >
                         🔁 é transferência?
+                      </button>
+                    )}
+                    {l.categoria === 'Transferência' && l.transferenciaId && (
+                      <button
+                        type="button"
+                        onClick={() => handleDesfazerTransferencia(l.transferenciaId!)}
+                        title="Classificado por engano? Volta a ficar sem categoria, pendente"
+                        style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
+                      >
+                        ↩ desfazer classificação
                       </button>
                     )}
                   </span>

@@ -54,10 +54,10 @@ public class ContasBancariasController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Inativar(Guid id)
+    public async Task<IActionResult> ExcluirOuInativar(Guid id)
     {
-        await _service.InativarAsync(id, ObterUsuarioId(), ObterPerfil());
-        return Ok(new ApiResponse<object> { Dados = null });
+        var resultado = await _service.ExcluirOuInativarAsync(id, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<ExclusaoContaBancariaResultDto> { Dados = resultado });
     }
 
     // ── Extrato e pendências por conta ─────────────────────────────────────────

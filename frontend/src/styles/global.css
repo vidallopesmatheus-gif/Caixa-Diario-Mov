@@ -59,7 +59,24 @@ button { font-family: inherit; cursor: pointer; }
   border-radius: 16px; padding: 28px; width: 100%; max-width: 500px;
 }
 .modal-title  { font-size: 17px; font-weight: 700; margin-bottom: 20px; }
-.modal-footer { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+/* Botões do rodapé sempre com a mesma altura e largura proporcional entre si — a ação primária se
+   destaca só pela cor (var(--success) em .btn-confirm), nunca por ser maior que as outras. */
+.modal-footer {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 20px;
+}
+.modal-footer button {
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.3;
+}
 
 /* ── Stats grid ── */
 .stats-grid {
@@ -86,6 +103,8 @@ button { font-family: inherit; cursor: pointer; }
 .inp-group label       { display: block; font-size: 13px; color: var(--tx2); margin-bottom: 5px; font-weight: 500; }
 .inp-group input       { width: 100%; padding: 10px 13px; background: var(--bg-input); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx); font-size: 15px; }
 .inp-group input:focus { outline: none; border-color: var(--accent); }
+.inp-group select      { width: 100%; box-sizing: border-box; padding: 10px 13px; background: var(--bg-input); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx); font-size: 15px; }
+.inp-group select:focus { outline: none; border-color: var(--accent); }
 
 /* ── Form card ── */
 .form-card    { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 14px; padding: 20px; margin-bottom: 16px; }

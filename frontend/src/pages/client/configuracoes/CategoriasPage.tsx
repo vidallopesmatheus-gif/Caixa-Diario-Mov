@@ -7,36 +7,40 @@ import {
   reordenarCategorias,
   excluirCategoria,
   migrarCategoria,
+  listarGrupos,
+  criarGrupo,
+  atualizarGrupo,
+  desativarGrupo,
 } from '../../../api/categorias'
 import Modal from '../../../components/shared/Modal'
-import type { CategoriaAdmin, TipoCusto } from '../../../types'
+import type { CategoriaAdmin, Grupo, Bloco } from '../../../types'
+import { BLOCOS_ORDEM } from '../../../types'
 import '../ClientContasBancarias.css'
 import './Categorias.css'
 
-const TIPOS: TipoCusto[] = ['Receita', 'CustoVariavel', 'CustoFixo', 'DespesaNaoOperacional']
-const TIPO_LABEL: Record<TipoCusto, string> = {
-  Receita: 'Receita',
-  CustoVariavel: 'Custo Variável',
-  CustoFixo: 'Despesa Fixa',
-  DespesaNaoOperacional: 'Despesa Não Operacional',
+const BLOCO_LABEL: Record<Bloco, string> = {
+  'RECEITAS OPERACIONAIS': 'Receitas Operacionais',
+  'DEDUÇÕES DA RECEITA': 'Deduções da Receita',
+  'CUSTOS OPERACIONAIS': 'Custos Operacionais',
+  'DESPESAS OPERACIONAIS': 'Despesas Operacionais',
+  'ATIVIDADES DE INVESTIMENTO': 'Atividades de Investimento',
+  'ATIVIDADES DE FINANCIAMENTO': 'Atividades de Financiamento',
 }
-
-// Mesma ordem usada no seed do Plano de Contas — grupos sem nome caem em "Outros".
-const GRUPO_ORDEM = ['Custos Diretos', 'Pessoas', 'Despesas Administrativas', 'Marketing', 'Impostos', 'Financeiras', 'Investimentos', 'Outros']
 
 export default function CategoriasPage() {
   const [categorias, setCategorias] = useState<CategoriaAdmin[]>([])
+  const [grupos, setGrupos] = useState<Grupo[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [msgOk, setMsgOk] = useState(true)
 
   const [novoNome, setNovoNome] = useState('')
-  const [novoTipo, setNovoTipo] = useState<TipoCusto>('CustoVariavel')
+  const [novoGrupoId, setNovoGrupoId] = useState('')
   const [criando, setCriando] = useState(false)
 
   const [editId, setEditId] = useState<string | null>(null)
   const [editNome, setEditNome] = useState('')
-  const [editTipo, setEditTipo] = useState<TipoCusto>('CustoVariavel')
+  const [editGrupoId, setEditGrupoId] = useState('')
   const [salvandoEdit, setSalvandoEdit] = useState(false)
 
   const [emUso, setEmUso] = useState<{ categoria: CategoriaAdmin; quantidade: number } | null>(null)
@@ -44,13 +48,31 @@ export default function CategoriasPage() {
   const [migrando, setMigrando] = useState(false)
 
   const [busca, setBusca] = useState('')
+  const [blocosColapsados, setBlocosColapsados] = useState<Set<Bloco>>(new Set())
   const [gruposColapsados, setGruposColapsados] = useState<Set<string>>(new Set())
 
-  function toggleGrupo(nome: string) {
+  // ── Novo grupo (criado a partir de um bloco específico) ────────────────────
+  const [criandoGrupoEm, setCriandoGrupoEm] = useState<Bloco | null>(null)
+  const [novoGrupoNome, setNovoGrupoNome] = useState('')
+  const [salvandoGrupo, setSalvandoGrupo] = useState(false)
+  const [editGrupo, setEditGrupo] = useState<Grupo | null>(null)
+  const [editGrupoNome, setEditGrupoNome] = useState('')
+  const [editGrupoBloco, setEditGrupoBloco] = useState<Bloco>('DESPESAS OPERACIONAIS')
+
+  function toggleBloco(bloco: Bloco) {
+    setBlocosColapsados(prev => {
+      const next = new Set(prev)
+      if (next.has(bloco)) next.delete(bloco)
+      else next.add(bloco)
+      return next
+    })
+  }
+
+  function toggleGrupo(id: string) {
     setGruposColapsados(prev => {
       const next = new Set(prev)
-      if (next.has(nome)) next.delete(nome)
-      else next.add(nome)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
@@ -59,9 +81,13 @@ export default function CategoriasPage() {
 
   function carregar() {
     setLoading(true)
-    listarCategoriasParaGerenciar()
-      .then(setCategorias)
-      .catch(() => showMsg('Erro ao carregar categorias.', false))
+    Promise.all([listarCategoriasParaGerenciar(), listarGrupos()])
+      .then(([cats, gps]) => {
+        setCategorias(cats)
+        setGrupos(gps)
+        setNovoGrupoId(prev => prev || gps.find(g => g.ativo)?.id || '')
+      })
+      .catch(() => showMsg('Erro ao carregar o Plano de Contas.', false))
       .finally(() => setLoading(false))
   }
 
@@ -71,10 +97,10 @@ export default function CategoriasPage() {
     setTimeout(() => setMsg(''), 3000)
   }
 
+  const gruposAtivos = useMemo(() => grupos.filter(g => g.ativo).sort((a, b) => a.ordem - b.ordem), [grupos])
+
   const ativas = useMemo(() => categorias.filter(c => c.ativa).sort((a, b) => a.ordem - b.ordem), [categorias])
   const inativas = useMemo(() => categorias.filter(c => !c.ativa), [categorias])
-  // Índice na lista FLAT de ativas (não a filtrada/agrupada) — as setas ▲▼ reordenam globalmente,
-  // então o estado desabilitado precisa continuar refletindo a posição real, não a exibida.
   const indicePorId = useMemo(() => new Map(ativas.map((c, i) => [c.id, i])), [ativas])
 
   const buscaNormalizada = busca.trim().toLowerCase()
@@ -87,28 +113,25 @@ export default function CategoriasPage() {
     [inativas, buscaNormalizada]
   )
 
-  // Receita não tem grupo — fica em seção própria. As demais são agrupadas pelo campo `grupo`
-  // (categorias sem grupo definido, ex.: criadas manualmente, caem em "Outros").
-  const receitasAtivas = useMemo(() => ativasFiltradas.filter(c => c.tipo === 'Receita'), [ativasFiltradas])
-  const gruposDespesas = useMemo(() => {
-    const porGrupo = new Map<string, CategoriaAdmin[]>()
-    for (const c of ativasFiltradas) {
-      if (c.tipo === 'Receita') continue
-      const chave = c.grupo ?? 'Outros'
-      const lista = porGrupo.get(chave)
-      if (lista) lista.push(c)
-      else porGrupo.set(chave, [c])
-    }
-    return GRUPO_ORDEM.filter(g => porGrupo.has(g)).map(nome => ({ nome, itens: porGrupo.get(nome)! }))
-  }, [ativasFiltradas])
+  // Árvore Bloco → Grupo → Categoria. Grupo sem categoria ainda aparece (ex.: grupos novos, vazios).
+  const arvore = useMemo(() => {
+    return BLOCOS_ORDEM
+      .map(bloco => {
+        const gruposDoBloco = gruposAtivos.filter(g => g.bloco === bloco)
+        const gruposComItens = gruposDoBloco
+          .map(grupo => ({ grupo, categorias: ativasFiltradas.filter(c => c.grupoId === grupo.id) }))
+          .filter(g => g.categorias.length > 0 || !buscaNormalizada)
+        return { bloco, grupos: gruposComItens }
+      })
+      .filter(b => b.grupos.length > 0)
+  }, [gruposAtivos, ativasFiltradas, buscaNormalizada])
 
   async function handleCriar() {
-    if (!novoNome.trim()) return
+    if (!novoNome.trim() || !novoGrupoId) return
     setCriando(true)
     try {
-      await criarCategoria(novoNome.trim(), novoTipo)
+      await criarCategoria(novoNome.trim(), novoGrupoId)
       setNovoNome('')
-      setNovoTipo('CustoVariavel')
       showMsg('Categoria criada com sucesso!')
       carregar()
     } catch (e: unknown) {
@@ -121,14 +144,14 @@ export default function CategoriasPage() {
   function iniciarEdicao(c: CategoriaAdmin) {
     setEditId(c.id)
     setEditNome(c.nome)
-    setEditTipo(c.tipo)
+    setEditGrupoId(c.grupoId)
   }
 
   async function handleSalvarEdit() {
-    if (!editId) return
+    if (!editId || !editGrupoId) return
     setSalvandoEdit(true)
     try {
-      await atualizarCategoria(editId, editNome.trim(), editTipo, true)
+      await atualizarCategoria(editId, editNome.trim(), editGrupoId, true)
       setEditId(null)
       showMsg('Categoria atualizada!')
       carregar()
@@ -152,7 +175,7 @@ export default function CategoriasPage() {
 
   async function handleReativar(c: CategoriaAdmin) {
     try {
-      await atualizarCategoria(c.id, c.nome, c.tipo, true)
+      await atualizarCategoria(c.id, c.nome, c.grupoId, true)
       showMsg('Categoria reativada.')
       carregar()
     } catch (e: unknown) {
@@ -216,9 +239,67 @@ export default function CategoriasPage() {
     setEmUso(null)
   }
 
+  // Migração só faz sentido entre categorias do mesmo grupo — mesma natureza contábil (Tipo/Bloco).
   const opcoesMigracao = emUso
-    ? ativas.filter(c => c.id !== emUso.categoria.id && c.tipo === emUso.categoria.tipo)
+    ? ativas.filter(c => c.id !== emUso.categoria.id && c.grupoId === emUso.categoria.grupoId)
     : []
+
+  async function handleCriarGrupo() {
+    if (!criandoGrupoEm || !novoGrupoNome.trim()) return
+    setSalvandoGrupo(true)
+    try {
+      await criarGrupo(novoGrupoNome.trim(), criandoGrupoEm)
+      setNovoGrupoNome('')
+      setCriandoGrupoEm(null)
+      showMsg('Grupo criado com sucesso!')
+      carregar()
+    } catch (e: unknown) {
+      showMsg(e instanceof Error ? e.message : 'Erro ao criar grupo.', false)
+    } finally {
+      setSalvandoGrupo(false)
+    }
+  }
+
+  function iniciarEdicaoGrupo(g: Grupo) {
+    setEditGrupo(g)
+    setEditGrupoNome(g.nome)
+    setEditGrupoBloco(g.bloco)
+  }
+
+  async function handleSalvarEdicaoGrupo() {
+    if (!editGrupo || !editGrupoNome.trim()) return
+    const mudouBloco = editGrupo.bloco !== editGrupoBloco
+    if (mudouBloco && editGrupo.quantidadeCategorias > 0
+      && !confirm(`Mudar o bloco deste grupo também muda a classificação de ${editGrupo.quantidadeCategorias} categoria(s) já cadastrada(s) nele. Continuar?`)) {
+      return
+    }
+    setSalvandoGrupo(true)
+    try {
+      await atualizarGrupo(editGrupo.id, editGrupoNome.trim(), editGrupoBloco, true)
+      setEditGrupo(null)
+      showMsg('Grupo atualizado!')
+      carregar()
+    } catch (e: unknown) {
+      showMsg(e instanceof Error ? e.message : 'Erro ao atualizar grupo.', false)
+    } finally {
+      setSalvandoGrupo(false)
+    }
+  }
+
+  async function handleDesativarGrupo(g: Grupo) {
+    if (g.quantidadeCategorias > 0) {
+      showMsg(`"${g.nome}" tem ${g.quantidadeCategorias} categoria(s) — mova-as pra outro grupo antes de desativar.`, false)
+      return
+    }
+    if (!confirm(`Desativar o grupo "${g.nome}"?`)) return
+    try {
+      await desativarGrupo(g.id)
+      showMsg('Grupo desativado.')
+      carregar()
+    } catch (e: unknown) {
+      showMsg(e instanceof Error ? e.message : 'Erro ao desativar grupo.', false)
+    }
+  }
 
   function renderCategoriaAtiva(c: CategoriaAdmin) {
     const i = indicePorId.get(c.id) ?? 0
@@ -226,8 +307,8 @@ export default function CategoriasPage() {
       return (
         <div key={c.id} className="cat-item-compacta cat-edit-form">
           <input value={editNome} onChange={e => setEditNome(e.target.value)} style={{ flex: 2 }} />
-          <select value={editTipo} onChange={e => setEditTipo(e.target.value as TipoCusto)} style={{ flex: 1, minWidth: 180 }}>
-            {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
+          <select value={editGrupoId} onChange={e => setEditGrupoId(e.target.value)} style={{ flex: 1, minWidth: 220 }}>
+            {gruposAtivos.map(g => <option key={g.id} value={g.id}>{BLOCO_LABEL[g.bloco]} · {g.nome}</option>)}
           </select>
           <button className="btn-add-conta" onClick={handleSalvarEdit} disabled={salvandoEdit}>
             {salvandoEdit ? 'Salvando...' : '✔ Salvar'}
@@ -243,7 +324,6 @@ export default function CategoriasPage() {
           <button disabled={i === ativas.length - 1} onClick={() => handleMover(c.id, 1)} title="Mover para baixo">▼</button>
         </div>
         <span className="cat-nome-compacta">{c.nome}</span>
-        <span className="cat-tipo-compacta">{TIPO_LABEL[c.tipo]}</span>
         <div className="cat-acoes-compactas">
           <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
           <button className="cb-btn-inativar" onClick={() => handleDesativar(c.id)}>Desativar</button>
@@ -258,6 +338,9 @@ export default function CategoriasPage() {
   return (
     <>
       <h3 style={{ marginBottom: 16 }}>📋 Plano de Contas</h3>
+      <p style={{ color: 'var(--tx3)', fontSize: 13, marginTop: -12, marginBottom: 16 }}>
+        Hierarquia do DRE: Bloco (fixo) → Grupo (seu, editável aqui) → Categoria (nível de lançamento).
+      </p>
 
       <div className="add-conta-form">
         <h4>＋ Nova Categoria</h4>
@@ -268,10 +351,11 @@ export default function CategoriasPage() {
             onChange={e => setNovoNome(e.target.value)}
             style={{ flex: 2 }}
           />
-          <select value={novoTipo} onChange={e => setNovoTipo(e.target.value as TipoCusto)} style={{ flex: 1, minWidth: 180 }}>
-            {TIPOS.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
+          <select value={novoGrupoId} onChange={e => setNovoGrupoId(e.target.value)} style={{ flex: 1, minWidth: 220 }}>
+            {gruposAtivos.length === 0 && <option value="">Crie um grupo primeiro</option>}
+            {gruposAtivos.map(g => <option key={g.id} value={g.id}>{BLOCO_LABEL[g.bloco]} · {g.nome}</option>)}
           </select>
-          <button className="btn-add-conta" onClick={handleCriar} disabled={criando || !novoNome.trim()}>
+          <button className="btn-add-conta" onClick={handleCriar} disabled={criando || !novoNome.trim() || !novoGrupoId}>
             {criando ? 'Criando...' : '＋ Criar'}
           </button>
         </div>
@@ -292,36 +376,64 @@ export default function CategoriasPage() {
         />
       </div>
 
-      <div className="contas-section">
-        <h3>Receita ({receitasAtivas.length})</h3>
-        {receitasAtivas.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma categoria de receita{buscaNormalizada ? ' encontrada.' : '.'}</p>}
-        <div className="cat-lista-compacta">
-          {receitasAtivas.map(renderCategoriaAtiva)}
-        </div>
-      </div>
-
-      <div className="contas-section">
-        <h3>Custos e Despesas ({ativasFiltradas.length - receitasAtivas.length})</h3>
-        {gruposDespesas.length === 0 && (
-          <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma categoria{buscaNormalizada ? ' encontrada.' : ' ativa.'}</p>
-        )}
-        {gruposDespesas.map(grupo => {
-          const colapsado = gruposColapsados.has(grupo.nome)
-          return (
-            <div key={grupo.nome} className="cat-grupo">
-              <button type="button" className="cat-grupo-header" onClick={() => toggleGrupo(grupo.nome)}>
-                <span className="cat-grupo-seta">{colapsado ? '▸' : '▾'}</span>
-                {grupo.nome} ({grupo.itens.length})
-              </button>
-              {!colapsado && (
-                <div className="cat-lista-compacta">
-                  {grupo.itens.map(renderCategoriaAtiva)}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {arvore.map(({ bloco, grupos: gruposDoBloco }) => {
+        const blocoColapsado = blocosColapsados.has(bloco)
+        const totalCategorias = gruposDoBloco.reduce((acc, g) => acc + g.categorias.length, 0)
+        return (
+          <div key={bloco} className="cat-bloco">
+            <button type="button" className="cat-bloco-header" onClick={() => toggleBloco(bloco)}>
+              <span className="cat-grupo-seta">{blocoColapsado ? '▸' : '▾'}</span>
+              {BLOCO_LABEL[bloco]} ({totalCategorias})
+            </button>
+            {!blocoColapsado && (
+              <div className="cat-bloco-corpo">
+                {gruposDoBloco.map(({ grupo, categorias: categoriasDoGrupo }) => {
+                  const grupoColapsado = gruposColapsados.has(grupo.id)
+                  return (
+                    <div key={grupo.id} className="cat-grupo">
+                      <div className="cat-grupo-header cat-grupo-header-com-acoes">
+                        <button type="button" className="cat-grupo-toggle" onClick={() => toggleGrupo(grupo.id)}>
+                          <span className="cat-grupo-seta">{grupoColapsado ? '▸' : '▾'}</span>
+                          {grupo.nome} ({categoriasDoGrupo.length})
+                        </button>
+                        <div className="cat-grupo-acoes">
+                          <button className="cb-btn-editar" onClick={() => iniciarEdicaoGrupo(grupo)}>Editar grupo</button>
+                          <button className="cb-btn-inativar" onClick={() => handleDesativarGrupo(grupo)}>Desativar grupo</button>
+                        </div>
+                      </div>
+                      {!grupoColapsado && (
+                        <div className="cat-lista-compacta">
+                          {categoriasDoGrupo.length === 0
+                            ? <p style={{ color: 'var(--tx3)', fontSize: 12, padding: '4px 4px' }}>Nenhuma categoria neste grupo ainda.</p>
+                            : categoriasDoGrupo.map(renderCategoriaAtiva)}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                {criandoGrupoEm === bloco ? (
+                  <div className="cat-novo-grupo-form">
+                    <input
+                      placeholder="Nome do novo grupo"
+                      value={novoGrupoNome}
+                      onChange={e => setNovoGrupoNome(e.target.value)}
+                      autoFocus
+                    />
+                    <button className="btn-add-conta" onClick={handleCriarGrupo} disabled={salvandoGrupo || !novoGrupoNome.trim()}>
+                      {salvandoGrupo ? 'Criando...' : '✔ Criar grupo'}
+                    </button>
+                    <button className="cat-btn-cancelar" onClick={() => { setCriandoGrupoEm(null); setNovoGrupoNome('') }}>Cancelar</button>
+                  </div>
+                ) : (
+                  <button type="button" className="cat-btn-novo-grupo" onClick={() => setCriandoGrupoEm(bloco)}>
+                    ＋ Novo grupo em {BLOCO_LABEL[bloco]}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
 
       {inativasFiltradas.length > 0 && (
         <div className="contas-section">
@@ -330,7 +442,7 @@ export default function CategoriasPage() {
             {inativasFiltradas.map(c => (
               <div key={c.id} className="cat-item-compacta cat-inativa">
                 <span className="cat-nome-compacta" style={{ color: 'var(--tx3)' }}>{c.nome}</span>
-                <span className="cat-tipo-compacta">{TIPO_LABEL[c.tipo]}</span>
+                <span className="cat-tipo-compacta">{c.grupoNome}</span>
                 <div className="cat-acoes-compactas">
                   <button className="cb-btn-editar" onClick={() => handleReativar(c)}>Reativar</button>
                   <button className="cat-btn-excluir" onClick={() => handleExcluir(c)}>Excluir</button>
@@ -360,7 +472,7 @@ export default function CategoriasPage() {
             <p style={{ color: 'var(--tx3)', marginBottom: 12 }}>
               <strong>{emUso.quantidade}</strong> lançamento(s) usam a categoria "{emUso.categoria.nome}".
               Ela não pode ser excluída fisicamente sem corromper o histórico. Desative-a, ou migre esses
-              lançamentos para outra categoria do mesmo tipo antes.
+              lançamentos para outra categoria do mesmo grupo antes.
             </p>
             {opcoesMigracao.length > 0 ? (
               <div className="inp-group">
@@ -372,7 +484,41 @@ export default function CategoriasPage() {
               </div>
             ) : (
               <p style={{ color: 'var(--tx3)', fontSize: 13 }}>
-                Não há outra categoria ativa do mesmo tipo ({TIPO_LABEL[emUso.categoria.tipo]}) para migrar.
+                Não há outra categoria ativa no grupo "{emUso.categoria.grupoNome}" para migrar.
+              </p>
+            )}
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!editGrupo}
+        title="Editar grupo"
+        onClose={() => setEditGrupo(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setEditGrupo(null)}>Cancelar</button>
+            <button className="btn-confirm" onClick={handleSalvarEdicaoGrupo} disabled={salvandoGrupo || !editGrupoNome.trim()}>
+              {salvandoGrupo ? 'Salvando...' : 'Salvar'}
+            </button>
+          </>
+        }
+      >
+        {editGrupo && (
+          <>
+            <div className="inp-group">
+              <label>Nome do grupo</label>
+              <input value={editGrupoNome} onChange={e => setEditGrupoNome(e.target.value)} />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Bloco</label>
+              <select value={editGrupoBloco} onChange={e => setEditGrupoBloco(e.target.value as Bloco)}>
+                {BLOCOS_ORDEM.map(b => <option key={b} value={b}>{BLOCO_LABEL[b]}</option>)}
+              </select>
+            </div>
+            {editGrupoBloco !== editGrupo.bloco && editGrupo.quantidadeCategorias > 0 && (
+              <p style={{ color: 'var(--warning)', fontSize: 12, marginTop: 10 }}>
+                ⚠ {editGrupo.quantidadeCategorias} categoria(s) deste grupo vão mudar de classificação no DRE.
               </p>
             )}
           </>

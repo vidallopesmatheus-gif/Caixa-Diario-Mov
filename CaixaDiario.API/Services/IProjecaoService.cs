@@ -10,4 +10,11 @@ public interface IProjecaoService
         List<ContaRecorrente> recorrentes,
         int dias,
         Guid? contaBancariaId);
+
+    TrajetoriaDto CalcularTrajetoria(
+        List<RegistroDiario> registros,
+        List<ContaRecorrente> recorrentes,
+        int mesesPassado,
+        int mesesFuturo,
+        Guid? contaBancariaId);
 }

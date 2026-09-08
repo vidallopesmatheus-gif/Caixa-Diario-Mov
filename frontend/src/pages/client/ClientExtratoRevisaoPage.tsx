@@ -39,6 +39,13 @@ export default function ClientExtratoRevisaoPage() {
   const [buscandoCandidato, setBuscandoCandidato] = useState(false)
   const [convertendo, setConvertendo] = useState(false)
 
+  // ── Mesma classificação, em lote — um par de transferência por lançamento, não um único par
+  // somando os valores (extratos trazem várias aplicações/resgates repetidos pro mesmo destino).
+  const [loteTransferenciaItens, setLoteTransferenciaItens] = useState<PendenteCategorizacao[] | null>(null)
+  const [loteContaContrapartidaId, setLoteContaContrapartidaId] = useState('')
+  const [aplicandoLoteTransferencia, setAplicandoLoteTransferencia] = useState(false)
+  const [loteTransferenciaFeitos, setLoteTransferenciaFeitos] = useState(0)
+
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const clienteId = user?.usuarioId ?? ''
 
@@ -127,9 +134,12 @@ export default function ClientExtratoRevisaoPage() {
   }
 
   function handleCategoriaCriada(nova: CategoriaAdmin) {
-    const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupo }
-    if (nova.tipo === 'Receita') setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
-    else setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
+    const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupoNome }
+    // Investimento/Financiamento podem ser lançados como entrada ou saída — entram nos dois lados.
+    if (nova.tipo === 'Receita' || nova.tipo === 'Investimento' || nova.tipo === 'Financiamento')
+      setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
+    if (nova.tipo !== 'Receita')
+      setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
   }
 
   function abrirModalTransferencia(item: PendenteCategorizacao) {
@@ -166,6 +176,50 @@ export default function ClientExtratoRevisaoPage() {
       setMsg(e instanceof Error ? e.message : 'Erro ao converter em transferência.')
     } finally {
       setConvertendo(false)
+    }
+  }
+
+  function abrirLoteTransferencia(itens: PendenteCategorizacao[]) {
+    if (itens.length === 0) return
+    setLoteTransferenciaItens(itens)
+    setLoteContaContrapartidaId('')
+    setLoteTransferenciaFeitos(0)
+    setMsg('')
+  }
+
+  async function confirmarLoteTransferencia() {
+    if (!loteTransferenciaItens || !contaId || !loteContaContrapartidaId) return
+    setAplicandoLoteTransferencia(true)
+    setMsg('')
+    // Sequencial (não Promise.all): itens do mesmo dia compartilham o mesmo RegistroDiario — duas
+    // chamadas em paralelo fariam leitura-e-escrita concorrente na mesma linha e uma perderia a
+    // alteração da outra. Um lançamento por vez garante que cada gravação parte do estado já salvo
+    // pela anterior.
+    const idsComSucesso: string[] = []
+    let falhas = 0
+    for (const item of loteTransferenciaItens) {
+      try {
+        await converterLancamentoEmTransferencia({
+          contaId, lancamentoId: item.id, data: item.data, tipo: item.tipo,
+          contaContrapartidaId: loteContaContrapartidaId,
+        })
+        idsComSucesso.push(item.id)
+      } catch {
+        falhas++
+      }
+      setLoteTransferenciaFeitos(f => f + 1)
+    }
+
+    setPendentes(prev => prev.filter(p => !idsComSucesso.includes(p.id)))
+    setSelecionados(prev => {
+      const next = new Set(prev)
+      idsComSucesso.forEach(id => next.delete(id))
+      return next
+    })
+    setAplicandoLoteTransferencia(false)
+    setLoteTransferenciaItens(null)
+    if (falhas > 0) {
+      setMsg(`${idsComSucesso.length} classificado(s) como transferência — ${falhas} falharam, continuam pendentes.`)
     }
   }
 
@@ -215,6 +269,15 @@ export default function ClientExtratoRevisaoPage() {
             >
               Aplicar a {selecionados.size} selecionada(s)
             </button>
+            <button
+              type="button"
+              className="er-btn-toggle"
+              disabled={selecionados.size === 0}
+              onClick={() => abrirLoteTransferencia(pendentes.filter(p => selecionados.has(p.id)))}
+              title="Marcar todas as selecionadas como transferência entre contas"
+            >
+              🔁 Marcar {selecionados.size} selecionada(s) como Transferência
+            </button>
             {loteMisto && (
               <span className="er-msg-erro" style={{ marginLeft: 8 }}>
                 Selecione só entradas ou só saídas por vez para categorizar em lote.
@@ -258,9 +321,17 @@ export default function ClientExtratoRevisaoPage() {
                       value=""
                       onChange={cat => aplicarCategoria(g.itens, cat)}
                       onCategoriaCriada={handleCategoriaCriada}
-                      tipoPadraoNovaCategoria={tipoGrupo === 'Entrada' ? 'Receita' : 'CustoVariavel'}
+                      blocoPadraoNovaCategoria={tipoGrupo === 'Entrada' ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
                       placeholder="Categorizar todo o grupo..."
                     />
+                    <button
+                      type="button"
+                      className="er-btn-toggle"
+                      onClick={() => abrirLoteTransferencia(g.itens)}
+                      title="Marcar todo o grupo como transferência entre contas"
+                    >
+                      🔁 Todo o grupo é Transferência
+                    </button>
                   </div>
                   <div className="er-grupo-itens">
                     {g.itens.map(item => (
@@ -337,6 +408,42 @@ export default function ClientExtratoRevisaoPage() {
           </>
         )}
       </Modal>
+
+      <Modal
+        open={!!loteTransferenciaItens}
+        title="🔁 Marcar como Transferência"
+        onClose={() => { if (!aplicandoLoteTransferencia) setLoteTransferenciaItens(null) }}
+        footer={
+          <>
+            <button className="er-btn-lote" onClick={() => setLoteTransferenciaItens(null)} disabled={aplicandoLoteTransferencia}>
+              Cancelar
+            </button>
+            <button className="btn-save" onClick={confirmarLoteTransferencia} disabled={!loteContaContrapartidaId || aplicandoLoteTransferencia}>
+              {aplicandoLoteTransferencia
+                ? `Classificando ${loteTransferenciaFeitos}/${loteTransferenciaItens?.length ?? 0}...`
+                : `Confirmar ${loteTransferenciaItens?.length ?? 0} lançamento(s)`}
+            </button>
+          </>
+        }
+      >
+        {loteTransferenciaItens && (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+              {loteTransferenciaItens.length} lançamento(s) selecionado(s), cada um vira sua própria
+              transferência (não um par único somando os valores). Pra qual conta é a contrapartida?
+            </p>
+            <div className="inp-group">
+              <label>Conta contrapartida</label>
+              <select value={loteContaContrapartidaId} onChange={e => setLoteContaContrapartidaId(e.target.value)} disabled={aplicandoLoteTransferencia}>
+                <option value="">Selecione...</option>
+                {contasBancarias.filter(c => c.ativa && c.id !== contaId).map(c => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+      </Modal>
     </>
   )
 }
@@ -379,7 +486,7 @@ function ExtratoLinhaPendente({
         value=""
         onChange={onCategorizar}
         onCategoriaCriada={onCategoriaCriada}
-        tipoPadraoNovaCategoria={item.tipo === 'Entrada' ? 'Receita' : 'CustoVariavel'}
+        blocoPadraoNovaCategoria={item.tipo === 'Entrada' ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
         placeholder={salvando ? 'Salvando...' : 'Categoria'}
         onNavigate={dir => onNavigate(item.id, dir)}
       />

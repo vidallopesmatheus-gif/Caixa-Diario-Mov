@@ -18,8 +18,11 @@ public class MetricasServiceTests
     private static ItemFinanceiro Item(string desc, decimal valor, string? categoria = null, string? tipoCusto = null) =>
         new() { Descricao = desc, Valor = valor, Categoria = categoria, TipoCusto = tipoCusto };
 
-    private static Categoria Cat(string nome, string tipo, string? grupo = null, int ordem = 0) =>
-        new() { Id = Guid.NewGuid(), Nome = nome, Tipo = tipo, Grupo = grupo, Ordem = ordem, Ativa = true };
+    // Bloco vazio ("") preserva o comportamento histórico dos testes que só conhecem Tipo/Grupo
+    // por nome — o cálculo do DRE cai no critério antigo (Tipo + nome de grupo) quando Bloco não
+    // está resolvido. Passe `bloco` explicitamente nos testes que exercitam a hierarquia nova.
+    private static Categoria Cat(string nome, string tipo, string? grupo = null, int ordem = 0, string bloco = "") =>
+        new() { Id = Guid.NewGuid(), Nome = nome, Tipo = tipo, GrupoId = Guid.NewGuid(), Grupo = new Grupo { Nome = grupo ?? "Outros", Bloco = bloco }, Ordem = ordem, Ativa = true };
 
     [Fact]
     public void CalcularPeriodo_SemCategorias_EbitdaNull()
@@ -1009,5 +1012,136 @@ public class MetricasServiceTests
 
         Assert.Equal(20m, dre.Deducoes.Total);
         Assert.Equal(30m, dre.DespesasFixas.Total);
+    }
+
+    // ---- DRE: hierarquia Bloco → Grupo → Categoria ----
+
+    private static Categoria CatComBloco(string nome, string tipo, string grupoNome, string bloco, int ordem = 0) =>
+        new() { Id = Guid.NewGuid(), Nome = nome, Tipo = tipo, GrupoId = Guid.NewGuid(), Grupo = new Grupo { Nome = grupoNome, Bloco = bloco }, Ordem = ordem, Ativa = true };
+
+    private static readonly List<Categoria> _planoComBlocos = new()
+    {
+        CatComBloco("Vendas", "Receita", "Vendas e Serviços", Blocos.ReceitasOperacionais),
+        CatComBloco("Simples/DAS", "CustoFixo", "Pagamento de Impostos", Blocos.DeducoesDaReceita),
+        CatComBloco("Insumos/Mercadoria", "CustoVariavel", "Custos Diretos", Blocos.CustosOperacionais),
+        CatComBloco("Aluguel", "CustoFixo", "Despesas com Ocupação", Blocos.DespesasOperacionais),
+        CatComBloco("Publicidade", "CustoFixo", "Despesas com Marketing", Blocos.DespesasOperacionais),
+        CatComBloco("Equipamentos", "Investimento", "Imobilizado", Blocos.AtividadesDeInvestimento),
+        CatComBloco("Empréstimo Banco X", "Financiamento", "Empréstimos/Financiamentos", Blocos.AtividadesDeFinanciamento),
+    };
+
+    [Fact]
+    public void CalcularDre_AtividadeDeInvestimento_CaptacaoPositivaEAquisicaoNegativa()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new() { Item("Notebook", 300m, "Equipamentos", "Investimento") });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        // Só saída de investimento nesse registro: net deve ser negativo (aquisição), não positivo.
+        Assert.Equal(-300m, dre.AtividadesInvestimento.Total);
+        Assert.Equal(700m, dre.ResultadoLiquido); // 1000 - 300, nada mais no exemplo
+    }
+
+    [Fact]
+    public void CalcularDre_AtividadeDeInvestimento_NetaEntradaESaidaComSinalCorreto()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new()
+            {
+                Item("Venda", 1000m, "Vendas", "Receita"),
+                Item("Aporte recebido", 500m, "Equipamentos", "Investimento"),
+            },
+            new() { Item("Compra equipamento", 200m, "Equipamentos", "Investimento") });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        Assert.Equal(300m, dre.AtividadesInvestimento.Total); // 500 (entrada) - 200 (saída) = net positivo
+    }
+
+    [Fact]
+    public void CalcularDre_AtividadeDeFinanciamento_AmortizacaoReduzResultadoLiquido()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new() { Item("Parcela empréstimo", 150m, "Empréstimo Banco X", "Financiamento") });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        Assert.Equal(-150m, dre.AtividadesFinanciamento.Total);
+        Assert.Equal(850m, dre.ResultadoLiquido);
+    }
+
+    [Fact]
+    public void CalcularDre_InvestimentoEFinanciamento_NaoEntramNoResultadoOperacionalNemNaMargem()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Aluguel", 200m, "Aluguel", "CustoFixo"),
+                Item("Compra equipamento", 300m, "Equipamentos", "Investimento"),
+                Item("Parcela empréstimo", 100m, "Empréstimo Banco X", "Financiamento"),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        Assert.Equal(800m, dre.ResultadoOperacional); // 1000 - 200, sem investimento/financiamento
+        Assert.Equal(400m, dre.ResultadoLiquido); // 800 - 300 - 100
+    }
+
+    [Fact]
+    public void CalcularDre_Blocos_MontaArvoreHierarquicaComTotaisETipo()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("DAS", 60m, "Simples/DAS", "CustoFixo"),
+                Item("Insumos", 100m, "Insumos/Mercadoria", "CustoVariavel"),
+                Item("Aluguel", 200m, "Aluguel", "CustoFixo"),
+                Item("Ads", 50m, "Publicidade", "CustoFixo"),
+                Item("Notebook", 30m, "Equipamentos", "Investimento"),
+                Item("Parcela", 40m, "Empréstimo Banco X", "Financiamento"),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        Assert.Equal(6, dre.Blocos.Count); // os 6 blocos aparecem, cada um com pelo menos 1 lançamento
+
+        var receitas = dre.Blocos.Single(b => b.Bloco == Blocos.ReceitasOperacionais);
+        Assert.Equal(1000m, receitas.Total);
+        Assert.Equal(100.0m, receitas.Percentual);
+        var grupoVendas = Assert.Single(receitas.Grupos);
+        Assert.Equal("Vendas e Serviços", grupoVendas.Nome);
+        Assert.Equal("Vendas", Assert.Single(grupoVendas.Categorias).Nome);
+
+        var deducoes = dre.Blocos.Single(b => b.Bloco == Blocos.DeducoesDaReceita);
+        Assert.Equal(-60m, deducoes.Total); // saída sempre com sinal negativo na árvore
+
+        var despesas = dre.Blocos.Single(b => b.Bloco == Blocos.DespesasOperacionais);
+        Assert.Equal(-250m, despesas.Total); // Aluguel (200) + Publicidade (50)
+        Assert.Equal(2, despesas.Grupos.Count); // Ocupação e Marketing, cada um seu grupo
+
+        var investimento = dre.Blocos.Single(b => b.Bloco == Blocos.AtividadesDeInvestimento);
+        Assert.Equal(-30m, investimento.Total);
+
+        var financiamento = dre.Blocos.Single(b => b.Bloco == Blocos.AtividadesDeFinanciamento);
+        Assert.Equal(-40m, financiamento.Total);
+    }
+
+    [Fact]
+    public void CalcularDre_Blocos_LancamentoSemCategoria_VaiParaNaoClassificadoDentroDoBloco()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 500m, "Vendas", "Receita") },
+            new() { Item("Gasto sem categoria", 40m, null, null) });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        var despesas = dre.Blocos.Single(b => b.Bloco == Blocos.DespesasOperacionais);
+        var grupoSemClasse = Assert.Single(despesas.Grupos, g => g.Nome == "Não Classificado");
+        Assert.Equal(-40m, grupoSemClasse.Total);
     }
 }

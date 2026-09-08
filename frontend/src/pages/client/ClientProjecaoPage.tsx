@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { obterProjecao } from '../../api/projecao'
+import { obterProjecao, obterTrajetoria } from '../../api/projecao'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { fmtBRL } from '../../utils/format'
-import type { Projecao, ProjecaoDia } from '../../api/projecao'
+import type { Projecao, ProjecaoDia, Trajetoria } from '../../api/projecao'
 import type { ContaBancaria } from '../../types'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -11,7 +11,11 @@ import {
 } from 'recharts'
 import './ClientProjecao.css'
 
-type Janela = 30 | 60 | 90
+// 'trajetoria' é uma visão diferente (histórico + projeção, resolução mensal), não um raio a mais
+// da mesma projeção diária — por isso vira uma 5ª aba mutuamente exclusiva com 30/60/90, e não um
+// segundo controle independente: não faz sentido combinar "60 dias" com "6 meses de histórico" ao
+// mesmo tempo, são dois jeitos de olhar o caixa (operacional de curto prazo vs. tendência).
+type Janela = 30 | 60 | 90 | 'trajetoria'
 
 const MESES_ABREV = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 
@@ -53,6 +57,7 @@ export default function ClientProjecaoPage() {
   const [contaFiltro, setContaFiltro] = useState('')
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [projecao, setProjecao] = useState<Projecao | null>(null)
+  const [trajetoria, setTrajetoria] = useState<Trajetoria | null>(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState('')
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({})
@@ -68,9 +73,13 @@ export default function ClientProjecaoPage() {
     if (!clienteId) return
     setLoading(true); setErro('')
     try {
-      const data = await obterProjecao(clienteId, janela, contaFiltro || undefined)
-      setProjecao(data)
-      setExpandidos({})
+      if (janela === 'trajetoria') {
+        setTrajetoria(await obterTrajetoria(clienteId, 6, 6, contaFiltro || undefined))
+      } else {
+        const data = await obterProjecao(clienteId, janela, contaFiltro || undefined)
+        setProjecao(data)
+        setExpandidos({})
+      }
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Erro ao carregar projeção.')
     } finally {
@@ -99,9 +108,32 @@ export default function ClientProjecaoPage() {
   )
 
   const semanas = useMemo(
-    () => janela > 30 ? agruparPorSemana(diasComMovimento) : null,
+    () => typeof janela === 'number' && janela > 30 ? agruparPorSemana(diasComMovimento) : null,
     [diasComMovimento, janela],
   )
+
+  // Um único array pro gráfico, com o ponto do mês atual presente nas duas séries (realizado E
+  // projetado) — é o que faz as duas linhas se encontrarem visualmente em "hoje", sem buraco.
+  const mesLabel = (mes: string) => {
+    const [ano, m] = mes.split('-')
+    return `${MESES_ABREV[Number(m) - 1]}/${ano.slice(2)}`
+  }
+  const dadosTrajetoria = useMemo(() => {
+    if (!trajetoria) return []
+    const pontos = [
+      ...trajetoria.historico.map(p => ({ mes: mesLabel(p.mes), saldoRealizado: p.saldo, saldoProjetado: undefined as number | undefined })),
+      ...trajetoria.projetado.map(p => ({ mes: mesLabel(p.mes), saldoRealizado: undefined as number | undefined, saldoProjetado: p.saldo })),
+    ]
+    // Ponte no "hoje": o último ponto do histórico também entra como início da série projetada.
+    const ultimoHistorico = trajetoria.historico.at(-1)
+    if (ultimoHistorico && trajetoria.projetado.length > 0) {
+      const idx = pontos.findIndex(p => p.mes === mesLabel(ultimoHistorico.mes))
+      if (idx >= 0) pontos[idx] = { ...pontos[idx], saldoProjetado: ultimoHistorico.saldo }
+    }
+    return pontos
+  }, [trajetoria])
+  const mesHojeLabel = trajetoria?.historico.at(-1) ? mesLabel(trajetoria.historico.at(-1)!.mes) : undefined
+  const historicoCurto = (trajetoria?.mesesHistoricoDisponiveis ?? 6) < 3
 
   const temNegativo = projecao?.dias.some(d => d.saldoNegativo) ?? false
   const menorSaldo  = projecao ? Math.min(...projecao.dias.map(d => d.saldoFim)) : 0
@@ -133,6 +165,13 @@ export default function ClientProjecaoPage() {
               {j} dias
             </button>
           ))}
+          <button
+            className={`pj-janela-btn${janela === 'trajetoria' ? ' active' : ''}`}
+            onClick={() => setJanela('trajetoria')}
+            title="Últimos 6 meses realizados + próximos 6 meses projetados"
+          >
+            6m + 6m
+          </button>
         </div>
         {contas.length > 1 && (
           <select className="pj-select" value={contaFiltro} onChange={e => setContaFiltro(e.target.value)}>
@@ -145,7 +184,97 @@ export default function ClientProjecaoPage() {
       {loading && <p className="pj-loading">Calculando projeção...</p>}
       {erro    && <p className="pj-erro">{erro}</p>}
 
-      {projecao && !loading && (
+      {janela === 'trajetoria' && trajetoria && !loading && (
+        <>
+          {historicoCurto && (
+            <div className="pj-alerta" style={{ background: 'var(--warning-soft, rgba(217,119,6,.12))', borderColor: 'var(--warning)', color: 'var(--warning)' }}>
+              ⚠️ Só há {trajetoria.mesesHistoricoDisponiveis} mês(es) de histórico disponível — mostrando o período que existe, em vez de 6 meses completos.
+            </div>
+          )}
+
+          <div className="pj-cards">
+            <div className="pj-card">
+              <span className="pj-card-label">Saldo Atual</span>
+              <span className={`pj-card-val ${trajetoria.saldoAtual >= 0 ? 'val-green' : 'val-red'}`}>
+                {fmtBRL(trajetoria.saldoAtual)}
+              </span>
+            </div>
+            <div className="pj-card">
+              <span className="pj-card-label">Variação · últimos {trajetoria.mesesHistoricoDisponiveis}m (realizado)</span>
+              <span className={`pj-card-val ${trajetoria.variacaoRealizada >= 0 ? 'val-green' : 'val-red'}`}>
+                {trajetoria.variacaoRealizada >= 0 ? '+' : ''}{fmtBRL(trajetoria.variacaoRealizada)}
+              </span>
+            </div>
+            <div className="pj-card">
+              <span className="pj-card-label">Variação · próximos 6m (projetado)</span>
+              <span className={`pj-card-val ${trajetoria.variacaoProjetada >= 0 ? 'val-green' : 'val-red'}`}>
+                {trajetoria.variacaoProjetada >= 0 ? '+' : ''}{fmtBRL(trajetoria.variacaoProjetada)}
+              </span>
+            </div>
+            <div className="pj-card">
+              <span className="pj-card-label">Projeção vs. realizado</span>
+              <span className={`pj-card-val ${trajetoria.variacaoProjetada >= trajetoria.variacaoRealizada ? 'val-green' : 'val-red'}`}>
+                {trajetoria.variacaoProjetada >= trajetoria.variacaoRealizada ? '↑ Melhor' : '↓ Pior'}
+              </span>
+            </div>
+          </div>
+
+          <div className="pj-grafico-container">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={dadosTrajetoria} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+                <defs>
+                  <linearGradient id="gradRealizado" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0a84ff" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#0a84ff" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
+                <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis
+                  stroke="var(--tx3)"
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`}
+                  width={60}
+                />
+                <Tooltip
+                  formatter={(v, name) => typeof v === 'number' ? [fmtBRL(v), name === 'saldoRealizado' ? 'Realizado' : 'Projetado'] : [String(v)]}
+                  contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', fontSize: 12 }}
+                />
+                {mesHojeLabel && (
+                  <ReferenceLine x={mesHojeLabel} stroke="var(--tx3)" strokeDasharray="2 2" label={{ value: 'Hoje', fill: 'var(--tx3)', fontSize: 11, position: 'insideTopRight' }} />
+                )}
+                <Area
+                  type="monotone"
+                  dataKey="saldoRealizado"
+                  name="saldoRealizado"
+                  stroke="#0a84ff"
+                  strokeWidth={2}
+                  fill="url(#gradRealizado)"
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  connectNulls={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="saldoProjetado"
+                  name="saldoProjetado"
+                  stroke="#0a84ff"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                  strokeOpacity={0.55}
+                  fill="url(#gradRealizado)"
+                  fillOpacity={0.4}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  connectNulls={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+
+      {janela !== 'trajetoria' && projecao && !loading && (
         <>
           {/* Cards de resumo */}
           <div className="pj-cards">

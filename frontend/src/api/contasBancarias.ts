@@ -36,6 +36,7 @@ function mapLancamento(raw: any): LancamentoExtrato {
     valor: raw.valor ?? 0,
     saldoAcumulado: raw.saldoAcumulado ?? 0,
     pendenteCategorizacao: raw.pendenteCategorizacao ?? false,
+    transferenciaId: raw.transferenciaId ?? undefined,
   }
 }
 
@@ -84,8 +85,19 @@ export const atualizarContaBancaria = async (id: string, dto: {
   return mapConta(res.dados)
 }
 
-export const inativarContaBancaria = async (id: string): Promise<void> => {
-  await apiFetch<ApiResponse<null>>(`/api/contas-bancarias/${id}`, { method: 'DELETE' })
+export interface ExclusaoContaBancariaResult {
+  excluida: boolean
+  diasComLancamento: number
+  contasProvisionadas: number
+  transferencias: number
+  transacoesImportadas: number
+  metasVinculadas: number
+  totalVinculos: number
+}
+
+export const excluirOuInativarContaBancaria = async (id: string): Promise<ExclusaoContaBancariaResult> => {
+  const res = await apiFetch<ApiResponse<ExclusaoContaBancariaResult>>(`/api/contas-bancarias/${id}`, { method: 'DELETE' })
+  return res.dados
 }
 
 export const obterExtratoConta = async (

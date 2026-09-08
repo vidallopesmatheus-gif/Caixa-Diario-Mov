@@ -4,7 +4,7 @@ import {
   listarContasBancarias,
   criarContaBancaria,
   atualizarContaBancaria,
-  inativarContaBancaria,
+  excluirOuInativarContaBancaria,
 } from '../../../api/contasBancarias'
 import { fmtBRL } from '../../../utils/format'
 import type { ContaBancaria } from '../../../types'
@@ -60,10 +60,10 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
       .finally(() => setLoading(false))
   }, [clienteId])
 
-  function showMsg(texto: string, ok = true) {
+  function showMsg(texto: string, ok = true, duracaoMs = 3000) {
     setMsgOk(ok)
     setMsg(texto)
-    setTimeout(() => setMsg(''), 3000)
+    setTimeout(() => setMsg(''), duracaoMs)
   }
 
   async function handleCriar() {
@@ -118,14 +118,29 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
     }
   }
 
-  async function handleInativar(id: string) {
-    if (!confirm('Inativar esta conta? Os registros vinculados serão preservados.')) return
+  async function handleExcluir(id: string) {
+    if (!confirm('Excluir esta conta bancária? Se ela não tiver nenhum lançamento, conta a pagar/receber, transferência ou meta vinculada, a exclusão é definitiva.')) return
     try {
-      await inativarContaBancaria(id)
+      const resultado = await excluirOuInativarContaBancaria(id)
+      if (resultado.excluida) {
+        setContas(prev => prev.filter(c => c.id !== id))
+        showMsg('Conta excluída definitivamente.')
+        return
+      }
       setContas(prev => prev.map(c => c.id === id ? { ...c, ativa: false } : c))
-      showMsg('Conta inativada.')
+      const partes: string[] = []
+      if (resultado.diasComLancamento > 0) partes.push(`${resultado.diasComLancamento} dia(s) com lançamento`)
+      if (resultado.contasProvisionadas > 0) partes.push(`${resultado.contasProvisionadas} conta(s) a pagar/receber`)
+      if (resultado.transferencias > 0) partes.push(`${resultado.transferencias} transferência(s)`)
+      if (resultado.transacoesImportadas > 0) partes.push(`${resultado.transacoesImportadas} transação(ões) importada(s)`)
+      if (resultado.metasVinculadas > 0) partes.push(`${resultado.metasVinculadas} meta(s) vinculada(s)`)
+      showMsg(
+        `Não é possível excluir — encontramos ${partes.join(', ')}. A conta foi inativada em vez disso, para preservar o histórico.`,
+        false,
+        7000,
+      )
     } catch (e: unknown) {
-      showMsg(e instanceof Error ? e.message : 'Erro ao inativar.', false)
+      showMsg(e instanceof Error ? e.message : 'Erro ao excluir.', false)
     }
   }
 
@@ -229,7 +244,7 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
                 <div className="cb-conta-saldo val-green">{fmtBRL(c.saldoAtual)}</div>
                 <div className="cb-conta-acoes">
                   <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
-                  <button className="cb-btn-inativar" onClick={() => handleInativar(c.id)}>Inativar</button>
+                  <button className="cb-btn-inativar" onClick={() => handleExcluir(c.id)}>Excluir</button>
                 </div>
               </div>
             )}

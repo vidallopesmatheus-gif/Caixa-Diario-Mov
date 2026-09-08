@@ -37,3 +37,31 @@ export async function obterProjecao(
   )
   return res.dados
 }
+
+export interface TrajetoriaPonto {
+  mes: string // "yyyy-MM"
+  saldo: number
+}
+
+export interface Trajetoria {
+  historico: TrajetoriaPonto[]
+  projetado: TrajetoriaPonto[]
+  mesesHistoricoDisponiveis: number
+  saldoAtual: number
+  variacaoRealizada: number
+  variacaoProjetada: number
+}
+
+export async function obterTrajetoria(
+  clienteId: string,
+  mesesPassado = 6,
+  mesesFuturo = 6,
+  contaBancariaId?: string,
+): Promise<Trajetoria> {
+  const params = new URLSearchParams({ mesesPassado: String(mesesPassado), mesesFuturo: String(mesesFuturo) })
+  if (contaBancariaId) params.set('contaBancariaId', contaBancariaId)
+  const res = await apiFetch<ApiResponse<Trajetoria>>(
+    `/api/projecao/${clienteId}/trajetoria?${params}`,
+  )
+  return res.dados
+}
