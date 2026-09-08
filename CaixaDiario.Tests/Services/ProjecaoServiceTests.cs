@@ -175,4 +175,108 @@ public class ProjecaoServiceTests
 
         Assert.All(resultado.Dias, d => Assert.Equal(0m, d.TotalSaidas));
     }
+
+    // ── CalcularTrajetoria: histórico realizado + projeção na mesma linha do tempo ──────────────
+
+    [Fact]
+    public void CalcularTrajetoria_SemFiltroDeConta_ConsolidaSaldoDeTodasAsContasPorMes()
+    {
+        var contaA = Guid.NewGuid();
+        var contaB = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(contaA, Hoje.AddMonths(-5), 1000m),
+            CriarRegistro(contaB, Hoje.AddMonths(-5), 500m),
+            CriarRegistro(contaA, Hoje.AddDays(-1), 1200m), // A mais recente
+            CriarRegistro(contaB, Hoje.AddMonths(-3), 600m), // B não mexe mais depois disso — carrega pro resto
+        };
+
+        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, null);
+
+        // Mês corrente: A=1200 (mais recente) + B=600 (carregado do último mês em que teve atividade)
+        var mesAtual = resultado.Historico.Last();
+        Assert.Equal(1800m, mesAtual.Saldo);
+        Assert.Equal(1800m, resultado.SaldoAtual);
+    }
+
+    [Fact]
+    public void CalcularTrajetoria_ComFiltroDeConta_IgnoraSaldoDasOutrasContas()
+    {
+        var contaA = Guid.NewGuid();
+        var contaB = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(contaA, Hoje.AddDays(-1), 1200m),
+            CriarRegistro(contaB, Hoje.AddDays(-1), 999m),
+        };
+
+        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, contaA);
+
+        Assert.Equal(1200m, resultado.SaldoAtual);
+    }
+
+    [Fact]
+    public void CalcularTrajetoria_MenosDeSeisMesesDeHistorico_RetornaSoOsMesesDisponiveis()
+    {
+        var contaA = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(contaA, Hoje.AddMonths(-1), 500m),
+            CriarRegistro(contaA, Hoje.AddDays(-1), 800m),
+        };
+
+        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, contaA);
+
+        // Só 2 meses de dado real (mês passado + mês corrente), mesmo pedindo 6.
+        Assert.Equal(2, resultado.MesesHistoricoDisponiveis);
+        Assert.Equal(2, resultado.Historico.Count);
+    }
+
+    [Fact]
+    public void CalcularTrajetoria_SemNenhumRegistro_HistoricoVazio()
+    {
+        var resultado = _sut.CalcularTrajetoria(new List<RegistroDiario>(), new List<ContaRecorrente>(), 6, 6, null);
+
+        Assert.Equal(0, resultado.MesesHistoricoDisponiveis);
+        Assert.Empty(resultado.Historico);
+    }
+
+    [Fact]
+    public void CalcularTrajetoria_ComRecorrenciaMensal_ProjetaSaldoNoFimDeCadaMes()
+    {
+        var contaA = Guid.NewGuid();
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 1000m);
+        var recorrencia = new ContaRecorrente
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Descricao = "Aluguel", Valor = 200m,
+            Tipo = "Pagar", Ativo = true, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(5), CriadoEm = DateTime.UtcNow,
+        };
+
+        var resultado = _sut.CalcularTrajetoria(new List<RegistroDiario> { registro }, new List<ContaRecorrente> { recorrencia }, 6, 3, null);
+
+        Assert.Equal(3, resultado.Projetado.Count);
+        // Depois de 1 mês, já pagou 1 aluguel; depois de 3 meses, já pagou 3.
+        Assert.True(resultado.Projetado[0].Saldo < 1000m);
+        Assert.True(resultado.Projetado[2].Saldo < resultado.Projetado[0].Saldo);
+    }
+
+    [Fact]
+    public void CalcularTrajetoria_CalculaVariacaoRealizadaEProjetadaParaComparacao()
+    {
+        var contaA = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(contaA, Hoje.AddMonths(-1), 500m),
+            CriarRegistro(contaA, Hoje.AddDays(-1), 1000m),
+        };
+        registros[1].ContasReceber.Add(new ContaProvisionada
+        {
+            Descricao = "Cliente", Valor = 300m, Pago = false, DataVencimento = Hoje.AddDays(10),
+        });
+
+        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 1, contaA);
+
+        Assert.Equal(500m, resultado.VariacaoRealizada); // 1000 (atual) - 500 (mês anterior)
+        Assert.Equal(300m, resultado.VariacaoProjetada); // 1300 (daqui a 1 mês) - 1000 (atual)
+    }
 }

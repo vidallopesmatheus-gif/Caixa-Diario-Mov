@@ -171,4 +171,105 @@ public class ProjecaoService : IProjecaoService
             Dias       = diasCompletos,
         };
     }
+
+    // ── Trajetória: histórico realizado + projeção, na mesma linha do tempo ─────────────────────
+    // Só leitura — reaproveita o mesmo critério de saldo consolidado (soma do último SaldoFinal de
+    // cada conta) já usado acima pro "saldo atual", e a mesma simulação dia-a-dia de pendentes +
+    // recorrências já usada em Calcular — só que amostrada mês a mês em vez de dia a dia.
+    public TrajetoriaDto CalcularTrajetoria(
+        List<RegistroDiario> registros,
+        List<ContaRecorrente> recorrentes,
+        int mesesPassado,
+        int mesesFuturo,
+        Guid? contaBancariaId)
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var filtrarPorConta = contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty;
+
+        var registrosFiltrados = filtrarPorConta
+            ? registros.Where(r => r.ContaBancariaId == contaBancariaId).ToList()
+            : registros;
+
+        decimal SaldoConsolidadoAte(DateOnly ateData)
+        {
+            var relevantes = registrosFiltrados.Where(r => r.Data <= ateData).ToList();
+            if (filtrarPorConta)
+                return relevantes.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0m;
+            return relevantes
+                .Where(r => r.ContaBancariaId.HasValue)
+                .GroupBy(r => r.ContaBancariaId)
+                .Sum(g => g.OrderByDescending(r => r.Data).First().SaldoFinal);
+        }
+
+        var saldoAtual = SaldoConsolidadoAte(hoje);
+
+        // ── Histórico: quantos meses de dado real existem de verdade (pode ser menos que o pedido) ──
+        var primeiraData = registrosFiltrados.Select(r => r.Data).DefaultIfEmpty().Min();
+        int mesesDisponiveis;
+        if (primeiraData == default)
+        {
+            mesesDisponiveis = 0;
+        }
+        else
+        {
+            var mesesDesdeInicio = (hoje.Year - primeiraData.Year) * 12 + hoje.Month - primeiraData.Month + 1;
+            mesesDisponiveis = Math.Clamp(mesesDesdeInicio, 0, mesesPassado);
+        }
+
+        var historico = new List<TrajetoriaPontoDto>();
+        for (int i = mesesDisponiveis - 1; i >= 0; i--)
+        {
+            var mesRef = hoje.AddMonths(-i);
+            // Mês corrente (i == 0): corta em hoje, não no fim do mês (ainda não acabou).
+            var cutoff = i == 0 ? hoje : UltimoDiaDoMes(mesRef);
+            historico.Add(new TrajetoriaPontoDto { Mes = $"{mesRef.Year}-{mesRef.Month:D2}", Saldo = SaldoConsolidadoAte(cutoff) });
+        }
+
+        // ── Projeção: mesma simulação de pendentes/recorrências de Calcular, amostrada mês a mês ──
+        var receberPendentes = registrosFiltrados.SelectMany(r => r.ContasReceber)
+            .Where(c => !c.Pago && c.DataVencimento.HasValue && c.DataVencimento.Value > hoje).ToList();
+        var pagarPendentes = registrosFiltrados.SelectMany(r => r.ContasPagar)
+            .Where(c => !c.Pago && c.DataVencimento.HasValue && c.DataVencimento.Value > hoje).ToList();
+        var recorrentesReceber = recorrentes.Where(r => r.Tipo == "Receber" && r.Ativo).ToList();
+        var recorrentesPagar = recorrentes.Where(r => r.Tipo == "Pagar" && r.Ativo).ToList();
+        var jaMaterializados = registrosFiltrados
+            .SelectMany(r => r.ContasReceber.Concat(r.ContasPagar))
+            .Where(c => c.RecorrenciaId.HasValue && c.DataVencimento.HasValue && c.DataVencimento.Value > hoje)
+            .Select(c => (c.RecorrenciaId!.Value, c.DataVencimento!.Value))
+            .ToHashSet();
+
+        var projetado = new List<TrajetoriaPontoDto>();
+        var saldoCorrendo = saldoAtual;
+        var diasTotais = hoje.AddMonths(mesesFuturo).DayNumber - hoje.DayNumber;
+        var proximoMarco = 1;
+        for (int d = 1; d <= diasTotais && proximoMarco <= mesesFuturo; d++)
+        {
+            var dia = hoje.AddDays(d);
+            var totalEntradas = receberPendentes.Where(c => c.DataVencimento == dia).Sum(c => c.Valor)
+                + recorrentesReceber.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia))).Sum(r => r.Valor);
+            var totalSaidas = pagarPendentes.Where(c => c.DataVencimento == dia).Sum(c => c.Valor)
+                + recorrentesPagar.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia))).Sum(r => r.Valor);
+            saldoCorrendo += totalEntradas - totalSaidas;
+
+            var marco = hoje.AddMonths(proximoMarco);
+            if (dia == marco)
+            {
+                projetado.Add(new TrajetoriaPontoDto { Mes = $"{marco.Year}-{marco.Month:D2}", Saldo = saldoCorrendo });
+                proximoMarco++;
+            }
+        }
+
+        return new TrajetoriaDto
+        {
+            Historico = historico,
+            Projetado = projetado,
+            MesesHistoricoDisponiveis = mesesDisponiveis,
+            SaldoAtual = saldoAtual,
+            VariacaoRealizada = historico.Count > 0 ? saldoAtual - historico[0].Saldo : 0m,
+            VariacaoProjetada = projetado.Count > 0 ? projetado[^1].Saldo - saldoAtual : 0m,
+        };
+    }
+
+    private static DateOnly UltimoDiaDoMes(DateOnly qualquerDiaDoMes) =>
+        new(qualquerDiaDoMes.Year, qualquerDiaDoMes.Month, DateTime.DaysInMonth(qualquerDiaDoMes.Year, qualquerDiaDoMes.Month));
 }

@@ -91,4 +91,45 @@ public class ProjecaoControllerTests
 
         Assert.Equal(403, ex.StatusCode);
     }
+
+    [Fact]
+    public async Task ObterTrajetoria_Admin_RetornaOk()
+    {
+        var clienteId = Guid.NewGuid();
+        ConfigurarRepositorios(clienteId);
+        _projecaoMock.Setup(s => s.CalcularTrajetoria(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<ContaRecorrente>>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>()))
+            .Returns(new TrajetoriaDto());
+
+        var result = await CriarSut(Guid.NewGuid(), "admin").ObterTrajetoria(clienteId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.IsType<ApiResponse<TrajetoriaDto>>(ok.Value);
+    }
+
+    [Theory]
+    [InlineData(0, 0, 1, 1)]
+    [InlineData(30, 30, 12, 12)]
+    public async Task ObterTrajetoria_ComMesesForaDoIntervalo_ClampaEntre1E12(int mesesPassado, int mesesFuturo, int passadoEsperado, int futuroEsperado)
+    {
+        var clienteId = Guid.NewGuid();
+        ConfigurarRepositorios(clienteId);
+        (int Passado, int Futuro)? recebido = null;
+        _projecaoMock.Setup(s => s.CalcularTrajetoria(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<ContaRecorrente>>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>()))
+            .Callback<List<RegistroDiario>, List<ContaRecorrente>, int, int, Guid?>((_, _, p, f, _) => recebido = (p, f))
+            .Returns(new TrajetoriaDto());
+
+        await CriarSut(Guid.NewGuid(), "admin").ObterTrajetoria(clienteId, mesesPassado, mesesFuturo);
+
+        Assert.Equal((passadoEsperado, futuroEsperado), recebido);
+    }
+
+    [Fact]
+    public async Task ObterTrajetoria_ClienteAcessandoOutro_LancaAcessoNegado()
+    {
+        var sut = CriarSut(Guid.NewGuid(), "cliente");
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => sut.ObterTrajetoria(Guid.NewGuid()));
+
+        Assert.Equal(403, ex.StatusCode);
+    }
 }

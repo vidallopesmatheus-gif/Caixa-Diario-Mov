@@ -49,4 +49,24 @@ public class ProjecaoController : ControllerBase
         var resultado = _projecaoService.Calcular(registros, recorrentes, dias, contaBancariaId);
         return Ok(new ApiResponse<ProjecaoDto> { Dados = resultado });
     }
+
+    [HttpGet("{clienteId:guid}/trajetoria")]
+    public async Task<IActionResult> ObterTrajetoria(
+        Guid clienteId,
+        [FromQuery] int mesesPassado = 6,
+        [FromQuery] int mesesFuturo = 6,
+        [FromQuery] Guid? contaBancariaId = null)
+    {
+        if (ObterPerfil() == "cliente" && ObterUsuarioId() != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+
+        mesesPassado = Math.Clamp(mesesPassado, 1, 12);
+        mesesFuturo = Math.Clamp(mesesFuturo, 1, 12);
+
+        var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
+        var recorrentes = await _recorrenteRepo.ListarAtivasPorClienteAsync(clienteId);
+
+        var resultado = _projecaoService.CalcularTrajetoria(registros, recorrentes, mesesPassado, mesesFuturo, contaBancariaId);
+        return Ok(new ApiResponse<TrajetoriaDto> { Dados = resultado });
+    }
 }
