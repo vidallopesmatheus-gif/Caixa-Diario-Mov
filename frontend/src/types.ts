@@ -164,6 +164,8 @@ export interface CategoriaAdmin {
   bloco: Bloco
   ordem: number
   ativa: boolean
+  ehEntrada: boolean
+  ehSaida: boolean
 }
 
 /** Grupo — nível entre Bloco (fixo) e Categoria, criado/editado em Configurações > Plano de Contas. */

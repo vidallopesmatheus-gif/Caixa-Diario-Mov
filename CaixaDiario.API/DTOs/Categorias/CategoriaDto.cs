@@ -10,4 +10,6 @@ public class CategoriaDto
     public string Bloco { get; set; } = string.Empty;
     public int Ordem { get; set; }
     public bool Ativa { get; set; }
+    public bool EhEntrada { get; set; }
+    public bool EhSaida { get; set; }
 }

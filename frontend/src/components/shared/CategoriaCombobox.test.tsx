@@ -16,7 +16,7 @@ describe('CategoriaCombobox — criação de categoria nova', () => {
 
   it('permite trocar o grupo no select antes de criar (regressão: mousedown no popover travava o select)', async () => {
     const nova: CategoriaAdmin = {
-      id: '1', nome: 'Frete e entrega', tipo: 'CustoFixo', grupoId: 'g-marketing', grupoNome: 'Despesas com Marketing', bloco: 'DESPESAS OPERACIONAIS', ordem: 0, ativa: true,
+      id: '1', nome: 'Frete e entrega', tipo: 'CustoFixo', grupoId: 'g-marketing', grupoNome: 'Despesas com Marketing', bloco: 'DESPESAS OPERACIONAIS', ordem: 0, ativa: true, ehEntrada: false, ehSaida: true,
     }
     vi.spyOn(categoriasApi, 'listarGrupos').mockResolvedValue([grupoVendas, grupoOcupacao, grupoMarketing])
     const criarSpy = vi.spyOn(categoriasApi, 'criarCategoria').mockResolvedValue(nova)

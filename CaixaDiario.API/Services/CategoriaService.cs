@@ -21,6 +21,11 @@ public class CategoriaService : ICategoriaService
     // Blocos.TipoPadrao, usado no cálculo do DRE). Na prática devolução/estorno pode ser um
     // reembolso que sai da conta (saída) ou um valor que volta pra conta (entrada) — por isso, tal
     // como Investimento/Financiamento, uma categoria desse bloco entra nos dois lados do combobox.
+    // EhEntrada/EhSaida são a única fonte dessa regra — ListarAgrupadasAsync e MapToDto usam os
+    // dois, pra não duplicar o cálculo de novo (foi exatamente essa duplicação, entre backend e
+    // frontend, que causou o bug de "Devoluções" sumindo do combobox de entradas).
+    private static bool EhEntrada(Categoria c) => TiposDeEntrada.Contains(c.Tipo) || c.Grupo.Bloco == Blocos.DeducoesDaReceita;
+    private static bool EhSaida(Categoria c) => TiposDeSaida.Contains(c.Tipo);
 
     private readonly ICategoriaRepository _repo;
     private readonly IGrupoRepository _grupoRepo;
@@ -36,10 +41,8 @@ public class CategoriaService : ICategoriaService
         var ativas = await _repo.ListarAtivasAsync();
         return new CategoriasAgrupadasDto
         {
-            Entradas = ativas
-                .Where(c => TiposDeEntrada.Contains(c.Tipo) || c.Grupo.Bloco == Blocos.DeducoesDaReceita)
-                .Select(MapToItemDto).ToList(),
-            Saidas = ativas.Where(c => TiposDeSaida.Contains(c.Tipo)).Select(MapToItemDto).ToList(),
+            Entradas = ativas.Where(EhEntrada).Select(MapToItemDto).ToList(),
+            Saidas = ativas.Where(EhSaida).Select(MapToItemDto).ToList(),
         };
     }
 
@@ -152,5 +155,7 @@ public class CategoriaService : ICategoriaService
         Bloco = c.Grupo.Bloco,
         Ordem = c.Ordem,
         Ativa = c.Ativa,
+        EhEntrada = EhEntrada(c),
+        EhSaida = EhSaida(c),
     };
 }

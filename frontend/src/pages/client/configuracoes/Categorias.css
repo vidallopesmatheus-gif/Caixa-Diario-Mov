@@ -89,36 +89,19 @@
 
 .cat-grupo-seta { font-size: 11px; width: 10px; }
 
-.cat-novo-grupo-form {
-  display: flex;
-  gap: 8px;
+/* ── Indicador de entrada/saída (seta colorida, 1 caractere) ─────────────── */
+.cat-direcao {
+  display: inline-flex;
   align-items: center;
-  margin-top: 10px;
-  flex-wrap: wrap;
-}
-
-.cat-novo-grupo-form input {
-  flex: 1;
-  min-width: 180px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--bd);
-  background: var(--bg);
-  color: var(--tx1);
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
   font-size: 13px;
+  font-weight: 800;
 }
-
-.cat-btn-novo-grupo {
-  margin-top: 10px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px dashed var(--bd);
-  background: none;
-  color: var(--tx3);
-  cursor: pointer;
-  font-size: 12px;
-}
-.cat-btn-novo-grupo:hover { color: var(--tx1); border-color: var(--tx3); }
+.cat-direcao-entrada { color: var(--success); }
+.cat-direcao-saida { color: var(--danger); }
+.cat-direcao-ambos { color: var(--accent); }
 
 /* ── Lista compacta: uma linha por categoria ──────────────────────────── */
 .cat-lista-compacta { display: flex; flex-direction: column; }

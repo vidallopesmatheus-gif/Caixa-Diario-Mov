@@ -123,4 +123,39 @@ public class CategoriaServiceTests
         Assert.Contains(agrupadas.Saidas, c => c.Nome == "Devoluções");
         Assert.Contains(agrupadas.Saidas, c => c.Nome == "Aluguel");
     }
+
+    [Fact]
+    public async Task ListarParaGerenciarAsync_PreencheEhEntradaEEhSaidaPorCategoria()
+    {
+        var grupoReceita = Grupo("Vendas e Serviços", Blocos.ReceitasOperacionais);
+        var grupoDevolucao = Grupo("Devolução e Estorno", Blocos.DeducoesDaReceita);
+        var grupoDespesa = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
+        var grupoInvest = Grupo("Imobilizado", Blocos.AtividadesDeInvestimento);
+        var todas = new List<Categoria>
+        {
+            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", Grupo = grupoReceita, Ativa = true },
+            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", Grupo = grupoDevolucao, Ativa = true },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true },
+            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", Grupo = grupoInvest, Ativa = true },
+        };
+        _repoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(todas);
+
+        var resultado = await _sut.ListarParaGerenciarAsync();
+
+        var vendas = resultado.Single(c => c.Nome == "Vendas");
+        Assert.True(vendas.EhEntrada);
+        Assert.False(vendas.EhSaida);
+
+        var devolucoes = resultado.Single(c => c.Nome == "Devoluções");
+        Assert.True(devolucoes.EhEntrada);
+        Assert.True(devolucoes.EhSaida);
+
+        var aluguel = resultado.Single(c => c.Nome == "Aluguel");
+        Assert.False(aluguel.EhEntrada);
+        Assert.True(aluguel.EhSaida);
+
+        var equipamentos = resultado.Single(c => c.Nome == "Equipamentos");
+        Assert.True(equipamentos.EhEntrada);
+        Assert.True(equipamentos.EhSaida);
+    }
 }
