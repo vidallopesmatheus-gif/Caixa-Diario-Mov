@@ -53,6 +53,21 @@ public class ContaRecorrenteServiceTests
     }
 
     [Fact]
+    public async Task Criar_QuantidadeParcelasAcimaDoTeto_LancaDadosInvalidos()
+    {
+        var dto = new CriarContaRecorrenteDto
+        {
+            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 600m,
+            Tipo = "Receber", DataInicio = new DateOnly(2026, 1, 1),
+            QuantidadeParcelas = 600,
+        };
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            CriarSut().CriarAsync(dto, dto.ClienteId, "cliente"));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
     public async Task Criar_Valido_RetornaDto()
     {
         var clienteId = Guid.NewGuid();

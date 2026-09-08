@@ -321,16 +321,21 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         <h4>＋ Nova Conta</h4>
 
         <div className="conta-form-row">
-          <select value={tipo} onChange={e => setTipo(e.target.value as 'receber' | 'pagar')}
-            style={{ maxWidth: 140 }}>
-            <option value="receber">A Receber</option>
-            <option value="pagar">A Pagar</option>
-          </select>
-          <input placeholder="Descrição" value={desc} onChange={e => setDesc(e.target.value)} style={{ flex: 2 }} />
+          <div className="conta-field" style={{ flex: '0 1 130px', minWidth: 110 }}>
+            <label className="conta-field-label">Tipo</label>
+            <select value={tipo} onChange={e => setTipo(e.target.value as 'receber' | 'pagar')} style={{ width: '100%' }}>
+              <option value="receber">A Receber</option>
+              <option value="pagar">A Pagar</option>
+            </select>
+          </div>
+          <div className="conta-field" style={{ flex: 1.3, minWidth: 160 }}>
+            <label className="conta-field-label">Descrição</label>
+            <input placeholder="Ex: Aluguel, Cliente X..." value={desc} onChange={e => setDesc(e.target.value)} style={{ width: '100%' }} />
+          </div>
           {!isRecorrente && (
-            <div style={{ minWidth: 220, flex: 1.1 }}>
+            <div className="conta-field" style={{ minWidth: 200, flex: 1.2 }}>
               <label className="conta-field-label">Conta bancária</label>
-              <select value={contaSelecionadaId} onChange={e => setContaSelecionadaId(e.target.value)} style={{ width: '100%', maxWidth: 220 }}>
+              <select value={contaSelecionadaId} onChange={e => setContaSelecionadaId(e.target.value)} style={{ width: '100%' }}>
                 {contasBancarias.filter(c => c.ativa).map(c => (
                   <option key={c.id} value={c.id}>{c.nome}</option>
                 ))}
@@ -340,30 +345,32 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
               )}
             </div>
           )}
-          <div className="val-input-wrap" style={{ flex: 1, minWidth: 120 }}>
-            <span className="val-prefix">R$</span>
-            <input
-              type="text" inputMode="decimal" placeholder="0,00"
-              value={valorDisplay}
-              onChange={e => {
-                const raw = e.target.value.replace(/[^\d,]/g, '')
-                setValorDisplay(raw)
-                setValor(parseBRL(raw))
-              }}
-              onBlur={() => setValorDisplay(valor ? fmtNum(valor) : '')}
-            />
+          <div className="conta-field" style={{ flex: 1, minWidth: 140 }}>
+            <label className="conta-field-label">Valor</label>
+            <div className="val-input-wrap">
+              <span className="val-prefix">R$</span>
+              <input
+                type="text" inputMode="decimal" placeholder="0,00"
+                value={valorDisplay}
+                onChange={e => {
+                  const raw = e.target.value.replace(/[^\d,]/g, '')
+                  setValorDisplay(raw)
+                  setValor(parseBRL(raw))
+                }}
+                onBlur={() => setValorDisplay(valor ? fmtNum(valor) : '')}
+              />
+            </div>
           </div>
           {!isRecorrente && (
-            <div style={{ flex: 1, minWidth: 140 }}>
-              <input type="date" value={venc} onChange={e => setVenc(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14 }} />
-              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <div className="conta-field" style={{ flex: 1.1, minWidth: 150 }}>
+              <label className="conta-field-label">Vencimento</label>
+              <input type="date" value={venc} onChange={e => setVenc(e.target.value)} style={{ width: '100%' }} />
+              <div className="conta-date-shortcuts">
                 {[{ label: 'Hoje', dias: 0 }, { label: '+7d', dias: 7 }, { label: '+30d', dias: 30 }].map(a => (
                   <button
                     key={a.label}
                     type="button"
                     onClick={() => setVenc(addDays(todayISO(), a.dias))}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
                   >
                     {a.label}
                   </button>
@@ -417,10 +424,11 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           </div>
         )}
 
-        <button className="btn-add-conta" onClick={handleAdicionar} disabled={saving || !podeAdicionar}
-          style={{ marginTop: 12 }}>
-          {saving ? 'Salvando...' : isRecorrente ? '＋ Adicionar Recorrente' : '＋ Adicionar'}
-        </button>
+        <div className="conta-form-footer">
+          <button className="btn-add-conta" onClick={handleAdicionar} disabled={saving || !podeAdicionar}>
+            {saving ? 'Salvando...' : isRecorrente ? '＋ Adicionar Recorrente' : '＋ Adicionar'}
+          </button>
+        </div>
         {msg && <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: msgOk ? '#34c759' : '#ff6b6b' }}>{msg}</div>}
       </div>
 
