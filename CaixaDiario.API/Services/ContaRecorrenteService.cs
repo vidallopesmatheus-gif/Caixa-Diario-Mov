@@ -42,6 +42,10 @@ public class ContaRecorrenteService : IContaRecorrenteService
         if (dto.QuantidadeParcelas.HasValue && dto.QuantidadeParcelas.Value < 1)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Quantidade de parcelas deve ser maior que zero.", "quantidadeParcelas");
 
+        // Teto de segurança: 360 (30 anos mensais) evita digitar por engano um valor em R$ neste campo.
+        if (dto.QuantidadeParcelas.HasValue && dto.QuantidadeParcelas.Value > 360)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Quantidade de parcelas não pode ser maior que 360.", "quantidadeParcelas");
+
         var conta = new ContaRecorrente
         {
             Id = Guid.NewGuid(),
