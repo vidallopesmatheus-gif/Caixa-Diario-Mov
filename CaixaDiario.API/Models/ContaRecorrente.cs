@@ -17,6 +17,10 @@ public class ContaRecorrente
     public bool Ativo { get; set; } = true;
     public DateTime CriadoEm { get; set; }
     public DateTime? AtualizadoEm { get; set; }
+    // Opcional — sem ela, a conta bancária só é definida na hora da baixa (comportamento
+    // histórico). Quando definida, é propagada pras ocorrências materializadas.
+    public Guid? ContaBancariaId { get; set; }
 
     public Usuario Cliente { get; set; } = null!;
+    public ContaBancaria? ContaBancaria { get; set; }
 }

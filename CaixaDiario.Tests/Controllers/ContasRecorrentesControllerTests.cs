@@ -81,11 +81,24 @@ public class ContasRecorrentesControllerTests
     {
         var clienteId = Guid.NewGuid();
         var id = Guid.NewGuid();
-        _serviceMock.Setup(s => s.DesativarAsync(clienteId, id, _usuarioId, "admin")).Returns(Task.CompletedTask);
+        _serviceMock.Setup(s => s.DesativarAsync(clienteId, id, false, _usuarioId, "admin")).Returns(Task.CompletedTask);
 
         var result = await _sut.Desativar(clienteId, id);
 
         Assert.IsType<OkObjectResult>(result);
-        _serviceMock.Verify(s => s.DesativarAsync(clienteId, id, _usuarioId, "admin"), Times.Once);
+        _serviceMock.Verify(s => s.DesativarAsync(clienteId, id, false, _usuarioId, "admin"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Desativar_ComRemoverPendentes_RepassaFlagPraOServico()
+    {
+        var clienteId = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        _serviceMock.Setup(s => s.DesativarAsync(clienteId, id, true, _usuarioId, "admin")).Returns(Task.CompletedTask);
+
+        var result = await _sut.Desativar(clienteId, id, removerPendentes: true);
+
+        Assert.IsType<OkObjectResult>(result);
+        _serviceMock.Verify(s => s.DesativarAsync(clienteId, id, true, _usuarioId, "admin"), Times.Once);
     }
 }

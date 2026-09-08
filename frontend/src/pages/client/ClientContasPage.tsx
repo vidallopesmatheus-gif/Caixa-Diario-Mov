@@ -2,11 +2,14 @@ import { useState, useMemo, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
-import { listarContasRecorrentes, criarContaRecorrente, desativarContaRecorrente } from '../../api/contasRecorrentes'
+import {
+  listarContasRecorrentes, criarContaRecorrente, atualizarContaRecorrente, desativarContaRecorrente,
+} from '../../api/contasRecorrentes'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import Modal from '../../components/shared/Modal'
 import type { ContaProvisionada, ContaRecorrente, ContaBancaria } from '../../types'
 import './ClientContas.css'
+import './ClientContasBancarias.css'
 
 interface Props { clienteIdOverride?: string }
 
@@ -38,7 +41,7 @@ function parseBRL(s: string): number {
 export default function ClientContasPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
-  const { registros, salvar, loading } = useRegistros(clienteId)
+  const { registros, salvar, recarregar, loading } = useRegistros(clienteId)
 
   // Formulário unificado
   const [tipo, setTipo] = useState<'receber' | 'pagar'>('receber')
@@ -70,6 +73,42 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [baixaView, setBaixaView] = useState<ContaView | null>(null)
   const [baixaContaId, setBaixaContaId] = useState('')
   const [confirmandoBaixa, setConfirmandoBaixa] = useState(false)
+
+  // ── Estornar baixa: sempre pede confirmação e avisa o impacto no saldo. Se `paraEditar` for
+  // true, ao confirmar a conta some da baixa e o formulário de edição abre em seguida.
+  const [estornoView, setEstornoView] = useState<ContaView | null>(null)
+  const [estornoParaEditar, setEstornoParaEditar] = useState(false)
+  const [estornando, setEstornando] = useState(false)
+
+  // ── Editar conta pendente (a pagar/receber) ──────────────────────────────────────────────
+  const [editView, setEditView] = useState<ContaView | null>(null)
+  const [editDesc, setEditDesc] = useState('')
+  const [editValorDisplay, setEditValorDisplay] = useState('')
+  const [editValor, setEditValor] = useState(0)
+  const [editVenc, setEditVenc] = useState('')
+  const [editContaId, setEditContaId] = useState('')
+  const [salvandoEdit, setSalvandoEdit] = useState(false)
+
+  // ── Excluir conta pendente ────────────────────────────────────────────────────────────────
+  const [excluirView, setExcluirView] = useState<ContaView | null>(null)
+  const [excluindo, setExcluindo] = useState(false)
+
+  // ── Editar recorrência ────────────────────────────────────────────────────────────────────
+  const [editRec, setEditRec] = useState<ContaRecorrente | null>(null)
+  const [editRecValorDisplay, setEditRecValorDisplay] = useState('')
+  const [editRecValor, setEditRecValor] = useState(0)
+  const [editRecPeriodicidade, setEditRecPeriodicidade] = useState('Mensal')
+  const [editRecInicio, setEditRecInicio] = useState('')
+  const [editRecFim, setEditRecFim] = useState('')
+  const [editRecContaId, setEditRecContaId] = useState('')
+  // '' força o usuário a escolher — nunca decide silenciosamente o que acontece com as já geradas.
+  const [editRecAlcance, setEditRecAlcance] = useState<'' | 'futuras' | 'todas'>('')
+  const [salvandoEditRec, setSalvandoEditRec] = useState(false)
+
+  // ── Excluir recorrência ───────────────────────────────────────────────────────────────────
+  const [excluirRec, setExcluirRec] = useState<ContaRecorrente | null>(null)
+  const [excluirRecPendentes, setExcluirRecPendentes] = useState<'' | 'manter' | 'remover'>('')
+  const [excluindoRec, setExcluindoRec] = useState(false)
 
   useEffect(() => {
     if (!clienteId) return
@@ -115,6 +154,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           dataInicio: recInicio, dataFim: recFim || undefined,
           periodicidade: recPeriodicidade,
           quantidadeParcelas: recParcelas ? Number(recParcelas) : undefined,
+          contaBancariaId: contaSelecionadaId || undefined,
         })
         setRecorrentes(prev => [...prev, nova])
         setMsg('Conta recorrente adicionada!')
@@ -159,12 +199,6 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     }
   }
 
-  async function handleDesativar(id: string) {
-    if (!clienteId) return
-    await desativarContaRecorrente(clienteId, id)
-    setRecorrentes(prev => prev.filter(r => r.id !== id))
-  }
-
   const todasContas = useMemo<ContaView[]>(() => {
     const acc: ContaView[] = []
     for (const reg of registros) {
@@ -189,21 +223,25 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       ?? registros.find(r => r.data === view.registroData)
   }
 
-  async function desfazerBaixa(view: ContaView) {
+  async function persistirListas(view: ContaView, transformar: (contas: ContaProvisionada[]) => ContaProvisionada[]) {
     if (!clienteId) return
     const reg = origemRegistro(view)
     if (!reg) return
     await salvar({
       clienteId, contaBancariaId: reg.contaBancariaId, data: reg.data, saldoInicio: reg.saldoInicio,
       entradas: reg.entradas, saidas: reg.saidas,
-      contasAReceber: reg.contasAReceber.map((c, i) => view.tipo === 'receber' && i === view.index ? { ...c, pago: false, lancamentoVinculadoId: undefined } : c),
-      contasAPagar: reg.contasAPagar.map((c, i) => view.tipo === 'pagar' && i === view.index ? { ...c, pago: false, lancamentoVinculadoId: undefined } : c),
+      contasAReceber: view.tipo === 'receber' ? transformar(reg.contasAReceber) : reg.contasAReceber,
+      contasAPagar: view.tipo === 'pagar' ? transformar(reg.contasAPagar) : reg.contasAPagar,
       saldoConfirmado: reg.saldoConfirmado,
     })
   }
 
+  async function desfazerBaixa(view: ContaView) {
+    await persistirListas(view, contas => contas.map((c, i) =>
+      i === view.index ? { ...c, pago: false, dataBaixa: undefined, lancamentoVinculadoId: undefined } : c))
+  }
+
   function togglePago(view: ContaView) {
-    if (view.conta.pago) { desfazerBaixa(view); return }
     setBaixaView(view)
     setBaixaContaId(view.conta.contaBancariaId || contaSelecionadaId)
     setModalBaixa(true)
@@ -222,20 +260,11 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   async function confirmarBaixa(vincular: boolean) {
     if (!baixaView || !clienteId) return
-    const reg = origemRegistro(baixaView)
-    if (!reg) return
     setConfirmandoBaixa(true)
     try {
       const lancamentoVinculadoId = vincular && lancamentoDuplicado?.id ? lancamentoDuplicado.id : undefined
-      await salvar({
-        clienteId, contaBancariaId: reg.contaBancariaId, data: reg.data, saldoInicio: reg.saldoInicio,
-        entradas: reg.entradas, saidas: reg.saidas,
-        contasAReceber: reg.contasAReceber.map((c, i) => baixaView.tipo === 'receber' && i === baixaView.index
-          ? { ...c, pago: true, contaBancariaId: baixaContaId, lancamentoVinculadoId } : c),
-        contasAPagar: reg.contasAPagar.map((c, i) => baixaView.tipo === 'pagar' && i === baixaView.index
-          ? { ...c, pago: true, contaBancariaId: baixaContaId, lancamentoVinculadoId } : c),
-        saldoConfirmado: reg.saldoConfirmado,
-      })
+      await persistirListas(baixaView, contas => contas.map((c, i) =>
+        i === baixaView.index ? { ...c, pago: true, contaBancariaId: baixaContaId, lancamentoVinculadoId } : c))
       setMsg(vincular ? 'Baixa vinculada ao lançamento existente.' : 'Baixa confirmada.')
       setMsgOk(true)
       setModalBaixa(false)
@@ -245,6 +274,136 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       setMsgOk(false)
     } finally {
       setConfirmandoBaixa(false)
+    }
+  }
+
+  // ── Estornar baixa (sempre com confirmação explícita do impacto no saldo) ──────────────────
+  function abrirEstorno(view: ContaView, paraEditar: boolean) {
+    setEstornoView(view)
+    setEstornoParaEditar(paraEditar)
+  }
+
+  function abrirEdicaoConta(view: ContaView) {
+    setEditView(view)
+    setEditDesc(view.conta.descricao)
+    setEditValor(view.conta.valor)
+    setEditValorDisplay(fmtNum(view.conta.valor))
+    setEditVenc(view.conta.dataVencimento ?? '')
+    setEditContaId(view.conta.contaBancariaId ?? contaSelecionadaId)
+  }
+
+  async function confirmarEstorno() {
+    if (!estornoView) return
+    setEstornando(true)
+    try {
+      await desfazerBaixa(estornoView)
+      if (estornoParaEditar) abrirEdicaoConta({ ...estornoView, conta: { ...estornoView.conta, pago: false } })
+      setMsg('Baixa estornada — conta voltou a ficar pendente.')
+      setMsgOk(true)
+      setEstornoView(null)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
+    } finally {
+      setEstornando(false)
+    }
+  }
+
+  // ── Editar conta pendente ────────────────────────────────────────────────────────────────
+  async function confirmarEdicaoConta() {
+    if (!editView || !editDesc.trim() || !editValor) return
+    setSalvandoEdit(true)
+    try {
+      await persistirListas(editView, contas => contas.map((c, i) => i === editView.index
+        ? { ...c, descricao: editDesc.trim(), valor: editValor, dataVencimento: editVenc || undefined, contaBancariaId: editContaId || undefined }
+        : c))
+      setMsg('Conta atualizada!')
+      setMsgOk(true)
+      setEditView(null)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
+    } finally {
+      setSalvandoEdit(false)
+    }
+  }
+
+  // ── Excluir conta pendente ───────────────────────────────────────────────────────────────
+  async function confirmarExclusaoConta() {
+    if (!excluirView) return
+    setExcluindo(true)
+    try {
+      await persistirListas(excluirView, contas => contas.filter((_, i) => i !== excluirView.index))
+      setMsg('Conta excluída.')
+      setMsgOk(true)
+      setExcluirView(null)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
+    } finally {
+      setExcluindo(false)
+    }
+  }
+
+  // ── Editar recorrência ───────────────────────────────────────────────────────────────────
+  function abrirEdicaoRecorrencia(r: ContaRecorrente) {
+    setEditRec(r)
+    setEditRecValor(r.valor)
+    setEditRecValorDisplay(fmtNum(r.valor))
+    setEditRecPeriodicidade(r.periodicidade)
+    setEditRecInicio(r.dataInicio)
+    setEditRecFim(r.dataFim ?? '')
+    setEditRecContaId(r.contaBancariaId ?? '')
+    setEditRecAlcance('')
+  }
+
+  async function confirmarEdicaoRecorrencia() {
+    if (!editRec || !clienteId || !editRecAlcance || !editRecValor) return
+    setSalvandoEditRec(true)
+    try {
+      const atualizada = await atualizarContaRecorrente(clienteId, editRec.id, {
+        valor: editRecValor,
+        periodicidade: editRecPeriodicidade,
+        dataInicio: editRecInicio,
+        dataFim: editRecFim || undefined,
+        contaBancariaId: editRecContaId || undefined,
+        aplicarAsPendentes: editRecAlcance === 'todas',
+      })
+      setRecorrentes(prev => prev.map(r => r.id === atualizada.id ? atualizada : r))
+      if (editRecAlcance === 'todas') await recarregar()
+      setMsg('Recorrência atualizada!')
+      setMsgOk(true)
+      setEditRec(null)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
+    } finally {
+      setSalvandoEditRec(false)
+    }
+  }
+
+  // ── Excluir recorrência ──────────────────────────────────────────────────────────────────
+  function abrirExclusaoRecorrencia(r: ContaRecorrente) {
+    setExcluirRec(r)
+    setExcluirRecPendentes('')
+  }
+
+  async function confirmarExclusaoRecorrencia() {
+    if (!excluirRec || !clienteId || !excluirRecPendentes) return
+    setExcluindoRec(true)
+    try {
+      const removerPendentes = excluirRecPendentes === 'remover'
+      await desativarContaRecorrente(clienteId, excluirRec.id, removerPendentes)
+      setRecorrentes(prev => prev.filter(r => r.id !== excluirRec.id))
+      if (removerPendentes) await recarregar()
+      setMsg('Recorrência excluída.')
+      setMsgOk(true)
+      setExcluirRec(null)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
+    } finally {
+      setExcluindoRec(false)
     }
   }
 
@@ -283,6 +442,16 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   const contaCaixaPadrao = contasBancarias.find(c => c.tipo === 'Caixa') ?? contasBancarias[0]
 
+  // Estimativa do impacto no saldo ao estornar — baixa vinculada a um lançamento existente nunca
+  // mexeu no saldo (o dinheiro já estava contado por aquele lançamento), então estornar também não mexe.
+  function impactoEstorno(view: ContaView): string {
+    if (view.conta.lancamentoVinculadoId) {
+      return 'Essa baixa está vinculada a um lançamento existente — estornar não muda o saldo, só volta a conta pra pendente e desfaz o vínculo.'
+    }
+    const sinal = view.tipo === 'receber' ? '−' : '+'
+    return `O saldo do dia da baixa vai mudar em ${sinal}${fmtBRL(view.conta.valor)}.`
+  }
+
   const renderConta = (view: ContaView) => {
     // Contas cadastradas antes de existir esse campo (contaBancariaId nulo) resolvem pra Caixa —
     // nunca aparecem sem conta nenhuma.
@@ -291,7 +460,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     return (
     <div key={`${view.registroData}-${view.tipo}-${view.index}`} className={`conta-item ${view.conta.pago ? 'pago' : ''}`}>
       <button
-        onClick={() => togglePago(view)}
+        onClick={() => view.conta.pago ? abrirEstorno(view, false) : togglePago(view)}
         style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
           background: view.conta.pago ? 'var(--bd)' : view.tipo === 'receber' ? '#34c759' : '#ff3b30',
           color: view.conta.pago ? 'var(--tx3)' : '#fff' }}>
@@ -308,6 +477,20 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         </div>
       </div>
       <div className={`conta-valor ${view.tipo}`}>{fmtBRL(view.conta.valor)}</div>
+      <div className="conta-item-acoes">
+        <button
+          className="cb-btn-editar"
+          onClick={() => view.conta.pago ? abrirEstorno(view, true) : abrirEdicaoConta(view)}
+          title={view.conta.pago ? 'Estornar a baixa e editar' : 'Editar'}
+        >
+          Editar
+        </button>
+        {!view.conta.pago && (
+          <button className="cb-btn-inativar" onClick={() => setExcluirView(view)} title="Excluir">
+            Excluir
+          </button>
+        )}
+      </div>
     </div>
     )
   }
@@ -332,19 +515,19 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
             <label className="conta-field-label">Descrição</label>
             <input placeholder="Ex: Aluguel, Cliente X..." value={desc} onChange={e => setDesc(e.target.value)} style={{ width: '100%' }} />
           </div>
-          {!isRecorrente && (
-            <div className="conta-field" style={{ minWidth: 200, flex: 1.2 }}>
-              <label className="conta-field-label">Conta bancária</label>
-              <select value={contaSelecionadaId} onChange={e => setContaSelecionadaId(e.target.value)} style={{ width: '100%' }}>
-                {contasBancarias.filter(c => c.ativa).map(c => (
-                  <option key={c.id} value={c.id}>{c.nome}</option>
-                ))}
-              </select>
-              {contaSelecionada && (
-                <div className="conta-field-hint">O lançamento será vinculado a {contaSelecionada.nome}.</div>
-              )}
-            </div>
-          )}
+          <div className="conta-field" style={{ minWidth: 200, flex: 1.2 }}>
+            <label className="conta-field-label">Conta bancária</label>
+            <select value={contaSelecionadaId} onChange={e => setContaSelecionadaId(e.target.value)} style={{ width: '100%' }}>
+              {contasBancarias.filter(c => c.ativa).map(c => (
+                <option key={c.id} value={c.id}>{c.nome}</option>
+              ))}
+            </select>
+            {contaSelecionada && (
+              <div className="conta-field-hint">
+                {isRecorrente ? `Conta sugerida na baixa de cada ocorrência: ${contaSelecionada.nome}.` : `O lançamento será vinculado a ${contaSelecionada.nome}.`}
+              </div>
+            )}
+          </div>
           <div className="conta-field" style={{ flex: 1, minWidth: 140 }}>
             <label className="conta-field-label">Valor</label>
             <div className="val-input-wrap">
@@ -524,6 +707,109 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         )}
       </Modal>
 
+      <Modal
+        open={!!estornoView}
+        title="↩ Estornar baixa"
+        onClose={() => setEstornoView(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setEstornoView(null)} disabled={estornando}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarEstorno} disabled={estornando}>
+              {estornando ? 'Estornando...' : 'Estornar'}
+            </button>
+          </>
+        }
+      >
+        {estornoView && (
+          <>
+            <div className="conta-info" style={{ marginBottom: 12 }}>
+              <div className="conta-desc">{estornoView.conta.descricao}</div>
+              <div className="conta-meta">{fmtBRL(estornoView.conta.valor)} · {estornoView.conta.dataBaixa ? `baixa em ${fmtDate(estornoView.conta.dataBaixa)}` : ''}</div>
+            </div>
+            <p style={{ color: 'var(--warning)', fontSize: 13, marginBottom: estornoParaEditar ? 8 : 0 }}>
+              {impactoEstorno(estornoView)}
+            </p>
+            {estornoParaEditar && (
+              <p style={{ color: 'var(--tx3)', fontSize: 13 }}>
+                Depois de estornada, a conta volta pra lista de pendentes e o formulário de edição abre em seguida.
+              </p>
+            )}
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!editView}
+        title="✏️ Editar conta"
+        onClose={() => setEditView(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setEditView(null)} disabled={salvandoEdit}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarEdicaoConta} disabled={salvandoEdit || !editDesc.trim() || !editValor}>
+              {salvandoEdit ? 'Salvando...' : 'Salvar'}
+            </button>
+          </>
+        }
+      >
+        {editView && (
+          <>
+            <div className="inp-group">
+              <label>Descrição</label>
+              <input value={editDesc} onChange={e => setEditDesc(e.target.value)} />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Valor</label>
+              <div className="val-input-wrap">
+                <span className="val-prefix">R$</span>
+                <input
+                  type="text" inputMode="decimal" placeholder="0,00"
+                  value={editValorDisplay}
+                  onChange={e => {
+                    const raw = e.target.value.replace(/[^\d,]/g, '')
+                    setEditValorDisplay(raw)
+                    setEditValor(parseBRL(raw))
+                  }}
+                  onBlur={() => setEditValorDisplay(editValor ? fmtNum(editValor) : '')}
+                />
+              </div>
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Vencimento</label>
+              <input type="date" value={editVenc} onChange={e => setEditVenc(e.target.value)} />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Conta bancária</label>
+              <select value={editContaId} onChange={e => setEditContaId(e.target.value)}>
+                {contasBancarias.filter(c => c.ativa).map(c => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!excluirView}
+        title="Excluir conta"
+        onClose={() => setExcluirView(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setExcluirView(null)} disabled={excluindo}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarExclusaoConta} disabled={excluindo}>
+              {excluindo ? 'Excluindo...' : 'Excluir'}
+            </button>
+          </>
+        }
+      >
+        {excluirView && (
+          <p style={{ color: 'var(--tx3)' }}>
+            Excluir "{excluirView.conta.descricao}" ({fmtBRL(excluirView.conta.valor)})? Essa conta ainda não foi
+            {excluirView.tipo === 'receber' ? ' recebida' : ' paga'} — excluir não afeta o saldo.
+          </p>
+        )}
+      </Modal>
+
       {recorrentes.length > 0 && (
         <div className="contas-section">
           <h3>🔁 Recorrentes Ativas ({recorrentes.length})</h3>
@@ -535,16 +821,137 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
                   {r.tipo} · {fmtBRL(r.valor)} · {r.periodicidade} · desde {fmtDate(r.dataInicio)}
                   {r.dataFim ? ` até ${fmtDate(r.dataFim)}` : ''}
                   {r.quantidadeParcelas ? ` · ${r.quantidadeParcelas}x` : ''}
+                  {r.contaBancariaId ? ` · ${contasBancarias.find(c => c.id === r.contaBancariaId)?.nome ?? 'Conta'}` : ''}
                 </div>
               </div>
-              <button style={{ fontSize: 12, padding: '4px 10px', background: '#ff3b30', border: 'none', borderRadius: 6, color: '#fff', cursor: 'pointer' }}
-                onClick={() => handleDesativar(r.id)}>
-                Desativar
-              </button>
+              <div className="conta-item-acoes">
+                <button className="cb-btn-editar" onClick={() => abrirEdicaoRecorrencia(r)}>Editar</button>
+                <button className="cb-btn-inativar" onClick={() => abrirExclusaoRecorrencia(r)}>Excluir</button>
+              </div>
             </div>
           ))}
         </div>
       )}
+
+      <Modal
+        open={!!editRec}
+        title="✏️ Editar recorrência"
+        onClose={() => setEditRec(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setEditRec(null)} disabled={salvandoEditRec}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarEdicaoRecorrencia} disabled={salvandoEditRec || !editRecAlcance || !editRecValor}>
+              {salvandoEditRec ? 'Salvando...' : 'Salvar'}
+            </button>
+          </>
+        }
+      >
+        {editRec && (
+          <>
+            <div className="conta-info" style={{ marginBottom: 12 }}>
+              <div className="conta-desc">{editRec.descricao}</div>
+            </div>
+            <div className="inp-group">
+              <label>Valor</label>
+              <div className="val-input-wrap">
+                <span className="val-prefix">R$</span>
+                <input
+                  type="text" inputMode="decimal" placeholder="0,00"
+                  value={editRecValorDisplay}
+                  onChange={e => {
+                    const raw = e.target.value.replace(/[^\d,]/g, '')
+                    setEditRecValorDisplay(raw)
+                    setEditRecValor(parseBRL(raw))
+                  }}
+                  onBlur={() => setEditRecValorDisplay(editRecValor ? fmtNum(editRecValor) : '')}
+                />
+              </div>
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Periodicidade</label>
+              <select value={editRecPeriodicidade} onChange={e => setEditRecPeriodicidade(e.target.value)}>
+                <option value="Mensal">Mensal</option>
+                <option value="Semanal">Semanal</option>
+                <option value="Quinzenal">Quinzenal</option>
+                <option value="Trimestral">Trimestral</option>
+                <option value="Semestral">Semestral</option>
+                <option value="Anual">Anual</option>
+              </select>
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Início</label>
+              <input type="date" value={editRecInicio} onChange={e => setEditRecInicio(e.target.value)} />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Fim (opcional)</label>
+              <input type="date" value={editRecFim} onChange={e => setEditRecFim(e.target.value)} />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Conta bancária</label>
+              <select value={editRecContaId} onChange={e => setEditRecContaId(e.target.value)}>
+                <option value="">Sem conta definida (escolhe na baixa)</option>
+                {contasBancarias.filter(c => c.ativa).map(c => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="inp-group" style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--bd)' }}>
+              <label>Aplicar essas mudanças a:</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}>
+                  <input type="radio" name="editRecAlcance" checked={editRecAlcance === 'futuras'}
+                    onChange={() => setEditRecAlcance('futuras')} style={{ marginTop: 2 }} />
+                  <span>Só as próximas ocorrências — as pendentes já geradas mantêm os valores antigos.</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}>
+                  <input type="radio" name="editRecAlcance" checked={editRecAlcance === 'todas'}
+                    onChange={() => setEditRecAlcance('todas')} style={{ marginTop: 2 }} />
+                  <span>Também as pendentes já geradas — atualiza valor/conta bancária nelas. As que já foram pagas nunca mudam.</span>
+                </label>
+              </div>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!excluirRec}
+        title="Excluir recorrência"
+        onClose={() => setExcluirRec(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setExcluirRec(null)} disabled={excluindoRec}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarExclusaoRecorrencia} disabled={excluindoRec || !excluirRecPendentes}>
+              {excluindoRec ? 'Excluindo...' : 'Excluir'}
+            </button>
+          </>
+        }
+      >
+        {excluirRec && (
+          <>
+            <p style={{ color: 'var(--tx3)', marginBottom: 12 }}>
+              Excluir a recorrência "{excluirRec.descricao}"? Ela para de gerar novas ocorrências. Isso nunca afeta
+              ocorrências já pagas — elas continuam no histórico normalmente.
+            </p>
+            <div className="inp-group">
+              <label>O que fazer com as ocorrências pendentes já geradas por ela?</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}>
+                  <input type="radio" name="excluirRecPendentes" checked={excluirRecPendentes === 'manter'}
+                    onChange={() => setExcluirRecPendentes('manter')} style={{ marginTop: 2 }} />
+                  <span>Manter — viram contas avulsas, continuam pendentes normalmente.</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, fontWeight: 400, cursor: 'pointer' }}>
+                  <input type="radio" name="excluirRecPendentes" checked={excluirRecPendentes === 'remover'}
+                    onChange={() => setExcluirRecPendentes('remover')} style={{ marginTop: 2 }} />
+                  <span>Remover — some da lista de pendentes (as já pagas nunca são removidas).</span>
+                </label>
+              </div>
+            </div>
+          </>
+        )}
+      </Modal>
     </>
   )
 }

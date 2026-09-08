@@ -14,4 +14,5 @@ public class ContaRecorrenteDto
     public int? QuantidadeParcelas { get; set; }
     public bool Ativo { get; set; }
     public DateTime CriadoEm { get; set; }
+    public Guid? ContaBancariaId { get; set; }
 }

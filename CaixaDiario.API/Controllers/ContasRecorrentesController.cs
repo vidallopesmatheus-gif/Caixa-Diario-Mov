@@ -41,9 +41,9 @@ public class ContasRecorrentesController : ControllerBase
     }
 
     [HttpDelete("{clienteId:guid}/{id:guid}")]
-    public async Task<IActionResult> Desativar(Guid clienteId, Guid id)
+    public async Task<IActionResult> Desativar(Guid clienteId, Guid id, [FromQuery] bool removerPendentes = false)
     {
-        await _service.DesativarAsync(clienteId, id, ObterUsuarioId(), ObterPerfil());
+        await _service.DesativarAsync(clienteId, id, removerPendentes, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<object?> { Dados = null });
     }
 }

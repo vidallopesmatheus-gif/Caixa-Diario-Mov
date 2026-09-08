@@ -135,9 +135,15 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Ativo).HasColumnName("ativo").HasDefaultValue(true);
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
             entity.HasOne(e => e.Cliente)
                 .WithMany(u => u.ContasRecorrentes)
                 .HasForeignKey(e => e.ClienteId);
+            entity.HasOne(e => e.ContaBancaria)
+                .WithMany()
+                .HasForeignKey(e => e.ContaBancariaId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(e => new { e.ClienteId, e.Ativo });
         });
 

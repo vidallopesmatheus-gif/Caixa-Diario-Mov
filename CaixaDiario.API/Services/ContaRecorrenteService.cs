@@ -9,12 +9,17 @@ namespace CaixaDiario.API.Services;
 
 public class ContaRecorrenteService : IContaRecorrenteService
 {
+    private static readonly string[] PeriodicidadesValidas =
+        { "Semanal", "Quinzenal", "Mensal", "Trimestral", "Semestral", "Anual" };
+
     private readonly IContaRecorrenteRepository _repo;
+    private readonly IRegistroRepository _registroRepo;
     private readonly IAuditService _auditService;
 
-    public ContaRecorrenteService(IContaRecorrenteRepository repo, IAuditService auditService)
+    public ContaRecorrenteService(IContaRecorrenteRepository repo, IRegistroRepository registroRepo, IAuditService auditService)
     {
         _repo = repo;
+        _registroRepo = registroRepo;
         _auditService = auditService;
     }
 
@@ -35,8 +40,7 @@ public class ContaRecorrenteService : IContaRecorrenteService
         if (dto.Tipo != "Receber" && dto.Tipo != "Pagar")
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Tipo deve ser 'Receber' ou 'Pagar'.", "tipo");
 
-        var periodicidadesValidas = new[] { "Semanal", "Quinzenal", "Mensal", "Trimestral", "Semestral", "Anual" };
-        if (!periodicidadesValidas.Contains(dto.Periodicidade))
+        if (!PeriodicidadesValidas.Contains(dto.Periodicidade))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Periodicidade inválida.", "periodicidade");
 
         if (dto.QuantidadeParcelas.HasValue && dto.QuantidadeParcelas.Value < 1)
@@ -58,6 +62,7 @@ public class ContaRecorrenteService : IContaRecorrenteService
             DataFim = dto.DataFim,
             Periodicidade = dto.Periodicidade,
             QuantidadeParcelas = dto.QuantidadeParcelas,
+            ContaBancariaId = dto.ContaBancariaId,
             Ativo = true,
             CriadoEm = DateTime.UtcNow,
         };
@@ -77,22 +82,32 @@ public class ContaRecorrenteService : IContaRecorrenteService
         var conta = await _repo.ObterPorIdAsync(clienteId, id)
             ?? throw new ApiException(404, CodigoRetorno.CONTA_RECORRENTE_NAO_ENCONTRADA, "Conta recorrente não encontrada.");
 
+        if (dto.Periodicidade != null && !PeriodicidadesValidas.Contains(dto.Periodicidade))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Periodicidade inválida.", "periodicidade");
+
         var antes = JsonSerializer.Serialize(MapToDto(conta));
 
         if (dto.Descricao != null) conta.Descricao = dto.Descricao;
         if (dto.Valor.HasValue) conta.Valor = dto.Valor.Value;
         if (dto.Categoria != null) conta.Categoria = dto.Categoria;
+        if (dto.DataInicio.HasValue) conta.DataInicio = dto.DataInicio.Value;
         if (dto.DataFim.HasValue) conta.DataFim = dto.DataFim;
+        if (dto.Periodicidade != null) conta.Periodicidade = dto.Periodicidade;
+        if (dto.ContaBancariaId.HasValue) conta.ContaBancariaId = dto.ContaBancariaId;
         conta.AtualizadoEm = DateTime.UtcNow;
 
         var atualizada = await _repo.AtualizarAsync(conta);
+
+        if (dto.AplicarAsPendentes)
+            await AtualizarOcorrenciasPendentesAsync(clienteId, atualizada);
+
         await _auditService.LogAsync(clienteId, usuarioLogadoId, "ContaRecorrente", "Edicao",
             id.ToString(), antes, JsonSerializer.Serialize(MapToDto(atualizada)));
 
         return MapToDto(atualizada);
     }
 
-    public async Task DesativarAsync(Guid clienteId, Guid id, Guid usuarioLogadoId, string perfil)
+    public async Task DesativarAsync(Guid clienteId, Guid id, bool removerPendentes, Guid usuarioLogadoId, string perfil)
     {
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
@@ -105,8 +120,66 @@ public class ContaRecorrenteService : IContaRecorrenteService
         conta.AtualizadoEm = DateTime.UtcNow;
 
         await _repo.AtualizarAsync(conta);
+
+        if (removerPendentes)
+            await RemoverOcorrenciasPendentesAsync(clienteId, id);
+
         await _auditService.LogAsync(clienteId, usuarioLogadoId, "ContaRecorrente", "Exclusao",
             id.ToString(), antes, null);
+    }
+
+    // Propaga Descricao/Valor/Categoria/ContaBancariaId pras ocorrências pendentes (não pagas) já
+    // materializadas dessa recorrência. Nunca toca em ocorrências pagas (fato financeiro já
+    // realizado) nem na DataVencimento de nenhuma (intrínseca a quando a ocorrência foi gerada).
+    private async Task AtualizarOcorrenciasPendentesAsync(Guid clienteId, ContaRecorrente conta)
+    {
+        var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
+        foreach (var registro in registros)
+        {
+            var mudouReceber = AplicarNaLista(registro.ContasReceber, conta);
+            var mudouPagar = AplicarNaLista(registro.ContasPagar, conta);
+            if (!mudouReceber && !mudouPagar) continue;
+
+            // Reatribui a lista — jsonb sem value comparer, EF só detecta mudança na referência.
+            if (mudouReceber) registro.ContasReceber = new List<ContaProvisionada>(registro.ContasReceber);
+            if (mudouPagar) registro.ContasPagar = new List<ContaProvisionada>(registro.ContasPagar);
+            registro.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(registro);
+        }
+    }
+
+    private static bool AplicarNaLista(List<ContaProvisionada> contas, ContaRecorrente conta)
+    {
+        var mudou = false;
+        foreach (var c in contas)
+        {
+            if (c.RecorrenciaId != conta.Id || c.Pago) continue;
+            c.Descricao = conta.Descricao;
+            c.Valor = conta.Valor;
+            c.Categoria = conta.Categoria;
+            c.ContaBancariaId = conta.ContaBancariaId;
+            mudou = true;
+        }
+        return mudou;
+    }
+
+    // Remove as ocorrências pendentes (não pagas) já materializadas dessa recorrência. Nunca toca
+    // em ocorrências pagas — removê-las apagaria um fato financeiro já refletido no saldo.
+    private async Task RemoverOcorrenciasPendentesAsync(Guid clienteId, Guid recorrenciaId)
+    {
+        var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
+        foreach (var registro in registros)
+        {
+            var novasReceber = registro.ContasReceber.Where(c => !(c.RecorrenciaId == recorrenciaId && !c.Pago)).ToList();
+            var novasPagar = registro.ContasPagar.Where(c => !(c.RecorrenciaId == recorrenciaId && !c.Pago)).ToList();
+            if (novasReceber.Count == registro.ContasReceber.Count && novasPagar.Count == registro.ContasPagar.Count)
+                continue;
+
+            registro.ContasReceber = novasReceber;
+            registro.ContasPagar = novasPagar;
+            registro.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(registro);
+        }
     }
 
     private static ContaRecorrenteDto MapToDto(ContaRecorrente c) => new()
@@ -114,6 +187,6 @@ public class ContaRecorrenteService : IContaRecorrenteService
         Id = c.Id, ClienteId = c.ClienteId, Descricao = c.Descricao, Valor = c.Valor,
         Categoria = c.Categoria, Tipo = c.Tipo, DataInicio = c.DataInicio, DataFim = c.DataFim,
         Periodicidade = c.Periodicidade, QuantidadeParcelas = c.QuantidadeParcelas,
-        Ativo = c.Ativo, CriadoEm = c.CriadoEm,
+        Ativo = c.Ativo, CriadoEm = c.CriadoEm, ContaBancariaId = c.ContaBancariaId,
     };
 }
