@@ -1,3 +1,4 @@
+using System.Globalization;
 using CaixaDiario.API.DTOs.SaudeFinanceira;
 using CaixaDiario.API.Models;
 
@@ -15,9 +16,11 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
         var mesAtual = hoje.Month;
         var diasNoMes = DateTime.DaysInMonth(anoAtual, mesAtual);
         var reg = registros.Where(r => !r.Excluido).ToList();
+        var nomeMes = CultureInfo.GetCultureInfo("pt-BR").DateTimeFormat.GetMonthName(mesAtual);
 
         return new SaudeFinanceiraDto
         {
+            Periodo              = $"{char.ToUpperInvariant(nomeMes[0])}{nomeMes[1..]}/{anoAtual}",
             TaxaPoupanca        = CalcTaxaPoupanca(reg, anoAtual, mesAtual),
             ComprometimentoFixos = CalcComprometimento(reg, recorrentes, hoje, anoAtual, mesAtual, diasNoMes),
             RitmoMeta           = CalcRitmoMeta(metas, anoAtual, mesAtual),
@@ -105,9 +108,12 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
     private static GaugeIndicadorDto CalcRitmoMeta(
         List<MetaAnual> metas, int anoAtual, int mesAtual)
     {
+        // TaxaRetorno == 0 é uma meta legítima (guardar sem render) — só < 0 não faz sentido aqui.
+        // A matemática de juros composto abaixo precisa de tratamento linear separado pra 0%
+        // (ver TaxaZerada), senão cai em divisão por zero.
         var elegiveis = metas.Where(m =>
             m.ModoMeta == "metodo" && m.ValorSonho > 0
-            && m.PrazoAnos > 0 && m.TaxaRetorno > 0).ToList();
+            && m.PrazoAnos > 0 && m.TaxaRetorno >= 0).ToList();
 
         if (elegiveis.Count == 0)
             return Indisponivel("Ritmo da Meta",
@@ -137,6 +143,12 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
             if (fvNecessario <= 0)
             {
                 ritmo = 150m; // meta já atingida
+            }
+            else if (TaxaZerada(meta.TaxaRetorno))
+            {
+                var aporteAgoraLinear = (decimal)fvNecessario / mesesRestantes;
+                if (aporteAgoraLinear <= 0) continue;
+                ritmo = aporteMensal / aporteAgoraLinear * 100m;
             }
             else
             {
@@ -173,10 +185,17 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
+    private static bool TaxaZerada(decimal taxaRetornoAnual) => taxaRetornoAnual == 0m;
+
     private static decimal CalcularAporteMensal(MetaAnual meta)
     {
-        if (meta.ValorSonho <= 0 || meta.PrazoAnos <= 0 || meta.TaxaRetorno <= 0) return 0m;
+        if (meta.ValorSonho <= 0 || meta.PrazoAnos <= 0 || meta.TaxaRetorno < 0) return 0m;
         var n = meta.PrazoAnos * 12;
+        if (TaxaZerada(meta.TaxaRetorno))
+        {
+            var fvNecessarioLinear = meta.ValorSonho - meta.TotalInvestido;
+            return fvNecessarioLinear <= 0 ? 0m : fvNecessarioLinear / n;
+        }
         var i = Math.Pow(1 + (double)meta.TaxaRetorno / 100, 1.0 / 12) - 1;
         var fvAtual      = (double)meta.TotalInvestido * Math.Pow(1 + i, n);
         var fvNecessario = (double)meta.ValorSonho - fvAtual;

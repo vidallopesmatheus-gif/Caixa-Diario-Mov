@@ -16,6 +16,10 @@ public class GaugeIndicadorDto
 
 public class SaudeFinanceiraDto
 {
+    /// <summary>Mês/ano usados no cálculo (ex.: "Setembro/2026") — Taxa de Poupança e
+    /// Comprometimento Fixo são sempre calculados sobre o mês corrente do servidor, não sobre o
+    /// período escolhido no seletor do Dashboard. Exibido explicitamente pra não parecer "zerado".</summary>
+    public string Periodo { get; set; } = "";
     public GaugeIndicadorDto TaxaPoupanca { get; set; } = new();
     public GaugeIndicadorDto ComprometimentoFixos { get; set; } = new();
     public GaugeIndicadorDto RitmoMeta { get; set; } = new();

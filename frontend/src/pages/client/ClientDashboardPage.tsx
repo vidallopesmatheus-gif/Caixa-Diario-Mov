@@ -540,7 +540,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
       {/* ══ Camada 4: saúde do negócio — gauges + margem do período ══ */}
       {clienteId && (
-        <SaudeNegocioBlock clienteId={clienteId} margem={dreLoading ? undefined : (dreAtual?.margem ?? null)} />
+        <SaudeNegocioBlock clienteId={clienteId} margem={dreLoading ? undefined : (dreAtual?.margem ?? null)} janela={janela} />
       )}
 
       {/* ══ Camada 5: atividade recente ══ */}

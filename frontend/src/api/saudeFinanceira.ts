@@ -12,6 +12,9 @@ export interface GaugeIndicador {
 }
 
 export interface SaudeFinanceira {
+  /** Ex.: "Setembro/2026" — Taxa de Poupança e Comprometimento Fixo são sempre calculados sobre o
+   * mês corrente do servidor, não sobre o período escolhido no topo do Dashboard. */
+  periodo: string
   taxaPoupanca: GaugeIndicador
   comprometimentoFixos: GaugeIndicador
   ritmoMeta: GaugeIndicador

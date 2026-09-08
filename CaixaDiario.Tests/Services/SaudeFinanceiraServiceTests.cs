@@ -164,6 +164,58 @@ public class SaudeFinanceiraServiceTests
     }
 
     [Fact]
+    public void Calcular_PreencheOMesEAnoDoPeriodo()
+    {
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente>(), new List<MetaAnual>());
+
+        Assert.Contains(Hoje.Year.ToString(), resultado.Periodo);
+        Assert.NotEmpty(resultado.Periodo);
+    }
+
+    [Fact]
+    public void Calcular_ComMetaTaxaZeradaEProgressoParcial_CalculaRitmoLinear()
+    {
+        // TaxaRetorno = 0 é uma meta legítima (guardar sem render) — antes desse fix, o filtro de
+        // elegibilidade (TaxaRetorno > 0) descartava essa meta e o card dizia "nenhuma meta
+        // configurada", mesmo com uma meta "metodo" real cadastrada.
+        var meta = new MetaAnual
+        {
+            Id = Guid.NewGuid(),
+            ClienteId = Guid.NewGuid(),
+            Sonho = "Reserva de emergência",
+            ModoMeta = "metodo",
+            ValorSonho = 12000m,
+            PrazoAnos = 1,
+            TaxaRetorno = 0m,
+            TotalInvestido = 2000m,
+            AtualizadoEm = DateTime.UtcNow.AddMonths(-6),
+            CriadoEm = DateTime.UtcNow.AddMonths(-6),
+        };
+
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente>(), new List<MetaAnual> { meta });
+
+        Assert.True(resultado.RitmoMeta.Disponivel);
+        Assert.Contains("Reserva de emergência", resultado.RitmoMeta.Calculo);
+    }
+
+    [Fact]
+    public void Calcular_ComMetaTaxaZeradaEMenosDeUmMesDecorrido_MensagemDizAguardarNaoNenhumaMeta()
+    {
+        var meta = new MetaAnual
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ModoMeta = "metodo",
+            ValorSonho = 4000m, PrazoAnos = 1, TaxaRetorno = 0m, TotalInvestido = 2000m,
+            AtualizadoEm = DateTime.UtcNow, CriadoEm = DateTime.UtcNow,
+        };
+
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente>(), new List<MetaAnual> { meta });
+
+        Assert.False(resultado.RitmoMeta.Disponivel);
+        Assert.Contains("aguarde", resultado.RitmoMeta.Calculo, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Nenhuma meta", resultado.RitmoMeta.Calculo);
+    }
+
+    [Fact]
     public void Calcular_IgnoraTransferenciasERendimentoNaTaxaDePoupanca()
     {
         var registro = CriarRegistro(Hoje, entradas: 1000m, saidas: 700m);

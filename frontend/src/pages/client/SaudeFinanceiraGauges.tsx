@@ -52,7 +52,7 @@ function Gauge({ id, dado }: GaugeProps) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {hovered && dado.disponivel && (
+      {hovered && (
         <div className="gauge-tooltip">
           <p className="gauge-tip-desc">{dado.descricao}</p>
           <p className="gauge-tip-calculo">{dado.calculo}</p>
@@ -106,7 +106,12 @@ export default function SaudeFinanceiraGauges({ clienteId }: Props) {
 
   return (
     <div className="saude-card">
-      <h3 className="saude-titulo">🩺 Saúde Financeira</h3>
+      <h3 className="saude-titulo">
+        🩺 Saúde Financeira
+        {/* Taxa de Poupança e Comprometimento Fixo são sempre do mês corrente do servidor —
+            independente do período escolhido lá em cima no Dashboard. Deixar isso explícito. */}
+        <span className="saude-titulo-periodo">{dados.periodo}</span>
+      </h3>
       <div className="saude-gauges">
         <Gauge id="taxaPoupanca"         dado={dados.taxaPoupanca} />
         <Gauge id="comprometimentoFixos" dado={dados.comprometimentoFixos} />

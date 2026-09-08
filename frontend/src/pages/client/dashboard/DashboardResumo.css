@@ -114,7 +114,9 @@
   flex: 1; min-width: 200px; background: var(--bg-card); border: 1px solid var(--bd);
   border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; justify-content: center;
 }
+.saude-margem-cabecalho { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .saude-margem-label { font-size: 12px; color: var(--tx3); font-weight: 600; }
+.saude-margem-periodo { font-size: 11px; color: var(--tx3); opacity: 0.75; white-space: nowrap; }
 .saude-margem-valor { font-size: 26px; font-weight: 800; color: var(--tx1); }
 .saude-margem-leitura { font-size: 12px; color: var(--tx3); line-height: 1.4; }
 
