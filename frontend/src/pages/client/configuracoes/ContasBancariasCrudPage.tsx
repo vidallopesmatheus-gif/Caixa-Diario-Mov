@@ -262,6 +262,9 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
                 <div className="cb-conta-meta">{TIPO_LABEL[c.tipo] ?? c.tipo} · Inativa</div>
               </div>
               <div className="cb-conta-saldo" style={{ color: 'var(--tx3)' }}>{fmtBRL(c.saldoAtual)}</div>
+              <div className="cb-conta-acoes">
+                <button className="cb-btn-inativar" onClick={() => handleExcluir(c.id)}>Excluir</button>
+              </div>
             </div>
           ))}
         </div>
