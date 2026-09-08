@@ -103,6 +103,9 @@ export interface LancamentoExtrato {
   valor: number
   saldoAcumulado: number
   pendenteCategorizacao: boolean
+  // Preenchido só quando categoria === 'Transferência' — id do registro de Transferencia, usado
+  // pra desfazer a classificação.
+  transferenciaId?: string
 }
 
 export interface PendenciasConta {

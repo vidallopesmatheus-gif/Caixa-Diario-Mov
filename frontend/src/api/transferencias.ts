@@ -30,27 +30,16 @@ function mapTransferencia(raw: any): Transferencia {
   }
 }
 
-export const criarTransferencia = async (dto: {
-  clienteId: string
-  contaOrigemId: string
-  contaDestinoId: string
-  data: string
-  valor: number
-  descricao?: string
-}): Promise<Transferencia> => {
-  const res = await apiFetch<ApiResponse<unknown>>('/api/transferencias', {
-    method: 'POST',
-    body: JSON.stringify(dto),
-  })
-  return mapTransferencia(res.dados)
-}
-
 export const listarTransferencias = async (clienteId: string): Promise<Transferencia[]> => {
   const res = await apiFetch<ApiResponse<unknown[]>>(`/api/transferencias/${clienteId}`)
   return (res.dados ?? []).map(mapTransferencia)
 }
 
-export const estornarTransferencia = async (id: string): Promise<void> => {
+/**
+ * Desfaz a classificação como Transferência — os dois lançamentos voltam a ficar sem categoria
+ * (pendentes de categorização). Nunca apaga o lançamento em si: o dinheiro realmente se moveu.
+ */
+export const desfazerClassificacaoTransferencia = async (id: string): Promise<void> => {
   await apiFetch<ApiResponse<null>>(`/api/transferencias/${id}`, { method: 'DELETE' })
 }
 

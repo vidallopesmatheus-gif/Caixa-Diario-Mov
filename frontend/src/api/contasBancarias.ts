@@ -36,6 +36,7 @@ function mapLancamento(raw: any): LancamentoExtrato {
     valor: raw.valor ?? 0,
     saldoAcumulado: raw.saldoAcumulado ?? 0,
     pendenteCategorizacao: raw.pendenteCategorizacao ?? false,
+    transferenciaId: raw.transferenciaId ?? undefined,
   }
 }
 
