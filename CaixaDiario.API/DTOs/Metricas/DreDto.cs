@@ -73,4 +73,19 @@ public class DreDto
 
     /// <summary>Demonstrativo hierárquico de 3 níveis (Bloco → Grupo → Categoria) para a tela de DRE.</summary>
     public List<DreBlocoDto> Blocos { get; set; } = new();
+
+    // ── Painel de KPIs da tela de DRE — preenchidos pelo controller após CalcularDre, não fazem
+    // parte do cálculo do demonstrativo em si (ver MetricasController.ObterDre). Nulo quando não
+    // solicitado (ex.: chamadas internas do CalcularIndicadores, que não usam esses campos).
+    public PontoEquilibrioDetalhadoDto? PontoEquilibrio { get; set; }
+    public List<ResultadoLiquidoMensalDto>? EvolucaoResultadoLiquido { get; set; }
+}
+
+/// <summary>Um mês da série usada no sparkline de Resultado Líquido do painel de KPIs da DRE.</summary>
+public class ResultadoLiquidoMensalDto
+{
+    public string Mes { get; set; } = string.Empty;
+    public decimal ResultadoLiquido { get; set; }
+    public decimal? ResultadoLiquidoPercentual { get; set; }
+    public bool TemDados { get; set; }
 }

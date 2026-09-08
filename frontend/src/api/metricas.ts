@@ -146,6 +146,28 @@ export interface Dre {
 
   /** Demonstrativo hierárquico de 3 níveis (Bloco → Grupo → Categoria) — fonte da tela de DRE nova. */
   blocos: DreBloco[]
+
+  // ── Painel de KPIs da tela de DRE — sempre do mesmo período/conta do DRE acima ──
+  pontoEquilibrio: PontoEquilibrioDre | null
+  evolucaoResultadoLiquido: ResultadoLiquidoMensal[] | null
+}
+
+/** "Quanto preciso faturar pra zerar o resultado?" — reaproveita a Margem de Contribuição do DRE. */
+export interface PontoEquilibrioDre {
+  disponivel: boolean
+  motivoIndisponivel: string | null
+  valorMensal: number | null
+  receitaAtual: number
+  distancia: number | null
+  distanciaPercentual: number | null
+}
+
+/** Um mês da série de Resultado Líquido (sparkline), ancorada no fim do período do DRE. */
+export interface ResultadoLiquidoMensal {
+  mes: string
+  resultadoLiquido: number
+  resultadoLiquidoPercentual: number | null
+  temDados: boolean
 }
 
 export async function obterDre(

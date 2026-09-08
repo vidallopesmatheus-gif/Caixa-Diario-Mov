@@ -99,12 +99,22 @@
   max-width: 760px;
 }
 
+/* Layout de 2 colunas — DRE à esquerda, painel de KPIs à direita. flex-wrap faz o painel cair
+   pra baixo da DRE sozinho quando não cabe lado a lado (telas estreitas), sem media query. */
+.dre-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
 .dre-corpo {
   background: var(--bg-card);
   border: 1px solid var(--bd);
   border-radius: 14px;
   padding: 28px;
   max-width: 760px;
+  flex: 1 1 620px;
 }
 
 .dre-corpo-comparativo {

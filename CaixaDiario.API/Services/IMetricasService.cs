@@ -10,4 +10,6 @@ public interface IMetricasService
     FluxoProjetadoDto CalcularFluxoProjetado(List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, int dias);
     DreDto CalcularDre(List<RegistroDiario> registros, IReadOnlyList<Categoria>? categorias = null);
     IndicadoresDecisaoDto CalcularIndicadores(List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null);
+    PontoEquilibrioDetalhadoDto CalcularPontoEquilibrio(decimal receitaBruta, decimal margemContribuicao, decimal despesasFixasTotal, DateOnly diaReferencia);
+    List<ResultadoLiquidoMensalDto> CalcularResultadoLiquidoMensal(List<RegistroDiario> registros, DateOnly ateMesReferencia, IReadOnlyList<Categoria>? categorias, int meses = 6);
 }

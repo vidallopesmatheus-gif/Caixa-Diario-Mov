@@ -127,6 +127,28 @@ public class MetricasControllerTests
     }
 
     [Fact]
+    public async Task ObterDre_AnexaPontoEquilibrioEEvolucaoResultadoLiquidoAoResultado()
+    {
+        var clienteId = Guid.NewGuid();
+        var de = new DateOnly(2026, 8, 1);
+        var ate = new DateOnly(2026, 8, 31);
+        _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
+        var dre = new DreDto { ReceitaBruta = 1000m, MargemContribuicao = 700m, DespesasFixas = new DreLinhaVerticalDto { Total = 300m } };
+        _metricasMock.Setup(m => m.CalcularDre(It.IsAny<List<RegistroDiario>>(), It.IsAny<IReadOnlyList<Categoria>>())).Returns(dre);
+        var pontoEquilibrio = new PontoEquilibrioDetalhadoDto { Disponivel = true, ValorMensal = 428.57m };
+        _metricasMock.Setup(m => m.CalcularPontoEquilibrio(1000m, 700m, 300m, ate)).Returns(pontoEquilibrio);
+        var evolucao = new List<ResultadoLiquidoMensalDto> { new() { Mes = "2026-08", ResultadoLiquido = 600m, TemDados = true } };
+        _metricasMock.Setup(m => m.CalcularResultadoLiquidoMensal(It.IsAny<List<RegistroDiario>>(), ate, It.IsAny<IReadOnlyList<Categoria>>(), 6)).Returns(evolucao);
+
+        var result = await CriarSut(Guid.NewGuid(), "admin").ObterDre(clienteId, de, ate);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<DreDto>>(ok.Value);
+        Assert.Same(pontoEquilibrio, body.Dados!.PontoEquilibrio);
+        Assert.Same(evolucao, body.Dados.EvolucaoResultadoLiquido);
+    }
+
+    [Fact]
     public async Task ObterDre_ClienteAcessandoOutro_LancaAcessoNegado()
     {
         var sut = CriarSut(Guid.NewGuid(), "cliente");

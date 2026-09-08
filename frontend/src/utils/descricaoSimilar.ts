@@ -19,7 +19,7 @@ const TAMANHO_MINIMO_PREFIXO = 12
 const TAMANHO_MINIMO_CAUDA = 3
 
 /** CNPJ/CPF na descrição é o identificador mais confiável do favorecido, quando presente. */
-function extrairDocumento(descricao: string): string | null {
+export function extrairDocumento(descricao: string): string | null {
   const cnpj = descricao.match(REGEX_CNPJ)
   if (cnpj) return `DOC:${cnpj[0].replace(/\D/g, '')}`
   const cpf = descricao.match(REGEX_CPF)
@@ -42,7 +42,7 @@ function ajustarParaLimiteDePalavra(texto: string, tamanho: number): number {
 }
 
 /** Remove, de uma descrição, o maior prefixo que ela compartilha com outra do mesmo lote. */
-function removerPrefixoRecorrente(descricaoNormalizada: string, outrasNormalizadas: string[]): string {
+export function removerPrefixoRecorrente(descricaoNormalizada: string, outrasNormalizadas: string[]): string {
   let maiorPrefixo = 0
   for (const outra of outrasNormalizadas) {
     if (outra === descricaoNormalizada) continue

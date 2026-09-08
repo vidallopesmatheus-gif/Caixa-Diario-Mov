@@ -65,6 +65,8 @@ const mockIndicadores: IndicadoresDecisao = {
     resultadoLiquido: 600,
     resultadoLiquidoPercentual: 60,
     blocos: [],
+    pontoEquilibrio: null,
+    evolucaoResultadoLiquido: null,
   },
   custoFixo: 400,
   custoVariavel: 0,
