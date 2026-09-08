@@ -14,7 +14,7 @@ public class ItemFinanceiro
     public Guid? TransferenciaId { get; set; }
     // Identificador único do OFX (dedup) — nulo para lançamentos manuais ou vindos de CSV/XLSX.
     public string? FitId { get; set; }
-    // Verdadeiro quando a importação não encontrou categoria sugerida — só usado no lado das
-    // saídas hoje (ver ItemFinanceiroSaida), mantido aqui por simetria/uso futuro.
+    // Verdadeiro para toda entrada importada (nunca tem sugestão automática de categoria —
+    // só o usuário sabe distinguir receita real de transferência/resgate).
     public bool PendenteCategorizacao { get; set; }
 }

@@ -105,6 +105,41 @@ public class ContaBancariaServiceTests
     }
 
     [Fact]
+    public async Task ObterExtratoAsync_ComEntradaPendenteDeCategorizacao_PropagaFlagNoDto()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(contaId, clienteId);
+        var dia = new DateOnly(2026, 7, 1);
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(),
+            ClienteId = clienteId,
+            ContaBancariaId = contaId,
+            Data = dia,
+            Inicio = 1000m,
+            Entradas = new List<ItemFinanceiro>
+            {
+                new() { Descricao = "Transferência recebida pelo Pix", Valor = 330m, Categoria = null, PendenteCategorizacao = true },
+            },
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new(),
+            SaldoFinal = 1330m,
+            CriadoEm = DateTime.UtcNow,
+            SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
+
+        Assert.True(extrato[0].PendenteCategorizacao);
+    }
+
+    [Fact]
     public async Task ObterExtratoAsync_ComFiltroDePeriodo_MantemSaldoAcumuladoDoHistoricoCompleto()
     {
         var contaId = Guid.NewGuid();

@@ -158,6 +158,7 @@ public class ContaBancariaService : IContaBancariaService
                     Categoria = entrada.Categoria,
                     Valor = entrada.Valor,
                     SaldoAcumulado = saldo,
+                    PendenteCategorizacao = entrada.PendenteCategorizacao,
                     TransferenciaId = entrada.TransferenciaId,
                 }));
             }
