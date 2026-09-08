@@ -100,4 +100,27 @@ public class CategoriaServiceTests
         Assert.Contains(agrupadas.Saidas, c => c.Nome == "Equipamentos");
         Assert.DoesNotContain(agrupadas.Saidas, c => c.Nome == "Vendas");
     }
+
+    [Fact]
+    public async Task ListarAgrupadasAsync_DeducoesDaReceita_AparecemNosDoisLadosENaoSeConfundemComDespesa()
+    {
+        // Deduções da Receita e Despesas Operacionais mapeiam pro mesmo Tipo ("CustoFixo" — ver
+        // Blocos.TipoPadrao), então a distinção entrada/saída não pode depender só do Tipo aqui.
+        var grupoDevolucao = Grupo("Devolução e Estorno", Blocos.DeducoesDaReceita);
+        var grupoDespesa = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
+        var ativas = new List<Categoria>
+        {
+            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", Grupo = grupoDevolucao, Ativa = true },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true },
+        };
+        _repoMock.Setup(r => r.ListarAtivasAsync()).ReturnsAsync(ativas);
+
+        var agrupadas = await _sut.ListarAgrupadasAsync();
+
+        Assert.Contains(agrupadas.Entradas, c => c.Nome == "Devoluções");
+        Assert.DoesNotContain(agrupadas.Entradas, c => c.Nome == "Aluguel");
+
+        Assert.Contains(agrupadas.Saidas, c => c.Nome == "Devoluções");
+        Assert.Contains(agrupadas.Saidas, c => c.Nome == "Aluguel");
+    }
 }

@@ -162,7 +162,7 @@ public class TransferenciaServiceTests
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 300m,
             Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 800m,
-            Entradas = new() { new ItemFinanceiro { Id = lancamentoId, Descricao = "Resgate RDB", Valor = 500m } },
+            Entradas = new() { new ItemFinanceiro { Id = lancamentoId, Descricao = "Resgate RDB", Valor = 500m, PendenteCategorizacao = true } },
         };
 
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCorrente.Id)).ReturnsAsync(contaCorrente);
@@ -187,6 +187,7 @@ public class TransferenciaServiceTests
 
         var entradaOriginal = Assert.Single(registroOrigem.Entradas);
         Assert.Equal("Transferencia", entradaOriginal.TipoCusto);
+        Assert.False(entradaOriginal.PendenteCategorizacao);
         Assert.Equal(800m, registroOrigem.SaldoFinal); // inalterado
 
         Assert.NotNull(registroDestinoCriado);

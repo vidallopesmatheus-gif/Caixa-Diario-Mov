@@ -16,6 +16,11 @@ public class CategoriaService : ICategoriaService
     {
         "CustoVariavel", "CustoFixo", "DespesaNaoOperacional", "Investimento", "Financiamento",
     };
+    // Categoria.Tipo por si só não distingue "Deduções da Receita" (bloco DeducoesDaReceita) de
+    // despesa comum (bloco DespesasOperacionais) — os dois mapeiam pra "CustoFixo" (ver
+    // Blocos.TipoPadrao, usado no cálculo do DRE). Na prática devolução/estorno pode ser um
+    // reembolso que sai da conta (saída) ou um valor que volta pra conta (entrada) — por isso, tal
+    // como Investimento/Financiamento, uma categoria desse bloco entra nos dois lados do combobox.
 
     private readonly ICategoriaRepository _repo;
     private readonly IGrupoRepository _grupoRepo;
@@ -31,7 +36,9 @@ public class CategoriaService : ICategoriaService
         var ativas = await _repo.ListarAtivasAsync();
         return new CategoriasAgrupadasDto
         {
-            Entradas = ativas.Where(c => TiposDeEntrada.Contains(c.Tipo)).Select(MapToItemDto).ToList(),
+            Entradas = ativas
+                .Where(c => TiposDeEntrada.Contains(c.Tipo) || c.Grupo.Bloco == Blocos.DeducoesDaReceita)
+                .Select(MapToItemDto).ToList(),
             Saidas = ativas.Where(c => TiposDeSaida.Contains(c.Tipo)).Select(MapToItemDto).ToList(),
         };
     }

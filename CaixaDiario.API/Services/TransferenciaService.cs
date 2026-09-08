@@ -168,6 +168,7 @@ public class TransferenciaService : ITransferenciaService
             item.TipoCusto = LancamentoFiltro.TipoTransferencia;
             item.TransferenciaId = transferenciaId;
             item.Categoria = "Transferência";
+            item.PendenteCategorizacao = false;
             registro.Entradas = new List<ItemFinanceiro>(registro.Entradas);
 
             if (dto.LancamentoContrapartidaId.HasValue)

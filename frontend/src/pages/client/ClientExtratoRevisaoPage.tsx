@@ -136,7 +136,9 @@ export default function ClientExtratoRevisaoPage() {
   function handleCategoriaCriada(nova: CategoriaAdmin) {
     const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupoNome }
     // Investimento/Financiamento podem ser lançados como entrada ou saída — entram nos dois lados.
-    if (nova.tipo === 'Receita' || nova.tipo === 'Investimento' || nova.tipo === 'Financiamento')
+    // Deduções da Receita (devolução/estorno) também: pode ser um valor que volta pra conta
+    // (entrada) ou um reembolso que sai dela (saída) — mesma regra do backend (CategoriaService).
+    if (nova.tipo === 'Receita' || nova.tipo === 'Investimento' || nova.tipo === 'Financiamento' || nova.bloco === 'DEDUÇÕES DA RECEITA')
       setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
     if (nova.tipo !== 'Receita')
       setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
