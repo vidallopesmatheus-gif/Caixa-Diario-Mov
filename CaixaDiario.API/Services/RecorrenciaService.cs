@@ -164,6 +164,7 @@ public class RecorrenciaService : IRecorrenciaService
                 Pago = false,
                 Categoria = conta.Categoria,
                 RecorrenciaId = conta.Id,
+                ContaBancariaId = conta.ContaBancariaId,
             };
 
             if (conta.Tipo == "Receber")

@@ -141,6 +141,7 @@ export interface ContaRecorrente {
   quantidadeParcelas?: number
   ativo: boolean
   criadoEm: string
+  contaBancariaId?: string
 }
 
 export interface CategoriaItem {

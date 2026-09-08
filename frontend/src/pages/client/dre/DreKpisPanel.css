@@ -1,0 +1,152 @@
+.dre-kpis-painel {
+  flex: 1 1 320px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.dre-kpi-bloco {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dre-kpi-bloco-titulo {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tx3);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin: 0;
+}
+
+.dre-kpi-card {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+
+.dre-kpi-titulo {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tx1);
+  margin-bottom: 6px;
+}
+
+.dre-kpi-subtitulo {
+  font-size: 12px;
+  color: var(--tx3);
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
+.dre-kpi-vazio {
+  font-size: 12px;
+  color: var(--tx3);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.dre-kpi-termometro-valor {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.dre-kpi-faixa {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 2px 10px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+/* ── Sparkline (Evolução do Resultado) ── */
+.dre-kpi-sparkline {
+  display: block;
+  margin-top: 4px;
+}
+
+.dre-kpi-sparkline-eixo {
+  stroke: var(--bd);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* ── Ranking (Favorecidos / Pagadores) ── */
+.dre-kpi-ranking {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.dre-kpi-ranking-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 6px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.dre-kpi-ranking-item:hover { background: var(--bg-hover); }
+
+.dre-kpi-ranking-rotulo {
+  flex: 1;
+  font-size: 12px;
+  color: var(--tx1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dre-kpi-ranking-meta {
+  font-size: 11px;
+  color: var(--tx3);
+  flex-shrink: 0;
+}
+
+.dre-kpi-ranking-valor {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tx1);
+  min-width: 80px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Concentração por Dia/Mês ── */
+.dre-kpi-concentracao {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.dre-kpi-concentracao-linha {
+  font-size: 12px;
+  color: var(--tx1);
+  line-height: 1.4;
+}
+
+.dre-kpi-concentracao-label {
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+@media (max-width: 600px) {
+  .dre-kpis-painel { min-width: 0; }
+}

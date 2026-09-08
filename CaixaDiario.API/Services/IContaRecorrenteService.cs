@@ -7,5 +7,5 @@ public interface IContaRecorrenteService
     Task<List<ContaRecorrenteDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil);
     Task<ContaRecorrenteDto> CriarAsync(CriarContaRecorrenteDto dto, Guid usuarioLogadoId, string perfil);
     Task<ContaRecorrenteDto> AtualizarAsync(Guid clienteId, Guid id, AtualizarContaRecorrenteDto dto, Guid usuarioLogadoId, string perfil);
-    Task DesativarAsync(Guid clienteId, Guid id, Guid usuarioLogadoId, string perfil);
+    Task DesativarAsync(Guid clienteId, Guid id, bool removerPendentes, Guid usuarioLogadoId, string perfil);
 }

@@ -1144,4 +1144,64 @@ public class MetricasServiceTests
         var grupoSemClasse = Assert.Single(despesas.Grupos, g => g.Nome == "Não Classificado");
         Assert.Equal(-40m, grupoSemClasse.Total);
     }
+
+    // ---- CalcularPontoEquilibrio (promovido a público — painel de KPIs da tela de DRE) ----
+
+    [Fact]
+    public void CalcularPontoEquilibrio_ComMargemPositiva_CalculaValorEDistancia()
+    {
+        // Receita 1000, margem de contribuição 700 (70%), despesas fixas 300 → equilíbrio ≈ 428,57.
+        var resultado = _sut.CalcularPontoEquilibrio(1000m, 700m, 300m, new DateOnly(2026, 6, 15));
+
+        Assert.True(resultado.Disponivel);
+        Assert.Equal(428.57m, resultado.ValorMensal);
+        Assert.Equal(1000m, resultado.ReceitaAtual);
+        Assert.Equal(571.43m, resultado.Distancia);
+    }
+
+    [Fact]
+    public void CalcularPontoEquilibrio_SemReceita_Indisponivel()
+    {
+        var resultado = _sut.CalcularPontoEquilibrio(0m, 0m, 300m, new DateOnly(2026, 6, 15));
+
+        Assert.False(resultado.Disponivel);
+        Assert.NotNull(resultado.MotivoIndisponivel);
+    }
+
+    [Fact]
+    public void CalcularPontoEquilibrio_MargemNaoPositiva_Indisponivel()
+    {
+        var resultado = _sut.CalcularPontoEquilibrio(1000m, 0m, 300m, new DateOnly(2026, 6, 15));
+
+        Assert.False(resultado.Disponivel);
+        Assert.NotNull(resultado.MotivoIndisponivel);
+    }
+
+    // ---- CalcularResultadoLiquidoMensal (sparkline do painel de KPIs da tela de DRE) ----
+
+    [Fact]
+    public void CalcularResultadoLiquidoMensal_RetornaSeisMesesAncoradosNoPeriodoSelecionado()
+    {
+        // Ancorado em agosto/2026 (não em "hoje") — a janela deve ir de março a agosto/2026.
+        var reg = CriarRegistro(new DateOnly(2026, 8, 10),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new() { Item("Aluguel", 400m, "Aluguel", "CustoFixo") });
+
+        var resultado = _sut.CalcularResultadoLiquidoMensal(new() { reg }, new DateOnly(2026, 8, 31), null);
+
+        Assert.Equal(6, resultado.Count);
+        Assert.Equal("2026-03", resultado[0].Mes);
+        Assert.Equal("2026-08", resultado[^1].Mes);
+        Assert.True(resultado[^1].TemDados);
+        Assert.Equal(600m, resultado[^1].ResultadoLiquido);
+        Assert.False(resultado[0].TemDados);
+    }
+
+    [Fact]
+    public void CalcularResultadoLiquidoMensal_MesSemAtividade_TemDadosFalso()
+    {
+        var resultado = _sut.CalcularResultadoLiquidoMensal(new(), new DateOnly(2026, 8, 31), null);
+
+        Assert.All(resultado, m => Assert.False(m.TemDados));
+    }
 }

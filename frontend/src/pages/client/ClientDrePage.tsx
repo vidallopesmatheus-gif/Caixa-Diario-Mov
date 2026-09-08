@@ -5,11 +5,12 @@ import { listarContasBancarias } from '../../api/contasBancarias'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtPct, fmtDate } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
+import DreKpisPanel from './dre/DreKpisPanel'
 import type { Dre, DreBloco } from '../../api/metricas'
 import type { ContaBancaria, Bloco } from '../../types'
 import './ClientDre.css'
 
-type TipoPeriodo = 'mes' | 'trimestre' | 'ano'
+export type TipoPeriodo = 'mes' | 'trimestre' | 'ano'
 
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
@@ -309,6 +310,7 @@ export default function ClientDrePage() {
       )}
 
       {todasCarregadas && !loading && (
+      <div className={modoComparativo ? undefined : 'dre-layout'}>
         <div className={`dre-corpo${modoComparativo ? ' dre-corpo-comparativo' : ''}`}>
           {modoComparativo && (
             <div
@@ -438,6 +440,21 @@ export default function ClientDrePage() {
             )
           })}
         </div>
+
+        {/* Painel de KPIs só faz sentido pra um período por vez — no modo comparativo (várias
+            colunas lado a lado) "o resultado do período" fica ambíguo, então ele some e a DRE
+            volta a ocupar a largura toda, como já era antes. */}
+        {!modoComparativo && (
+          <DreKpisPanel
+            dre={periodosComDre[0].dre}
+            tipoPeriodo={tipo}
+            registros={registros}
+            de={periodosComDre[0].periodo.de}
+            ate={periodosComDre[0].periodo.ate}
+            contaFiltro={contaFiltro}
+          />
+        )}
+      </div>
       )}
 
       <Modal

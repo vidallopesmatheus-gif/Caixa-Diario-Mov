@@ -9,6 +9,7 @@
 .conta-valor { font-size: 15px; font-weight: 700; }
 .conta-valor.receber { color: var(--success); }
 .conta-valor.pagar  { color: var(--danger); }
+.conta-item-acoes { display: flex; gap: 6px; flex-shrink: 0; }
 .add-conta-form { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
 .add-conta-form h4 { font-size: 13px; font-weight: 700; color: var(--tx3); margin-bottom: 12px; }
 .conta-form-row { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }

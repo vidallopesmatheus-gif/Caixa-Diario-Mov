@@ -574,7 +574,7 @@ public class MetricasService : IMetricasService
         }
 
         // ── Indicadores de decisão ──────────────────────────────────────────
-        var pontoEquilibrio = CalcularPontoEquilibrio(dre, hoje);
+        var pontoEquilibrio = CalcularPontoEquilibrio(dre.ReceitaBruta, dre.MargemContribuicao, dre.DespesasFixas.Total, hoje);
 
         // Série mensal de Custo Fixo ÷ Receita (últimos 6 meses) — mesma DRE por mês, reaproveitada
         // tanto pra tendência (item 4) quanto pro custo fixo médio do Fôlego de Caixa (item 2).
@@ -617,28 +617,33 @@ public class MetricasService : IMetricasService
 
     // ── 1. Ponto de Equilíbrio ───────────────────────────────────────────────
     // Reaproveita a Margem de Contribuição já calculada no DRE (ReceitaLíquida − Custos Variáveis).
-    private static PontoEquilibrioDetalhadoDto CalcularPontoEquilibrio(DreDto dre, DateOnly hoje)
+    // Recebe as peças já prontas (não um DreDto inteiro) pra poder ser chamado tanto com o DRE de
+    // um mês civil (Indicadores de Decisão) quanto com o DRE de qualquer período arbitrário
+    // (painel de KPIs da tela de DRE — mês, trimestre ou ano). `diaReferencia` só define o mês
+    // usado pro detalhamento "por dia útil", que só faz sentido pra período mensal.
+    public PontoEquilibrioDetalhadoDto CalcularPontoEquilibrio(
+        decimal receitaBruta, decimal margemContribuicao, decimal despesasFixasTotal, DateOnly diaReferencia)
     {
-        if (dre.ReceitaBruta <= 0)
+        if (receitaBruta <= 0)
             return new PontoEquilibrioDetalhadoDto
             {
                 Disponivel = false,
-                MotivoIndisponivel = "Sem faturamento neste mês ainda — não é possível calcular o ponto de equilíbrio.",
-                ReceitaAtual = dre.ReceitaBruta,
+                MotivoIndisponivel = "Sem faturamento neste período ainda — não é possível calcular o ponto de equilíbrio.",
+                ReceitaAtual = receitaBruta,
             };
 
-        var margemPercentual = dre.MargemContribuicao / dre.ReceitaBruta;
+        var margemPercentual = margemContribuicao / receitaBruta;
         if (margemPercentual <= 0)
             return new PontoEquilibrioDetalhadoDto
             {
                 Disponivel = false,
                 MotivoIndisponivel = "Os custos variáveis (e deduções) consomem toda a receita — não sobra margem de contribuição para cobrir as despesas fixas. Rever preço ou custo variável antes de calcular o ponto de equilíbrio.",
-                ReceitaAtual = dre.ReceitaBruta,
+                ReceitaAtual = receitaBruta,
             };
 
-        var valorMensal = dre.DespesasFixas.Total / margemPercentual;
-        var diasUteis = ContarDiasUteis(hoje.Year, hoje.Month);
-        var distancia = dre.ReceitaBruta - valorMensal;
+        var valorMensal = despesasFixasTotal / margemPercentual;
+        var diasUteis = ContarDiasUteis(diaReferencia.Year, diaReferencia.Month);
+        var distancia = receitaBruta - valorMensal;
 
         return new PontoEquilibrioDetalhadoDto
         {
@@ -646,10 +651,34 @@ public class MetricasService : IMetricasService
             ValorMensal = Math.Round(valorMensal, 2),
             ValorPorDiaUtil = diasUteis > 0 ? Math.Round(valorMensal / diasUteis, 2) : null,
             DiasUteisNoMes = diasUteis,
-            ReceitaAtual = dre.ReceitaBruta,
+            ReceitaAtual = receitaBruta,
             Distancia = Math.Round(distancia, 2),
             DistanciaPercentual = valorMensal > 0 ? Math.Round(distancia / valorMensal * 100, 1) : null,
         };
+    }
+
+    // ── 3. Evolução do Resultado Líquido (sparkline, painel de KPIs da DRE) ──────────────────
+    // Mesmo padrão do custoFixoMensal acima (chama CalcularDre mês a mês), só que ancorado no
+    // último mês do período selecionado na tela de DRE — não em "hoje" — pra continuar coerente
+    // quando o usuário está olhando um período passado.
+    public List<ResultadoLiquidoMensalDto> CalcularResultadoLiquidoMensal(
+        List<RegistroDiario> registros, DateOnly ateMesReferencia, IReadOnlyList<Categoria>? categorias, int meses = 6)
+    {
+        return Enumerable.Range(0, meses)
+            .Select(i => ateMesReferencia.AddMonths(-(meses - 1 - i)))
+            .Select(m =>
+            {
+                var doMes = registros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month && !r.Excluido).ToList();
+                var dreMes = CalcularDre(doMes, categorias);
+                return new ResultadoLiquidoMensalDto
+                {
+                    Mes = $"{m.Year}-{m.Month:D2}",
+                    ResultadoLiquido = dreMes.ResultadoLiquido,
+                    ResultadoLiquidoPercentual = dreMes.ResultadoLiquidoPercentual,
+                    TemDados = dreMes.ReceitaBruta > 0 || dreMes.TotalDespesas > 0,
+                };
+            })
+            .ToList();
     }
 
     private static int ContarDiasUteis(int ano, int mes)

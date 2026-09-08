@@ -87,6 +87,14 @@ public class MetricasController : ControllerBase
 
         var categorias = await _categoriaRepo.ListarTodasAsync();
         var resultado = _metricasService.CalcularDre(filtrados, categorias);
+
+        // Painel de KPIs da tela de DRE — reaproveita o próprio resultado do CalcularDre (não
+        // recalcula nada), só acrescenta Ponto de Equilíbrio e a série de Resultado Líquido dos
+        // últimos 6 meses ancorada no fim do período selecionado (não em "hoje").
+        resultado.PontoEquilibrio = _metricasService.CalcularPontoEquilibrio(
+            resultado.ReceitaBruta, resultado.MargemContribuicao, resultado.DespesasFixas.Total, ate);
+        resultado.EvolucaoResultadoLiquido = _metricasService.CalcularResultadoLiquidoMensal(todos, ate, categorias);
+
         return Ok(new ApiResponse<DreDto> { Dados = resultado });
     }
 
