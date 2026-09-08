@@ -368,7 +368,8 @@ public class ContaBancariaService : IContaBancariaService
             SaldoAtual = saldoAtual,
             EntradasMes = entradasMes,
             SaidasMes = saidasMes,
-            PendentesCategorizacao = regsOrdenados.Sum(r => r.Saidas.Count(s => s.PendenteCategorizacao)),
+            PendentesCategorizacao = regsOrdenados.Sum(r =>
+                r.Entradas.Count(e => e.PendenteCategorizacao) + r.Saidas.Count(s => s.PendenteCategorizacao)),
             Ativa = c.Ativa,
             DataCriacao = c.DataCriacao,
         };

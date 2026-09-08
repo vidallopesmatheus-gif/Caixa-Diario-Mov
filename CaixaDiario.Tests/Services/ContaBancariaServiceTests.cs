@@ -242,6 +242,30 @@ public class ContaBancariaServiceTests
     }
 
     [Fact]
+    public async Task ListarPorClienteAsync_ComEntradaESaidaPendentes_ContaAsDuas()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId);
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id,
+            Data = new DateOnly(2026, 7, 1),
+            Entradas = new List<ItemFinanceiro> { new() { Descricao = "Pix recebido", Valor = 100m, PendenteCategorizacao = true } },
+            Saidas = new List<ItemFinanceiroSaida> { new() { Descricao = "Compra", Valor = 50m, PendenteCategorizacao = true } },
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 1050m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var contas = await _sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
+
+        var dto = Assert.Single(contas);
+        Assert.Equal(2, dto.PendentesCategorizacao);
+    }
+
+    [Fact]
     public async Task ListarPorClienteAsync_ComUsuarioDeOutroCliente_LancaAcessoNegado()
     {
         var clienteId = Guid.NewGuid();
