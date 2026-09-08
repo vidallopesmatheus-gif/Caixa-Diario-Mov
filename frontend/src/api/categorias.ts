@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Categorias, CategoriaAdmin, ApiResponse, TipoCusto } from '../types'
+import type { Categorias, CategoriaAdmin, ApiResponse, Grupo, Bloco } from '../types'
 
 // Module-level cache: categories are static app data, fetched once per session.
 let _cache: Categorias | null = null
@@ -22,19 +22,19 @@ export async function listarCategoriasParaGerenciar(): Promise<CategoriaAdmin[]>
   return res.dados
 }
 
-export async function criarCategoria(nome: string, tipo: TipoCusto): Promise<CategoriaAdmin> {
+export async function criarCategoria(nome: string, grupoId: string): Promise<CategoriaAdmin> {
   const res = await apiFetch<ApiResponse<CategoriaAdmin>>('/api/categorias', {
     method: 'POST',
-    body: JSON.stringify({ nome, tipo }),
+    body: JSON.stringify({ nome, grupoId }),
   })
   resetCategoriaCache()
   return res.dados
 }
 
-export async function atualizarCategoria(id: string, nome: string, tipo: TipoCusto, ativa: boolean): Promise<CategoriaAdmin> {
+export async function atualizarCategoria(id: string, nome: string, grupoId: string, ativa: boolean): Promise<CategoriaAdmin> {
   const res = await apiFetch<ApiResponse<CategoriaAdmin>>(`/api/categorias/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ nome, tipo, ativa }),
+    body: JSON.stringify({ nome, grupoId, ativa }),
   })
   resetCategoriaCache()
   return res.dados
@@ -80,4 +80,44 @@ export async function migrarCategoria(origemId: string, paraCategoriaId: string)
     body: JSON.stringify({ paraCategoriaId }),
   })
   resetCategoriaCache()
+}
+
+// ── Grupos (nível entre Bloco fixo e Categoria) ──────────────────────────────────────────
+
+export async function listarGrupos(): Promise<Grupo[]> {
+  const res = await apiFetch<ApiResponse<Grupo[]>>('/api/grupos')
+  return res.dados
+}
+
+export async function listarBlocos(): Promise<Bloco[]> {
+  const res = await apiFetch<ApiResponse<Bloco[]>>('/api/grupos/blocos')
+  return res.dados
+}
+
+export async function criarGrupo(nome: string, bloco: Bloco): Promise<Grupo> {
+  const res = await apiFetch<ApiResponse<Grupo>>('/api/grupos', {
+    method: 'POST',
+    body: JSON.stringify({ nome, bloco }),
+  })
+  return res.dados
+}
+
+export async function atualizarGrupo(id: string, nome: string, bloco: Bloco, ativo: boolean): Promise<Grupo> {
+  const res = await apiFetch<ApiResponse<Grupo>>(`/api/grupos/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ nome, bloco, ativo }),
+  })
+  resetCategoriaCache()
+  return res.dados
+}
+
+export async function desativarGrupo(id: string): Promise<void> {
+  await apiFetch<ApiResponse<null>>(`/api/grupos/${id}/desativar`, { method: 'POST' })
+}
+
+export async function reordenarGrupos(ids: string[]): Promise<void> {
+  await apiFetch<ApiResponse<null>>('/api/grupos/reordenar', {
+    method: 'PUT',
+    body: JSON.stringify({ ids }),
+  })
 }

@@ -8,22 +8,31 @@ namespace CaixaDiario.API.Services;
 
 public class CategoriaService : ICategoriaService
 {
-    private static readonly HashSet<string> TiposValidos = new()
+    // Investimento/Financiamento podem ser lançados como entrada (captação, rendimento) ou saída
+    // (amortização, aquisição) — por isso aparecem nos dois lados do combobox, diferente dos
+    // outros tipos que só existem de um lado.
+    private static readonly HashSet<string> TiposDeEntrada = new() { "Receita", "Investimento", "Financiamento" };
+    private static readonly HashSet<string> TiposDeSaida = new()
     {
-        "Receita", "CustoVariavel", "CustoFixo", "DespesaNaoOperacional",
+        "CustoVariavel", "CustoFixo", "DespesaNaoOperacional", "Investimento", "Financiamento",
     };
 
     private readonly ICategoriaRepository _repo;
+    private readonly IGrupoRepository _grupoRepo;
 
-    public CategoriaService(ICategoriaRepository repo) => _repo = repo;
+    public CategoriaService(ICategoriaRepository repo, IGrupoRepository grupoRepo)
+    {
+        _repo = repo;
+        _grupoRepo = grupoRepo;
+    }
 
     public async Task<CategoriasAgrupadasDto> ListarAgrupadasAsync()
     {
         var ativas = await _repo.ListarAtivasAsync();
         return new CategoriasAgrupadasDto
         {
-            Entradas = ativas.Where(c => c.Tipo == "Receita").Select(MapToItemDto).ToList(),
-            Saidas = ativas.Where(c => c.Tipo != "Receita").Select(MapToItemDto).ToList(),
+            Entradas = ativas.Where(c => TiposDeEntrada.Contains(c.Tipo)).Select(MapToItemDto).ToList(),
+            Saidas = ativas.Where(c => TiposDeSaida.Contains(c.Tipo)).Select(MapToItemDto).ToList(),
         };
     }
 
@@ -35,7 +44,7 @@ public class CategoriaService : ICategoriaService
 
     public async Task<CategoriaDto> CriarAsync(CriarCategoriaDto dto)
     {
-        ValidarTipo(dto.Tipo);
+        var grupo = await ObterGrupoOuFalharAsync(dto.GrupoId);
         var nome = dto.Nome.Trim();
         if (await _repo.ObterPorNomeAsync(nome) is not null)
             throw new ApiException(409, CodigoRetorno.CATEGORIA_DUPLICADA, "Já existe uma categoria com esse nome.");
@@ -46,19 +55,20 @@ public class CategoriaService : ICategoriaService
         {
             Id = Guid.NewGuid(),
             Nome = nome,
-            Tipo = dto.Tipo,
-            Grupo = null,
+            Tipo = Blocos.TipoPadrao(grupo.Bloco),
+            GrupoId = grupo.Id,
             Ordem = maiorOrdem + 1,
             Ativa = true,
             CriadoEm = DateTime.UtcNow,
         };
         var criada = await _repo.AdicionarAsync(categoria);
+        criada.Grupo = grupo;
         return MapToDto(criada);
     }
 
     public async Task<CategoriaDto> AtualizarAsync(Guid id, AtualizarCategoriaDto dto)
     {
-        ValidarTipo(dto.Tipo);
+        var grupo = await ObterGrupoOuFalharAsync(dto.GrupoId);
         var categoria = await ObterOuFalharAsync(id);
 
         var nome = dto.Nome.Trim();
@@ -67,9 +77,11 @@ public class CategoriaService : ICategoriaService
             throw new ApiException(409, CodigoRetorno.CATEGORIA_DUPLICADA, "Já existe uma categoria com esse nome.");
 
         categoria.Nome = nome;
-        categoria.Tipo = dto.Tipo;
+        categoria.GrupoId = grupo.Id;
+        categoria.Tipo = Blocos.TipoPadrao(grupo.Bloco);
         categoria.Ativa = dto.Ativa;
         var atualizada = await _repo.AtualizarAsync(categoria);
+        atualizada.Grupo = grupo;
         return MapToDto(atualizada);
     }
 
@@ -112,17 +124,15 @@ public class CategoriaService : ICategoriaService
         await _repo.ObterPorIdAsync(id)
             ?? throw new ApiException(404, CodigoRetorno.CATEGORIA_NAO_ENCONTRADA, "Categoria não encontrada.");
 
-    private static void ValidarTipo(string tipo)
-    {
-        if (!TiposValidos.Contains(tipo))
-            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, $"Tipo inválido. Use: {string.Join(", ", TiposValidos)}");
-    }
+    private async Task<Grupo> ObterGrupoOuFalharAsync(Guid grupoId) =>
+        await _grupoRepo.ObterPorIdAsync(grupoId)
+            ?? throw new ApiException(404, CodigoRetorno.GRUPO_NAO_ENCONTRADO, "Grupo não encontrado.");
 
     private static CategoriaItemDto MapToItemDto(Categoria c) => new()
     {
         Nome = c.Nome,
         TipoCusto = c.Tipo,
-        Grupo = c.Grupo,
+        Grupo = c.Grupo.Nome,
     };
 
     private static CategoriaDto MapToDto(Categoria c) => new()
@@ -130,7 +140,9 @@ public class CategoriaService : ICategoriaService
         Id = c.Id,
         Nome = c.Nome,
         Tipo = c.Tipo,
-        Grupo = c.Grupo,
+        GrupoId = c.GrupoId,
+        GrupoNome = c.Grupo.Nome,
+        Bloco = c.Grupo.Bloco,
         Ordem = c.Ordem,
         Ativa = c.Ativa,
     };

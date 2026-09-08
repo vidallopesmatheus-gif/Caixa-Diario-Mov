@@ -127,9 +127,12 @@ export default function ClientExtratoRevisaoPage() {
   }
 
   function handleCategoriaCriada(nova: CategoriaAdmin) {
-    const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupo }
-    if (nova.tipo === 'Receita') setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
-    else setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
+    const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupoNome }
+    // Investimento/Financiamento podem ser lançados como entrada ou saída — entram nos dois lados.
+    if (nova.tipo === 'Receita' || nova.tipo === 'Investimento' || nova.tipo === 'Financiamento')
+      setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
+    if (nova.tipo !== 'Receita')
+      setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
   }
 
   function abrirModalTransferencia(item: PendenteCategorizacao) {
@@ -258,7 +261,7 @@ export default function ClientExtratoRevisaoPage() {
                       value=""
                       onChange={cat => aplicarCategoria(g.itens, cat)}
                       onCategoriaCriada={handleCategoriaCriada}
-                      tipoPadraoNovaCategoria={tipoGrupo === 'Entrada' ? 'Receita' : 'CustoVariavel'}
+                      blocoPadraoNovaCategoria={tipoGrupo === 'Entrada' ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
                       placeholder="Categorizar todo o grupo..."
                     />
                   </div>
@@ -379,7 +382,7 @@ function ExtratoLinhaPendente({
         value=""
         onChange={onCategorizar}
         onCategoriaCriada={onCategoriaCriada}
-        tipoPadraoNovaCategoria={item.tipo === 'Entrada' ? 'Receita' : 'CustoVariavel'}
+        blocoPadraoNovaCategoria={item.tipo === 'Entrada' ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
         placeholder={salvando ? 'Salvando...' : 'Categoria'}
         onNavigate={dir => onNavigate(item.id, dir)}
       />

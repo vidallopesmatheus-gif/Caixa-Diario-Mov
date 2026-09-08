@@ -18,6 +18,7 @@ public class AppDbContext : DbContext
     public DbSet<ContaBancaria> ContasBancarias { get; set; }
     public DbSet<TransacaoImportada> TransacoesImportadas { get; set; }
     public DbSet<Categoria> Categorias { get; set; }
+    public DbSet<Grupo> Grupos { get; set; }
     public DbSet<Transferencia> Transferencias { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -207,13 +208,33 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Nome).HasColumnName("nome").IsRequired();
             entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired();
-            entity.Property(e => e.Grupo).HasColumnName("grupo");
+            entity.Property(e => e.GrupoId).HasColumnName("grupo_id");
             entity.Property(e => e.Ordem).HasColumnName("ordem").HasDefaultValue(0);
             entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
 
+            entity.HasOne(e => e.Grupo)
+                .WithMany()
+                .HasForeignKey(e => e.GrupoId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(e => e.Nome).IsUnique();
             entity.HasIndex(e => new { e.Ativa, e.Ordem });
+        });
+
+        modelBuilder.Entity<Grupo>(entity =>
+        {
+            entity.ToTable("grupos");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Nome).HasColumnName("nome").IsRequired();
+            entity.Property(e => e.Bloco).HasColumnName("bloco").IsRequired();
+            entity.Property(e => e.Ordem).HasColumnName("ordem").HasDefaultValue(0);
+            entity.Property(e => e.Ativo).HasColumnName("ativo").HasDefaultValue(true);
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+
+            entity.HasIndex(e => e.Nome).IsUnique();
+            entity.HasIndex(e => new { e.Bloco, e.Ordem });
         });
 
         modelBuilder.Entity<Transferencia>(entity =>

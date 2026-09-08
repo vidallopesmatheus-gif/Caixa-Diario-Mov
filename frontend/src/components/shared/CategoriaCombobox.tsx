@@ -1,27 +1,38 @@
 import { useEffect, useRef, useState, forwardRef } from 'react'
-import { criarCategoria } from '../../api/categorias'
-import type { CategoriaItem, CategoriaAdmin, TipoCusto } from '../../types'
+import { criarCategoria, listarGrupos } from '../../api/categorias'
+import type { CategoriaItem, CategoriaAdmin, Bloco, Grupo } from '../../types'
+import { BLOCOS_ORDEM } from '../../types'
 import './CategoriaCombobox.css'
+
+const BLOCO_LABEL_CURTO: Record<Bloco, string> = {
+  'RECEITAS OPERACIONAIS': 'Receitas',
+  'DEDUÇÕES DA RECEITA': 'Deduções',
+  'CUSTOS OPERACIONAIS': 'Custos',
+  'DESPESAS OPERACIONAIS': 'Despesas',
+  'ATIVIDADES DE INVESTIMENTO': 'Investimento',
+  'ATIVIDADES DE FINANCIAMENTO': 'Financiamento',
+}
 
 interface CategoriaComboboxProps {
   categorias: CategoriaItem[]
   value: string
   onChange: (nome: string) => void
   onCategoriaCriada?: (categoria: CategoriaAdmin) => void
-  tipoPadraoNovaCategoria: TipoCusto
+  blocoPadraoNovaCategoria: Bloco
   placeholder?: string
   onNavigate?: (direcao: 'up' | 'down') => void
 }
 
 const CategoriaCombobox = forwardRef<HTMLInputElement, CategoriaComboboxProps>(function CategoriaCombobox(
-  { categorias, value, onChange, onCategoriaCriada, tipoPadraoNovaCategoria, placeholder, onNavigate },
+  { categorias, value, onChange, onCategoriaCriada, blocoPadraoNovaCategoria, placeholder, onNavigate },
   ref,
 ) {
   const [texto, setTexto] = useState(value)
   const [aberto, setAberto] = useState(false)
   const [indiceAtivo, setIndiceAtivo] = useState(0)
   const [criando, setCriando] = useState(false)
-  const [tipoNova, setTipoNova] = useState<TipoCusto>(tipoPadraoNovaCategoria)
+  const [grupos, setGrupos] = useState<Grupo[]>([])
+  const [grupoNovaId, setGrupoNovaId] = useState('')
   const [erro, setErro] = useState('')
   const [salvando, setSalvando] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -42,19 +53,28 @@ const CategoriaCombobox = forwardRef<HTMLInputElement, CategoriaComboboxProps>(f
     setAberto(false)
   }
 
-  function abrirCriacao() {
-    setTipoNova(tipoPadraoNovaCategoria)
+  async function abrirCriacao() {
     setErro('')
     setCriando(true)
+    if (grupos.length === 0) {
+      try {
+        const todos = await listarGrupos()
+        const ativos = todos.filter(g => g.ativo)
+        setGrupos(ativos)
+        setGrupoNovaId(ativos.find(g => g.bloco === blocoPadraoNovaCategoria)?.id ?? ativos[0]?.id ?? '')
+      } catch {
+        setErro('Erro ao carregar grupos do Plano de Contas.')
+      }
+    }
   }
 
   async function confirmarCriacao() {
     const nome = texto.trim()
-    if (!nome) return
+    if (!nome || !grupoNovaId) return
     setSalvando(true)
     setErro('')
     try {
-      const nova = await criarCategoria(nome, tipoNova)
+      const nova = await criarCategoria(nome, grupoNovaId)
       onCategoriaCriada?.(nova)
       selecionar(nova.nome)
       setCriando(false)
@@ -137,15 +157,21 @@ const CategoriaCombobox = forwardRef<HTMLInputElement, CategoriaComboboxProps>(f
       {criando && (
         <div className="cc-criar-form">
           <div className="cc-criar-nome">Nova categoria: <strong>{texto.trim()}</strong></div>
-          <select className="cc-criar-tipo" value={tipoNova} onChange={e => setTipoNova(e.target.value as TipoCusto)}>
-            <option value="Receita">Receita</option>
-            <option value="CustoVariavel">Custo Variável</option>
-            <option value="CustoFixo">Custo Fixo</option>
-            <option value="DespesaNaoOperacional">Despesa Não Operacional</option>
+          <select className="cc-criar-tipo" value={grupoNovaId} onChange={e => setGrupoNovaId(e.target.value)}>
+            {grupos.length === 0 && <option value="">Carregando grupos...</option>}
+            {BLOCOS_ORDEM.map(bloco => {
+              const doBloco = grupos.filter(g => g.bloco === bloco)
+              if (doBloco.length === 0) return null
+              return (
+                <optgroup key={bloco} label={BLOCO_LABEL_CURTO[bloco]}>
+                  {doBloco.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
+                </optgroup>
+              )
+            })}
           </select>
           {erro && <div className="cc-criar-erro">{erro}</div>}
           <div className="cc-criar-acoes">
-            <button type="button" className="cc-btn-criar" disabled={salvando} onClick={confirmarCriacao}>
+            <button type="button" className="cc-btn-criar" disabled={salvando || !grupoNovaId} onClick={confirmarCriacao}>
               {salvando ? 'Criando...' : 'Criar e usar'}
             </button>
             <button type="button" className="cc-btn-cancelar" onClick={() => { setCriando(false); setAberto(false) }}>

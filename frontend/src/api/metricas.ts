@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { ApiResponse } from '../types'
+import type { ApiResponse, Bloco } from '../types'
 
 export interface EbitdaMetrica {
   valor: number
@@ -102,6 +102,22 @@ export interface DreLinhaVertical {
   categorias: DreCategoria[]
 }
 
+/** Nível "Grupo" da árvore Bloco → Grupo → Categoria do demonstrativo de 3 níveis. */
+export interface DreGrupo {
+  nome: string
+  total: number
+  percentual: number | null
+  categorias: DreCategoria[]
+}
+
+/** Nível "Bloco" (fixo) do demonstrativo de 3 níveis. */
+export interface DreBloco {
+  bloco: Bloco
+  total: number
+  percentual: number | null
+  grupos: DreGrupo[]
+}
+
 export interface Dre {
   receitaBruta: number
   gruposDespesa: DreLinha[]
@@ -123,8 +139,13 @@ export interface Dre {
   receitaFinanceira: DreLinhaVertical
   despesasNaoOperacionais: DreLinhaVertical
   naoClassificado: DreLinhaVertical
+  atividadesInvestimento: DreLinhaVertical
+  atividadesFinanciamento: DreLinhaVertical
   resultadoLiquido: number
   resultadoLiquidoPercentual: number | null
+
+  /** Demonstrativo hierárquico de 3 níveis (Bloco → Grupo → Categoria) — fonte da tela de DRE nova. */
+  blocos: DreBloco[]
 }
 
 export async function obterDre(

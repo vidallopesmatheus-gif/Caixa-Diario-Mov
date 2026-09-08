@@ -13,17 +13,19 @@ public class CategoriaRepository : ICategoriaRepository
 
     public async Task<List<Categoria>> ListarAtivasAsync() =>
         await _context.Categorias
+            .Include(c => c.Grupo)
             .Where(c => c.Ativa)
             .OrderBy(c => c.Ordem)
             .ToListAsync();
 
     public async Task<List<Categoria>> ListarTodasAsync() =>
         await _context.Categorias
+            .Include(c => c.Grupo)
             .OrderBy(c => c.Ordem)
             .ToListAsync();
 
     public async Task<Categoria?> ObterPorIdAsync(Guid id) =>
-        await _context.Categorias.FindAsync(id);
+        await _context.Categorias.Include(c => c.Grupo).FirstOrDefaultAsync(c => c.Id == id);
 
     public async Task<Categoria?> ObterPorNomeAsync(string nome) =>
         await _context.Categorias.FirstOrDefaultAsync(c => c.Nome == nome);

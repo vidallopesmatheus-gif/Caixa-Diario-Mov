@@ -9,7 +9,22 @@ export interface Usuario {
   criadoPor?: string
 }
 
-export type TipoCusto = 'Receita' | 'CustoFixo' | 'CustoVariavel' | 'DespesaNaoOperacional'
+export type TipoCusto = 'Receita' | 'CustoFixo' | 'CustoVariavel' | 'DespesaNaoOperacional' | 'Investimento' | 'Financiamento'
+
+// Os 6 blocos são fixos na estrutura do demonstrativo — não são cadastráveis, só os Grupos dentro
+// de cada um são (ver Configurações → Plano de Contas).
+export type Bloco =
+  | 'RECEITAS OPERACIONAIS'
+  | 'DEDUÇÕES DA RECEITA'
+  | 'CUSTOS OPERACIONAIS'
+  | 'DESPESAS OPERACIONAIS'
+  | 'ATIVIDADES DE INVESTIMENTO'
+  | 'ATIVIDADES DE FINANCIAMENTO'
+
+export const BLOCOS_ORDEM: Bloco[] = [
+  'RECEITAS OPERACIONAIS', 'DEDUÇÕES DA RECEITA', 'CUSTOS OPERACIONAIS',
+  'DESPESAS OPERACIONAIS', 'ATIVIDADES DE INVESTIMENTO', 'ATIVIDADES DE FINANCIAMENTO',
+]
 
 export interface ItemFinanceiro {
   id?: string
@@ -141,9 +156,21 @@ export interface CategoriaAdmin {
   id: string
   nome: string
   tipo: TipoCusto
-  grupo?: string
+  grupoId: string
+  grupoNome: string
+  bloco: Bloco
   ordem: number
   ativa: boolean
+}
+
+/** Grupo — nível entre Bloco (fixo) e Categoria, criado/editado em Configurações > Plano de Contas. */
+export interface Grupo {
+  id: string
+  nome: string
+  bloco: Bloco
+  ordem: number
+  ativo: boolean
+  quantidadeCategorias: number
 }
 
 export interface MetaAnual {

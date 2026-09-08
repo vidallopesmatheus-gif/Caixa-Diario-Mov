@@ -11,6 +11,33 @@
   font-size: 13px;
 }
 
+/* ── Blocos (fixos, nível de topo do demonstrativo) ───────────────────── */
+.cat-bloco {
+  margin-top: 20px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.cat-bloco-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--bg-card);
+  border: none;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--tx1);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cat-bloco-corpo { padding: 4px 14px 14px; }
+
 /* ── Grupos recolhíveis ────────────────────────────────────────────────── */
 .cat-grupo { margin-bottom: 6px; }
 
@@ -33,7 +60,65 @@
   text-align: left;
 }
 
+.cat-grupo-header-com-acoes {
+  justify-content: space-between;
+  cursor: default;
+}
+
+.cat-grupo-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.cat-grupo-acoes {
+  display: flex;
+  gap: 6px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+
 .cat-grupo-seta { font-size: 11px; width: 10px; }
+
+.cat-novo-grupo-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.cat-novo-grupo-form input {
+  flex: 1;
+  min-width: 180px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg);
+  color: var(--tx1);
+  font-size: 13px;
+}
+
+.cat-btn-novo-grupo {
+  margin-top: 10px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--bd);
+  background: none;
+  color: var(--tx3);
+  cursor: pointer;
+  font-size: 12px;
+}
+.cat-btn-novo-grupo:hover { color: var(--tx1); border-color: var(--tx3); }
 
 /* ── Lista compacta: uma linha por categoria ──────────────────────────── */
 .cat-lista-compacta { display: flex; flex-direction: column; }

@@ -88,12 +88,23 @@
   color: var(--danger);
 }
 
+.dre-alerta-global {
+  background: var(--warning-soft, rgba(217,119,6,.12));
+  border: 1px solid var(--warning);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--tx1);
+  margin-bottom: 16px;
+  max-width: 760px;
+}
+
 .dre-corpo {
   background: var(--bg-card);
   border: 1px solid var(--bd);
   border-radius: 14px;
-  padding: 24px;
-  max-width: 680px;
+  padding: 28px;
+  max-width: 760px;
 }
 
 .dre-corpo-comparativo {
@@ -157,72 +168,135 @@
   font-variant-numeric: tabular-nums;
 }
 
-.dre-linha-receita .dre-linha-label {
-  font-size: 15px;
-  font-weight: 700;
+/* ── Bloco (nível de topo, cor de identidade própria) ─────────────────────── */
+.dre-bloco-wrap {
+  margin: 22px 0;
 }
 
-.dre-linha-receita .dre-linha-valor,
-.dre-linha-receita .dre-linha-pct {
-  font-size: 15px;
-}
+.dre-bloco-wrap:first-child { margin-top: 0; }
 
-/* Linhas de composição (Deduções, Custos Variáveis, Despesas Fixas, ...) — clicáveis */
-.dre-linha-bucket {
+.dre-linha-bloco {
   cursor: pointer;
-  border-radius: 6px;
-  padding: 7px 4px;
+  border-radius: 8px;
+  padding: 10px 10px 10px 14px;
   transition: background .12s;
 }
 
-.dre-linha-bucket:hover {
-  background: rgba(255,255,255,.04);
+.dre-linha-bloco:hover { background: var(--bg-hover); }
+
+.dre-linha-vazia { cursor: default; opacity: 0.55; }
+
+.dre-bloco-nome {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
 }
 
-/* Linhas de subtotal (Receita Líquida, Margem de Contribuição, Resultado Operacional, Resultado Líquido) */
+.dre-linha-bloco .dre-linha-valor { font-size: 15px; font-weight: 700; }
+
+/* Barra de proporção horizontal — participação sobre a Receita Operacional */
+.dre-barra-trilho {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg);
+  margin: 4px 14px 0;
+  overflow: hidden;
+}
+
+.dre-barra-trilho-grupo { margin-left: 34px; height: 3px; }
+
+.dre-barra-preenchida {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .2s;
+}
+
+/* ── Grupo (dentro de um bloco expandido) ──────────────────────────────────── */
+.dre-grupo-wrap { margin: 6px 0; }
+
+.dre-grupo-linha {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 6px 14px 6px 28px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.dre-grupo-linha:hover { background: var(--bg-hover); border-radius: 6px; }
+
+.dre-expand-grupo { width: 10px; }
+
+.dre-grupo-nome { flex: 1; font-size: 13px; color: var(--tx1); font-weight: 500; }
+.dre-grupo-valor { font-size: 13px; font-weight: 600; color: var(--tx1); min-width: 100px; text-align: right; font-variant-numeric: tabular-nums; }
+.dre-grupo-pct { font-size: 12px; color: var(--tx3); min-width: 50px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.dre-cat-lista {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 14px 4px 46px;
+}
+
+.dre-cat-btn-alerta .dre-cat-nome { color: var(--warning); font-weight: 600; }
+
+/* ── Subtotais (Margem de Contribuição, Resultado Operacional) ────────────── */
 .dre-linha-subtotal {
   background: var(--bg);
-  border-radius: 6px;
-  padding: 8px 6px;
-  margin: 2px 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 16px 0;
 }
 
 .dre-linha-subtotal .dre-linha-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tx2);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.dre-linha-subtotal .dre-linha-valor,
+.dre-linha-subtotal .dre-cmp-cel-valor {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--tx1);
+}
+
+.dre-linha-subtotal .dre-linha-pct {
   font-size: 14px;
   font-weight: 700;
   color: var(--tx1);
 }
 
-.dre-linha-subtotal .dre-linha-valor,
-.dre-linha-subtotal .dre-linha-pct,
-.dre-linha-subtotal .dre-cmp-cel-valor {
-  font-size: 15px;
-  font-weight: 700;
+/* ── Resultado Líquido: maior destaque da tela ─────────────────────────────── */
+.dre-linha-final {
+  margin-top: 24px;
+  padding: 20px 22px;
+  border-radius: 12px;
+  border: 2px solid var(--bd-str);
+  background: var(--bg-card);
 }
 
-.dre-linha-subtotal .dre-linha-pct {
+.dre-linha-final .dre-linha-label {
+  font-size: 15px;
   color: var(--tx1);
 }
 
-.dre-linha[data-final="true"] {
-  border-top: 3px double var(--bd);
-  margin-top: 6px;
-  padding-top: 10px;
+.dre-linha-final .dre-linha-valor,
+.dre-linha-final .dre-cmp-cel-valor {
+  font-size: 24px;
+  font-weight: 800;
 }
 
-.dre-linha-alerta {
-  background: var(--danger-soft);
-}
-
-.dre-naoclass-badge {
-  font-size: 10px;
+.dre-linha-final .dre-linha-pct {
+  font-size: 16px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .4px;
-  color: var(--danger);
-  background: rgba(220,38,38,.12);
-  border-radius: 4px;
-  padding: 1px 6px;
+  color: var(--tx1);
 }
 
 .dre-expand {
@@ -232,10 +306,13 @@
 }
 
 .dre-expand-bloco {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 4px 4px 8px 28px;
+  padding: 6px 0 4px;
+}
+
+.dre-expand-periodo + .dre-expand-periodo {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--bd);
 }
 
 .dre-expand-periodo {
