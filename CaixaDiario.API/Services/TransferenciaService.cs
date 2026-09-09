@@ -1,9 +1,11 @@
 using System.Text.Json;
+using CaixaDiario.API.Data;
 using CaixaDiario.API.DTOs.Transferencias;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace CaixaDiario.API.Services;
 
@@ -13,17 +15,20 @@ public class TransferenciaService : ITransferenciaService
     private readonly IContaBancariaRepository _contaRepo;
     private readonly IRegistroRepository _registroRepo;
     private readonly IAuditService _auditService;
+    private readonly AppDbContext _context;
 
     public TransferenciaService(
         ITransferenciaRepository transferenciaRepo,
         IContaBancariaRepository contaRepo,
         IRegistroRepository registroRepo,
-        IAuditService auditService)
+        IAuditService auditService,
+        AppDbContext context)
     {
         _transferenciaRepo = transferenciaRepo;
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _auditService = auditService;
+        _context = context;
     }
 
     public async Task<List<TransferenciaDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -49,6 +54,14 @@ public class TransferenciaService : ITransferenciaService
         var transferencia = await _transferenciaRepo.ObterPorIdAsync(id)
             ?? throw new ApiException(404, CodigoRetorno.TRANSFERENCIA_NAO_ENCONTRADA, "Transferência não encontrada.");
         VerificarAcesso(transferencia.ClienteId, usuarioLogadoId, perfil);
+
+        // Transacional: as duas pontas + a remoção do registro de Transferencia têm que valer todas
+        // juntas ou nenhuma — uma falha no meio (ex.: perda de conexão) não pode deixar o par
+        // "meio desfeito" (uma ponta revertida, a outra ainda marcada como transferência).
+        // IsRelational() evita quebrar os testes, que usam o provider InMemory (sem suporte a transação).
+        await using var transacao = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
 
         var regOrigem = await _registroRepo.ObterPorContaEDataAsync(transferencia.ContaOrigemId, transferencia.Data);
         var itemOrigem = regOrigem?.Saidas.FirstOrDefault(s => s.TransferenciaId == transferencia.Id);
@@ -79,6 +92,8 @@ public class TransferenciaService : ITransferenciaService
         }
 
         await _transferenciaRepo.RemoverAsync(transferencia);
+        if (transacao != null) await transacao.CommitAsync();
+
         await _auditService.LogAsync(transferencia.ClienteId, usuarioLogadoId, "Transferencia", "DesfazerClassificacao",
             transferencia.Id.ToString(), JsonSerializer.Serialize(transferencia), null);
     }
@@ -111,10 +126,20 @@ public class TransferenciaService : ITransferenciaService
         string descricaoOriginal;
         Guid contaOrigemId, contaDestinoId;
 
+        // Transacional: contrapartida, ponta original e o registro de Transferencia têm que ser
+        // gravados juntos — sem isso, uma falha no meio deixa resíduo (ex.: contrapartida criada mas
+        // a ponta original nunca marcada, ou vice-versa) e um retry do usuário, sem essa marca, cria
+        // um SEGUNDO par inteiro em vez de completar o primeiro (era assim que o lote duplicava tudo).
+        await using var transacao = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
         if (dto.Tipo == "Saida")
         {
             var item = registro.Saidas.FirstOrDefault(s => s.Id == dto.LancamentoId)
                 ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+            if (item.TransferenciaId.HasValue)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Este lançamento já foi classificado como transferência.");
             valor = item.Valor;
             descricaoOriginal = item.Descricao;
             item.TipoCusto = LancamentoFiltro.TipoTransferencia;
@@ -163,6 +188,8 @@ public class TransferenciaService : ITransferenciaService
         {
             var item = registro.Entradas.FirstOrDefault(e => e.Id == dto.LancamentoId)
                 ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+            if (item.TransferenciaId.HasValue)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Este lançamento já foi classificado como transferência.");
             valor = item.Valor;
             descricaoOriginal = item.Descricao;
             item.TipoCusto = LancamentoFiltro.TipoTransferencia;
@@ -221,6 +248,7 @@ public class TransferenciaService : ITransferenciaService
             CriadoEm = DateTime.UtcNow,
         };
         var criada = await _transferenciaRepo.AdicionarAsync(transferencia);
+        if (transacao != null) await transacao.CommitAsync();
 
         var contaOrigemNome = contaOrigemId == conta.Id ? conta.Nome : contrapartida.Nome;
         var contaDestinoNome = contaDestinoId == conta.Id ? conta.Nome : contrapartida.Nome;
