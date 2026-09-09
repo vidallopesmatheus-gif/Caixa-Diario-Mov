@@ -16,18 +16,15 @@ public class MetricasController : ControllerBase
 {
     private readonly IMetricasService _metricasService;
     private readonly IRegistroRepository _registroRepo;
-    private readonly IContaRecorrenteRepository _contaRecorrenteRepo;
     private readonly ICategoriaRepository _categoriaRepo;
 
     public MetricasController(
         IMetricasService metricasService,
         IRegistroRepository registroRepo,
-        IContaRecorrenteRepository contaRecorrenteRepo,
         ICategoriaRepository categoriaRepo)
     {
         _metricasService = metricasService;
         _registroRepo = registroRepo;
-        _contaRecorrenteRepo = contaRecorrenteRepo;
         _categoriaRepo = categoriaRepo;
     }
 
@@ -57,16 +54,6 @@ public class MetricasController : ControllerBase
         var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
         var resultado = _metricasService.CalcularEvolucao(registros, meses);
         return Ok(new ApiResponse<List<EvolucaoMensalDto>> { Dados = resultado });
-    }
-
-    [HttpGet("{clienteId:guid}/fluxo-projetado")]
-    public async Task<IActionResult> ObterFluxoProjetado(Guid clienteId, [FromQuery] int dias = 90)
-    {
-        VerificarAcesso(clienteId);
-        var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
-        var recorrentes = await _contaRecorrenteRepo.ListarAtivasPorClienteAsync(clienteId);
-        var resultado = _metricasService.CalcularFluxoProjetado(registros, recorrentes, dias);
-        return Ok(new ApiResponse<FluxoProjetadoDto> { Dados = resultado });
     }
 
     [HttpGet("{clienteId:guid}/dre")]

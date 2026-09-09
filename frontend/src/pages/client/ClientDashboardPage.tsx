@@ -11,6 +11,8 @@ import { obterSelicAtual } from '../../api/selic'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { obterDre } from '../../api/metricas'
 import type { Dre } from '../../api/metricas'
+import { obterProjecao } from '../../api/projecao'
+import type { Projecao } from '../../api/projecao'
 import OrcamentoDinamicoCard from './OrcamentoDinamicoCard'
 import MetasResumoBlock from './dashboard/MetasResumoBlock'
 import ResumoStatusBar from './dashboard/ResumoStatusBar'
@@ -98,6 +100,15 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       .catch(() => { setDreAtual(null); setDreAnterior(null); setDreLoading(false) })
   }, [clienteId, janela.de, janela.ate, janela.deAnterior, janela.ateAnterior, contaFiltro])
 
+  // Projeção de saldo (30 dias) — única busca, usada tanto no card "Saldo Projetado" quanto no
+  // gráfico de fluxo de caixa abaixo (eram duas chamadas separadas antes: uma via /api/projecao,
+  // outra via /api/metricas/fluxo-projetado — essa segunda tinha até um bug de dedup diferente).
+  const [projecao, setProjecao] = useState<Projecao | null>(null)
+  useEffect(() => {
+    if (!clienteId) return
+    obterProjecao(clienteId, 30, contaFiltro ?? undefined).then(setProjecao).catch(() => setProjecao(null))
+  }, [clienteId, contaFiltro])
+
   const hoje = new Date()
   const anoAtual = hoje.getFullYear()
   const mesAtual = hoje.getMonth() + 1
@@ -106,7 +117,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const de = janela.de
   const ate = janela.ate
   const [multiploValuation, setMultiploValuation] = useState(3)
-  const { metricas, fluxo } = useMetricas(clienteId, de, ate, multiploValuation)
+  const { metricas } = useMetricas(clienteId, de, ate, multiploValuation)
   const [meta, setMeta] = useState<MetaAnual | null>(null)
   const [editReceita, setEditReceita] = useState('')
   const [editLucro, setEditLucro] = useState('')
@@ -527,11 +538,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       {clienteId && (
         <ResumoMetricCards
           clienteId={clienteId}
-          contaFiltro={contaFiltro}
           janela={janela}
           dreAtual={dreLoading ? null : dreAtual}
           dreAnterior={dreLoading ? null : dreAnterior}
           saldoAtual={saldoAtualSelecionado}
+          projecao={projecao}
         />
       )}
 
@@ -620,12 +631,12 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         </div>
       )}
 
-      {fluxo && fluxo.dias.length > 0 && (
+      {projecao && projecao.dias.length > 0 && (
         <div className="meta-card">
           <h3>📈 Fluxo de Caixa Projetado (30 dias)</h3>
           <div style={{ height: 200 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={fluxo.dias.map(d => ({ dia: d.data.slice(5), saldo: d.saldoProjetado }))}>
+              <LineChart data={projecao.dias.map(d => ({ dia: d.data.slice(5), saldo: d.saldoFim }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
                 <XAxis dataKey="dia" stroke="var(--tx3)" tick={{ fontSize: 11 }} interval={4} />
                 <YAxis stroke="var(--tx3)" tick={{ fontSize: 11 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
