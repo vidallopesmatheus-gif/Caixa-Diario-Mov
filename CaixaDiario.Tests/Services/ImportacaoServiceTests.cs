@@ -16,6 +16,8 @@ public class ImportacaoServiceTests
     private readonly Mock<ITransacaoImportadaRepository> _importRepoMock = new();
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
     private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
+    private readonly Mock<IRegraCategorizacaoRepository> _regraRepoMock = new();
+    private readonly Mock<ITransferenciaService> _transferenciaServiceMock = new();
     private readonly ImportacaoService _sut;
 
     public ImportacaoServiceTests()
@@ -29,7 +31,11 @@ public class ImportacaoServiceTests
             new() { Id = Guid.NewGuid(), Nome = "Material de Escritório", Tipo = "CustoFixo" },
             new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo" },
         });
-        _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object, _categoriaRepoMock.Object);
+        // Nenhuma regra ativa por padrão — os testes que não mexem com regra ficam com o
+        // comportamento de sempre (sugestão por palavra-chave / pendente).
+        _regraRepoMock.Setup(r => r.ListarAtivasPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<RegraCategorizacao>());
+        _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object, _categoriaRepoMock.Object,
+            _regraRepoMock.Object, _transferenciaServiceMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid contaId, Guid clienteId, decimal saldoInicial = 0m) => new()

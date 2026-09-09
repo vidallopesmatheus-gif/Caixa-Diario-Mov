@@ -11,6 +11,7 @@ import {
 } from '../../api/contasBancarias'
 import { previewExtrato, importarExtrato, categorizarPendentes } from '../../api/importacao'
 import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
+import { listarRegras, atualizarRegra } from '../../api/regras'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { listarMetas, salvarMeta } from '../../api/metas'
 import { listarCategorias } from '../../api/categorias'
@@ -219,6 +220,28 @@ export default function ClientContaDetalhePage() {
     setMsg('')
     try {
       await categorizarPendentes(contaId, [{ id: lancamentoParaEditar.id, data: lancamentoParaEditar.data, categoria: categoriaEdicao }])
+
+      // Categoria veio de uma regra e o usuário trocou pra outra — a regra em si NUNCA é alterada
+      // sozinha, mas oferece atualizar (só essa reclassificação manual, não muda o critério).
+      const regraId = lancamentoParaEditar.regraCategorizacaoId
+      if (regraId && categoriaEdicao !== lancamentoParaEditar.categoria && clienteId) {
+        try {
+          const regras = await listarRegras(clienteId)
+          const regra = regras.find(r => r.id === regraId)
+          if (regra && regra.acaoTipo === 'Categoria' && regra.categoria !== categoriaEdicao
+            && confirm(`Esse lançamento veio da regra baseada em "${regra.descricaoReferencia}" (categoria "${regra.categoria}"). Atualizar a regra para usar "${categoriaEdicao}" daqui pra frente?`)) {
+            await atualizarRegra(regra.id, {
+              descricaoReferencia: regra.descricaoReferencia,
+              acaoTipo: regra.acaoTipo,
+              categoria: categoriaEdicao,
+              ativa: regra.ativa,
+            })
+          }
+        } catch {
+          // Não bloqueia a edição do lançamento (já salva) por causa disso.
+        }
+      }
+
       setLancamentoParaEditar(null)
       carregarConta()
       carregarExtrato()
@@ -413,6 +436,9 @@ export default function ClientContaDetalhePage() {
       {resultadoImportacao && (
         <div className="cd-msg cd-msg-sucesso">
           ✅ {resultadoImportacao.totalImportadas} lançamento(s) importado(s)
+          {resultadoImportacao.totalCategorizadasPorRegra > 0 && (
+            <> — {resultadoImportacao.totalCategorizadasPorRegra} categorizado(s) automaticamente por regra</>
+          )}
           {resultadoImportacao.totalPendentesCategorizacao > 0 && (
             <> — {resultadoImportacao.totalPendentesCategorizacao} sem categoria sugerida (
               <button
@@ -555,7 +581,14 @@ export default function ClientContaDetalhePage() {
                       <span style={{ color: 'var(--warning)' }} title="Sem categoria — afeta o saldo normalmente, só falta classificar">
                         🏷️ Pendente
                       </span>
-                    ) : (l.categoria || '—')}
+                    ) : (
+                      <>
+                        {l.categoria || '—'}
+                        {l.regraCategorizacaoId && (
+                          <span title="Categorizado automaticamente por uma regra" style={{ marginLeft: 4, fontSize: 11, color: 'var(--tx3)' }}>⚙️</span>
+                        )}
+                      </>
+                    )}
                   </span>
                   <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
                     {l.valor >= 0 ? '+' : ''}{fmtBRL(l.valor)}
@@ -795,6 +828,9 @@ export default function ClientContaDetalhePage() {
           <>
             <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
               "{lancamentoParaEditar.descricao}" · {fmtBRL(Math.abs(lancamentoParaEditar.valor))} · {fmtDate(lancamentoParaEditar.data)}
+              {lancamentoParaEditar.regraCategorizacaoId && (
+                <><br />⚙️ Categoria atual veio de uma regra automática.</>
+              )}
             </p>
             <div className="inp-group">
               <label>Categoria</label>

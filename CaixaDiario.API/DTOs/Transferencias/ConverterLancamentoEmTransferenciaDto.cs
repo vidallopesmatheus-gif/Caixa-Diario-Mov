@@ -19,4 +19,8 @@ public class ConverterLancamentoEmTransferenciaDto
     // cria lançamento novo, só relabela os dois como Transferência.
     public Guid? LancamentoContrapartidaId { get; set; }
     public DateOnly? DataContrapartida { get; set; }
+
+    // Preenchido só quando a conversão veio de uma RegraCategorizacao (importação automática ou
+    // aplicação retroativa) — marca a origem no item, igual a categorização por regra comum.
+    public Guid? RegraCategorizacaoId { get; set; }
 }
