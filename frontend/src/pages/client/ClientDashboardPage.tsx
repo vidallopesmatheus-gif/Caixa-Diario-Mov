@@ -244,10 +244,6 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     const periodoMeses = meta.periodoMeses ?? 12
     const anoMeta = meta.ano
 
-    const salvoDate = meta.salvoEm ? new Date(meta.salvoEm) : null
-    const mesSalvo = salvoDate ? salvoDate.getMonth() + 1 : 1
-    const anoSalvo = salvoDate ? salvoDate.getFullYear() : anoMeta
-
     let remainingReceita = meta.metaReceita
     let remainingLucro = meta.metaLucro
 
@@ -264,10 +260,10 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
       const isPassado = ano < anoAtual || (ano === anoAtual && mes < mesAtual)
       const isAtual = ano === anoAtual && mes === mesAtual
-      const isAntesSalvo = salvoDate
-        ? (ano < anoSalvo || (ano === anoSalvo && mes < mesSalvo))
-        : false
 
+      // Meta distribuída em todos os meses do período, inclusive os que já passaram — sempre que a
+      // meta é editada, o restante é redistribuído a partir daqui pra frente, mas o mês em si
+      // sempre mostra a meta (não fica em branco só por ter sido editada depois daquele mês).
       const targetReceita = remainingReceita / remainingMonths
       const targetLucro = remainingLucro / remainingMonths
 
@@ -279,12 +275,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       return {
         mes, ano,
         label: `${MONTHS[mes - 1]}/${ano}`,
-        targetReceita: isAntesSalvo ? null : targetReceita,
-        targetLucro: isAntesSalvo ? null : targetLucro,
+        targetReceita,
+        targetLucro,
         receitaReal: (isPassado || isAtual) ? receitaReal : null,
         lucroReal: (isPassado || isAtual) ? lucroReal : null,
         isAtual,
-        isAntesSalvo,
       }
     })
   }, [meta, registros, anoAtual, mesAtual])
@@ -976,7 +971,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         </div>
         {meta?.salvoEm && (
           <div className="meta-salvo-em">
-            Projeção calculada a partir de {new Date(meta.salvoEm).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+            Última atualização: {new Date(meta.salvoEm).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
           </div>
         )}
       </div>
@@ -1000,8 +995,8 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                 <Line type="monotone" dataKey="pessimista" stroke="#ff6b6b" strokeWidth={2} dot={false} name="Pessimista" />
                 <Line type="monotone" dataKey="realista" stroke="#0a84ff" strokeWidth={2} dot={false} name="Realista" />
                 <Line type="monotone" dataKey="otimista" stroke="#34c759" strokeWidth={2} dot={false} name="Otimista" />
-                {Number(editValorSonho) > 0 && (
-                  <ReferenceLine y={Number(editValorSonho)} stroke="#ff9500" strokeDasharray="5 5"
+                {parseBRL(editValorSonho) > 0 && (
+                  <ReferenceLine y={parseBRL(editValorSonho)} stroke="#ff9500" strokeDasharray="5 5"
                     label={{ value: 'Meta', fill: '#ff9500', fontSize: 11, position: 'insideTopRight' }} />
                 )}
               </LineChart>
@@ -1014,7 +1009,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         <div className="meta-card">
           <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({fmtPct(selic, 2)} a.a.)</span></h3>
           <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
-            Capital de {fmtBRL(Number(editTotalInvestido))} composto à SELIC, sem aportes adicionais.
+            Capital de {fmtBRL(parseBRL(editTotalInvestido))} composto à SELIC, sem aportes adicionais.
           </p>
           <div className="stats-grid">
             <StatCard label="📅 Em 10 anos" value={fmtBRL(projecaoSelic.dez)} className="val-blue" />
@@ -1042,7 +1037,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
             <span style={{ color: fireNumber.atingido ? '#34c759' : '#ff9500' }}>
               {fireNumber.atingido
                 ? '🎉 FIRE atingido!'
-                : `Faltam ${fmtBRL(fireNumber.fireTarget - Number(editTotalInvestido))}`}
+                : `Faltam ${fmtBRL(fireNumber.fireTarget - parseBRL(editTotalInvestido))}`}
             </span>
           </div>
         </div>
@@ -1052,8 +1047,8 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         <div className="meta-card">
           <h3>📅 Projeção Mês a Mês — {MONTH_NAMES[meta.mesInicio - 1]} a {MONTH_NAMES[((meta.mesInicio - 1 + meta.periodoMeses - 1) % 12)]} / {meta.ano}</h3>
           <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 10 }}>
-            Redistribuição automática do restante nos meses seguintes. Projeção ativa a partir de{' '}
-            {meta.salvoEm ? new Date(meta.salvoEm).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : '—'}.
+            Meta distribuída em partes iguais pelo período — a cada mês já fechado (passado ou
+            atual), o que sobrou é redistribuído entre os meses seguintes.
           </p>
           <table className="plan-table">
             <thead>
