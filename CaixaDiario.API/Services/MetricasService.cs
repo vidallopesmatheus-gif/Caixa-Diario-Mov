@@ -776,35 +776,4 @@ public class MetricasService : IMetricasService
         return dict;
     }
 
-    public FluxoProjetadoDto CalcularFluxoProjetado(List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, int dias)
-    {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
-        var saldoAtual = registros.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0;
-
-        var fluxoDias = new List<FluxoDiaDto>();
-        var saldoCorrendo = saldoAtual;
-
-        for (int d = 1; d <= dias; d++)
-        {
-            var dia = hoje.AddDays(d);
-
-            var entradas = registros.SelectMany(r => r.ContasReceber)
-                .Where(c => !c.Pago && c.DataVencimento == dia).Sum(c => c.Valor);
-
-            var saidas = registros.SelectMany(r => r.ContasPagar)
-                .Where(c => !c.Pago && c.DataVencimento == dia).Sum(c => c.Valor);
-
-            var entradasRec = recorrentes.Where(r => r.Tipo == "Receber" && r.Ativo &&
-                RecorrenciaService.OcorreEm(r, dia)).Sum(r => r.Valor);
-
-            var saidasRec = recorrentes.Where(r => r.Tipo == "Pagar" && r.Ativo &&
-                RecorrenciaService.OcorreEm(r, dia)).Sum(r => r.Valor);
-
-            saldoCorrendo += entradas + entradasRec - saidas - saidasRec;
-
-            fluxoDias.Add(new FluxoDiaDto { Data = dia, SaldoProjetado = saldoCorrendo });
-        }
-
-        return new FluxoProjetadoDto { SaldoAtual = saldoAtual, Dias = fluxoDias };
-    }
 }

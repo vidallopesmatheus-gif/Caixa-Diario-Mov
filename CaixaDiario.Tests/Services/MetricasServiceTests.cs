@@ -143,17 +143,6 @@ public class MetricasServiceTests
         Assert.Equal(700m, mesAtual.Lucro);
     }
 
-    [Fact]
-    public void CalcularFluxoProjetado_SemContasFuturas_SaldoConstante()
-    {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
-        var registro = CriarRegistro(hoje, new(), new(), saldoFinal: 1000m);
-        var resultado = _sut.CalcularFluxoProjetado(new() { registro }, new(), 3);
-        Assert.Equal(1000m, resultado.SaldoAtual);
-        Assert.Equal(3, resultado.Dias.Count);
-        Assert.All(resultado.Dias, d => Assert.Equal(1000m, d.SaldoProjetado));
-    }
-
     // ---- Valuation ----
 
     [Fact]

@@ -1,18 +1,20 @@
 import { useState, useEffect } from 'react'
 import { obterEvolucao } from '../../../api/metricas'
 import type { Dre, EvolucaoMensal } from '../../../api/metricas'
-import { obterProjecao } from '../../../api/projecao'
 import type { Projecao } from '../../../api/projecao'
 import type { JanelaPeriodo } from '../../../utils/periodo'
 import MetricCard from './MetricCard'
 
 interface Props {
   clienteId: string
-  contaFiltro: string | null
   janela: JanelaPeriodo
   dreAtual: Dre | null
   dreAnterior: Dre | null
   saldoAtual: number | null
+  // Vem de cima (ClientDashboardPage) — mesma chamada a /api/projecao usada no gráfico de
+  // fluxo de caixa logo abaixo, pra não duplicar a busca (era uma segunda fonte pra "projeção
+  // de saldo", com a lógica de dedup de recorrência já materializada implementada só numa delas).
+  projecao: Projecao | null
 }
 
 function variacaoPct(atual: number, base: number): number | null {
@@ -20,19 +22,13 @@ function variacaoPct(atual: number, base: number): number | null {
   return ((atual - base) / Math.abs(base)) * 100
 }
 
-export default function ResumoMetricCards({ clienteId, contaFiltro, janela, dreAtual, dreAnterior, saldoAtual }: Props) {
+export default function ResumoMetricCards({ clienteId, janela, dreAtual, dreAnterior, saldoAtual, projecao }: Props) {
   const [evolucao, setEvolucao] = useState<EvolucaoMensal[]>([])
-  const [projecao, setProjecao] = useState<Projecao | null>(null)
 
   useEffect(() => {
     if (!clienteId) return
     obterEvolucao(clienteId, 8).then(setEvolucao).catch(() => setEvolucao([]))
   }, [clienteId])
-
-  useEffect(() => {
-    if (!clienteId) return
-    obterProjecao(clienteId, 30, contaFiltro ?? undefined).then(setProjecao).catch(() => setProjecao(null))
-  }, [clienteId, contaFiltro])
 
   const entradas = dreAtual?.receitaBruta ?? null
   const saidas = dreAtual?.totalDespesas ?? null
