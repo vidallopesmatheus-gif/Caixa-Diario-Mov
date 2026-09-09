@@ -1,9 +1,11 @@
+using CaixaDiario.API.Data;
 using CaixaDiario.API.DTOs.Transferencias;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
 using CaixaDiario.API.Services;
+using Microsoft.EntityFrameworkCore;
 using Moq;
 
 namespace CaixaDiario.Tests.Services;
@@ -16,9 +18,15 @@ public class TransferenciaServiceTests
     private readonly Mock<IAuditService> _auditMock = new();
     private readonly TransferenciaService _sut;
 
+    // InMemory não é relacional — o serviço detecta isso (Database.IsRelational()) e não tenta abrir
+    // transação, então os testes continuam simulando só via mocks dos repositórios.
+    private static AppDbContext CriarContexto() =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
     public TransferenciaServiceTests()
     {
-        _sut = new TransferenciaService(_transferenciaRepoMock.Object, _contaRepoMock.Object, _registroRepoMock.Object, _auditMock.Object);
+        _sut = new TransferenciaService(_transferenciaRepoMock.Object, _contaRepoMock.Object, _registroRepoMock.Object, _auditMock.Object, CriarContexto());
     }
 
     private static ContaBancaria CriarConta(Guid clienteId, string nome, string tipo = "Caixa", decimal saldoInicial = 0m, bool ativa = true) => new()
