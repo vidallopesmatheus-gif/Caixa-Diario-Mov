@@ -16,20 +16,17 @@ public class SaudeFinanceiraController : ControllerBase
 {
     private readonly ISaudeFinanceiraService _saudeService;
     private readonly IRegistroRepository _registroRepo;
-    private readonly IContaRecorrenteRepository _contaRecorrenteRepo;
     private readonly IMetaRepository _metaRepo;
     private readonly IMetaProgressoService _metaProgressoService;
 
     public SaudeFinanceiraController(
         ISaudeFinanceiraService saudeService,
         IRegistroRepository registroRepo,
-        IContaRecorrenteRepository contaRecorrenteRepo,
         IMetaRepository metaRepo,
         IMetaProgressoService metaProgressoService)
     {
         _saudeService        = saudeService;
         _registroRepo        = registroRepo;
-        _contaRecorrenteRepo = contaRecorrenteRepo;
         _metaRepo            = metaRepo;
         _metaProgressoService = metaProgressoService;
     }
@@ -43,12 +40,11 @@ public class SaudeFinanceiraController : ControllerBase
         if (ObterPerfil() == "cliente" && ObterUsuarioId() != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
 
-        var registros   = await _registroRepo.ListarPorClienteAsync(clienteId);
-        var recorrentes = await _contaRecorrenteRepo.ListarAtivasPorClienteAsync(clienteId);
-        var metas       = await _metaRepo.ListarPorClienteAsync(clienteId);
+        var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
+        var metas     = await _metaRepo.ListarPorClienteAsync(clienteId);
         await _metaProgressoService.AplicarSaldoDeContasVinculadasAsync(clienteId, metas);
 
-        var resultado = _saudeService.Calcular(registros, recorrentes, metas);
+        var resultado = _saudeService.Calcular(registros, metas);
         return Ok(new ApiResponse<SaudeFinanceiraDto> { Dados = resultado });
     }
 }

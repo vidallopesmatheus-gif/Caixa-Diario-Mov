@@ -16,13 +16,12 @@ public class SaudeFinanceiraControllerTests
 {
     private readonly Mock<ISaudeFinanceiraService> _saudeMock = new();
     private readonly Mock<IRegistroRepository> _registroMock = new();
-    private readonly Mock<IContaRecorrenteRepository> _contaMock = new();
     private readonly Mock<IMetaRepository> _metaMock = new();
     private readonly Mock<IMetaProgressoService> _metaProgressoMock = new();
 
     private SaudeFinanceiraController CriarSut(Guid usuarioId, string perfil)
     {
-        var sut = new SaudeFinanceiraController(_saudeMock.Object, _registroMock.Object, _contaMock.Object, _metaMock.Object, _metaProgressoMock.Object);
+        var sut = new SaudeFinanceiraController(_saudeMock.Object, _registroMock.Object, _metaMock.Object, _metaProgressoMock.Object);
         var claims = new[] { new Claim("id", usuarioId.ToString()), new Claim("perfil", perfil) };
         sut.ControllerContext = new ControllerContext
         {
@@ -36,9 +35,8 @@ public class SaudeFinanceiraControllerTests
     {
         var clienteId = Guid.NewGuid();
         _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
-        _contaMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaRecorrente>());
         _metaMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual>());
-        _saudeMock.Setup(s => s.Calcular(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<ContaRecorrente>>(), It.IsAny<List<MetaAnual>>()))
+        _saudeMock.Setup(s => s.Calcular(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<MetaAnual>>()))
             .Returns(new SaudeFinanceiraDto());
 
         var result = await CriarSut(Guid.NewGuid(), "admin").ObterSaudeFinanceira(clienteId);
@@ -52,9 +50,8 @@ public class SaudeFinanceiraControllerTests
     {
         var clienteId = Guid.NewGuid();
         _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
-        _contaMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaRecorrente>());
         _metaMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual>());
-        _saudeMock.Setup(s => s.Calcular(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<ContaRecorrente>>(), It.IsAny<List<MetaAnual>>()))
+        _saudeMock.Setup(s => s.Calcular(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<MetaAnual>>()))
             .Returns(new SaudeFinanceiraDto());
 
         var result = await CriarSut(clienteId, "cliente").ObterSaudeFinanceira(clienteId);
