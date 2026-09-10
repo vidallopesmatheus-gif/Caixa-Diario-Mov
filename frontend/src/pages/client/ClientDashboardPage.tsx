@@ -140,10 +140,14 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [savingObjetivo, setSavingObjetivo] = useState(false)
   const [objetivoMsg, setObjetivoMsg] = useState('')
   const [selic, setSelic] = useState(10.5)
+  const [selicIndisponivel, setSelicIndisponivel] = useState(false)
   const [simAporteExtra, setSimAporteExtra] = useState('')
 
   useEffect(() => {
-    obterSelicAtual().then(setSelic).catch(() => setSelic(10.5))
+    obterSelicAtual().then(r => {
+      setSelic(r.valor)
+      setSelicIndisponivel(r.fonte === 'indisponivel')
+    })
   }, [])
 
   useEffect(() => {
@@ -315,15 +319,21 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     return (fvNecessario * i) / (Math.pow(1 + i, n) - 1)
   }, [editValorSonho, mesesAteAlvo, editTaxaRetorno, editTotalInvestido])
 
+  // Capital real de portfólio (soma das contas tipo Investimento) — não o campo "Já investido" de
+  // um objetivo específico, que é sobre o progresso daquele objetivo, não sobre o total investido.
+  const capitalInvestido = useMemo(() =>
+    contasBancarias.filter(c => c.tipo === 'Investimento' && c.ativa).reduce((s, c) => s + c.saldoAtual, 0),
+  [contasBancarias])
+
   const projecaoSelic = useMemo(() => {
-    const base = parseBRL(editTotalInvestido)
+    const base = capitalInvestido
     if (!base || !selic) return null
     return {
       dez: base * Math.pow(1 + selic / 100, 10),
       vinte: base * Math.pow(1 + selic / 100, 20),
       trinta: base * Math.pow(1 + selic / 100, 30),
     }
-  }, [editTotalInvestido, selic])
+  }, [capitalInvestido, selic])
 
   const trajetorias = useMemo(() => {
     const taxa = Number(editTaxaRetorno)
@@ -386,7 +396,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   }, [simAporteExtra, tempoAteMeta, editValorSonho, editTaxaRetorno, editTotalInvestido, aporteMensal])
 
   const fireNumber = useMemo(() => {
-    const investido = parseBRL(editTotalInvestido)
+    const investido = capitalInvestido
     if (!investido || totalSaida <= 0) return null
     const daysInPeriod = Math.max(1,
       (new Date(ate).getTime() - new Date(de).getTime()) / 86400000 + 1
@@ -395,7 +405,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     const fireTarget = despMensal * 12 / 0.04
     const pct = Math.min(100, (investido / fireTarget) * 100)
     return { fireTarget, despMensal, pct, atingido: investido >= fireTarget }
-  }, [editTotalInvestido, totalSaida, de, ate])
+  }, [capitalInvestido, totalSaida, de, ate])
 
   const atrasadaNaSonho = useMemo(() => {
     if (aporteMensal === null || aporteMensal <= 0) return null
@@ -1005,21 +1015,33 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         </div>
       )}
 
-      {projecaoSelic && (
+      {projecaoSelic ? (
         <div className="meta-card">
           <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({fmtPct(selic, 2)} a.a.)</span></h3>
           <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
-            Capital de {fmtBRL(parseBRL(editTotalInvestido))} composto à SELIC, sem aportes adicionais.
+            Capital de {fmtBRL(capitalInvestido)} composto à SELIC, sem aportes adicionais.
           </p>
+          {selicIndisponivel && (
+            <p style={{ fontSize: 11, color: '#ff9500', marginBottom: 12 }}>
+              ⚠️ Não foi possível obter a SELIC atual do Banco Central — exibindo taxa de referência ({fmtPct(selic, 1)} a.a.), não o valor real de hoje.
+            </p>
+          )}
           <div className="stats-grid">
             <StatCard label="📅 Em 10 anos" value={fmtBRL(projecaoSelic.dez)} className="val-blue" />
             <StatCard label="📅 Em 20 anos" value={fmtBRL(projecaoSelic.vinte)} className="val-blue" />
             <StatCard label="📅 Em 30 anos" value={fmtBRL(projecaoSelic.trinta)} className="val-blue" />
           </div>
         </div>
+      ) : (
+        <div className="meta-card">
+          <h3>💹 Projeção à SELIC</h3>
+          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+            Cadastre uma conta de investimento para ver esta projeção.
+          </p>
+        </div>
       )}
 
-      {fireNumber && (
+      {fireNumber ? (
         <div className="meta-card">
           <h3>🔥 Indicador FIRE <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>(Financial Independence, Retire Early)</span></h3>
           <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
@@ -1037,9 +1059,18 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
             <span style={{ color: fireNumber.atingido ? '#34c759' : '#ff9500' }}>
               {fireNumber.atingido
                 ? '🎉 FIRE atingido!'
-                : `Faltam ${fmtBRL(fireNumber.fireTarget - parseBRL(editTotalInvestido))}`}
+                : `Faltam ${fmtBRL(fireNumber.fireTarget - capitalInvestido)}`}
             </span>
           </div>
+        </div>
+      ) : (
+        <div className="meta-card">
+          <h3>🔥 Indicador FIRE</h3>
+          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+            {capitalInvestido <= 0
+              ? 'Cadastre uma conta de investimento para ver esta projeção.'
+              : 'Sem despesas no período selecionado para estimar a meta FIRE.'}
+          </p>
         </div>
       )}
 
