@@ -8,13 +8,11 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
 {
     public SaudeFinanceiraDto Calcular(
         List<RegistroDiario> registros,
-        List<ContaRecorrente> recorrentes,
         List<MetaAnual> metas)
     {
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var anoAtual = hoje.Year;
         var mesAtual = hoje.Month;
-        var diasNoMes = DateTime.DaysInMonth(anoAtual, mesAtual);
         var reg = registros.Where(r => !r.Excluido).ToList();
         var nomeMes = CultureInfo.GetCultureInfo("pt-BR").DateTimeFormat.GetMonthName(mesAtual);
 
@@ -22,7 +20,7 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
         {
             Periodo              = $"{char.ToUpperInvariant(nomeMes[0])}{nomeMes[1..]}/{anoAtual}",
             TaxaPoupanca        = CalcTaxaPoupanca(reg, anoAtual, mesAtual),
-            ComprometimentoFixos = CalcComprometimento(reg, recorrentes, hoje, anoAtual, mesAtual, diasNoMes),
+            ComprometimentoFixos = CalcComprometimento(reg, hoje),
             RitmoMeta           = CalcRitmoMeta(metas, anoAtual, mesAtual),
         };
     }
@@ -54,42 +52,33 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
     }
 
     // ── 2. Comprometimento com Fixos ────────────────────────────────────────
-    private static GaugeIndicadorDto CalcComprometimento(
-        List<RegistroDiario> reg, List<ContaRecorrente> recorrentes,
-        DateOnly hoje, int ano, int mes, int diasNoMes)
+    // Numerador e denominador usam o mesmo critério — média dos últimos 3 meses de valores
+    // REALIZADOS (Entradas/Saídas de verdade), não projeção de Contas a Pagar/Recorrências do mês
+    // corrente. Essas duas fontes formais ficavam de fora do numerador: um cliente que não usa
+    // Contas a Pagar/Recorrências (registra despesa fixa como saída comum, categorizada CustoFixo)
+    // via zerava o indicador mesmo tendo despesa fixa real todo mês.
+    private static GaugeIndicadorDto CalcComprometimento(List<RegistroDiario> reg, DateOnly hoje)
     {
-        // Receita esperada = média dos últimos 3 meses
-        var receitasMeses = Enumerable.Range(1, 3)
-            .Select(i => hoje.AddMonths(-i))
-            .Select(m => reg.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
-                           .SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor))
-            .Where(v => v > 0).ToList();
-        var receitaEsperada = receitasMeses.Count > 0 ? receitasMeses.Average() : 0m;
+        decimal MediaUltimosTresMeses(Func<RegistroDiario, decimal> somaDoRegistro)
+        {
+            var valores = Enumerable.Range(1, 3)
+                .Select(i => hoje.AddMonths(-i))
+                .Select(m => reg.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month).Sum(somaDoRegistro))
+                .Where(v => v > 0).ToList();
+            return valores.Count > 0 ? valores.Average() : 0m;
+        }
+
+        var receitaEsperada = MediaUltimosTresMeses(
+            r => r.Entradas.Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor));
 
         if (receitaEsperada <= 0)
             return Indisponivel("Comprometimento Fixo",
                 "Percentual da receita preso em despesas fixas e recorrentes.",
                 "Sem histórico de receita nos últimos 3 meses.");
 
-        // Contas a pagar com vencimento este mês
-        var contasPagar = reg
-            .SelectMany(r => r.ContasPagar)
-            .Where(c => !c.Pago && c.DataVencimento.HasValue
-                && c.DataVencimento.Value.Year == ano
-                && c.DataVencimento.Value.Month == mes)
-            .Sum(c => c.Valor);
+        var fixos = MediaUltimosTresMeses(
+            r => r.Saidas.Where(s => s.TipoCusto == "CustoFixo").Sum(s => s.Valor));
 
-        // Recorrências "Pagar" que ocorrem em qualquer dia deste mês
-        decimal recorrPagar = 0m;
-        for (int d = 1; d <= diasNoMes; d++)
-        {
-            var dia = new DateOnly(ano, mes, d);
-            recorrPagar += recorrentes
-                .Where(r => r.Tipo == "Pagar" && r.Ativo && RecorrenciaService.OcorreEm(r, dia))
-                .Sum(r => r.Valor);
-        }
-
-        var fixos = contasPagar + recorrPagar;
         var comprVal = fixos / receitaEsperada * 100m;
 
         return new GaugeIndicadorDto
@@ -98,8 +87,8 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
             Valor            = Math.Round(comprVal, 1),
             ValorNormalizado = Math.Max(0m, Math.Min(100m, comprVal)),
             Semaforo         = comprVal <= 40m ? "verde" : comprVal <= 70m ? "amarelo" : "vermelho",
-            Descricao        = "Percentual da receita esperada comprometida com fixos. Abaixo de 40% é saudável.",
-            Calculo          = $"Despesas fixas ÷ Receita esperada = {comprVal:F1}%",
+            Descricao        = "Percentual da receita comprometida com despesas fixas, média dos últimos 3 meses. Abaixo de 40% é saudável.",
+            Calculo          = $"Despesas fixas ÷ Receita, média 3 meses = {comprVal:F1}%",
             Disponivel       = true,
         };
     }
