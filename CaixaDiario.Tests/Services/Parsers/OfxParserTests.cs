@@ -129,4 +129,22 @@ public class OfxParserTests
         var t = Assert.Single(resultado);
         Assert.Equal("Aplicação RDB Transferência", t.Descricao);
     }
+
+    [Fact]
+    public void Parse_CabecalhoDeclaraCharset1252MasConteudoEhUtf8_PrevaleceUtf8()
+    {
+        // Reproduz o bug real (banco C6): cabeçalho legado diz CHARSET:1252, mas o arquivo já foi
+        // exportado em UTF-8 de verdade. Confiar cegamente na declaração produzia "FlÃ¡via" a
+        // partir de "Flávia" (bytes UTF-8 genuínos lidos como Latin-1).
+        var ofx = "OFXHEADER:100\nDATA:OFXSGML\nVERSION:102\nSECURITY:NONE\nENCODING:USASCII\nCHARSET:1252\n\n" +
+            "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>CREDIT<TRNAMT>180.00<DTPOSTED>20260524<MEMO>Pix recebido de Flávia Regina do Rosário</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+        var bytes = Encoding.UTF8.GetBytes(ofx);
+
+        var resultado = OfxParser.Parse(new MemoryStream(bytes));
+
+        var t = Assert.Single(resultado);
+        Assert.Equal("Pix recebido de Flávia Regina do Rosário", t.Descricao);
+    }
 }
