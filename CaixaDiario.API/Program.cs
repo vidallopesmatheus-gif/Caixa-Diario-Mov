@@ -78,6 +78,8 @@ builder.Services.AddScoped<IGrupoRepository, GrupoRepository>();
 builder.Services.AddScoped<IGrupoService, GrupoService>();
 builder.Services.AddScoped<ITransferenciaRepository, TransferenciaRepository>();
 builder.Services.AddScoped<ITransferenciaService, TransferenciaService>();
+builder.Services.AddScoped<IRegraCategorizacaoRepository, RegraCategorizacaoRepository>();
+builder.Services.AddScoped<IRegraCategorizacaoService, RegraCategorizacaoService>();
 builder.Services.AddScoped<IMetaProgressoService, MetaProgressoService>();
 
 // Chat IA

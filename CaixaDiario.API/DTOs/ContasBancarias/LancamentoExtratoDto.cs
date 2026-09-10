@@ -14,4 +14,7 @@ public class LancamentoExtratoDto
     // Preenchido só quando Categoria == "Transferência" — é o id do registro de Transferencia (não
     // do lançamento), usado pra desfazer a classificação (DELETE /api/transferencias/{id}).
     public Guid? TransferenciaId { get; set; }
+    // Preenchido quando a categoria veio de uma RegraCategorizacao (importação automática ou
+    // aplicação retroativa) — corrigir manualmente não limpa isso, só marca a origem pra exibição.
+    public Guid? RegraCategorizacaoId { get; set; }
 }

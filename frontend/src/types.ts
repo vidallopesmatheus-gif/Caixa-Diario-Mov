@@ -106,6 +106,9 @@ export interface LancamentoExtrato {
   // Preenchido só quando categoria === 'Transferência' — id do registro de Transferencia, usado
   // pra desfazer a classificação.
   transferenciaId?: string
+  // Preenchido quando a categoria veio de uma RegraCategorizacao aplicada na importação (ou
+  // aplicação retroativa) — corrigir manualmente não muda isso, só marca a origem pra exibição.
+  regraCategorizacaoId?: string
 }
 
 export interface PendenciasConta {
@@ -236,6 +239,7 @@ export interface ResumoImportacao {
 export interface ResultadoImportacao {
   totalImportadas: number
   totalPendentesCategorizacao: number
+  totalCategorizadasPorRegra: number
   totalEntradas: number
   totalSaidas: number
 }
@@ -247,6 +251,25 @@ export interface PendenteCategorizacao {
   descricao: string
   valor: number
   tipo: 'Entrada' | 'Saida'
+}
+
+/** Regra de categorização automática aplicada na importação de extrato. */
+export interface RegraCategorizacao {
+  id: string
+  contaBancariaId: string
+  contaBancariaNome: string
+  tipo: 'Entrada' | 'Saida'
+  criterioTipo: 'Documento' | 'DescricaoExata'
+  criterioValor: string
+  descricaoReferencia: string
+  acaoTipo: 'Categoria' | 'Transferencia'
+  categoria?: string
+  contaContrapartidaId?: string
+  contaContrapartidaNome?: string
+  ativa: boolean
+  ordem: number
+  quantidadeAplicada: number
+  criadoEm: string
 }
 
 export interface ChatResponse {

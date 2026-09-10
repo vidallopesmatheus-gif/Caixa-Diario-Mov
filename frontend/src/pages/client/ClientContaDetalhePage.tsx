@@ -9,13 +9,16 @@ import {
   vincularMeta,
   desvincularMeta,
 } from '../../api/contasBancarias'
-import { previewExtrato, importarExtrato } from '../../api/importacao'
+import { previewExtrato, importarExtrato, categorizarPendentes } from '../../api/importacao'
 import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
+import { listarRegras, atualizarRegra } from '../../api/regras'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { listarMetas, salvarMeta } from '../../api/metas'
+import { listarCategorias } from '../../api/categorias'
 import { fmtBRL, fmtPct, fmtDate, todayISO, addDays } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
-import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao } from '../../types'
+import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
+import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao, Categorias, CategoriaAdmin } from '../../types'
 import './ClientContas.css'
 import './ClientContaDetalhe.css'
 import './ClientContasBancarias.css'
@@ -77,6 +80,13 @@ export default function ClientContaDetalhePage() {
   const [buscandoCandidato, setBuscandoCandidato] = useState(false)
   const [convertendo, setConvertendo] = useState(false)
 
+  // ── Editar categoria de lançamento já classificado (reaproveita o mesmo endpoint da
+  // categorização de pendentes — ele já localiza o item por Id e não depende de estar pendente) ──
+  const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
+  const [lancamentoParaEditar, setLancamentoParaEditar] = useState<LancamentoExtrato | null>(null)
+  const [categoriaEdicao, setCategoriaEdicao] = useState('')
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false)
+
   const [modalVincular, setModalVincular] = useState(false)
   const [metasDisponiveis, setMetasDisponiveis] = useState<MetaAnual[]>([])
   const [metaSelecionadaId, setMetaSelecionadaId] = useState('')
@@ -111,6 +121,8 @@ export default function ClientContaDetalhePage() {
   }, [contaId, de, ate])
 
   useEffect(() => { carregarExtrato() }, [carregarExtrato])
+
+  useEffect(() => { listarCategorias().then(setCategorias).catch(() => {}) }, [])
 
   useEffect(() => {
     if (!contaId) return
@@ -185,6 +197,58 @@ export default function ClientContaDetalhePage() {
       carregarExtrato()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao desfazer classificação.')
+    }
+  }
+
+  function handleCategoriaCriada(nova: CategoriaAdmin) {
+    const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupoNome }
+    // ehEntrada/ehSaida vêm prontos do backend (CategoriaService) — mesma regra usada em
+    // ClientExtratoRevisaoPage, pra não duplicar essa partição aqui de novo.
+    if (nova.ehEntrada) setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
+    if (nova.ehSaida) setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
+  }
+
+  function abrirModalEditarCategoria(lancamento: LancamentoExtrato) {
+    setLancamentoParaEditar(lancamento)
+    setCategoriaEdicao(lancamento.categoria ?? '')
+    setMsg('')
+  }
+
+  async function confirmarEdicaoCategoria() {
+    if (!lancamentoParaEditar?.id || !contaId || !categoriaEdicao) return
+    setSalvandoEdicao(true)
+    setMsg('')
+    try {
+      await categorizarPendentes(contaId, [{ id: lancamentoParaEditar.id, data: lancamentoParaEditar.data, categoria: categoriaEdicao }])
+
+      // Categoria veio de uma regra e o usuário trocou pra outra — a regra em si NUNCA é alterada
+      // sozinha, mas oferece atualizar (só essa reclassificação manual, não muda o critério).
+      const regraId = lancamentoParaEditar.regraCategorizacaoId
+      if (regraId && categoriaEdicao !== lancamentoParaEditar.categoria && clienteId) {
+        try {
+          const regras = await listarRegras(clienteId)
+          const regra = regras.find(r => r.id === regraId)
+          if (regra && regra.acaoTipo === 'Categoria' && regra.categoria !== categoriaEdicao
+            && confirm(`Esse lançamento veio da regra baseada em "${regra.descricaoReferencia}" (categoria "${regra.categoria}"). Atualizar a regra para usar "${categoriaEdicao}" daqui pra frente?`)) {
+            await atualizarRegra(regra.id, {
+              descricaoReferencia: regra.descricaoReferencia,
+              acaoTipo: regra.acaoTipo,
+              categoria: categoriaEdicao,
+              ativa: regra.ativa,
+            })
+          }
+        } catch {
+          // Não bloqueia a edição do lançamento (já salva) por causa disso.
+        }
+      }
+
+      setLancamentoParaEditar(null)
+      carregarConta()
+      carregarExtrato()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao editar categoria.')
+    } finally {
+      setSalvandoEdicao(false)
     }
   }
 
@@ -372,6 +436,9 @@ export default function ClientContaDetalhePage() {
       {resultadoImportacao && (
         <div className="cd-msg cd-msg-sucesso">
           ✅ {resultadoImportacao.totalImportadas} lançamento(s) importado(s)
+          {resultadoImportacao.totalCategorizadasPorRegra > 0 && (
+            <> — {resultadoImportacao.totalCategorizadasPorRegra} categorizado(s) automaticamente por regra</>
+          )}
           {resultadoImportacao.totalPendentesCategorizacao > 0 && (
             <> — {resultadoImportacao.totalPendentesCategorizacao} sem categoria sugerida (
               <button
@@ -498,13 +565,30 @@ export default function ClientContaDetalhePage() {
                         ↩ desfazer classificação
                       </button>
                     )}
+                    {l.id && !l.pendenteCategorizacao && l.categoria !== 'Transferência' && (
+                      <button
+                        type="button"
+                        onClick={() => abrirModalEditarCategoria(l)}
+                        title="Trocar a categoria deste lançamento"
+                        style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
+                      >
+                        ✏️ editar categoria
+                      </button>
+                    )}
                   </span>
                   <span className="cd-categoria">
                     {l.pendenteCategorizacao ? (
                       <span style={{ color: 'var(--warning)' }} title="Sem categoria — afeta o saldo normalmente, só falta classificar">
                         🏷️ Pendente
                       </span>
-                    ) : (l.categoria || '—')}
+                    ) : (
+                      <>
+                        {l.categoria || '—'}
+                        {l.regraCategorizacaoId && (
+                          <span title="Categorizado automaticamente por uma regra" style={{ marginLeft: 4, fontSize: 11, color: 'var(--tx3)' }}>⚙️</span>
+                        )}
+                      </>
+                    )}
                   </span>
                   <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
                     {l.valor >= 0 ? '+' : ''}{fmtBRL(l.valor)}
@@ -723,6 +807,41 @@ export default function ClientContaDetalhePage() {
                 Vincular a ele evita duplicar a transferência.
               </p>
             )}
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!lancamentoParaEditar}
+        title="✏️ Editar categoria"
+        onClose={() => setLancamentoParaEditar(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setLancamentoParaEditar(null)}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarEdicaoCategoria} disabled={!categoriaEdicao || salvandoEdicao}>
+              {salvandoEdicao ? 'Salvando...' : 'Salvar'}
+            </button>
+          </>
+        }
+      >
+        {lancamentoParaEditar && (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+              "{lancamentoParaEditar.descricao}" · {fmtBRL(Math.abs(lancamentoParaEditar.valor))} · {fmtDate(lancamentoParaEditar.data)}
+              {lancamentoParaEditar.regraCategorizacaoId && (
+                <><br />⚙️ Categoria atual veio de uma regra automática.</>
+              )}
+            </p>
+            <div className="inp-group">
+              <label>Categoria</label>
+              <CategoriaCombobox
+                categorias={lancamentoParaEditar.valor >= 0 ? categorias.entradas : categorias.saidas}
+                value={categoriaEdicao}
+                onChange={setCategoriaEdicao}
+                onCategoriaCriada={handleCategoriaCriada}
+                blocoPadraoNovaCategoria={lancamentoParaEditar.valor >= 0 ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
+              />
+            </div>
           </>
         )}
       </Modal>

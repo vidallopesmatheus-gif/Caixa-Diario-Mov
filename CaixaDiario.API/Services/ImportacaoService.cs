@@ -1,4 +1,5 @@
 using CaixaDiario.API.DTOs.Importacao;
+using CaixaDiario.API.DTOs.Transferencias;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
@@ -14,17 +15,23 @@ public class ImportacaoService : IImportacaoService
     private readonly ITransacaoImportadaRepository _importRepo;
     private readonly IRegistroRepository _registroRepo;
     private readonly ICategoriaRepository _categoriaRepo;
+    private readonly IRegraCategorizacaoRepository _regraRepo;
+    private readonly ITransferenciaService _transferenciaService;
 
     public ImportacaoService(
         IContaBancariaRepository contaRepo,
         ITransacaoImportadaRepository importRepo,
         IRegistroRepository registroRepo,
-        ICategoriaRepository categoriaRepo)
+        ICategoriaRepository categoriaRepo,
+        IRegraCategorizacaoRepository regraRepo,
+        ITransferenciaService transferenciaService)
     {
         _contaRepo = contaRepo;
         _importRepo = importRepo;
         _registroRepo = registroRepo;
         _categoriaRepo = categoriaRepo;
+        _regraRepo = regraRepo;
+        _transferenciaService = transferenciaService;
     }
 
     // Representação unificada de uma linha do arquivo, independente do formato de origem.
@@ -89,8 +96,16 @@ public class ImportacaoService : IImportacaoService
 
         var registrosPorData = registros.ToDictionary(r => r.Data);
         var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
+        var regrasPorTipo = (await _regraRepo.ListarAtivasPorContaAsync(contaBancariaId))
+            .GroupBy(r => r.Tipo)
+            .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Ordem).ToList());
         var auditoria = new List<TransacaoImportada>();
+        // (data, itemId) dos itens que uma regra de Transferência casou — convertidos só depois que
+        // TODOS os registros do lote já foram salvos (ConverterLancamentoAsync precisa achar o
+        // lançamento por conta+data já persistido).
+        var aConverterEmTransferencia = new List<(DateOnly Data, Guid ItemId, RegraCategorizacao Regra)>();
         var pendentes = 0;
+        var categorizadasPorRegra = 0;
 
         foreach (var grupo in aImportar.GroupBy(t => t.Data).OrderBy(g => g.Key))
         {
@@ -133,47 +148,86 @@ public class ImportacaoService : IImportacaoService
 
             foreach (var t in grupo)
             {
-                // Entrada não tem sugestão por palavra-chave (venda, serviço, transferência recebida
-                // e resgate de investimento têm o mesmo verbo "recebido"/"pix" no extrato — só o
-                // usuário sabe distinguir). Por isso toda entrada importada entra pendente também:
-                // sem isso, receita real e dinheiro que só mudou de lugar ficavam indistinguíveis no DRE.
+                var regraCorrespondente = regrasPorTipo.TryGetValue(t.Tipo, out var regrasDoTipo)
+                    ? regrasDoTipo.FirstOrDefault(r => DescricaoMatcher.Casa(r.CriterioTipo, r.CriterioValor, t.Descricao))
+                    : null;
+                var itemId = Guid.NewGuid();
+
                 if (t.Tipo == "Entrada")
                 {
-                    pendentes++;
+                    // Entrada não tem sugestão por palavra-chave (venda, serviço, transferência
+                    // recebida e resgate de investimento têm o mesmo verbo "recebido"/"pix" no
+                    // extrato — só o usuário sabe distinguir, ou uma regra que ele mesmo criou).
+                    // Regra de Transferência entra pendente por ora — a conversão de verdade só
+                    // acontece depois que este registro for salvo (precisa de um Id persistido).
+                    var categorizadaPorRegra = regraCorrespondente is { AcaoTipo: "Categoria" };
+                    var pendenteEntrada = !categorizadaPorRegra;
+                    if (categorizadaPorRegra) categorizadasPorRegra++; else pendentes++;
+
                     registro.Entradas.Add(new ItemFinanceiro
                     {
-                        Id = Guid.NewGuid(),
+                        Id = itemId,
                         Descricao = t.Descricao,
                         Valor = t.Valor,
                         FitId = t.FitId,
-                        PendenteCategorizacao = true,
+                        Categoria = categorizadaPorRegra ? regraCorrespondente!.Categoria : null,
+                        TipoCusto = categorizadaPorRegra && regraCorrespondente!.Categoria != null
+                            && categoriasPorNome.TryGetValue(regraCorrespondente.Categoria, out var tcEntrada) ? tcEntrada : null,
+                        RegraCategorizacaoId = categorizadaPorRegra ? regraCorrespondente!.Id : null,
+                        PendenteCategorizacao = pendenteEntrada,
                     });
                     registro.SaldoFinal += t.Valor;
                 }
                 else
                 {
-                    var categoriaSugerida = SugerirCategoria(t.Tipo, t.Descricao);
-                    var pendente = categoriaSugerida == null;
-                    if (pendente) pendentes++;
-                    // A sugestão por palavra-chave devolve um nome de categoria já cadastrado no
-                    // Plano de Contas — sem resolver o TipoCusto aqui, o lançamento nunca entraria
-                    // como custo fixo/variável no DRE mesmo tendo uma categoria "certa" atribuída.
-                    var tipoCustoSugerido = categoriaSugerida != null && categoriasPorNome.TryGetValue(categoriaSugerida, out var tc)
-                        ? tc : null;
+                    string categoriaFinal; string? tipoCustoFinal; bool pendente; Guid? regraIdAplicada = null;
+
+                    if (regraCorrespondente is { AcaoTipo: "Categoria" })
+                    {
+                        categoriaFinal = regraCorrespondente.Categoria ?? string.Empty;
+                        tipoCustoFinal = regraCorrespondente.Categoria != null && categoriasPorNome.TryGetValue(regraCorrespondente.Categoria, out var tcRegra) ? tcRegra : null;
+                        pendente = false;
+                        regraIdAplicada = regraCorrespondente.Id;
+                        categorizadasPorRegra++;
+                    }
+                    else if (regraCorrespondente is { AcaoTipo: "Transferencia" })
+                    {
+                        // Fica pendente por ora — a conversão de verdade (Fase 2) só acontece depois
+                        // que este registro estiver salvo, e é ela quem marca Categoria/PendenteCategorizacao.
+                        categoriaFinal = string.Empty;
+                        tipoCustoFinal = null;
+                        pendente = true;
+                        pendentes++;
+                    }
+                    else
+                    {
+                        var categoriaSugerida = SugerirCategoria(t.Tipo, t.Descricao);
+                        categoriaFinal = categoriaSugerida ?? string.Empty;
+                        pendente = categoriaSugerida == null;
+                        if (pendente) pendentes++;
+                        // A sugestão por palavra-chave devolve um nome de categoria já cadastrado no
+                        // Plano de Contas — sem resolver o TipoCusto aqui, o lançamento nunca entraria
+                        // como custo fixo/variável no DRE mesmo tendo uma categoria "certa" atribuída.
+                        tipoCustoFinal = categoriaSugerida != null && categoriasPorNome.TryGetValue(categoriaSugerida, out var tc) ? tc : null;
+                    }
 
                     registro.Saidas.Add(new ItemFinanceiroSaida
                     {
-                        Id = Guid.NewGuid(),
+                        Id = itemId,
                         Descricao = t.Descricao,
                         Valor = t.Valor,
-                        Categoria = categoriaSugerida ?? string.Empty,
+                        Categoria = categoriaFinal,
                         Subcategoria = string.Empty,
-                        TipoCusto = tipoCustoSugerido,
+                        TipoCusto = tipoCustoFinal,
                         FitId = t.FitId,
+                        RegraCategorizacaoId = regraIdAplicada,
                         PendenteCategorizacao = pendente,
                     });
                     registro.SaldoFinal -= t.Valor;
                 }
+
+                if (regraCorrespondente is { AcaoTipo: "Transferencia" })
+                    aConverterEmTransferencia.Add((data, itemId, regraCorrespondente));
 
                 auditoria.Add(new TransacaoImportada
                 {
@@ -198,10 +252,36 @@ public class ImportacaoService : IImportacaoService
 
         await _importRepo.AdicionarLoteAsync(auditoria);
 
+        // Regras de Transferência — só agora, com todos os registros do lote já persistidos (o
+        // lançamento precisa existir de verdade, com Id salvo, pra ConverterLancamentoAsync achá-lo
+        // por conta+data). Sequencial: cada conversão lê e grava o RegistroDiario do dia inteiro.
+        foreach (var (data, itemId, regra) in aConverterEmTransferencia)
+        {
+            try
+            {
+                await _transferenciaService.ConverterLancamentoAsync(new ConverterLancamentoEmTransferenciaDto
+                {
+                    ContaId = contaBancariaId,
+                    LancamentoId = itemId,
+                    Data = data,
+                    Tipo = regra.Tipo,
+                    ContaContrapartidaId = regra.ContaContrapartidaId!.Value,
+                    RegraCategorizacaoId = regra.Id,
+                }, usuarioLogadoId, perfil);
+                categorizadasPorRegra++;
+                pendentes--;
+            }
+            catch (ApiException)
+            {
+                // Fica pendente — o usuário categoriza manualmente na tela de Categorizar Lançamentos.
+            }
+        }
+
         return new ResultadoImportacaoDto
         {
             TotalImportadas = aImportar.Count,
             TotalPendentesCategorizacao = pendentes,
+            TotalCategorizadasPorRegra = categorizadasPorRegra,
             TotalEntradas = aImportar.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
             TotalSaidas = aImportar.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
         };

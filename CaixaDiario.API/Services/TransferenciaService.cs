@@ -146,6 +146,7 @@ public class TransferenciaService : ITransferenciaService
             item.TransferenciaId = transferenciaId;
             item.Categoria = "Transferência";
             item.PendenteCategorizacao = false;
+            item.RegraCategorizacaoId = dto.RegraCategorizacaoId;
             registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas); // força o EF a detectar a mudança
 
             if (dto.LancamentoContrapartidaId.HasValue)
@@ -161,6 +162,7 @@ public class TransferenciaService : ITransferenciaService
                 itemContrapartida.TransferenciaId = transferenciaId;
                 itemContrapartida.Categoria = "Transferência";
                 itemContrapartida.PendenteCategorizacao = false;
+                itemContrapartida.RegraCategorizacaoId = dto.RegraCategorizacaoId;
                 regContrapartida.Entradas = new List<ItemFinanceiro>(regContrapartida.Entradas);
                 regContrapartida.SalvoEm = DateTime.UtcNow;
                 await _registroRepo.AtualizarAsync(regContrapartida);
@@ -174,6 +176,7 @@ public class TransferenciaService : ITransferenciaService
                     {
                         Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
+                        RegraCategorizacaoId = dto.RegraCategorizacaoId,
                     },
                 };
                 regDestino.SaldoFinal += valor;
@@ -196,6 +199,7 @@ public class TransferenciaService : ITransferenciaService
             item.TransferenciaId = transferenciaId;
             item.Categoria = "Transferência";
             item.PendenteCategorizacao = false;
+            item.RegraCategorizacaoId = dto.RegraCategorizacaoId;
             registro.Entradas = new List<ItemFinanceiro>(registro.Entradas);
 
             if (dto.LancamentoContrapartidaId.HasValue)
@@ -209,6 +213,7 @@ public class TransferenciaService : ITransferenciaService
                 itemContrapartida.TransferenciaId = transferenciaId;
                 itemContrapartida.Categoria = "Transferência";
                 itemContrapartida.PendenteCategorizacao = false;
+                itemContrapartida.RegraCategorizacaoId = dto.RegraCategorizacaoId;
                 regContrapartida.Saidas = new List<ItemFinanceiroSaida>(regContrapartida.Saidas);
                 regContrapartida.SalvoEm = DateTime.UtcNow;
                 await _registroRepo.AtualizarAsync(regContrapartida);
@@ -222,6 +227,7 @@ public class TransferenciaService : ITransferenciaService
                     {
                         Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor, Subcategoria = string.Empty,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
+                        RegraCategorizacaoId = dto.RegraCategorizacaoId,
                     },
                 };
                 regOrigem.SaldoFinal -= valor;

@@ -193,6 +193,11 @@
   font-size: 16px;
 }
 
+.er-sticky-selecao {
+  display: flex;
+  gap: 8px;
+}
+
 .er-sticky-restante {
   color: var(--tx3);
   font-weight: 400;

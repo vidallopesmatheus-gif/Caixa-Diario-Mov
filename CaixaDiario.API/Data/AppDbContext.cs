@@ -20,6 +20,7 @@ public class AppDbContext : DbContext
     public DbSet<Categoria> Categorias { get; set; }
     public DbSet<Grupo> Grupos { get; set; }
     public DbSet<Transferencia> Transferencias { get; set; }
+    public DbSet<RegraCategorizacao> RegrasCategorizacao { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -271,6 +272,42 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(e => new { e.ClienteId, e.Data });
+        });
+
+        modelBuilder.Entity<RegraCategorizacao>(entity =>
+        {
+            entity.ToTable("regras_categorizacao");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+            entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired();
+            entity.Property(e => e.CriterioTipo).HasColumnName("criterio_tipo").IsRequired();
+            entity.Property(e => e.CriterioValor).HasColumnName("criterio_valor").IsRequired();
+            entity.Property(e => e.DescricaoReferencia).HasColumnName("descricao_referencia").IsRequired();
+            entity.Property(e => e.AcaoTipo).HasColumnName("acao_tipo").IsRequired();
+            entity.Property(e => e.Categoria).HasColumnName("categoria");
+            entity.Property(e => e.ContaContrapartidaId).HasColumnName("conta_contrapartida_id");
+            entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);
+            entity.Property(e => e.Ordem).HasColumnName("ordem").HasDefaultValue(0);
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
+
+            entity.HasOne(e => e.Cliente)
+                .WithMany()
+                .HasForeignKey(e => e.ClienteId);
+
+            entity.HasOne(e => e.ContaBancaria)
+                .WithMany()
+                .HasForeignKey(e => e.ContaBancariaId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ContaContrapartida)
+                .WithMany()
+                .HasForeignKey(e => e.ContaContrapartidaId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.ClienteId, e.ContaBancariaId, e.Tipo, e.Ativa });
         });
     }
 }

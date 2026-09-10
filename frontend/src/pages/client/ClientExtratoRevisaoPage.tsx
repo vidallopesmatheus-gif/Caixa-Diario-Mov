@@ -4,6 +4,7 @@ import { listarPendentesCategorizacao, categorizarPendentes } from '../../api/im
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { listarCategorias } from '../../api/categorias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
+import { criarRegra, contarCorrespondencias } from '../../api/regras'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { fmtBRL } from '../../utils/format'
 import { useAuth } from '../../contexts/AuthContext'
@@ -45,6 +46,15 @@ export default function ClientExtratoRevisaoPage() {
   const [loteContaContrapartidaId, setLoteContaContrapartidaId] = useState('')
   const [aplicandoLoteTransferencia, setAplicandoLoteTransferencia] = useState(false)
   const [loteTransferenciaFeitos, setLoteTransferenciaFeitos] = useState(0)
+
+  // ── Criar regra de categorização automática, a partir de um lançamento (ou grupo) sendo
+  // categorizado agora — a descrição de referência é sempre a do primeiro item do grupo/seleção.
+  const [regraOrigemItens, setRegraOrigemItens] = useState<PendenteCategorizacao[] | null>(null)
+  const [regraAcaoTipo, setRegraAcaoTipo] = useState<'Categoria' | 'Transferencia'>('Categoria')
+  const [regraCategoria, setRegraCategoria] = useState('')
+  const [regraContaContrapartidaId, setRegraContaContrapartidaId] = useState('')
+  const [regraContagem, setRegraContagem] = useState<number | null>(null)
+  const [criandoRegra, setCriandoRegra] = useState(false)
 
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const clienteId = user?.usuarioId ?? ''
@@ -124,6 +134,16 @@ export default function ClientExtratoRevisaoPage() {
       else next.add(id)
       return next
     })
+  }
+
+  // Seleciona só o que está VISÍVEL agora (ordemFoco vem de `grupos`, que já reflete qualquer
+  // busca/filtro aplicado) — nunca os pendentes inteiros se a lista estiver filtrada.
+  function selecionarTodos() {
+    setSelecionados(new Set(ordemFoco))
+  }
+
+  function desmarcarTodos() {
+    setSelecionados(new Set())
   }
 
   function aplicarCategoriaLote() {
@@ -222,6 +242,51 @@ export default function ClientExtratoRevisaoPage() {
     }
   }
 
+  function abrirModalRegra(itens: PendenteCategorizacao[]) {
+    if (itens.length === 0) return
+    setRegraOrigemItens(itens)
+    setRegraAcaoTipo('Categoria')
+    setRegraCategoria('')
+    setRegraContaContrapartidaId('')
+    setRegraContagem(null)
+    setMsg('')
+  }
+
+  // Recalcula "quantos casariam" sempre que a descrição de referência muda (troca de item/grupo) —
+  // o critério (documento ou descrição exata) é derivado dela no servidor.
+  useEffect(() => {
+    if (!regraOrigemItens || !contaId) { setRegraContagem(null); return }
+    let cancelado = false
+    contarCorrespondencias(contaId, regraOrigemItens[0].tipo, regraOrigemItens[0].descricao)
+      .then(qtd => { if (!cancelado) setRegraContagem(qtd) })
+      .catch(() => { if (!cancelado) setRegraContagem(null) })
+    return () => { cancelado = true }
+  }, [regraOrigemItens, contaId])
+
+  async function confirmarCriarRegra() {
+    if (!regraOrigemItens || !contaId) return
+    if (regraAcaoTipo === 'Categoria' && !regraCategoria) return
+    if (regraAcaoTipo === 'Transferencia' && !regraContaContrapartidaId) return
+    setCriandoRegra(true)
+    setMsg('')
+    try {
+      await criarRegra(clienteId, {
+        contaBancariaId: contaId,
+        tipo: regraOrigemItens[0].tipo,
+        descricaoReferencia: regraOrigemItens[0].descricao,
+        acaoTipo: regraAcaoTipo,
+        categoria: regraAcaoTipo === 'Categoria' ? regraCategoria : undefined,
+        contaContrapartidaId: regraAcaoTipo === 'Transferencia' ? regraContaContrapartidaId : undefined,
+      })
+      setRegraOrigemItens(null)
+      setMsg('Regra criada! Vai valer nas próximas importações desta conta — edite ou desative em Configurações → Regras.')
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao criar regra.')
+    } finally {
+      setCriandoRegra(false)
+    }
+  }
+
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
   return (
@@ -246,6 +311,15 @@ export default function ClientExtratoRevisaoPage() {
           <div className="er-sticky-bar">
             <div className="er-sticky-contador">
               <strong>{pendentes.length}</strong> lançamento(s) aguardando categoria
+              {selecionados.size > 0 && <> · <strong>{selecionados.size}</strong> selecionado(s)</>}
+            </div>
+            <div className="er-sticky-selecao">
+              <button type="button" className="er-btn-toggle" onClick={selecionarTodos} disabled={selecionados.size === ordemFoco.length}>
+                Selecionar todos
+              </button>
+              <button type="button" className="er-btn-toggle" onClick={desmarcarTodos} disabled={selecionados.size === 0}>
+                Desmarcar todos
+              </button>
             </div>
           </div>
 
@@ -302,6 +376,7 @@ export default function ClientExtratoRevisaoPage() {
                     onNavigate={navegarFoco}
                     registerInputRef={registerInputRef}
                     onMarcarTransferencia={() => abrirModalTransferencia(item)}
+                    onCriarRegra={() => abrirModalRegra([item])}
                   />
                 )
               }
@@ -331,6 +406,14 @@ export default function ClientExtratoRevisaoPage() {
                     >
                       🔁 Todo o grupo é Transferência
                     </button>
+                    <button
+                      type="button"
+                      className="er-btn-toggle"
+                      onClick={() => abrirModalRegra(g.itens)}
+                      title="Criar regra pra categorizar automaticamente lançamentos parecidos nas próximas importações"
+                    >
+                      ⚙️ Criar regra pro grupo
+                    </button>
                   </div>
                   <div className="er-grupo-itens">
                     {g.itens.map(item => (
@@ -346,6 +429,7 @@ export default function ClientExtratoRevisaoPage() {
                         onNavigate={navegarFoco}
                         registerInputRef={registerInputRef}
                         onMarcarTransferencia={() => abrirModalTransferencia(item)}
+                        onCriarRegra={() => abrirModalRegra([item])}
                       />
                     ))}
                   </div>
@@ -443,6 +527,85 @@ export default function ClientExtratoRevisaoPage() {
           </>
         )}
       </Modal>
+
+      <Modal
+        open={!!regraOrigemItens}
+        title="⚙️ Criar regra de categorização automática"
+        onClose={() => setRegraOrigemItens(null)}
+        footer={
+          <>
+            <button className="er-btn-lote" onClick={() => setRegraOrigemItens(null)} disabled={criandoRegra}>Cancelar</button>
+            <button
+              className="btn-save"
+              onClick={confirmarCriarRegra}
+              disabled={criandoRegra || (regraAcaoTipo === 'Categoria' ? !regraCategoria : !regraContaContrapartidaId)}
+            >
+              {criandoRegra ? 'Criando...' : 'Criar regra'}
+            </button>
+          </>
+        }
+      >
+        {regraOrigemItens && (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+              Baseada em "{regraOrigemItens[0].descricao}". Vai categorizar automaticamente, nas
+              próximas importações desta conta, todo lançamento {regraOrigemItens[0].tipo === 'Entrada' ? 'de entrada' : 'de saída'} que
+              {' '}{regraOrigemItens[0].descricao.match(/\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{3}\.?\d{3}\.?\d{3}-?\d{2}/)
+                ? 'tiver o mesmo CNPJ/CPF do favorecido' : 'tiver essa mesma descrição'}.
+            </p>
+            <div className="inp-group">
+              <label>Ação da regra</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setRegraAcaoTipo('Categoria')}
+                  className={regraAcaoTipo === 'Categoria' ? 'btn-save' : 'er-btn-lote'}
+                >
+                  Categorizar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRegraAcaoTipo('Transferencia')}
+                  className={regraAcaoTipo === 'Transferencia' ? 'btn-save' : 'er-btn-lote'}
+                >
+                  🔁 Marcar como Transferência
+                </button>
+              </div>
+            </div>
+
+            {regraAcaoTipo === 'Categoria' ? (
+              <div className="inp-group" style={{ marginTop: 12 }}>
+                <label>Categoria</label>
+                <CategoriaCombobox
+                  categorias={regraOrigemItens[0].tipo === 'Entrada' ? categorias.entradas : categorias.saidas}
+                  value={regraCategoria}
+                  onChange={setRegraCategoria}
+                  onCategoriaCriada={handleCategoriaCriada}
+                  blocoPadraoNovaCategoria={regraOrigemItens[0].tipo === 'Entrada' ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
+                />
+              </div>
+            ) : (
+              <div className="inp-group" style={{ marginTop: 12 }}>
+                <label>Conta contrapartida</label>
+                <select value={regraContaContrapartidaId} onChange={e => setRegraContaContrapartidaId(e.target.value)}>
+                  <option value="">Selecione...</option>
+                  {contasBancarias.filter(c => c.ativa && c.id !== contaId).map(c => (
+                    <option key={c.id} value={c.id}>{c.nome}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <p style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 12 }}>
+              {regraContagem === null
+                ? 'Calculando quantos lançamentos pendentes já casam com esse critério...'
+                : regraContagem === 0
+                  ? 'Nenhum outro lançamento pendente casa com esse critério hoje.'
+                  : `${regraContagem} lançamento(s) pendente(s) hoje casam com esse critério — só valem pra importações futuras, a menos que você aplique retroativamente depois em Configurações → Regras.`}
+            </p>
+          </>
+        )}
+      </Modal>
     </>
   )
 }
@@ -458,11 +621,12 @@ interface ExtratoLinhaPendenteProps {
   onNavigate: (id: string, direcao: 'up' | 'down') => void
   registerInputRef: (id: string, el: HTMLInputElement | null) => void
   onMarcarTransferencia: () => void
+  onCriarRegra: () => void
 }
 
 function ExtratoLinhaPendente({
   item, categoriasDisponiveis, selecionado, salvando,
-  onToggleSelecionado, onCategorizar, onCategoriaCriada, onNavigate, registerInputRef, onMarcarTransferencia,
+  onToggleSelecionado, onCategorizar, onCategoriaCriada, onNavigate, registerInputRef, onMarcarTransferencia, onCriarRegra,
 }: ExtratoLinhaPendenteProps) {
   return (
     <div className="er-item">
@@ -491,6 +655,9 @@ function ExtratoLinhaPendente({
       />
       <button type="button" className="er-btn-toggle" title="Não é despesa — é uma transferência entre contas" onClick={onMarcarTransferencia}>
         🔁 Transferência
+      </button>
+      <button type="button" className="er-btn-toggle" title="Criar regra pra categorizar automaticamente lançamentos parecidos nas próximas importações" onClick={onCriarRegra}>
+        ⚙️ Criar regra
       </button>
     </div>
   )

@@ -5,6 +5,7 @@ public class ResultadoImportacaoDto
 {
     public int TotalImportadas { get; set; }
     public int TotalPendentesCategorizacao { get; set; }
+    public int TotalCategorizadasPorRegra { get; set; }
     public decimal TotalEntradas { get; set; }
     public decimal TotalSaidas { get; set; }
 }
