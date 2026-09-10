@@ -24,17 +24,37 @@ public static class EncodingDetector
         if (mCharset.Success)
         {
             var resolvido = ResolverPorNome(mCharset.Groups[1].Value);
-            if (resolvido != null) return resolvido;
+            if (resolvido != null) return PreferirUtf8SeConteudoValido(resolvido, bytes);
         }
 
         var mXmlEncoding = Regex.Match(previa, @"encoding\s*=\s*[""']([\w-]+)[""']", RegexOptions.IgnoreCase);
         if (mXmlEncoding.Success)
         {
             var resolvido = ResolverPorNome(mXmlEncoding.Groups[1].Value);
-            if (resolvido != null) return resolvido;
+            if (resolvido != null) return PreferirUtf8SeConteudoValido(resolvido, bytes);
         }
 
         return DetectarPorConteudo(bytes);
+    }
+
+    // Vários bancos (ex.: C6) declaram CHARSET:1252/ISO-8859-1 por padrão legado no cabeçalho
+    // mesmo já exportando o arquivo em UTF-8 de verdade — confiar cegamente na declaração faz
+    // "débito" virar "dÃ©bito" (bytes UTF-8 genuínos lidos como Latin-1). Um arquivo realmente em
+    // Latin-1 com acentuação real não forma UTF-8 estritamente válido por coincidência (exigiria
+    // várias sequências multi-byte corretas ao acaso); se o conteúdo passa na validação estrita,
+    // é porque ele já é UTF-8, e a declaração Latin-1/1252 do cabeçalho está simplesmente errada.
+    private static Encoding PreferirUtf8SeConteudoValido(Encoding declarado, byte[] bytes)
+    {
+        if (declarado.CodePage != Encoding.Latin1.CodePage) return declarado;
+        try
+        {
+            new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
+            return new UTF8Encoding(false);
+        }
+        catch (DecoderFallbackException)
+        {
+            return declarado;
+        }
     }
 
     /// Sem cabeçalho declarando o encoding (caso do CSV): tenta decodificar como UTF-8 estrito;

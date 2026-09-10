@@ -82,6 +82,14 @@ function Gauge({ id, dado }: GaugeProps) {
           {displayValor}
         </span>
         <span className="gauge-nome">{dado.titulo}</span>
+        {!dado.disponivel && (
+          <span className="gauge-motivo">
+            {dado.calculo}
+            {id === 'ritmoMeta' && dado.calculo.includes('Nenhuma meta') && (
+              <> <a href="#metas-investimentos">cadastrar →</a></>
+            )}
+          </span>
+        )}
         <div className="gauge-faixas">
           {faixas.map((c, i) => (
             <div key={i} className="gauge-faixa" style={{ background: c }} />
