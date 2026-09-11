@@ -24,6 +24,11 @@ public class RegistroServiceTests
             .Returns(Task.CompletedTask);
         _recorrenciaMock.Setup(r => r.MaterializarMesAtualAsync(It.IsAny<Guid>()))
             .Returns(Task.CompletedTask);
+        // Fallback padrão pros testes que não passam ContaBancariaId no dto (a maioria) — sem isso,
+        // ResolverContaPadraoAsync não tem nenhuma conta pra cair de volta. Testes que querem cenários
+        // específicos de resolução de conta (ver região "ResolverContaPadraoAsync") sobrescrevem isso.
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(It.IsAny<Guid>()))
+            .ReturnsAsync(new List<ContaBancaria> { new() { Id = Guid.NewGuid(), Tipo = "Caixa", Ativa = true } });
         _sut = new RegistroService(_repoMock.Object, _auditMock.Object, _recorrenciaMock.Object, _contaBancariaMock.Object);
     }
 
@@ -947,5 +952,100 @@ public class RegistroServiceTests
         Assert.Single(resultado.Saidas);
         Assert.Equal("Administrativas", resultado.Saidas[0].Categoria);
         Assert.Equal("Aluguel", resultado.Saidas[0].Subcategoria);
+    }
+
+    // ── ResolverContaPadraoAsync (via SalvarAsync) ──────────────────────────────────────────────
+    // Cobre o bug: baixa de conta a pagar/receber, ou qualquer save sem ContaBancariaId explícito,
+    // não pode mais exigir uma conta do tipo "Caixa" especificamente — Caixa é só uma preferência
+    // de fallback quando existe; qualquer conta ativa do cliente deve servir.
+
+    [Fact]
+    public async Task SalvarAsync_SemContaBancariaIdEClienteSemContaCaixa_UsaOutraContaAtivaComoFallback()
+    {
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var c6Bank = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "C6 Bank", Tipo = "ContaCorrente", Ativa = true };
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { c6Bank });
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        RegistroDiario? criado = null;
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(),
+            ContasReceber = new List<ContaProvisionadaDto> { new() { Descricao = "Pedro Personal", Valor = 350m, Pago = true } },
+            ContasPagar = new(),
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(c6Bank.Id, resultado.ContaBancariaId);
+        Assert.NotNull(criado);
+        Assert.Equal(c6Bank.Id, criado!.ContaBancariaId);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ClienteSemNenhumaContaBancaria_LancaDadosInvalidosSemMencionarCaixa()
+    {
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria>());
+
+        var dto = new CriarRegistroDto { ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new() };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+        Assert.DoesNotContain("Caixa", ex.Message);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_SemContaBancariaIdEClienteComContaCaixaEOutras_PrefereACaixa()
+    {
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var contaCorrente = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Nubank", Tipo = "ContaCorrente", Ativa = true };
+        var caixa = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Caixa", Tipo = "Caixa", Ativa = true };
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { contaCorrente, caixa });
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto { ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new() };
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(caixa.Id, resultado.ContaBancariaId);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ContaBancariaIdExplicito_IgnoraListaDeContasDoCliente()
+    {
+        // Explícito sempre vence — nem chega a olhar as contas do cliente (baixa com conta escolhida
+        // no momento, ex. modal "Confirmar recebimento" trocando a conta padrão).
+        var clienteId = Guid.NewGuid();
+        var contaEscolhida = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria>());
+
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(contaEscolhida, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, ContaBancariaId = contaEscolhida, Data = hoje,
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(contaEscolhida, resultado.ContaBancariaId);
+        _contaBancariaMock.Verify(c => c.ListarPorClienteAsync(It.IsAny<Guid>()), Times.Never);
     }
 }

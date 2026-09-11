@@ -20,12 +20,6 @@ public class ContaBancariaRepository : IContaBancariaRepository
     public async Task<ContaBancaria?> ObterPorIdAsync(Guid id) =>
         await _context.ContasBancarias.FindAsync(id);
 
-    public async Task<ContaBancaria?> ObterCaixaPadraoAsync(Guid clienteId) =>
-        await _context.ContasBancarias
-            .Where(c => c.ClienteId == clienteId && c.Tipo == "Caixa" && c.Ativa)
-            .OrderBy(c => c.DataCriacao)
-            .FirstOrDefaultAsync();
-
     public async Task<ContaBancaria> AdicionarAsync(ContaBancaria conta)
     {
         _context.ContasBancarias.Add(conta);
