@@ -81,6 +81,43 @@ public class RegistroServiceTests
     }
 
     [Fact]
+    public async Task SalvarAsync_RegistroExistenteComDataFutura_PermiteBaixaAntecipada()
+    {
+        // Cenário real do bug: RecorrenciaService materializa uma conta a receber com antecedência
+        // (vencimento amanhã, dentro do mês atual) — o registro correspondente já existe com Data
+        // futura. Confirmar o recebimento hoje (antes do vencimento) reenvia esse mesmo Data e não
+        // pode ser barrado como se fosse um lançamento novo de Caixa no futuro.
+        var clienteId = Guid.NewGuid();
+        var dataFutura = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1);
+        var registroExistente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = dataFutura,
+            Entradas = new(), Saidas = new(), ContasPagar = new(),
+            ContasReceber = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Pedro Personal", Valor = 350m, DataVencimento = dataFutura, Pago = false },
+            },
+            SaldoFinal = 0m,
+        };
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, dataFutura)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = dataFutura, Entradas = new(), Saidas = new(), ContasPagar = new(),
+            ContasReceber = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Pedro Personal", Valor = 350m, DataVencimento = dataFutura, Pago = true },
+            },
+        };
+
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.False(criado);
+        Assert.True(resultado.ContasReceber[0].Pago);
+    }
+
+    [Fact]
     public async Task SalvarAsync_ContasComVencimentoNoDia_MarcaComoPagas()
     {
         var clienteId = Guid.NewGuid();

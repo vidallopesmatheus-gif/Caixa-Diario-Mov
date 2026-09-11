@@ -51,9 +51,6 @@ public class RegistroService : IRegistroService
 
     public async Task<(RegistroDto dto, bool criado)> SalvarAsync(CriarRegistroDto dto, string nomeUsuarioLogado)
     {
-        if (dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
-            throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
-
         if (dto.Saidas.Any(s => string.IsNullOrWhiteSpace(s.Categoria)))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Toda saída deve ter uma categoria.", "categoria");
 
@@ -61,6 +58,16 @@ public class RegistroService : IRegistroService
 
         var existente = await _registroRepository.ObterPorContaEDataAsync(contaId, dto.Data)
             ?? await _registroRepository.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data);
+
+        // Só bloqueia data futura pra registro NOVO — um lançamento manual de Caixa num dia que
+        // ainda não aconteceu. Um registro já EXISTENTE pode legitimamente ter Data futura:
+        // RecorrenciaService materializa contas a pagar/receber com antecedência pro mês inteiro
+        // (ver MaterializarMesAtualAsync). Resalvar esse registro — baixa, edição ou exclusão de
+        // uma pendência — não é "lançar no futuro", é continuar algo que já existe; barrar isso
+        // impedia até confirmar recebimento antecipado de uma conta com vencimento amanhã.
+        if (existente == null && dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
+
         var registrosCliente = (await _registroRepository.ListarPorClienteAsync(dto.ClienteId)) ?? new List<RegistroDiario>();
         var dadosAntes = existente != null ? JsonSerializer.Serialize(MapToDto(existente)) : null;
         var referenciasReceber = registrosCliente
