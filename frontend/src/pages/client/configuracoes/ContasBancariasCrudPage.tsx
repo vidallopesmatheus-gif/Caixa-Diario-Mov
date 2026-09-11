@@ -12,11 +12,12 @@ import '../ClientContasBancarias.css'
 
 interface Props { clienteIdOverride?: string }
 
-const TIPOS = ['Caixa', 'ContaCorrente', 'Investimento'] as const
+const TIPOS = ['Caixa', 'ContaCorrente', 'Investimento', 'CartaoCredito'] as const
 const TIPO_LABEL: Record<string, string> = {
   Caixa: '💵 Caixa',
   ContaCorrente: '🏦 Conta Corrente',
   Investimento: '📈 Investimento',
+  CartaoCredito: '💳 Cartão de Crédito',
 }
 
 function fmtNum(n: number) {
@@ -41,6 +42,9 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
   const [novoTipo, setNovoTipo] = useState<string>('ContaCorrente')
   const [novoSaldoDisplay, setNovoSaldoDisplay] = useState('')
   const [novoSaldo, setNovoSaldo] = useState(0)
+  const [novoLimite, setNovoLimite] = useState('')
+  const [novoDiaFechamento, setNovoDiaFechamento] = useState('')
+  const [novoDiaVencimento, setNovoDiaVencimento] = useState('')
   const [criando, setCriando] = useState(false)
 
   const [editId, setEditId] = useState<string | null>(null)
@@ -49,6 +53,9 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
   const [editSaldoDisplay, setEditSaldoDisplay] = useState('')
   const [editSaldo, setEditSaldo] = useState(0)
   const [editAtiva, setEditAtiva] = useState(true)
+  const [editLimite, setEditLimite] = useState('')
+  const [editDiaFechamento, setEditDiaFechamento] = useState('')
+  const [editDiaVencimento, setEditDiaVencimento] = useState('')
   const [salvandoEdit, setSalvandoEdit] = useState(false)
 
   useEffect(() => {
@@ -75,12 +82,18 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
         nome: novoNome.trim(),
         tipo: novoTipo,
         saldoInicial: novoSaldo,
+        limite: novoTipo === 'CartaoCredito' && novoLimite ? parseBRL(novoLimite) : undefined,
+        diaFechamento: novoTipo === 'CartaoCredito' && novoDiaFechamento ? Number(novoDiaFechamento) : undefined,
+        diaVencimento: novoTipo === 'CartaoCredito' && novoDiaVencimento ? Number(novoDiaVencimento) : undefined,
       })
       setContas(prev => [...prev, nova])
       setNovoNome('')
       setNovoTipo('ContaCorrente')
       setNovoSaldoDisplay('')
       setNovoSaldo(0)
+      setNovoLimite('')
+      setNovoDiaFechamento('')
+      setNovoDiaVencimento('')
       showMsg('Conta criada com sucesso!')
     } catch (e: unknown) {
       showMsg(e instanceof Error ? e.message : 'Erro ao criar conta.', false)
@@ -96,6 +109,9 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
     setEditSaldo(c.saldoInicial)
     setEditSaldoDisplay(c.saldoInicial ? fmtNum(c.saldoInicial) : '')
     setEditAtiva(c.ativa)
+    setEditLimite(c.limite ? fmtNum(c.limite) : '')
+    setEditDiaFechamento(c.diaFechamento ? String(c.diaFechamento) : '')
+    setEditDiaVencimento(c.diaVencimento ? String(c.diaVencimento) : '')
   }
 
   async function handleSalvarEdit() {
@@ -107,6 +123,9 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
         tipo: editTipo,
         saldoInicial: editSaldo,
         ativa: editAtiva,
+        limite: editTipo === 'CartaoCredito' && editLimite ? parseBRL(editLimite) : undefined,
+        diaFechamento: editTipo === 'CartaoCredito' && editDiaFechamento ? Number(editDiaFechamento) : undefined,
+        diaVencimento: editTipo === 'CartaoCredito' && editDiaVencimento ? Number(editDiaVencimento) : undefined,
       })
       setContas(prev => prev.map(c => c.id === editId ? atualizada : c))
       setEditId(null)
@@ -183,6 +202,30 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
             {criando ? 'Criando...' : '＋ Criar'}
           </button>
         </div>
+        {novoTipo === 'CartaoCredito' && (
+          <div className="conta-form-row" style={{ marginTop: 8 }}>
+            <div className="val-input-wrap" style={{ flex: 1, minWidth: 130 }}>
+              <span className="val-prefix">R$</span>
+              <input
+                type="text" inputMode="decimal" placeholder="Limite"
+                value={novoLimite}
+                onChange={e => setNovoLimite(e.target.value.replace(/[^\d,]/g, ''))}
+              />
+            </div>
+            <input
+              type="number" min={1} max={31} placeholder="Dia de fechamento"
+              value={novoDiaFechamento}
+              onChange={e => setNovoDiaFechamento(e.target.value)}
+              style={{ flex: 1, minWidth: 140 }}
+            />
+            <input
+              type="number" min={1} max={31} placeholder="Dia de vencimento"
+              value={novoDiaVencimento}
+              onChange={e => setNovoDiaVencimento(e.target.value)}
+              style={{ flex: 1, minWidth: 140 }}
+            />
+          </div>
+        )}
         {msg && (
           <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: msgOk ? '#34c759' : '#ff6b6b' }}>
             {msg}
@@ -221,6 +264,30 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
                     />
                   </div>
                 </div>
+                {editTipo === 'CartaoCredito' && (
+                  <div className="conta-form-row" style={{ marginTop: 8 }}>
+                    <div className="val-input-wrap" style={{ flex: 1, minWidth: 130 }}>
+                      <span className="val-prefix">R$</span>
+                      <input
+                        type="text" inputMode="decimal" placeholder="Limite"
+                        value={editLimite}
+                        onChange={e => setEditLimite(e.target.value.replace(/[^\d,]/g, ''))}
+                      />
+                    </div>
+                    <input
+                      type="number" min={1} max={31} placeholder="Dia de fechamento"
+                      value={editDiaFechamento}
+                      onChange={e => setEditDiaFechamento(e.target.value)}
+                      style={{ flex: 1, minWidth: 140 }}
+                    />
+                    <input
+                      type="number" min={1} max={31} placeholder="Dia de vencimento"
+                      value={editDiaVencimento}
+                      onChange={e => setEditDiaVencimento(e.target.value)}
+                      style={{ flex: 1, minWidth: 140 }}
+                    />
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                   <button className="btn-add-conta" onClick={handleSalvarEdit} disabled={salvandoEdit}>
                     {salvandoEdit ? 'Salvando...' : '✔ Salvar'}
@@ -238,10 +305,14 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
                   <div className="cb-conta-nome">{c.nome}</div>
                   <div className="cb-conta-meta">
                     {TIPO_LABEL[c.tipo] ?? c.tipo}
-                    {c.saldoInicial > 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`}
+                    {c.tipo === 'CartaoCredito'
+                      ? (c.limite ? ` · Limite: ${fmtBRL(c.limite)}` : '')
+                      : (c.saldoInicial > 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`)}
                   </div>
                 </div>
-                <div className="cb-conta-saldo val-green">{fmtBRL(c.saldoAtual)}</div>
+                {c.tipo === 'CartaoCredito'
+                  ? <div className="cb-conta-saldo val-red">{fmtBRL(c.saldoDevedor ?? 0)}</div>
+                  : <div className="cb-conta-saldo val-green">{fmtBRL(c.saldoAtual)}</div>}
                 <div className="cb-conta-acoes">
                   <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
                   <button className="cb-btn-inativar" onClick={() => handleExcluir(c.id)}>Excluir</button>

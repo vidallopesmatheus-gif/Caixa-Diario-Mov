@@ -8,4 +8,9 @@ public class AtualizarContaBancariaDto
     [Required] public string Tipo { get; set; } = "Caixa";
     public decimal SaldoInicial { get; set; }
     public bool Ativa { get; set; } = true;
+
+    // Só usados quando Tipo == "CartaoCredito".
+    public decimal? Limite { get; set; }
+    public int? DiaFechamento { get; set; }
+    public int? DiaVencimento { get; set; }
 }

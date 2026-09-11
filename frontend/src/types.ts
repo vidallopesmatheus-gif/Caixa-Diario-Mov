@@ -82,7 +82,7 @@ export interface ContaBancaria {
   id: string
   clienteId: string
   nome: string
-  tipo: 'Caixa' | 'ContaCorrente' | 'Investimento'
+  tipo: 'Caixa' | 'ContaCorrente' | 'Investimento' | 'CartaoCredito'
   saldoInicial: number
   saldoAtual: number
   entradasMes: number
@@ -96,6 +96,13 @@ export interface ContaBancaria {
   rentabilidadePercentual?: number | null
   metasVinculadas?: MetaVinculada[]
   progressoCombinadoPercentual?: number | null
+  // Só vêm preenchidos quando tipo === 'CartaoCredito'. saldoDevedor é sempre >= 0 (valor
+  // absoluto da dívida), mesmo que saldoAtual seja negativo.
+  limite?: number | null
+  diaFechamento?: number | null
+  diaVencimento?: number | null
+  saldoDevedor?: number
+  limiteDisponivel?: number | null
 }
 
 export interface LancamentoExtrato {

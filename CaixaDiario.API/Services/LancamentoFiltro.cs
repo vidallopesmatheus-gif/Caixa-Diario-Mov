@@ -14,8 +14,13 @@ public static class LancamentoFiltro
     // de Investimento/Financiamento), nunca em Ebitda, ponto de equilíbrio, evolução de receita/custo etc.
     public const string TipoInvestimento = "Investimento";
     public const string TipoFinanciamento = "Financiamento";
+    // Pagamento de fatura de cartão (na conta corrente) e a baixa correspondente na conta do
+    // cartão (ver FaturaCartaoService) — a despesa já foi reconhecida na compra, então o pagamento
+    // da fatura não pode contar de novo, senão duplica no DRE.
+    public const string TipoPagamentoFatura = "PagamentoFatura";
 
     public static bool EhOperacional(string? tipoCusto) =>
         tipoCusto != TipoTransferencia && tipoCusto != TipoRendimento
-        && tipoCusto != TipoInvestimento && tipoCusto != TipoFinanciamento;
+        && tipoCusto != TipoInvestimento && tipoCusto != TipoFinanciamento
+        && tipoCusto != TipoPagamentoFatura;
 }

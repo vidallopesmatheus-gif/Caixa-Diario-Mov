@@ -22,6 +22,7 @@ public class AppDbContext : DbContext
     public DbSet<Transferencia> Transferencias { get; set; }
     public DbSet<RegraCategorizacao> RegrasCategorizacao { get; set; }
     public DbSet<LinkConciliacao> LinksConciliacao { get; set; }
+    public DbSet<PagamentoFatura> PagamentosFatura { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -160,6 +161,9 @@ public class AppDbContext : DbContext
             entity.Property(e => e.SaldoInicial).HasColumnName("saldo_inicial").HasColumnType("decimal(18,2)").HasDefaultValue(0m);
             entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);
             entity.Property(e => e.DataCriacao).HasColumnName("data_criacao").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.Limite).HasColumnName("limite").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiaFechamento).HasColumnName("dia_fechamento");
+            entity.Property(e => e.DiaVencimento).HasColumnName("dia_vencimento");
 
             entity.HasOne(e => e.Cliente)
                 .WithMany(u => u.ContasBancarias)
@@ -331,6 +335,36 @@ public class AppDbContext : DbContext
 
             entity.HasIndex(e => e.Token).IsUnique();
             entity.HasIndex(e => new { e.ClienteId, e.CriadoEm });
+        });
+
+        modelBuilder.Entity<PagamentoFatura>(entity =>
+        {
+            entity.ToTable("pagamentos_fatura");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaCartaoId).HasColumnName("conta_cartao_id");
+            entity.Property(e => e.ContaOrigemId).HasColumnName("conta_origem_id");
+            entity.Property(e => e.Competencia).HasColumnName("competencia").IsRequired();
+            entity.Property(e => e.ValorPago).HasColumnName("valor_pago").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Data).HasColumnName("data");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+
+            entity.HasOne(e => e.Cliente)
+                .WithMany()
+                .HasForeignKey(e => e.ClienteId);
+
+            entity.HasOne(e => e.ContaCartao)
+                .WithMany()
+                .HasForeignKey(e => e.ContaCartaoId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ContaOrigem)
+                .WithMany()
+                .HasForeignKey(e => e.ContaOrigemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.ContaCartaoId, e.Competencia });
         });
     }
 }

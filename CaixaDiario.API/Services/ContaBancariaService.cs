@@ -9,7 +9,7 @@ namespace CaixaDiario.API.Services;
 
 public class ContaBancariaService : IContaBancariaService
 {
-    private static readonly HashSet<string> TiposValidos = new() { "Caixa", "ContaCorrente", "Investimento" };
+    private static readonly HashSet<string> TiposValidos = new() { "Caixa", "ContaCorrente", "Investimento", "CartaoCredito" };
 
     private readonly IContaBancariaRepository _contaRepo;
     private readonly IRegistroRepository _registroRepo;
@@ -62,6 +62,9 @@ public class ContaBancariaService : IContaBancariaService
             SaldoInicial = dto.SaldoInicial,
             Ativa = true,
             DataCriacao = DateTime.UtcNow,
+            Limite = dto.Tipo == "CartaoCredito" ? dto.Limite : null,
+            DiaFechamento = dto.Tipo == "CartaoCredito" ? dto.DiaFechamento : null,
+            DiaVencimento = dto.Tipo == "CartaoCredito" ? dto.DiaVencimento : null,
         };
 
         var criada = await _contaRepo.AdicionarAsync(conta);
@@ -80,6 +83,9 @@ public class ContaBancariaService : IContaBancariaService
         conta.Tipo = dto.Tipo;
         conta.SaldoInicial = dto.SaldoInicial;
         conta.Ativa = dto.Ativa;
+        conta.Limite = dto.Tipo == "CartaoCredito" ? dto.Limite : null;
+        conta.DiaFechamento = dto.Tipo == "CartaoCredito" ? dto.DiaFechamento : null;
+        conta.DiaVencimento = dto.Tipo == "CartaoCredito" ? dto.DiaVencimento : null;
 
         var atualizada = await _contaRepo.AtualizarAsync(conta);
         var registros = await _registroRepo.ListarPorContaAsync(id);
@@ -401,6 +407,18 @@ public class ContaBancariaService : IContaBancariaService
             dto.ProgressoCombinadoPercentual = somaMetas > 0
                 ? Math.Round(Math.Min(1m, saldoAtual / somaMetas) * 100, 1)
                 : null;
+        }
+
+        if (c.Tipo == "CartaoCredito")
+        {
+            dto.Limite = c.Limite;
+            dto.DiaFechamento = c.DiaFechamento;
+            dto.DiaVencimento = c.DiaVencimento;
+            // SaldoAtual do cartão é negativo (dívida) ou zero — SaldoDevedor é a mesma coisa em
+            // valor absoluto, mais direto de exibir num card. Se por algum motivo estiver positivo
+            // (crédito a favor do cliente, ex. fatura paga a mais), a dívida é zero.
+            dto.SaldoDevedor = Math.Max(0m, -saldoAtual);
+            dto.LimiteDisponivel = c.Limite.HasValue ? c.Limite.Value - dto.SaldoDevedor.Value : null;
         }
 
         return dto;

@@ -23,6 +23,11 @@ function mapConta(raw: any): ContaBancaria {
       id: m.id, ano: m.ano, sonho: m.sonho ?? undefined, valorSonho: m.valorSonho ?? 0,
     })),
     progressoCombinadoPercentual: raw.progressoCombinadoPercentual ?? undefined,
+    limite: raw.limite ?? undefined,
+    diaFechamento: raw.diaFechamento ?? undefined,
+    diaVencimento: raw.diaVencimento ?? undefined,
+    saldoDevedor: raw.saldoDevedor ?? undefined,
+    limiteDisponivel: raw.limiteDisponivel ?? undefined,
   }
 }
 
@@ -64,6 +69,9 @@ export const criarContaBancaria = async (dto: {
   nome: string
   tipo: string
   saldoInicial: number
+  limite?: number
+  diaFechamento?: number
+  diaVencimento?: number
 }): Promise<ContaBancaria> => {
   const res = await apiFetch<ApiResponse<unknown>>('/api/contas-bancarias', {
     method: 'POST',
@@ -77,6 +85,9 @@ export const atualizarContaBancaria = async (id: string, dto: {
   tipo: string
   saldoInicial: number
   ativa: boolean
+  limite?: number
+  diaFechamento?: number
+  diaVencimento?: number
 }): Promise<ContaBancaria> => {
   const res = await apiFetch<ApiResponse<unknown>>(`/api/contas-bancarias/${id}`, {
     method: 'PUT',

@@ -20,6 +20,14 @@ public class ContaBancariaDto
     public decimal? RentabilidadePercentual { get; set; }
     public List<MetaVinculadaDto>? MetasVinculadas { get; set; }
     public decimal? ProgressoCombinadoPercentual { get; set; }
+
+    // Só preenchidos quando Tipo == "CartaoCredito". SaldoDevedor é sempre >= 0 (valor absoluto da
+    // dívida) mesmo que SaldoAtual seja negativo — mais fácil de exibir direto no card.
+    public decimal? Limite { get; set; }
+    public int? DiaFechamento { get; set; }
+    public int? DiaVencimento { get; set; }
+    public decimal? SaldoDevedor { get; set; }
+    public decimal? LimiteDisponivel { get; set; }
 }
 
 public class MetaVinculadaDto
