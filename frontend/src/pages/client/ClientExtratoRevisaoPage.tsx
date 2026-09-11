@@ -6,6 +6,7 @@ import { listarCategorias } from '../../api/categorias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
 import { criarRegra, contarCorrespondencias } from '../../api/regras'
 import { gerarLinkConciliacao, listarLinksConciliacao, revogarLinkConciliacao } from '../../api/linksConciliacao'
+import { listarFaturasCartao, sugerirFaturaCartao, vincularPagamentoFatura } from '../../api/faturasCartao'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { fmtBRL } from '../../utils/format'
 import { useAuth } from '../../contexts/AuthContext'
@@ -13,6 +14,7 @@ import { agruparPorDescricaoSimilar } from '../../utils/descricaoSimilar'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import Modal from '../../components/shared/Modal'
 import type { Categorias, CategoriaAdmin, PendenteCategorizacao, ContaBancaria, LancamentoExtrato, LinkConciliacao } from '../../types'
+import type { FaturaCartao } from '../../api/faturasCartao'
 import './ClientExtratoRevisao.css'
 
 function fmtData(iso: string): string {
@@ -64,6 +66,17 @@ export default function ClientExtratoRevisaoPage() {
   const [regraContaContrapartidaId, setRegraContaContrapartidaId] = useState('')
   const [regraContagem, setRegraContagem] = useState<number | null>(null)
   const [criandoRegra, setCriandoRegra] = useState(false)
+
+  // ── Marcar como Pagamento de fatura de cartão — a saída não é despesa nova, é quitação de uma
+  // dívida já reconhecida quando a compra foi categorizada no cartão (ver FaturaCartaoService).
+  const [itemParaPagamentoFatura, setItemParaPagamentoFatura] = useState<PendenteCategorizacao | null>(null)
+  const [contaCartaoId, setContaCartaoId] = useState('')
+  const [faturasDoCartao, setFaturasDoCartao] = useState<FaturaCartao[]>([])
+  const [competenciaEscolhida, setCompetenciaEscolhida] = useState('')
+  const [carregandoFaturas, setCarregandoFaturas] = useState(false)
+  const [vinculandoPagamento, setVinculandoPagamento] = useState(false)
+
+  const contasCartao = useMemo(() => contasBancarias.filter(c => c.tipo === 'CartaoCredito' && c.ativa), [contasBancarias])
 
   // ── Portal de conciliação — link público pro cliente classificar sozinho ────────────────────
   const [links, setLinks] = useState<LinkConciliacao[]>([])
@@ -259,6 +272,49 @@ export default function ClientExtratoRevisaoPage() {
     }
   }
 
+  function abrirModalPagamentoFatura(item: PendenteCategorizacao) {
+    setItemParaPagamentoFatura(item)
+    setContaCartaoId(contasCartao.length === 1 ? contasCartao[0].id : '')
+    setFaturasDoCartao([])
+    setCompetenciaEscolhida('')
+    setMsg('')
+  }
+
+  useEffect(() => {
+    if (!itemParaPagamentoFatura || !contaCartaoId) { setFaturasDoCartao([]); setCompetenciaEscolhida(''); return }
+    let cancelado = false
+    setCarregandoFaturas(true)
+    Promise.all([
+      listarFaturasCartao(contaCartaoId),
+      sugerirFaturaCartao(contaCartaoId, itemParaPagamentoFatura.valor, itemParaPagamentoFatura.data),
+    ])
+      .then(([faturas, sugestao]) => {
+        if (cancelado) return
+        setFaturasDoCartao(faturas)
+        setCompetenciaEscolhida(sugestao?.competencia ?? faturas.find(f => f.status !== 'Paga')?.competencia ?? '')
+      })
+      .finally(() => { if (!cancelado) setCarregandoFaturas(false) })
+    return () => { cancelado = true }
+  }, [itemParaPagamentoFatura, contaCartaoId])
+
+  async function confirmarPagamentoFatura() {
+    if (!itemParaPagamentoFatura || !contaId || !contaCartaoId || !competenciaEscolhida) return
+    setVinculandoPagamento(true)
+    setMsg('')
+    try {
+      await vincularPagamentoFatura({
+        contaOrigemId: contaId, lancamentoId: itemParaPagamentoFatura.id, data: itemParaPagamentoFatura.data,
+        contaCartaoId, competencia: competenciaEscolhida,
+      })
+      setPendentes(prev => prev.filter(p => p.id !== itemParaPagamentoFatura.id))
+      setItemParaPagamentoFatura(null)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao vincular pagamento de fatura.')
+    } finally {
+      setVinculandoPagamento(false)
+    }
+  }
+
   function abrirLoteTransferencia(itens: PendenteCategorizacao[]) {
     if (itens.length === 0) return
     setLoteTransferenciaItens(itens)
@@ -448,6 +504,7 @@ export default function ClientExtratoRevisaoPage() {
                     registerInputRef={registerInputRef}
                     onMarcarTransferencia={() => abrirModalTransferencia(item)}
                     onCriarRegra={() => abrirModalRegra([item])}
+                    onMarcarPagamentoFatura={item.tipo === 'Saida' && contasCartao.length > 0 ? () => abrirModalPagamentoFatura(item) : undefined}
                   />
                 )
               }
@@ -501,6 +558,7 @@ export default function ClientExtratoRevisaoPage() {
                         registerInputRef={registerInputRef}
                         onMarcarTransferencia={() => abrirModalTransferencia(item)}
                         onCriarRegra={() => abrirModalRegra([item])}
+                        onMarcarPagamentoFatura={item.tipo === 'Saida' && contasCartao.length > 0 ? () => abrirModalPagamentoFatura(item) : undefined}
                       />
                     ))}
                   </div>
@@ -595,6 +653,62 @@ export default function ClientExtratoRevisaoPage() {
                 ))}
               </select>
             </div>
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!itemParaPagamentoFatura}
+        title="💳 Pagamento de fatura de cartão"
+        onClose={() => { if (!vinculandoPagamento) setItemParaPagamentoFatura(null) }}
+        footer={
+          <>
+            <button className="er-btn-lote" onClick={() => setItemParaPagamentoFatura(null)} disabled={vinculandoPagamento}>
+              Cancelar
+            </button>
+            <button
+              className="btn-save"
+              onClick={confirmarPagamentoFatura}
+              disabled={vinculandoPagamento || !contaCartaoId || !competenciaEscolhida}
+            >
+              {vinculandoPagamento ? 'Vinculando...' : 'Confirmar'}
+            </button>
+          </>
+        }
+      >
+        {itemParaPagamentoFatura && (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+              "{itemParaPagamentoFatura.descricao}" · {fmtBRL(itemParaPagamentoFatura.valor)} · {fmtData(itemParaPagamentoFatura.data)}
+              <br />
+              Não é despesa nova: as compras já foram categorizadas no cartão. Isto só abate o
+              saldo devedor da fatura escolhida.
+            </p>
+            <div className="inp-group">
+              <label>Cartão</label>
+              <select value={contaCartaoId} onChange={e => setContaCartaoId(e.target.value)}>
+                <option value="">Selecione...</option>
+                {contasCartao.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </div>
+            {contaCartaoId && (
+              <div className="inp-group" style={{ marginTop: 12 }}>
+                <label>Fatura</label>
+                {carregandoFaturas ? (
+                  <p style={{ fontSize: 12, color: 'var(--tx3)' }}>Carregando faturas...</p>
+                ) : faturasDoCartao.length === 0 ? (
+                  <p style={{ fontSize: 12, color: 'var(--tx3)' }}>Nenhuma fatura encontrada nesta conta ainda.</p>
+                ) : (
+                  <select value={competenciaEscolhida} onChange={e => setCompetenciaEscolhida(e.target.value)}>
+                    {faturasDoCartao.map(f => (
+                      <option key={f.competencia} value={f.competencia}>
+                        {f.competencia} · devedor {fmtBRL(f.saldoDevedor)} · {f.status}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
           </>
         )}
       </Modal>
@@ -754,11 +868,13 @@ interface ExtratoLinhaPendenteProps {
   registerInputRef: (id: string, el: HTMLInputElement | null) => void
   onMarcarTransferencia: () => void
   onCriarRegra: () => void
+  onMarcarPagamentoFatura?: () => void
 }
 
 function ExtratoLinhaPendente({
   item, categoriasDisponiveis, selecionado, salvando,
   onToggleSelecionado, onCategorizar, onCategoriaCriada, onNavigate, registerInputRef, onMarcarTransferencia, onCriarRegra,
+  onMarcarPagamentoFatura,
 }: ExtratoLinhaPendenteProps) {
   return (
     <div className="er-item">
@@ -788,6 +904,11 @@ function ExtratoLinhaPendente({
       <button type="button" className="er-btn-toggle" title="Não é despesa — é uma transferência entre contas" onClick={onMarcarTransferencia}>
         🔁 Transferência
       </button>
+      {onMarcarPagamentoFatura && (
+        <button type="button" className="er-btn-toggle" title="Não é despesa nova — é o pagamento de uma fatura de cartão já categorizada" onClick={onMarcarPagamentoFatura}>
+          💳 Pagamento de fatura
+        </button>
+      )}
       <button type="button" className="er-btn-toggle" title="Criar regra pra categorizar automaticamente lançamentos parecidos nas próximas importações" onClick={onCriarRegra}>
         ⚙️ Criar regra
       </button>

@@ -10,6 +10,9 @@ public class ItemFinanceiroSaida
     public string? TipoCusto { get; set; }
     // Preenchido apenas quando TipoCusto == "Transferencia": liga as duas pontas do par.
     public Guid? TransferenciaId { get; set; }
+    // Preenchido apenas quando TipoCusto == "PagamentoFatura": esta saída (na conta corrente) é o
+    // pagamento de uma fatura de cartão, não uma despesa nova — ver FaturaCartaoService.
+    public Guid? PagamentoFaturaId { get; set; }
     // Identificador único do OFX (dedup) — nulo para lançamentos manuais ou vindos de CSV/XLSX.
     public string? FitId { get; set; }
     // Verdadeiro quando a importação não encontrou categoria sugerida — some quando o usuário categoriza.
