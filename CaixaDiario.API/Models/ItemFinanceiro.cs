@@ -20,4 +20,7 @@ public class ItemFinanceiro
     // Preenchido quando a categoria veio de uma RegraCategorizacao aplicada na importação —
     // corrigir manualmente NÃO limpa isso nem altera a regra (só marca a origem pra exibição).
     public Guid? RegraCategorizacaoId { get; set; }
+    // Verdadeiro quando quem escolheu a categoria foi o próprio cliente, pelo portal de
+    // conciliação (link público) — nunca setado quando o consultor categoriza pela tela normal.
+    public bool ClassificadoPeloCliente { get; set; }
 }

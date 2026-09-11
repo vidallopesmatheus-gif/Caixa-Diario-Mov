@@ -38,6 +38,9 @@ export interface ItemFinanceiro {
   // Opacos pro usuário — só precisam sobreviver ao carregar/salvar de novo o dia.
   fitId?: string
   pendenteCategorizacao?: boolean
+  // Verdadeiro quando quem escolheu a categoria foi o cliente, pelo portal de conciliação
+  // (link público) — nunca setado quando o consultor categoriza pela tela normal.
+  classificadoPeloCliente?: boolean
 }
 
 export interface ItemFinanceiroSaida {
@@ -50,6 +53,7 @@ export interface ItemFinanceiroSaida {
   transferenciaId?: string
   fitId?: string
   pendenteCategorizacao?: boolean
+  classificadoPeloCliente?: boolean
 }
 
 
@@ -270,6 +274,32 @@ export interface RegraCategorizacao {
   ordem: number
   quantidadeAplicada: number
   criadoEm: string
+}
+
+/** Link público (sem login), válido 24h, pro cliente classificar seus pendentes sozinho. */
+export interface LinkConciliacao {
+  id: string
+  token: string
+  criadoEm: string
+  expiraEm: string
+  revogadoEm?: string
+  ultimoAcessoEm?: string
+  totalClassificadosPeloCliente: number
+  status: 'Ativo' | 'Expirado' | 'Revogado'
+}
+
+export interface ContaPendentesPortal {
+  contaBancariaId: string
+  contaNome: string
+  itens: PendenteCategorizacao[]
+}
+
+/** Dados que o portal público recebe pelo token — só o necessário pra classificar pendentes. */
+export interface PortalConciliacaoData {
+  expiraEm: string
+  contas: ContaPendentesPortal[]
+  categoriasEntrada: CategoriaItem[]
+  categoriasSaida: CategoriaItem[]
 }
 
 export interface ChatResponse {

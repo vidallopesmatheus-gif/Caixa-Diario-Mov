@@ -81,6 +81,9 @@ builder.Services.AddScoped<ITransferenciaService, TransferenciaService>();
 builder.Services.AddScoped<IRegraCategorizacaoRepository, RegraCategorizacaoRepository>();
 builder.Services.AddScoped<IRegraCategorizacaoService, RegraCategorizacaoService>();
 builder.Services.AddScoped<IMetaProgressoService, MetaProgressoService>();
+builder.Services.AddScoped<ILinkConciliacaoRepository, LinkConciliacaoRepository>();
+builder.Services.AddScoped<ILinkConciliacaoService, LinkConciliacaoService>();
+builder.Services.AddScoped<IConciliacaoPublicaService, ConciliacaoPublicaService>();
 
 // Chat IA
 var groqApiKey = builder.Configuration["Groq:ApiKey"]

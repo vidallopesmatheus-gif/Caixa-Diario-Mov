@@ -10,4 +10,5 @@ public class ItemFinanceiroDto
     public Guid Id { get; set; }
     public string? FitId { get; set; }
     public bool PendenteCategorizacao { get; set; }
+    public bool ClassificadoPeloCliente { get; set; }
 }

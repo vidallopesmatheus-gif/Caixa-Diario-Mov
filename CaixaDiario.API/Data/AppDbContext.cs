@@ -21,6 +21,7 @@ public class AppDbContext : DbContext
     public DbSet<Grupo> Grupos { get; set; }
     public DbSet<Transferencia> Transferencias { get; set; }
     public DbSet<RegraCategorizacao> RegrasCategorizacao { get; set; }
+    public DbSet<LinkConciliacao> LinksConciliacao { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -308,6 +309,28 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(e => new { e.ClienteId, e.ContaBancariaId, e.Tipo, e.Ativa });
+        });
+
+        modelBuilder.Entity<LinkConciliacao>(entity =>
+        {
+            entity.ToTable("links_conciliacao");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.Token).HasColumnName("token").IsRequired();
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.ExpiraEm).HasColumnName("expira_em");
+            entity.Property(e => e.RevogadoEm).HasColumnName("revogado_em");
+            entity.Property(e => e.UltimoAcessoEm).HasColumnName("ultimo_acesso_em");
+            entity.Property(e => e.TotalClassificadosPeloCliente).HasColumnName("total_classificados_pelo_cliente").HasDefaultValue(0);
+
+            entity.HasOne(e => e.Cliente)
+                .WithMany()
+                .HasForeignKey(e => e.ClienteId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.Token).IsUnique();
+            entity.HasIndex(e => new { e.ClienteId, e.CriadoEm });
         });
     }
 }
