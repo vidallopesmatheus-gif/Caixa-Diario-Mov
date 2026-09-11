@@ -51,9 +51,6 @@ public class RegistroService : IRegistroService
 
     public async Task<(RegistroDto dto, bool criado)> SalvarAsync(CriarRegistroDto dto, string nomeUsuarioLogado)
     {
-        if (dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
-            throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
-
         if (dto.Saidas.Any(s => string.IsNullOrWhiteSpace(s.Categoria)))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Toda saída deve ter uma categoria.", "categoria");
 
@@ -61,6 +58,16 @@ public class RegistroService : IRegistroService
 
         var existente = await _registroRepository.ObterPorContaEDataAsync(contaId, dto.Data)
             ?? await _registroRepository.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data);
+
+        // Só bloqueia data futura pra registro NOVO — um lançamento manual de Caixa num dia que
+        // ainda não aconteceu. Um registro já EXISTENTE pode legitimamente ter Data futura:
+        // RecorrenciaService materializa contas a pagar/receber com antecedência pro mês inteiro
+        // (ver MaterializarMesAtualAsync). Resalvar esse registro — baixa, edição ou exclusão de
+        // uma pendência — não é "lançar no futuro", é continuar algo que já existe; barrar isso
+        // impedia até confirmar recebimento antecipado de uma conta com vencimento amanhã.
+        if (existente == null && dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
+
         var registrosCliente = (await _registroRepository.ListarPorClienteAsync(dto.ClienteId)) ?? new List<RegistroDiario>();
         var dadosAntes = existente != null ? JsonSerializer.Serialize(MapToDto(existente)) : null;
         var referenciasReceber = registrosCliente
@@ -162,22 +169,27 @@ public class RegistroService : IRegistroService
             $"{clienteId}/{data}", dadosAntes, null);
     }
 
-    // Resolve a ContaBancariaId: usa a fornecida ou busca o Caixa padrão do cliente.
-    // Nunca devolve Guid.Empty — RegistroDiario.ContaBancariaId tem FK pra contas_bancarias, e
-    // gravar Guid.Empty ali derruba a query com violação de FK (500 genérico pro usuário, sem
-    // pista nenhuma do que houve). Se não há conta explícita nem Caixa cadastrada, o problema é
-    // de dados (cliente sem nenhuma conta bancária) — melhor um erro claro do que uma FK quebrada.
+    // Resolve a ContaBancariaId: usa a fornecida ou, na ausência dela (ex.: baixa de conta a
+    // pagar/receber cujo registro nunca teve conta vinculada), cai pra alguma conta do cliente.
+    // Caixa é só uma PREFERÊNCIA de fallback (mantém o comportamento histórico de quem sempre
+    // lançou tudo lá) — não é mais exigida: qualquer conta ativa do cliente serve. Nunca devolve
+    // Guid.Empty — RegistroDiario.ContaBancariaId tem FK pra contas_bancarias, e gravar
+    // Guid.Empty ali derruba a query com violação de FK (500 genérico pro usuário, sem pista
+    // nenhuma do que houve). Só falha se o cliente não tiver NENHUMA conta bancária cadastrada.
     private async Task<Guid> ResolverContaPadraoAsync(Guid clienteId, Guid? contaBancariaId)
     {
         if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
             return contaBancariaId.Value;
 
-        var caixa = await _contaBancariaRepository.ObterCaixaPadraoAsync(clienteId);
-        if (caixa != null)
-            return caixa.Id;
+        var contas = await _contaBancariaRepository.ListarPorClienteAsync(clienteId);
+        var padrao = contas.FirstOrDefault(c => c.Tipo == "Caixa" && c.Ativa)
+            ?? contas.FirstOrDefault(c => c.Ativa)
+            ?? contas.FirstOrDefault();
+        if (padrao != null)
+            return padrao.Id;
 
         throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
-            "Nenhuma conta bancária padrão (Caixa) encontrada para este cliente. Cadastre uma conta bancária em Configurações antes de continuar.");
+            "Este cliente ainda não tem nenhuma conta bancária cadastrada. Cadastre uma em Configurações antes de continuar.");
     }
 
     private static List<ContaProvisionada> AplicarBaixaAutomatica(List<ContaProvisionada> contas, DateOnly data)

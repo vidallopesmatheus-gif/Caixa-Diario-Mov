@@ -1,10 +1,13 @@
 using System.Text;
 using CaixaDiario.API.Data;
+using CaixaDiario.API.Enums;
 using CaixaDiario.API.Middleware;
 using CaixaDiario.API.Repositories;
 using CaixaDiario.API.Repositories.Interfaces;
+using CaixaDiario.API.Responses;
 using CaixaDiario.API.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 DotNetEnv.Env.Load();
@@ -12,6 +15,28 @@ DotNetEnv.Env.Load();
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+// Erro de model binding/DataAnnotations (ex.: [Required] faltando) normalmente vira um 400 do
+// próprio framework, no formato ValidationProblemDetails — sem "mensagem", o formato que o
+// frontend (apiFetch) sabe ler. Redireciona esse 400 pro mesmo formato de ErroResponse que
+// ErrorHandlingMiddleware usa pra ApiException, pra nunca virar um "Erro 400" sem contexto.
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var primeiroErro = context.ModelState
+            .FirstOrDefault(kvp => kvp.Value?.Errors.Count > 0);
+        var mensagem = primeiroErro.Value?.Errors.FirstOrDefault()?.ErrorMessage ?? "Dados inválidos.";
+        var campo = string.IsNullOrEmpty(primeiroErro.Key) ? null : primeiroErro.Key;
+
+        return new BadRequestObjectResult(new ErroResponse
+        {
+            Status = 400,
+            Codigo = CodigoRetorno.DADOS_INVALIDOS.ToString(),
+            Mensagem = mensagem,
+            Campo = campo,
+        });
+    };
+});
 // Banco de dados
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options =>
