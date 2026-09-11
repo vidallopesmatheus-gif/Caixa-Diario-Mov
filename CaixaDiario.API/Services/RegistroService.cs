@@ -346,11 +346,13 @@ public class RegistroService : IRegistroService
         {
             Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, TipoCusto = s.TipoCusto,
             TransferenciaId = s.TransferenciaId, FitId = s.FitId, PendenteCategorizacao = s.PendenteCategorizacao,
+            ClassificadoPeloCliente = s.ClassificadoPeloCliente,
         }).ToList(),
         Saidas = r.Saidas.Select(s => new ItemFinanceiroSaidaDto
         {
             Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, Subcategoria = s.Subcategoria,
             TipoCusto = s.TipoCusto, TransferenciaId = s.TransferenciaId, FitId = s.FitId, PendenteCategorizacao = s.PendenteCategorizacao,
+            ClassificadoPeloCliente = s.ClassificadoPeloCliente,
         }).ToList(),
         ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
         ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),

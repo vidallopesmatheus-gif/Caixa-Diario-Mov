@@ -118,6 +118,11 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
                                 {e.categoria}
                               </span>
                             )}
+                            {e.classificadoPeloCliente && (
+                              <span title="Categoria escolhida pelo cliente, pelo portal de conciliação" style={{ marginLeft: 6, fontSize: 11, color: 'var(--accent, #4f9cff)', background: 'rgba(79,156,255,.12)', border: '1px solid rgba(79,156,255,.3)', borderRadius: 4, padding: '1px 6px' }}>
+                                👤 Cliente
+                              </span>
+                            )}
                           </span>
                           <span style={{ color: '#34c759', fontWeight: 600 }}>+{fmtBRL(e.valor)}</span>
                         </div>
@@ -137,6 +142,11 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
                             {s.categoria && (
                               <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--tx3)', background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.25)', borderRadius: 4, padding: '1px 6px' }}>
                                 {s.categoria}
+                              </span>
+                            )}
+                            {s.classificadoPeloCliente && (
+                              <span title="Categoria escolhida pelo cliente, pelo portal de conciliação" style={{ marginLeft: 6, fontSize: 11, color: 'var(--accent, #4f9cff)', background: 'rgba(79,156,255,.12)', border: '1px solid rgba(79,156,255,.3)', borderRadius: 4, padding: '1px 6px' }}>
+                                👤 Cliente
                               </span>
                             )}
                           </span>

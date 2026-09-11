@@ -27,6 +27,7 @@ function mapItemFinanceiro(raw: any): ItemFinanceiro {
     transferenciaId: raw.TransferenciaId ?? raw.transferenciaId ?? undefined,
     fitId: raw.FitId ?? raw.fitId ?? undefined,
     pendenteCategorizacao: raw.PendenteCategorizacao ?? raw.pendenteCategorizacao ?? false,
+    classificadoPeloCliente: raw.ClassificadoPeloCliente ?? raw.classificadoPeloCliente ?? false,
   }
 }
 
@@ -42,6 +43,7 @@ function mapItemFinanceiroSaida(raw: any): ItemFinanceiroSaida {
     transferenciaId: raw.TransferenciaId ?? raw.transferenciaId ?? undefined,
     fitId: raw.FitId ?? raw.fitId ?? undefined,
     pendenteCategorizacao: raw.PendenteCategorizacao ?? raw.pendenteCategorizacao ?? false,
+    classificadoPeloCliente: raw.ClassificadoPeloCliente ?? raw.classificadoPeloCliente ?? false,
   }
 }
 

@@ -285,3 +285,48 @@
   margin: 6px 0;
   font-size: 13px;
 }
+
+.er-link-resumo {
+  font-size: 12px;
+  color: var(--accent, #4f9cff);
+  margin-top: 4px;
+}
+
+.er-link-card {
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.er-link-url {
+  font-size: 12px;
+  color: var(--tx1);
+  word-break: break-all;
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.er-link-acoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.er-link-meta {
+  font-size: 12px;
+  color: var(--tx3);
+  margin-top: 10px;
+}
+
+.er-link-historico-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--tx3);
+  border-bottom: 1px solid var(--bd);
+  padding-bottom: 4px;
+}

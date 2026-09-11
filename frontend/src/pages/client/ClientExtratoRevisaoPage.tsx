@@ -5,17 +5,26 @@ import { listarContasBancarias } from '../../api/contasBancarias'
 import { listarCategorias } from '../../api/categorias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
 import { criarRegra, contarCorrespondencias } from '../../api/regras'
+import { gerarLinkConciliacao, listarLinksConciliacao, revogarLinkConciliacao } from '../../api/linksConciliacao'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { fmtBRL } from '../../utils/format'
 import { useAuth } from '../../contexts/AuthContext'
 import { agruparPorDescricaoSimilar } from '../../utils/descricaoSimilar'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import Modal from '../../components/shared/Modal'
-import type { Categorias, CategoriaAdmin, PendenteCategorizacao, ContaBancaria, LancamentoExtrato } from '../../types'
+import type { Categorias, CategoriaAdmin, PendenteCategorizacao, ContaBancaria, LancamentoExtrato, LinkConciliacao } from '../../types'
 import './ClientExtratoRevisao.css'
 
 function fmtData(iso: string): string {
   return iso.slice(0, 10).split('-').reverse().join('/')
+}
+
+function fmtDataHora(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+function urlDoPortal(token: string): string {
+  return `${window.location.origin}/portal/conciliacao/${token}`
 }
 
 export default function ClientExtratoRevisaoPage() {
@@ -56,6 +65,14 @@ export default function ClientExtratoRevisaoPage() {
   const [regraContagem, setRegraContagem] = useState<number | null>(null)
   const [criandoRegra, setCriandoRegra] = useState(false)
 
+  // ── Portal de conciliação — link público pro cliente classificar sozinho ────────────────────
+  const [links, setLinks] = useState<LinkConciliacao[]>([])
+  const [mostrarModalLink, setMostrarModalLink] = useState(false)
+  const [gerandoLink, setGerandoLink] = useState(false)
+  const [revogandoLinkId, setRevogandoLinkId] = useState<string | null>(null)
+  const [linkCopiado, setLinkCopiado] = useState(false)
+  const [msgLink, setMsgLink] = useState('')
+
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const clienteId = user?.usuarioId ?? ''
 
@@ -63,14 +80,16 @@ export default function ClientExtratoRevisaoPage() {
     if (!contaId || !clienteId) return
     setLoading(true)
     try {
-      const [pend, cats, contas] = await Promise.all([
+      const [pend, cats, contas, linksCarregados] = await Promise.all([
         listarPendentesCategorizacao(contaId),
         listarCategorias(),
         listarContasBancarias(clienteId),
+        listarLinksConciliacao(clienteId),
       ])
       setPendentes(pend)
       setCategorias(cats)
       setContasBancarias(contas)
+      setLinks(linksCarregados)
       setNomeConta(contas.find(c => c.id === contaId)?.nome ?? '')
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao carregar lançamentos pendentes.')
@@ -78,6 +97,48 @@ export default function ClientExtratoRevisaoPage() {
       setLoading(false)
     }
   }, [contaId, clienteId])
+
+  const linkAtivo = useMemo(() => links.find(l => l.status === 'Ativo'), [links])
+
+  async function gerarLink() {
+    if (!clienteId) return
+    setGerandoLink(true)
+    setMsgLink('')
+    try {
+      const novo = await gerarLinkConciliacao(clienteId)
+      setLinks(prev => [novo, ...prev.map(l => (l.status === 'Ativo' ? { ...l, status: 'Revogado' as const } : l))])
+      setLinkCopiado(false)
+    } catch (e: unknown) {
+      setMsgLink(e instanceof Error ? e.message : 'Erro ao gerar link.')
+    } finally {
+      setGerandoLink(false)
+    }
+  }
+
+  async function revogarLink(id: string) {
+    setRevogandoLinkId(id)
+    setMsgLink('')
+    try {
+      await revogarLinkConciliacao(id)
+      setLinks(prev => prev.map(l => (l.id === id ? { ...l, status: 'Revogado' as const, revogadoEm: new Date().toISOString() } : l)))
+    } catch (e: unknown) {
+      setMsgLink(e instanceof Error ? e.message : 'Erro ao revogar link.')
+    } finally {
+      setRevogandoLinkId(null)
+    }
+  }
+
+  function copiarLink(token: string) {
+    navigator.clipboard.writeText(urlDoPortal(token)).then(() => {
+      setLinkCopiado(true)
+      setTimeout(() => setLinkCopiado(false), 2000)
+    })
+  }
+
+  function urlWhatsappLink(token: string) {
+    const texto = `Oi! Pode classificar alguns lançamentos pendentes por aqui? ${urlDoPortal(token)}`
+    return `https://wa.me/?text=${encodeURIComponent(texto)}`
+  }
 
   useEffect(() => { carregar() }, [carregar])
 
@@ -295,8 +356,18 @@ export default function ClientExtratoRevisaoPage() {
         <div>
           <h2 className="er-titulo">Categorizar Lançamentos</h2>
           <div className="er-subtitulo">{nomeConta} · lançamentos já importados, só falta a categoria</div>
+          {linkAtivo && (
+            <div className="er-link-resumo">
+              📤 Link ativo até {fmtDataHora(linkAtivo.expiraEm)} · {linkAtivo.totalClassificadosPeloCliente} classificado(s) pelo cliente
+            </div>
+          )}
         </div>
-        <button className="er-btn-voltar" onClick={() => navigate(`/banco/${contaId}`)}>← Voltar</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="er-btn-toggle" onClick={() => setMostrarModalLink(true)}>
+            📤 {linkAtivo ? 'Ver link enviado' : 'Enviar para o cliente'}
+          </button>
+          <button className="er-btn-voltar" onClick={() => navigate(`/banco/${contaId}`)}>← Voltar</button>
+        </div>
       </div>
 
       {pendentes.length === 0 ? (
@@ -604,6 +675,67 @@ export default function ClientExtratoRevisaoPage() {
                   : `${regraContagem} lançamento(s) pendente(s) hoje casam com esse critério — só valem pra importações futuras, a menos que você aplique retroativamente depois em Configurações → Regras.`}
             </p>
           </>
+        )}
+      </Modal>
+
+      <Modal
+        open={mostrarModalLink}
+        title="📤 Portal de Conciliação"
+        onClose={() => setMostrarModalLink(false)}
+        footer={<button className="er-btn-lote" onClick={() => setMostrarModalLink(false)}>Fechar</button>}
+      >
+        <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+          Gera um link sem login, válido por 24h, pro cliente classificar sozinho os lançamentos
+          pendentes de todas as contas dele. Gerar um novo substitui o anterior.
+        </p>
+        {msgLink && <div className="er-msg-erro">{msgLink}</div>}
+
+        {linkAtivo ? (
+          <div className="er-link-card">
+            <div className="er-link-url">{urlDoPortal(linkAtivo.token)}</div>
+            <div className="er-link-acoes">
+              <button className="er-btn-lote" onClick={() => copiarLink(linkAtivo.token)}>
+                {linkCopiado ? '✓ Copiado' : 'Copiar link'}
+              </button>
+              <a className="er-btn-lote" href={urlWhatsappLink(linkAtivo.token)} target="_blank" rel="noreferrer">
+                WhatsApp
+              </a>
+              <button
+                className="er-btn-lote"
+                onClick={() => revogarLink(linkAtivo.id)}
+                disabled={revogandoLinkId === linkAtivo.id}
+              >
+                {revogandoLinkId === linkAtivo.id ? 'Revogando...' : 'Revogar'}
+              </button>
+            </div>
+            <div className="er-link-meta">
+              Expira em {fmtDataHora(linkAtivo.expiraEm)} · {linkAtivo.totalClassificadosPeloCliente} classificado(s) pelo cliente
+              {linkAtivo.ultimoAcessoEm && <> · último acesso {fmtDataHora(linkAtivo.ultimoAcessoEm)}</>}
+            </div>
+            <button className="er-btn-toggle" style={{ marginTop: 8 }} onClick={gerarLink} disabled={gerandoLink}>
+              {gerandoLink ? 'Gerando...' : 'Gerar novo link (substitui este)'}
+            </button>
+          </div>
+        ) : (
+          <button className="btn-save" onClick={gerarLink} disabled={gerandoLink}>
+            {gerandoLink ? 'Gerando...' : 'Gerar link'}
+          </button>
+        )}
+
+        {links.filter(l => l.status !== 'Ativo').length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx3)', textTransform: 'uppercase', marginBottom: 6 }}>
+              Histórico
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {links.filter(l => l.status !== 'Ativo').map(l => (
+                <div key={l.id} className="er-link-historico-item">
+                  <span>{l.status} · criado {fmtDataHora(l.criadoEm)}</span>
+                  <span>{l.totalClassificadosPeloCliente} classificado(s)</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </Modal>
     </>
