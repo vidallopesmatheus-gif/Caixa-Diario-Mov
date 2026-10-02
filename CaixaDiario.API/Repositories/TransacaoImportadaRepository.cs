@@ -21,4 +21,10 @@ public class TransacaoImportadaRepository : ITransacaoImportadaRepository
         _context.TransacoesImportadas.AddRange(transacoes);
         await _context.SaveChangesAsync();
     }
+
+    public async Task AtualizarAsync(TransacaoImportada transacao)
+    {
+        _context.TransacoesImportadas.Update(transacao);
+        await _context.SaveChangesAsync();
+    }
 }

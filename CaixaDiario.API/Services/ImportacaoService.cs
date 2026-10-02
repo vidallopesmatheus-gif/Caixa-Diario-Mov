@@ -56,8 +56,9 @@ public class ImportacaoService : IImportacaoService
         var registrosAtivos = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
+        var ignoradas = await ObterIgnoradasAsync(contaBancariaId);
 
-        var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos);
+        var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos, ignoradas);
         var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
 
         return new PreviewImportacaoDto
@@ -86,8 +87,9 @@ public class ImportacaoService : IImportacaoService
         var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
+        var ignoradas = await ObterIgnoradasAsync(contaBancariaId);
 
-        var jaImportadas = IdentificarJaImportadas(parseadas, registros);
+        var jaImportadas = IdentificarJaImportadas(parseadas, registros, ignoradas);
         var aImportar = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
 
         if (aImportar.Count == 0)
@@ -372,6 +374,103 @@ public class ImportacaoService : IImportacaoService
         }
     }
 
+    public async Task<ExcluirLancamentoResultDto> ExcluirLancamentoAsync(
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, ExcluirLancamentoDto dto)
+    {
+        var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        if (!DateOnly.TryParse(dto.Data, out var data))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Data inválida.", "data");
+
+        var registro = await _registroRepo.ObterPorContaEDataAsync(contaBancariaId, data)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+
+        var saida = registro.Saidas.FirstOrDefault(s => s.Id == dto.Id);
+        var entrada = saida == null ? registro.Entradas.FirstOrDefault(e => e.Id == dto.Id) : null;
+        if (saida == null && entrada == null)
+            throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+
+        // Ponta de Transferência: as duas pontas são o mesmo evento financeiro — excluir só uma
+        // deixaria a outra órfã, então delega pro TransferenciaService excluir as duas juntas.
+        var transferenciaId = saida?.TransferenciaId ?? entrada?.TransferenciaId;
+        if (transferenciaId.HasValue)
+        {
+            await _transferenciaService.ExcluirAsync(transferenciaId.Value, usuarioLogadoId, perfil);
+            return new ExcluirLancamentoResultDto { TransferenciaExcluida = true };
+        }
+
+        // Reabre qualquer título (em qualquer conta do cliente) cuja baixa foi vinculada a este
+        // lançamento, em vez de gerar um lançamento novo — ver RegistroService/ContaProvisionada.
+        string? tituloReaberto = null;
+        foreach (var r in await _registroRepo.ListarPorClienteAsync(conta.ClienteId))
+        {
+            var pendenciaReceber = r.ContasReceber.FirstOrDefault(p => p.LancamentoVinculadoId == dto.Id);
+            var pendenciaPagar = r.ContasPagar.FirstOrDefault(p => p.LancamentoVinculadoId == dto.Id);
+            if (pendenciaReceber == null && pendenciaPagar == null) continue;
+
+            if (pendenciaReceber != null)
+            {
+                tituloReaberto = pendenciaReceber.Descricao;
+                pendenciaReceber.Pago = false;
+                pendenciaReceber.DataBaixa = null;
+                pendenciaReceber.LancamentoVinculadoId = null;
+                r.ContasReceber = new List<ContaProvisionada>(r.ContasReceber);
+            }
+            if (pendenciaPagar != null)
+            {
+                tituloReaberto = pendenciaPagar.Descricao;
+                pendenciaPagar.Pago = false;
+                pendenciaPagar.DataBaixa = null;
+                pendenciaPagar.LancamentoVinculadoId = null;
+                r.ContasPagar = new List<ContaProvisionada>(r.ContasPagar);
+            }
+            r.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(r);
+        }
+
+        if (saida != null)
+        {
+            registro.Saidas = registro.Saidas.Where(s => s.Id != dto.Id).ToList();
+            registro.SaldoFinal += saida.Valor;
+            await MarcarIgnoradaSeImportadaAsync(contaBancariaId, data, "Saida", saida.Valor, saida.Descricao, saida.FitId);
+        }
+        else
+        {
+            registro.Entradas = registro.Entradas.Where(e => e.Id != dto.Id).ToList();
+            registro.SaldoFinal -= entrada!.Valor;
+            await MarcarIgnoradaSeImportadaAsync(contaBancariaId, data, "Entrada", entrada.Valor, entrada.Descricao, entrada.FitId);
+        }
+
+        registro.SalvoEm = DateTime.UtcNow;
+        registro.AtualizadoEm = DateTime.UtcNow;
+        await _registroRepo.AtualizarAsync(registro);
+
+        return new ExcluirLancamentoResultDto { TituloReaberto = tituloReaberto };
+    }
+
+    // Marca a transação de origem como "Ignorada" no histórico de importação (TransacaoImportada),
+    // se houver uma — é o que impede o item excluído de "ressuscitar" numa reimportação do mesmo
+    // arquivo (ver IdentificarJaImportadas). Sem FitId (CSV/XLSX), casa pela mesma heurística de
+    // data+tipo+valor+descrição normalizada usada no resto da deduplicação.
+    private async Task MarcarIgnoradaSeImportadaAsync(
+        Guid contaBancariaId, DateOnly data, string tipo, decimal valor, string descricao, string? fitId)
+    {
+        var candidatas = (await _importRepo.ListarPorContaAsync(contaBancariaId))
+            .Where(t => t.Data == data && t.Tipo == tipo && t.Status != "Ignorada");
+
+        var alvo = fitId != null
+            ? candidatas.FirstOrDefault(t => t.FitId == fitId)
+            : candidatas.FirstOrDefault(t => t.FitId == null
+                && Math.Round(t.Valor, 2) == Math.Round(valor, 2)
+                && NormalizarDescricao(t.Descricao) == NormalizarDescricao(descricao));
+
+        if (alvo == null) return;
+        alvo.Status = "Ignorada";
+        await _importRepo.AtualizarAsync(alvo);
+    }
+
+    private async Task<List<TransacaoImportada>> ObterIgnoradasAsync(Guid contaBancariaId) =>
+        (await _importRepo.ListarPorContaAsync(contaBancariaId)).Where(t => t.Status == "Ignorada").ToList();
+
     // ── Sugestão de categoria por palavra-chave ────────────────────────────────
     // Dicionário simples e estático (palavra-chave → categoria já existente em /api/categorias).
     // Só sugere para Saídas: o usuário confirma/troca depois se quiser.
@@ -481,7 +580,8 @@ public class ImportacaoService : IImportacaoService
     // como novas transações. Um `.Any()` simples (o que existia antes) marcaria a segunda
     // ocorrência legítima como duplicata só por ela parecer com a primeira — a diferença de
     // quantidade (multiset) é o que resolve isso sem precisar perguntar nada ao usuário.
-    private static HashSet<int> IdentificarJaImportadas(List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos)
+    private static HashSet<int> IdentificarJaImportadas(
+        List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos, List<TransacaoImportada> ignoradas)
     {
         var jaImportadas = new HashSet<int>();
 
@@ -510,6 +610,19 @@ public class ImportacaoService : IImportacaoService
                 disponivelNoRazao[chave] = restante - 1;
                 jaImportadas.Add(t.Indice);
             }
+        }
+
+        // Lançamentos que o usuário excluiu do extrato não contam mais como "no razão" (os dois
+        // blocos acima não os encontram mais), mas continuam marcados "Ignorada" no histórico de
+        // importação justamente pra não reaparecer aqui — ver ExcluirLancamentoAsync.
+        foreach (var t in parseadas.Where(t => !jaImportadas.Contains(t.Indice)))
+        {
+            var ignorada = t.FitId != null
+                ? ignoradas.Any(i => i.FitId == t.FitId)
+                : ignoradas.Any(i => i.FitId == null && i.Data == t.Data && i.Tipo == t.Tipo
+                    && Math.Round(i.Valor, 2) == Math.Round(t.Valor, 2)
+                    && NormalizarDescricao(i.Descricao) == NormalizarDescricao(t.Descricao));
+            if (ignorada) jaImportadas.Add(t.Indice);
         }
 
         return jaImportadas;

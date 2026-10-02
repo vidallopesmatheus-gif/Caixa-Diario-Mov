@@ -11,4 +11,5 @@ public interface ITransacaoImportadaRepository
 {
     Task<List<TransacaoImportada>> ListarPorContaAsync(Guid contaBancariaId);
     Task AdicionarLoteAsync(IEnumerable<TransacaoImportada> transacoes);
+    Task AtualizarAsync(TransacaoImportada transacao);
 }
