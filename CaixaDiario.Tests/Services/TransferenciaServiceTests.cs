@@ -151,6 +151,10 @@ public class TransferenciaServiceTests
         Assert.Equal(500m, entradaDestino.Valor);
         Assert.Equal(500m, registroDestinoCriado.SaldoFinal); // 0 + 500
         Assert.Equal(saidaOriginal.TransferenciaId, entradaDestino.TransferenciaId);
+        // Provisória: ainda não confirmada pelo extrato real da conta de destino (ver Bloco 3C —
+        // é o que permite a importação casar com ela em vez de duplicar).
+        Assert.True(entradaDestino.Provisoria);
+        Assert.Equal($"Transferência de {contaCorrente.Nome}", entradaDestino.Descricao);
 
         Assert.Equal(contaCorrente.Id, resultado.ContaOrigemId);
         Assert.Equal(contaInvestimento.Id, resultado.ContaDestinoId);
@@ -203,6 +207,8 @@ public class TransferenciaServiceTests
         Assert.Equal("Transferencia", saidaDestino.TipoCusto);
         Assert.Equal(500m, saidaDestino.Valor);
         Assert.Equal(500m, registroDestinoCriado.SaldoFinal); // 1000 - 500
+        Assert.True(saidaDestino.Provisoria);
+        Assert.Equal($"Transferência para {contaCorrente.Nome}", saidaDestino.Descricao);
 
         Assert.Equal(contaInvestimento.Id, resultado.ContaOrigemId);
         Assert.Equal(contaCorrente.Id, resultado.ContaDestinoId);
@@ -253,6 +259,8 @@ public class TransferenciaServiceTests
         var entradaContrapartida = Assert.Single(registroContrapartida.Entradas);
         Assert.Equal("Transferencia", entradaContrapartida.TipoCusto);
         Assert.Equal(1000m, registroOrigem.SaldoFinal); // também inalterado
+        // Pareado com lançamento real já existente — não é provisória (já foi confirmado pelo banco).
+        Assert.False(entradaContrapartida.Provisoria);
 
         var saidaOriginal = Assert.Single(registroOrigem.Saidas);
         Assert.Equal(saidaOriginal.TransferenciaId, entradaContrapartida.TransferenciaId);

@@ -1069,4 +1069,129 @@ public class ImportacaoServiceTests
         Assert.Equal(1, resultado.TotalJaImportadas);
         Assert.Equal(0, resultado.TotalNovas);
     }
+
+    // ── Conciliação com contrapartida provisória de Transferência (Bloco 3C: bug do Pix duplicado) ──
+    // Cenário real: Pix de R$480 classificado como Transferência no Nubank cria uma ENTRADA
+    // provisória de R$480 no C6 (TransferenciaService.ConverterLancamentoAsync). Antes desta
+    // correção, importar o extrato real do C6 trazia "Pix recebido" de R$480 de novo e duplicava —
+    // 2 entradas, saldo inflado em R$480.
+
+    [Fact]
+    public async Task ImportarArquivoAsync_UmaProvisoriaCandidata_ConciliaEmVezDeDuplicarSaldo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        var provisoriaId = Guid.NewGuid();
+        var data = new DateOnly(2026, 9, 26);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 0m));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 0m,
+            Entradas = new() { new ItemFinanceiro
+            {
+                Id = provisoriaId, Descricao = "Transferência de Conta Corrente Nubank", Valor = 480m,
+                Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId, Provisoria = true,
+            } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 480m,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/09/2026;Pix recebido - Matheus Vidal Lopes;480,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        // Sem duplicata: continua 1 única entrada, e é a MESMA (mesmo Id/TransferenciaId) — só os
+        // dados "ganharam realidade" (descrição do banco, deixou de ser provisória).
+        var entrada = Assert.Single(registro.Entradas);
+        Assert.Equal(provisoriaId, entrada.Id);
+        Assert.Equal(transferenciaId, entrada.TransferenciaId);
+        Assert.Equal("Pix recebido - Matheus Vidal Lopes", entrada.Descricao);
+        Assert.False(entrada.Provisoria);
+        Assert.Equal(480m, registro.SaldoFinal); // inalterado — já tinha sido contado quando a provisória nasceu
+
+        Assert.Equal(1, resultado.TotalConciliadasTransferencia);
+        Assert.Equal(0, resultado.TotalAmbiguasTransferencia);
+        Assert.Equal(0, resultado.TotalImportadas); // nada "novo" de verdade entrou
+        Assert.Equal(0, resultado.TotalPendentesCategorizacao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_DuasProvisoriasCandidatas_NaoDecideSozinhoEImportaComoPendente()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 9, 26);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 0m));
+
+        var registroA = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 0m,
+            Entradas = new() { new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Transferência de Conta A", Valor = 480m, TransferenciaId = Guid.NewGuid(), Provisoria = true } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 480m,
+        };
+        var registroB = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data.AddDays(1), Inicio = 480m,
+            Entradas = new() { new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Transferência de Conta B", Valor = 480m, TransferenciaId = Guid.NewGuid(), Provisoria = true } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 960m,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroA, registroB });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/09/2026;Pix recebido - Fulano;480,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        // Nenhuma das duas provisórias é tocada — a transação entra como lançamento novo normal
+        // (pendente), no dia correspondente, pro usuário conciliar manualmente.
+        Assert.Equal(2, registroA.Entradas.Count);
+        Assert.True(registroA.Entradas[0].Provisoria);
+        var novaEntrada = registroA.Entradas[1];
+        Assert.False(novaEntrada.Provisoria);
+        Assert.True(novaEntrada.PendenteCategorizacao);
+        Assert.True(Assert.Single(registroB.Entradas).Provisoria);
+
+        Assert.Equal(0, resultado.TotalConciliadasTransferencia);
+        Assert.Equal(1, resultado.TotalAmbiguasTransferencia);
+        Assert.Equal(1, resultado.TotalImportadas);
+        Assert.Equal(1, resultado.TotalPendentesCategorizacao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ProvisoriaForaDaJanelaDeDiasUteis_NaoConcilia()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var dataProvisoria = new DateOnly(2026, 9, 10); // bem fora da janela de ±2 dias úteis
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 0m));
+
+        var registroAntigo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataProvisoria, Inicio = 0m,
+            Entradas = new() { new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Transferência de Conta A", Valor = 480m, TransferenciaId = Guid.NewGuid(), Provisoria = true } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 480m,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroAntigo });
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/09/2026;Pix recebido - Fulano;480,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.True(Assert.Single(registroAntigo.Entradas).Provisoria); // não tocada
+        Assert.NotNull(criado);
+        Assert.Single(criado!.Entradas);
+        Assert.Equal(0, resultado.TotalConciliadasTransferencia);
+        Assert.Equal(0, resultado.TotalAmbiguasTransferencia);
+        Assert.Equal(1, resultado.TotalImportadas);
+    }
 }

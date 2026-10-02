@@ -251,6 +251,8 @@ export interface ResultadoImportacao {
   totalImportadas: number
   totalPendentesCategorizacao: number
   totalCategorizadasPorRegra: number
+  totalConciliadasTransferencia: number
+  totalAmbiguasTransferencia: number
   totalEntradas: number
   totalSaidas: number
 }

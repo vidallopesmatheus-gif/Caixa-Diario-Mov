@@ -213,9 +213,11 @@ public class TransferenciaService : ITransferenciaService
                 {
                     new()
                     {
-                        Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor,
+                        // Provisória: ainda não confirmada pelo extrato real da conta de destino —
+                        // descrição própria (não a do banco) pra não parecer um lançamento já conciliado.
+                        Id = Guid.NewGuid(), Descricao = $"Transferência de {conta.Nome}", Valor = valor,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
-                        RegraCategorizacaoId = dto.RegraCategorizacaoId,
+                        RegraCategorizacaoId = dto.RegraCategorizacaoId, Provisoria = true,
                     },
                 };
                 regDestino.SaldoFinal += valor;
@@ -264,9 +266,11 @@ public class TransferenciaService : ITransferenciaService
                 {
                     new()
                     {
-                        Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor, Subcategoria = string.Empty,
+                        // Provisória: ainda não confirmada pelo extrato real da conta de origem —
+                        // descrição própria (não a do banco) pra não parecer um lançamento já conciliado.
+                        Id = Guid.NewGuid(), Descricao = $"Transferência para {conta.Nome}", Valor = valor, Subcategoria = string.Empty,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
-                        RegraCategorizacaoId = dto.RegraCategorizacaoId,
+                        RegraCategorizacaoId = dto.RegraCategorizacaoId, Provisoria = true,
                     },
                 };
                 regOrigem.SaldoFinal -= valor;

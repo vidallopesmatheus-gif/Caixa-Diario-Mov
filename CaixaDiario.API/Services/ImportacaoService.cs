@@ -60,17 +60,39 @@ public class ImportacaoService : IImportacaoService
 
         var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos, ignoradas);
         var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
+        var totalConciliar = ContarConciliaveis(novas, registrosAtivos);
 
         return new PreviewImportacaoDto
         {
             TotalEncontradas = parseadas.Count,
             TotalJaImportadas = jaImportadas.Count,
             TotalNovas = novas.Count,
+            TotalConciliarAoImportar = totalConciliar,
             TotalEntradas = novas.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
             TotalSaidas = novas.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
             DataInicioArquivo = dataInicioArquivo.ToString("yyyy-MM-dd"),
             DataFimArquivo = dataFimArquivo.ToString("yyyy-MM-dd"),
         };
+    }
+
+    // Versão só-leitura de ColetarProvisorias+ReconciliarProvisoria, pro Preview não precisar
+    // persistir nada — conta quantas das "novas" vão casar com uma provisória 1:1 ao importar de
+    // verdade (mesma regra: só concilia quando há exatamente 1 candidata).
+    private static int ContarConciliaveis(List<TransacaoParseada> novas, List<RegistroDiario> registrosAtivos)
+    {
+        var pool = ColetarProvisorias(registrosAtivos);
+        var total = 0;
+        foreach (var t in novas)
+        {
+            var candidatas = pool.Where(p => p.Tipo == t.Tipo
+                && Math.Abs(p.Valor - t.Valor) < 0.01m
+                && DiferencaDiasUteis(p.Registro.Data, t.Data) <= 2)
+                .ToList();
+            if (candidatas.Count != 1) continue;
+            pool.Remove(candidatas[0]);
+            total++;
+        }
+        return total;
     }
 
     // ── Importar (lança direto no RegistroDiario — afeta saldo na hora) ──────────
@@ -108,6 +130,14 @@ public class ImportacaoService : IImportacaoService
         var aConverterEmTransferencia = new List<(DateOnly Data, Guid ItemId, RegraCategorizacao Regra)>();
         var pendentes = 0;
         var categorizadasPorRegra = 0;
+        var conciliadasTransferencia = 0;
+        var ambiguasTransferencia = 0;
+
+        // Provisórias já existentes nesta conta (contrapartida de Transferência criada antes do
+        // extrato real chegar — ver TransferenciaService.ConverterLancamentoAsync). Cada uma só pode
+        // casar com UMA transação do arquivo — é removida do pool assim que conciliada.
+        var provisorias = ColetarProvisorias(registros);
+        var registrosTocadosPorConciliacao = new HashSet<RegistroDiario>();
 
         foreach (var grupo in aImportar.GroupBy(t => t.Data).OrderBy(g => g.Key))
         {
@@ -150,6 +180,34 @@ public class ImportacaoService : IImportacaoService
 
             foreach (var t in grupo)
             {
+                var candidatas = provisorias.Where(p => p.Tipo == t.Tipo
+                    && Math.Abs(p.Valor - t.Valor) < 0.01m
+                    && DiferencaDiasUteis(p.Registro.Data, t.Data) <= 2)
+                    .ToList();
+
+                if (candidatas.Count == 1)
+                {
+                    // Concilia: a provisória assume os dados reais (descrição, FitId) em vez de criar
+                    // um lançamento novo — é isso que impede o Pix de virar 2 entradas (bug original).
+                    ReconciliarProvisoria(candidatas[0], t);
+                    provisorias.Remove(candidatas[0]);
+                    registrosTocadosPorConciliacao.Add(candidatas[0].Registro);
+                    conciliadasTransferencia++;
+                    auditoria.Add(new TransacaoImportada
+                    {
+                        Id = Guid.NewGuid(), ContaBancariaId = conta.Id, ClienteId = conta.ClienteId,
+                        Data = t.Data, Valor = t.Valor, Descricao = t.Descricao, FitId = t.FitId,
+                        Tipo = t.Tipo, Status = "Confirmada", ImportadoEm = DateTime.UtcNow,
+                    });
+                    continue;
+                }
+                if (candidatas.Count > 1)
+                {
+                    // Mais de uma candidata pro mesmo valor/sentido/janela — não decide sozinho
+                    // (ex.: dois Pix iguais no mesmo dia). Importa normal, pendente de classificação.
+                    ambiguasTransferencia++;
+                }
+
                 var regraCorrespondente = regrasPorTipo.TryGetValue(t.Tipo, out var regrasDoTipo)
                     ? regrasDoTipo.FirstOrDefault(r => DescricaoMatcher.Casa(r.CriterioTipo, r.CriterioValor, t.Descricao))
                     : null;
@@ -252,6 +310,11 @@ public class ImportacaoService : IImportacaoService
             else await _registroRepo.AtualizarAsync(registro);
         }
 
+        // Registros tocados só pela conciliação (a provisória vivia num dia fora do lote de
+        // dias que o loop acima processou) ainda não foram persistidos — salva agora.
+        foreach (var r in registrosTocadosPorConciliacao)
+            await _registroRepo.AtualizarAsync(r);
+
         await _importRepo.AdicionarLoteAsync(auditoria);
 
         // Regras de Transferência — só agora, com todos os registros do lote já persistidos (o
@@ -281,9 +344,11 @@ public class ImportacaoService : IImportacaoService
 
         return new ResultadoImportacaoDto
         {
-            TotalImportadas = aImportar.Count,
+            TotalImportadas = aImportar.Count - conciliadasTransferencia,
             TotalPendentesCategorizacao = pendentes,
             TotalCategorizadasPorRegra = categorizadasPorRegra,
+            TotalConciliadasTransferencia = conciliadasTransferencia,
+            TotalAmbiguasTransferencia = ambiguasTransferencia,
             TotalEntradas = aImportar.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
             TotalSaidas = aImportar.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
         };
@@ -470,6 +535,54 @@ public class ImportacaoService : IImportacaoService
 
     private async Task<List<TransacaoImportada>> ObterIgnoradasAsync(Guid contaBancariaId) =>
         (await _importRepo.ListarPorContaAsync(contaBancariaId)).Where(t => t.Status == "Ignorada").ToList();
+
+    // ── Conciliação com contrapartida provisória de Transferência (bug: Pix duplicado) ──────────
+    // Ver TransferenciaService.ConverterLancamentoAsync (cria a provisória) e Models/ItemFinanceiro.
+    private sealed record ProvisoriaCandidata(RegistroDiario Registro, string Tipo, Guid ItemId, decimal Valor);
+
+    private static List<ProvisoriaCandidata> ColetarProvisorias(List<RegistroDiario> registros)
+    {
+        var lista = new List<ProvisoriaCandidata>();
+        foreach (var r in registros)
+        {
+            lista.AddRange(r.Entradas.Where(e => e.Provisoria).Select(e => new ProvisoriaCandidata(r, "Entrada", e.Id, e.Valor)));
+            lista.AddRange(r.Saidas.Where(s => s.Provisoria).Select(s => new ProvisoriaCandidata(r, "Saida", s.Id, s.Valor)));
+        }
+        return lista;
+    }
+
+    private static void ReconciliarProvisoria(ProvisoriaCandidata candidata, TransacaoParseada t)
+    {
+        if (candidata.Tipo == "Entrada")
+        {
+            var item = candidata.Registro.Entradas.First(e => e.Id == candidata.ItemId);
+            item.Descricao = t.Descricao;
+            item.FitId = t.FitId;
+            item.Provisoria = false;
+            candidata.Registro.Entradas = new List<ItemFinanceiro>(candidata.Registro.Entradas);
+        }
+        else
+        {
+            var item = candidata.Registro.Saidas.First(s => s.Id == candidata.ItemId);
+            item.Descricao = t.Descricao;
+            item.FitId = t.FitId;
+            item.Provisoria = false;
+            candidata.Registro.Saidas = new List<ItemFinanceiroSaida>(candidata.Registro.Saidas);
+        }
+        candidata.Registro.SalvoEm = DateTime.UtcNow;
+    }
+
+    // Conta dias úteis (seg-sex, sem calendário de feriados) estritamente ENTRE as duas datas —
+    // aproximação razoável de "±2 dias úteis" sem precisar de uma tabela de feriados no sistema.
+    private static int DiferencaDiasUteis(DateOnly a, DateOnly b)
+    {
+        if (a == b) return 0;
+        var (inicio, fim) = a < b ? (a, b) : (b, a);
+        var dias = 0;
+        for (var d = inicio.AddDays(1); d < fim; d = d.AddDays(1))
+            if (d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)) dias++;
+        return dias;
+    }
 
     // ── Sugestão de categoria por palavra-chave ────────────────────────────────
     // Dicionário simples e estático (palavra-chave → categoria já existente em /api/categorias).

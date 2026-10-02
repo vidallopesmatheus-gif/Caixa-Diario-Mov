@@ -60,6 +60,8 @@ export const importarExtrato = async (
     totalImportadas: Number(d.totalImportadas ?? 0),
     totalPendentesCategorizacao: Number(d.totalPendentesCategorizacao ?? 0),
     totalCategorizadasPorRegra: Number(d.totalCategorizadasPorRegra ?? 0),
+    totalConciliadasTransferencia: Number(d.totalConciliadasTransferencia ?? 0),
+    totalAmbiguasTransferencia: Number(d.totalAmbiguasTransferencia ?? 0),
     totalEntradas: Number(d.totalEntradas ?? 0),
     totalSaidas: Number(d.totalSaidas ?? 0),
   }

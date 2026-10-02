@@ -456,6 +456,12 @@ export default function ClientContaDetalhePage() {
       {resultadoImportacao && (
         <div className="cd-msg cd-msg-sucesso">
           ✅ {resultadoImportacao.totalImportadas} lançamento(s) importado(s)
+          {resultadoImportacao.totalConciliadasTransferencia > 0 && (
+            <> — {resultadoImportacao.totalConciliadasTransferencia} conciliado(s) com transferência(s) já classificada(s)</>
+          )}
+          {resultadoImportacao.totalAmbiguasTransferencia > 0 && (
+            <> — {resultadoImportacao.totalAmbiguasTransferencia} com mais de uma transferência pendente parecida (confira manualmente)</>
+          )}
           {resultadoImportacao.totalCategorizadasPorRegra > 0 && (
             <> — {resultadoImportacao.totalCategorizadasPorRegra} categorizado(s) automaticamente por regra</>
           )}
