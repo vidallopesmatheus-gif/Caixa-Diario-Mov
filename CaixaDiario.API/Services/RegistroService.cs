@@ -41,7 +41,8 @@ public class RegistroService : IRegistroService
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
 
-        var contaId = await ResolverContaPadraoAsync(clienteId, contaBancariaId);
+        var contas = await _contaBancariaRepository.ListarPorClienteAsync(clienteId);
+        var contaId = ResolverContaPadrao(contas, contaBancariaId);
         var registro = await _registroRepository.ObterPorContaEDataAsync(contaId, data)
             ?? await _registroRepository.ObterPorClienteEDataAsync(clienteId, data)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
@@ -54,7 +55,14 @@ public class RegistroService : IRegistroService
         if (dto.Saidas.Any(s => string.IsNullOrWhiteSpace(s.Categoria)))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Toda saída deve ter uma categoria.", "categoria");
 
-        var contaId = await ResolverContaPadraoAsync(dto.ClienteId, dto.ContaBancariaId);
+        var contas = await _contaBancariaRepository.ListarPorClienteAsync(dto.ClienteId);
+        var contaId = ResolverContaPadrao(contas, dto.ContaBancariaId);
+
+        // Cada item de ContasReceber/ContasPagar pode trazer sua própria ContaBancariaId (ex.: modal
+        // "Confirmar recebimento" escolhendo uma conta diferente da conta padrão do registro) — sem essa
+        // checagem, um payload adulterado conseguia gravar baixa numa conta de outro cliente ou inativa.
+        foreach (var item in dto.ContasReceber.Concat(dto.ContasPagar))
+            ValidarContaVinculada(contas, item.ContaBancariaId);
 
         var existente = await _registroRepository.ObterPorContaEDataAsync(contaId, dto.Data)
             ?? await _registroRepository.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data);
@@ -153,7 +161,8 @@ public class RegistroService : IRegistroService
         if (string.IsNullOrWhiteSpace(motivo))
             throw new ApiException(400, CodigoRetorno.MOTIVO_OBRIGATORIO, "Motivo de exclusão é obrigatório.", "motivo_exclusao");
 
-        var contaId = await ResolverContaPadraoAsync(clienteId, null);
+        var contas = await _contaBancariaRepository.ListarPorClienteAsync(clienteId);
+        var contaId = ResolverContaPadrao(contas, null);
         var registro = await _registroRepository.ObterPorContaEDataAsync(contaId, data)
             ?? await _registroRepository.ObterPorClienteEDataAsync(clienteId, data)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
@@ -176,12 +185,15 @@ public class RegistroService : IRegistroService
     // Guid.Empty — RegistroDiario.ContaBancariaId tem FK pra contas_bancarias, e gravar
     // Guid.Empty ali derruba a query com violação de FK (500 genérico pro usuário, sem pista
     // nenhuma do que houve). Só falha se o cliente não tiver NENHUMA conta bancária cadastrada.
-    private async Task<Guid> ResolverContaPadraoAsync(Guid clienteId, Guid? contaBancariaId)
+    //
+    // Quando contaBancariaId é fornecida (explícita no registro ou numa baixa), ela precisa
+    // pertencer ao cliente e estar ativa — do contrário um payload adulterado conseguiria gravar
+    // lançamentos numa conta de outro cliente, barrado só pela FK do banco (sem mensagem clara).
+    private static Guid ResolverContaPadrao(List<ContaBancaria> contas, Guid? contaBancariaId)
     {
         if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
-            return contaBancariaId.Value;
+            return ValidarContaVinculada(contas, contaBancariaId.Value);
 
-        var contas = await _contaBancariaRepository.ListarPorClienteAsync(clienteId);
         var padrao = contas.FirstOrDefault(c => c.Tipo == "Caixa" && c.Ativa)
             ?? contas.FirstOrDefault(c => c.Ativa)
             ?? contas.FirstOrDefault();
@@ -190,6 +202,19 @@ public class RegistroService : IRegistroService
 
         throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
             "Este cliente ainda não tem nenhuma conta bancária cadastrada. Cadastre uma em Configurações antes de continuar.");
+    }
+
+    private static Guid ValidarContaVinculada(List<ContaBancaria> contas, Guid? contaBancariaId)
+    {
+        if (!contaBancariaId.HasValue || contaBancariaId.Value == Guid.Empty)
+            return Guid.Empty;
+
+        var conta = contas.FirstOrDefault(c => c.Id == contaBancariaId.Value)
+            ?? throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Conta bancária não pertence a este cliente.");
+        if (!conta.Ativa)
+            throw new ApiException(400, CodigoRetorno.CONTA_INATIVA, "A conta bancária selecionada está inativa.");
+
+        return conta.Id;
     }
 
     private static List<ContaProvisionada> AplicarBaixaAutomatica(List<ContaProvisionada> contas, DateOnly data)
