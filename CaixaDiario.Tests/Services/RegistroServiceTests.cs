@@ -75,7 +75,7 @@ public class RegistroServiceTests
             Data = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)),
         };
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin"));
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.DATA_FUTURA, ex.Codigo);
     }
@@ -111,10 +111,37 @@ public class RegistroServiceTests
             },
         };
 
-        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.False(criado);
         Assert.True(resultado.ContasReceber[0].Pago);
+    }
+
+    // ── Controle de acesso ───────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SalvarAsync_ClienteTentandoSalvarRegistroDeOutroCliente_LancaAcessoNegado()
+    {
+        var dto = CriarDto();
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "cliente", Guid.NewGuid(), "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
+        _repoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+        _repoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ClienteSalvandoSeuProprioRegistro_Permite()
+    {
+        var dto = CriarDto();
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "cliente", dto.ClienteId, "cliente");
+
+        Assert.True(criado);
+        Assert.Equal(dto.ClienteId, resultado.ClienteId);
     }
 
     [Fact]
@@ -143,7 +170,7 @@ public class RegistroServiceTests
             Saidas = new(),
         };
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.True(resultado.ContasReceber[0].Pago);
         Assert.True(resultado.ContasPagar[0].Pago);
@@ -159,7 +186,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto { ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new() };
-        await _sut.SalvarAsync(dto, "admin");
+        await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         _auditMock.Verify(a => a.LogAsync(
             clienteId, It.IsAny<Guid>(), "RegistroDiario", "Criacao",
@@ -192,7 +219,7 @@ public class RegistroServiceTests
             ContasPagar = new(),
         };
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         var entrada = Assert.Single(resultado.Entradas);
         Assert.Equal(transferenciaId, entrada.TransferenciaId);
@@ -242,7 +269,7 @@ public class RegistroServiceTests
             SaldoFinal = 1000m,
         };
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.False(resultado.ContasPagar[0].Pago);
         Assert.Equal(1000m, resultado.SaldoFinal);
@@ -270,7 +297,7 @@ public class RegistroServiceTests
             Saidas = new() { new ItemFinanceiroSaidaDto { Descricao = "Compra", Valor = 50m, Categoria = null! } },
             ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
         };
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "tester"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "tester", Guid.NewGuid(), "admin"));
         Assert.Equal(400, ex.StatusCode);
     }
 
@@ -281,7 +308,7 @@ public class RegistroServiceTests
     {
         var dto = CriarDto(DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)));
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "joao"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "joao", Guid.NewGuid(), "admin"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.DATA_FUTURA, ex.Codigo);
@@ -294,7 +321,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
-        var (resultado, criado) = await _sut.SalvarAsync(dto, "joao");
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "joao", Guid.NewGuid(), "admin");
 
         Assert.True(criado);
         Assert.Equal(dto.SaldoFinal, resultado.SaldoFinal);
@@ -314,7 +341,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
-        var (resultado, criado) = await _sut.SalvarAsync(dto, "joao");
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "joao", Guid.NewGuid(), "admin");
 
         Assert.False(criado);
         Assert.Equal(dto.SaldoFinal, resultado.SaldoFinal);
@@ -553,7 +580,7 @@ public class RegistroServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var (_, dto) = SetupBaixa(pagarPago: true, receberPago: false);
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(800m, resultado.SaldoFinal); // 1000 - 200
         Assert.True(resultado.ContasPagar[0].Pago);
@@ -566,7 +593,7 @@ public class RegistroServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var (_, dto) = SetupBaixa(pagarPago: false, receberPago: true);
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(1500m, resultado.SaldoFinal); // 1000 + 500
         Assert.True(resultado.ContasReceber[0].Pago);
@@ -581,7 +608,7 @@ public class RegistroServiceTests
         var (_, dto) = SetupBaixa(pagarPago: true, receberPago: false,
             existentePagarPago: true, dataBaixaPagarExistente: ontem);
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(1000m, resultado.SaldoFinal); // inalterado: idempotente
         Assert.True(resultado.ContasPagar[0].Pago);
@@ -596,7 +623,7 @@ public class RegistroServiceTests
         var (_, dto) = SetupBaixa(pagarPago: false, receberPago: false,
             existentePagarPago: true, dataBaixaPagarExistente: ontem);
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(1200m, resultado.SaldoFinal); // 1000 + 200 (reverte a saída)
         Assert.False(resultado.ContasPagar[0].Pago);
@@ -635,7 +662,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(1500m, resultado.SaldoFinal); // sem duplicar: não soma mais 500
         Assert.True(resultado.ContasReceber[0].Pago);
@@ -675,7 +702,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(1500m, resultado.SaldoFinal); // nada a reverter: a baixa vinculada nunca somou nada
         Assert.False(resultado.ContasReceber[0].Pago);
@@ -700,7 +727,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
-        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.True(criado);
         Assert.Single(resultado.ContasReceber);
@@ -735,7 +762,7 @@ public class RegistroServiceTests
             SaldoFinal = 1000m,
         };
 
-        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.True(criado);
         Assert.Equal(700m, resultado.SaldoFinal); // 1000 - 300
@@ -767,7 +794,7 @@ public class RegistroServiceTests
             SaldoFinal = 1000m,
         };
 
-        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.True(criado);
         Assert.Equal(1400m, resultado.SaldoFinal); // 1000 + 400
@@ -814,7 +841,7 @@ public class RegistroServiceTests
             SaldoFinal = 700m, // frontend reenvia saldo atual
         };
 
-        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.False(criado);
         Assert.Equal(700m, resultado.SaldoFinal); // idempotente: não reduz de novo
@@ -860,7 +887,7 @@ public class RegistroServiceTests
             SaldoFinal = 1000m,
         };
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         // AplicarBaixaAutomatica marca pago=true; ajuste financeiro deve ocorrer UMA vez (−150)
         Assert.Equal(850m, resultado.SaldoFinal); // 1000 - 150
@@ -907,7 +934,7 @@ public class RegistroServiceTests
             SaldoFinal = 850m,
         };
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         // auto-baixa marca pago=true; existente também era true → sem transição → sem reajuste
         Assert.Equal(850m, resultado.SaldoFinal); // idempotente
@@ -954,7 +981,7 @@ public class RegistroServiceTests
             SaldoFinal = 900m,
         };
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(900m, resultado.SaldoFinal); // sem reajuste: conta paga já estava paga; conta nova está não-paga
         Assert.Equal(2, resultado.ContasPagar.Count);
@@ -986,7 +1013,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
                  .ReturnsAsync((RegistroDiario r) => r);
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "joao");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "joao", Guid.NewGuid(), "admin");
 
         Assert.Single(resultado.Saidas);
         Assert.Equal("Administrativas", resultado.Saidas[0].Categoria);
@@ -1019,7 +1046,7 @@ public class RegistroServiceTests
             ContasPagar = new(),
         };
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(c6Bank.Id, resultado.ContaBancariaId);
         Assert.NotNull(criado);
@@ -1036,7 +1063,7 @@ public class RegistroServiceTests
 
         var dto = new CriarRegistroDto { ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new() };
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
@@ -1057,7 +1084,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto { ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new() };
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(caixa.Id, resultado.ContaBancariaId);
     }
@@ -1080,7 +1107,7 @@ public class RegistroServiceTests
             Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
         };
 
-        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin");
 
         Assert.Equal(contaEscolhida.Id, resultado.ContaBancariaId);
     }
@@ -1100,7 +1127,7 @@ public class RegistroServiceTests
             Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
         };
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin"));
 
         Assert.Equal(403, ex.StatusCode);
         Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
@@ -1121,7 +1148,7 @@ public class RegistroServiceTests
             Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
         };
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.CONTA_INATIVA, ex.Codigo);
@@ -1149,7 +1176,7 @@ public class RegistroServiceTests
             ContasPagar = new(),
         };
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin", Guid.NewGuid(), "admin"));
 
         Assert.Equal(403, ex.StatusCode);
         Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
