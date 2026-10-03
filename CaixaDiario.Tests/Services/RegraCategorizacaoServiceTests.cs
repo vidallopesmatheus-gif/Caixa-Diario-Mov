@@ -1,4 +1,5 @@
 using CaixaDiario.API.DTOs.Regras;
+using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
@@ -81,6 +82,99 @@ public class RegraCategorizacaoServiceTests
         Assert.Equal("APLICAÇÃO RDB", salva.CriterioValor);
         // Nova regra entra no fim da lista (maior ordem existente + 1) — precedência manual.
         Assert.Equal(4, salva.Ordem);
+    }
+
+    [Fact]
+    public async Task CriarAsync_MesmoCriterioComAcaoDiferenteDeRegraAtiva_LancaRegraConflitante()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        ConfigurarContaAsync(conta);
+        var existente = new RegraCategorizacao
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Tipo = "Saida",
+            CriterioTipo = "DescricaoExata", CriterioValor = "APLICAÇÃO RDB", AcaoTipo = "Categoria", Categoria = "Investimentos", Ativa = true,
+        };
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegraCategorizacao> { existente });
+
+        var dto = new CriarRegraDto { ContaBancariaId = conta.Id, Tipo = "Saida", AcaoTipo = "Categoria", Categoria = "Despesas Financeiras", DescricaoReferencia = "aplicação rdb" };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.CriarAsync(clienteId, dto, clienteId, "cliente"));
+
+        Assert.Equal(409, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.REGRA_CONFLITANTE, ex.Codigo);
+        Assert.Contains("Investimentos", ex.Message);
+        _regraRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CriarAsync_MesmoCriterioComAcaoDiferente_ForcarApesarDeConflito_CriaMesmoAssim()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        ConfigurarContaAsync(conta);
+        var existente = new RegraCategorizacao
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Tipo = "Saida",
+            CriterioTipo = "DescricaoExata", CriterioValor = "APLICAÇÃO RDB", AcaoTipo = "Categoria", Categoria = "Investimentos", Ativa = true,
+        };
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegraCategorizacao> { existente });
+        RegraCategorizacao? salva = null;
+        _regraRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>()))
+            .Callback<RegraCategorizacao>(r => salva = r).ReturnsAsync((RegraCategorizacao r) => r);
+
+        var dto = new CriarRegraDto
+        {
+            ContaBancariaId = conta.Id, Tipo = "Saida", AcaoTipo = "Categoria", Categoria = "Despesas Financeiras",
+            DescricaoReferencia = "aplicação rdb", ForcarApesarDeConflito = true,
+        };
+
+        await _sut.CriarAsync(clienteId, dto, clienteId, "cliente");
+
+        Assert.NotNull(salva);
+        Assert.Equal("Despesas Financeiras", salva!.Categoria);
+    }
+
+    [Fact]
+    public async Task CriarAsync_MesmoCriterioMesmaAcaoDeRegraAtiva_NaoEhConflito()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        ConfigurarContaAsync(conta);
+        var existente = new RegraCategorizacao
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Tipo = "Saida",
+            CriterioTipo = "DescricaoExata", CriterioValor = "APLICAÇÃO RDB", AcaoTipo = "Categoria", Categoria = "Investimentos", Ativa = true,
+        };
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegraCategorizacao> { existente });
+        _regraRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>())).ReturnsAsync((RegraCategorizacao r) => r);
+
+        var dto = new CriarRegraDto { ContaBancariaId = conta.Id, Tipo = "Saida", AcaoTipo = "Categoria", Categoria = "Investimentos", DescricaoReferencia = "aplicação rdb" };
+
+        await _sut.CriarAsync(clienteId, dto, clienteId, "cliente"); // não lança
+
+        _regraRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CriarAsync_MesmoCriterioDeRegraInativa_NaoEhConflito()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        ConfigurarContaAsync(conta);
+        var inativa = new RegraCategorizacao
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Tipo = "Saida",
+            CriterioTipo = "DescricaoExata", CriterioValor = "APLICAÇÃO RDB", AcaoTipo = "Categoria", Categoria = "Investimentos", Ativa = false,
+        };
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegraCategorizacao> { inativa });
+        _regraRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>())).ReturnsAsync((RegraCategorizacao r) => r);
+
+        var dto = new CriarRegraDto { ContaBancariaId = conta.Id, Tipo = "Saida", AcaoTipo = "Categoria", Categoria = "Despesas Financeiras", DescricaoReferencia = "aplicação rdb" };
+
+        await _sut.CriarAsync(clienteId, dto, clienteId, "cliente"); // não lança — regra conflitante está inativa
+
+        _regraRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>()), Times.Once);
     }
 
     [Fact]

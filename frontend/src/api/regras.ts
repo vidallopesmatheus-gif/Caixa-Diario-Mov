@@ -13,6 +13,8 @@ export interface CriarRegraDto {
   acaoTipo: 'Categoria' | 'Transferencia'
   categoria?: string
   contaContrapartidaId?: string
+  // Confirma a criação mesmo com REGRA_CONFLITANTE (outra regra ativa, mesmo critério, ação diferente).
+  forcarApesarDeConflito?: boolean
 }
 
 export const criarRegra = async (clienteId: string, dto: CriarRegraDto): Promise<RegraCategorizacao> => {
