@@ -9,11 +9,16 @@ export interface GaugeIndicador {
   descricao: string
   calculo: string
   disponivel: boolean
+  /** Só para Ritmo da Meta: "Atingida" | "Adiantado" | "No ritmo" | "Atrasado". */
+  statusRitmo?: string | null
+  /** Só para Ritmo da Meta: investido − esperado linear até hoje (negativo = atrasado). */
+  diferencaReais?: number | null
 }
 
 export interface SaudeFinanceira {
-  /** Ex.: "Setembro/2026" — Taxa de Poupança e Comprometimento Fixo são sempre calculados sobre o
-   * mês corrente do servidor, não sobre o período escolhido no topo do Dashboard. */
+  /** Ex.: "Setembro/2026 · último mês fechado" — Taxa de Poupança e Comprometimento Fixo usam
+   * sempre o último mês INTEIRO já fechado (não o corrente), independente do período escolhido
+   * no topo do Dashboard. */
   periodo: string
   taxaPoupanca: GaugeIndicador
   comprometimentoFixos: GaugeIndicador

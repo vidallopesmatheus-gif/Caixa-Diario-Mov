@@ -122,18 +122,15 @@
   line-height: 1.3;
 }
 
-/* ── Faixas de referência (legenda visual) ── */
-.gauge-faixas {
-  display: flex;
-  gap: 4px;
-  margin-top: 6px;
-  justify-content: center;
-}
-
-.gauge-faixa {
-  width: 8px;
-  height: 4px;
-  border-radius: 2px;
+/* Faixas de referência em texto — substitui as 3 bolinhas coloridas que não explicavam nada
+   sozinhas (nem ordem nem o que cada cor significava). */
+.gauge-tip-legenda {
+  font-size: 10px;
+  color: var(--tx3);
+  margin: 6px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--bd);
+  line-height: 1.3;
 }
 
 @media (max-width: 480px) {
