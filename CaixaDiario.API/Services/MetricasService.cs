@@ -41,16 +41,23 @@ public class MetricasService : IMetricasService
                 };
             }
 
+            // Custos variáveis consumindo receita igual ou maior não deixam margem de contribuição
+            // nenhuma pra cobrir custo fixo — não dá pra calcular um ponto de equilíbrio (nem
+            // "vermelho" faz sentido: não existe valor de receita que cubra isso). Card some em vez
+            // de mostrar "verde" (pe forçado a 0 passava como se tudo estivesse ótimo).
             if (custosFixos > 0 || custosVariaveis > 0)
             {
                 var mc = (receita - custosVariaveis) / receita;
-                var pe = mc > 0 ? custosFixos / mc : 0;
-                dto.PontoDeEquilibrio = new PontoDeEquilibrioDto
+                if (mc > 0)
                 {
-                    Valor = pe,
-                    Receita = receita,
-                    Semaforo = receita >= pe * 1.2m ? "verde" : receita >= pe ? "amarelo" : "vermelho",
-                };
+                    var pe = custosFixos / mc;
+                    dto.PontoDeEquilibrio = new PontoDeEquilibrioDto
+                    {
+                        Valor = pe,
+                        Receita = receita,
+                        Semaforo = receita >= pe * 1.2m ? "verde" : receita >= pe ? "amarelo" : "vermelho",
+                    };
+                }
             }
 
             var qtdRecebimentos = entradas.Count(e => e.TipoCusto == "Receita");

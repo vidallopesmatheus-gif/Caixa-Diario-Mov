@@ -689,8 +689,11 @@ public class MetricasServiceTests
     }
 
     [Fact]
-    public void CalcularPeriodo_MargemContribuicaoZeroOuNegativa_PontoDeEquilibrioZeroESemaforoVerde()
+    public void CalcularPeriodo_MargemContribuicaoZeroOuNegativa_PontoDeEquilibrioIndisponivel()
     {
+        // Custo variável consome toda a receita (ou mais) — não sobra margem de contribuição
+        // nenhuma pra cobrir custo fixo, não existe ponto de equilíbrio calculável. Antes, isso
+        // forçava Valor=0 e Semáforo="verde" (o pior cenário possível exibido como o melhor).
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new()
@@ -699,8 +702,7 @@ public class MetricasServiceTests
                 Item("Custo Variavel", 1000m, "Insumos/Mercadoria", "CustoVariavel"),
             });
         var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
-        Assert.Equal(0m, resultado.PontoDeEquilibrio!.Valor);
-        Assert.Equal("verde", resultado.PontoDeEquilibrio.Semaforo);
+        Assert.Null(resultado.PontoDeEquilibrio);
     }
 
     // ---- Semáforos: Valuation ----
