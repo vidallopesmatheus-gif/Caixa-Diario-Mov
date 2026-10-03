@@ -247,6 +247,47 @@ public class RecorrenciaServiceTests
     }
 
     [Fact]
+    public async Task MaterializarMesAtual_RegistroJaExistente_ReatribuiListaParaEfDetectarMudanca()
+    {
+        // ContasPagar/ContasReceber são jsonb sem value comparer — EF só marca a coluna como
+        // modificada se a REFERÊNCIA da lista mudar, não só o conteúdo. Travar isso aqui evita
+        // reintroduzir o bug em que a ocorrência materializada nunca era persistida.
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId, tipo: "Pagar");
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
+        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+        var listaOriginal = new List<ContaProvisionada>();
+
+        var registroHoje = new RegistroDiario
+        {
+            Id = Guid.NewGuid(),
+            ClienteId = clienteId,
+            Data = hoje,
+            ContasPagar = listaOriginal,
+            ContasReceber = new List<ContaProvisionada>(),
+            CriadoEm = DateTime.UtcNow,
+            SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaRecorrente> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorPeriodoAsync(clienteId, primeiroDia, ultimoDia))
+            .ReturnsAsync(new List<RegistroDiario> { registroHoje });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<RegistroDiario> { registroHoje });
+        RegistroDiario? persistido = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(rd => persistido = rd)
+            .ReturnsAsync((RegistroDiario r) => r);
+
+        await _sut.MaterializarMesAtualAsync(clienteId);
+
+        Assert.NotNull(persistido);
+        Assert.NotSame(listaOriginal, persistido!.ContasPagar);
+    }
+
+    [Fact]
     public async Task MaterializarMesAtual_ContaExpirada_NaoMaterializa()
     {
         var clienteId = Guid.NewGuid();

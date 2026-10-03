@@ -306,8 +306,19 @@ public class ImportacaoService : IImportacaoService
 
             registro.SalvoEm = DateTime.UtcNow;
             registro.AtualizadoEm = DateTime.UtcNow;
-            if (novo) await _registroRepo.AdicionarAsync(registro);
-            else await _registroRepo.AtualizarAsync(registro);
+            if (novo)
+            {
+                await _registroRepo.AdicionarAsync(registro);
+            }
+            else
+            {
+                // Reatribui — jsonb sem value comparer, EF só detecta mudança na referência. Sem
+                // isso, as transações importadas acima (.Add em Entradas/Saidas) nunca são
+                // persistidas quando o dia já tinha um registro existente.
+                registro.Entradas = new List<ItemFinanceiro>(registro.Entradas);
+                registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas);
+                await _registroRepo.AtualizarAsync(registro);
+            }
         }
 
         // Registros tocados só pela conciliação (a provisória vivia num dia fora do lote de

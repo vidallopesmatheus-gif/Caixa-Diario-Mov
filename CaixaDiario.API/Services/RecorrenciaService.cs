@@ -177,6 +177,13 @@ public class RecorrenciaService : IRecorrenciaService
             await _registroRepo.AdicionarAsync(novo);
 
         foreach (var registro in registrosTocados.Values.Where(r => !novosRegistros.Contains(r)))
+        {
+            // Reatribui a lista — jsonb sem value comparer, EF só detecta mudança na referência.
+            // Sem isso, a ocorrência materializada neste método (.Add acima) nunca é persistida
+            // quando o registro do dia já existia.
+            registro.ContasReceber = new List<ContaProvisionada>(registro.ContasReceber);
+            registro.ContasPagar = new List<ContaProvisionada>(registro.ContasPagar);
             await _registroRepo.AtualizarAsync(registro);
+        }
     }
 }
