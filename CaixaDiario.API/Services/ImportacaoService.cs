@@ -56,20 +56,43 @@ public class ImportacaoService : IImportacaoService
         var registrosAtivos = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
+        var ignoradas = await ObterIgnoradasAsync(contaBancariaId);
 
-        var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos);
+        var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos, ignoradas);
         var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
+        var totalConciliar = ContarConciliaveis(novas, registrosAtivos);
 
         return new PreviewImportacaoDto
         {
             TotalEncontradas = parseadas.Count,
             TotalJaImportadas = jaImportadas.Count,
             TotalNovas = novas.Count,
+            TotalConciliarAoImportar = totalConciliar,
             TotalEntradas = novas.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
             TotalSaidas = novas.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
             DataInicioArquivo = dataInicioArquivo.ToString("yyyy-MM-dd"),
             DataFimArquivo = dataFimArquivo.ToString("yyyy-MM-dd"),
         };
+    }
+
+    // Versão só-leitura de ColetarProvisorias+ReconciliarProvisoria, pro Preview não precisar
+    // persistir nada — conta quantas das "novas" vão casar com uma provisória 1:1 ao importar de
+    // verdade (mesma regra: só concilia quando há exatamente 1 candidata).
+    private static int ContarConciliaveis(List<TransacaoParseada> novas, List<RegistroDiario> registrosAtivos)
+    {
+        var pool = ColetarProvisorias(registrosAtivos);
+        var total = 0;
+        foreach (var t in novas)
+        {
+            var candidatas = pool.Where(p => p.Tipo == t.Tipo
+                && Math.Abs(p.Valor - t.Valor) < 0.01m
+                && DiferencaDiasUteis(p.Registro.Data, t.Data) <= 2)
+                .ToList();
+            if (candidatas.Count != 1) continue;
+            pool.Remove(candidatas[0]);
+            total++;
+        }
+        return total;
     }
 
     // ── Importar (lança direto no RegistroDiario — afeta saldo na hora) ──────────
@@ -86,8 +109,9 @@ public class ImportacaoService : IImportacaoService
         var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
+        var ignoradas = await ObterIgnoradasAsync(contaBancariaId);
 
-        var jaImportadas = IdentificarJaImportadas(parseadas, registros);
+        var jaImportadas = IdentificarJaImportadas(parseadas, registros, ignoradas);
         var aImportar = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
 
         if (aImportar.Count == 0)
@@ -106,6 +130,14 @@ public class ImportacaoService : IImportacaoService
         var aConverterEmTransferencia = new List<(DateOnly Data, Guid ItemId, RegraCategorizacao Regra)>();
         var pendentes = 0;
         var categorizadasPorRegra = 0;
+        var conciliadasTransferencia = 0;
+        var ambiguasTransferencia = 0;
+
+        // Provisórias já existentes nesta conta (contrapartida de Transferência criada antes do
+        // extrato real chegar — ver TransferenciaService.ConverterLancamentoAsync). Cada uma só pode
+        // casar com UMA transação do arquivo — é removida do pool assim que conciliada.
+        var provisorias = ColetarProvisorias(registros);
+        var registrosTocadosPorConciliacao = new HashSet<RegistroDiario>();
 
         foreach (var grupo in aImportar.GroupBy(t => t.Data).OrderBy(g => g.Key))
         {
@@ -148,6 +180,34 @@ public class ImportacaoService : IImportacaoService
 
             foreach (var t in grupo)
             {
+                var candidatas = provisorias.Where(p => p.Tipo == t.Tipo
+                    && Math.Abs(p.Valor - t.Valor) < 0.01m
+                    && DiferencaDiasUteis(p.Registro.Data, t.Data) <= 2)
+                    .ToList();
+
+                if (candidatas.Count == 1)
+                {
+                    // Concilia: a provisória assume os dados reais (descrição, FitId) em vez de criar
+                    // um lançamento novo — é isso que impede o Pix de virar 2 entradas (bug original).
+                    ReconciliarProvisoria(candidatas[0], t);
+                    provisorias.Remove(candidatas[0]);
+                    registrosTocadosPorConciliacao.Add(candidatas[0].Registro);
+                    conciliadasTransferencia++;
+                    auditoria.Add(new TransacaoImportada
+                    {
+                        Id = Guid.NewGuid(), ContaBancariaId = conta.Id, ClienteId = conta.ClienteId,
+                        Data = t.Data, Valor = t.Valor, Descricao = t.Descricao, FitId = t.FitId,
+                        Tipo = t.Tipo, Status = "Confirmada", ImportadoEm = DateTime.UtcNow,
+                    });
+                    continue;
+                }
+                if (candidatas.Count > 1)
+                {
+                    // Mais de uma candidata pro mesmo valor/sentido/janela — não decide sozinho
+                    // (ex.: dois Pix iguais no mesmo dia). Importa normal, pendente de classificação.
+                    ambiguasTransferencia++;
+                }
+
                 var regraCorrespondente = regrasPorTipo.TryGetValue(t.Tipo, out var regrasDoTipo)
                     ? regrasDoTipo.FirstOrDefault(r => DescricaoMatcher.Casa(r.CriterioTipo, r.CriterioValor, t.Descricao))
                     : null;
@@ -250,6 +310,11 @@ public class ImportacaoService : IImportacaoService
             else await _registroRepo.AtualizarAsync(registro);
         }
 
+        // Registros tocados só pela conciliação (a provisória vivia num dia fora do lote de
+        // dias que o loop acima processou) ainda não foram persistidos — salva agora.
+        foreach (var r in registrosTocadosPorConciliacao)
+            await _registroRepo.AtualizarAsync(r);
+
         await _importRepo.AdicionarLoteAsync(auditoria);
 
         // Regras de Transferência — só agora, com todos os registros do lote já persistidos (o
@@ -279,9 +344,11 @@ public class ImportacaoService : IImportacaoService
 
         return new ResultadoImportacaoDto
         {
-            TotalImportadas = aImportar.Count,
+            TotalImportadas = aImportar.Count - conciliadasTransferencia,
             TotalPendentesCategorizacao = pendentes,
             TotalCategorizadasPorRegra = categorizadasPorRegra,
+            TotalConciliadasTransferencia = conciliadasTransferencia,
+            TotalAmbiguasTransferencia = ambiguasTransferencia,
             TotalEntradas = aImportar.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
             TotalSaidas = aImportar.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
         };
@@ -370,6 +437,151 @@ public class ImportacaoService : IImportacaoService
             registro.AtualizadoEm = DateTime.UtcNow;
             await _registroRepo.AtualizarAsync(registro);
         }
+    }
+
+    public async Task<ExcluirLancamentoResultDto> ExcluirLancamentoAsync(
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, ExcluirLancamentoDto dto)
+    {
+        var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        if (!DateOnly.TryParse(dto.Data, out var data))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Data inválida.", "data");
+
+        var registro = await _registroRepo.ObterPorContaEDataAsync(contaBancariaId, data)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+
+        var saida = registro.Saidas.FirstOrDefault(s => s.Id == dto.Id);
+        var entrada = saida == null ? registro.Entradas.FirstOrDefault(e => e.Id == dto.Id) : null;
+        if (saida == null && entrada == null)
+            throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+
+        // Ponta de Transferência: as duas pontas são o mesmo evento financeiro — excluir só uma
+        // deixaria a outra órfã, então delega pro TransferenciaService excluir as duas juntas.
+        var transferenciaId = saida?.TransferenciaId ?? entrada?.TransferenciaId;
+        if (transferenciaId.HasValue)
+        {
+            await _transferenciaService.ExcluirAsync(transferenciaId.Value, usuarioLogadoId, perfil);
+            return new ExcluirLancamentoResultDto { TransferenciaExcluida = true };
+        }
+
+        // Reabre qualquer título (em qualquer conta do cliente) cuja baixa foi vinculada a este
+        // lançamento, em vez de gerar um lançamento novo — ver RegistroService/ContaProvisionada.
+        string? tituloReaberto = null;
+        foreach (var r in await _registroRepo.ListarPorClienteAsync(conta.ClienteId))
+        {
+            var pendenciaReceber = r.ContasReceber.FirstOrDefault(p => p.LancamentoVinculadoId == dto.Id);
+            var pendenciaPagar = r.ContasPagar.FirstOrDefault(p => p.LancamentoVinculadoId == dto.Id);
+            if (pendenciaReceber == null && pendenciaPagar == null) continue;
+
+            if (pendenciaReceber != null)
+            {
+                tituloReaberto = pendenciaReceber.Descricao;
+                pendenciaReceber.Pago = false;
+                pendenciaReceber.DataBaixa = null;
+                pendenciaReceber.LancamentoVinculadoId = null;
+                r.ContasReceber = new List<ContaProvisionada>(r.ContasReceber);
+            }
+            if (pendenciaPagar != null)
+            {
+                tituloReaberto = pendenciaPagar.Descricao;
+                pendenciaPagar.Pago = false;
+                pendenciaPagar.DataBaixa = null;
+                pendenciaPagar.LancamentoVinculadoId = null;
+                r.ContasPagar = new List<ContaProvisionada>(r.ContasPagar);
+            }
+            r.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(r);
+        }
+
+        if (saida != null)
+        {
+            registro.Saidas = registro.Saidas.Where(s => s.Id != dto.Id).ToList();
+            registro.SaldoFinal += saida.Valor;
+            await MarcarIgnoradaSeImportadaAsync(contaBancariaId, data, "Saida", saida.Valor, saida.Descricao, saida.FitId);
+        }
+        else
+        {
+            registro.Entradas = registro.Entradas.Where(e => e.Id != dto.Id).ToList();
+            registro.SaldoFinal -= entrada!.Valor;
+            await MarcarIgnoradaSeImportadaAsync(contaBancariaId, data, "Entrada", entrada.Valor, entrada.Descricao, entrada.FitId);
+        }
+
+        registro.SalvoEm = DateTime.UtcNow;
+        registro.AtualizadoEm = DateTime.UtcNow;
+        await _registroRepo.AtualizarAsync(registro);
+
+        return new ExcluirLancamentoResultDto { TituloReaberto = tituloReaberto };
+    }
+
+    // Marca a transação de origem como "Ignorada" no histórico de importação (TransacaoImportada),
+    // se houver uma — é o que impede o item excluído de "ressuscitar" numa reimportação do mesmo
+    // arquivo (ver IdentificarJaImportadas). Sem FitId (CSV/XLSX), casa pela mesma heurística de
+    // data+tipo+valor+descrição normalizada usada no resto da deduplicação.
+    private async Task MarcarIgnoradaSeImportadaAsync(
+        Guid contaBancariaId, DateOnly data, string tipo, decimal valor, string descricao, string? fitId)
+    {
+        var candidatas = (await _importRepo.ListarPorContaAsync(contaBancariaId))
+            .Where(t => t.Data == data && t.Tipo == tipo && t.Status != "Ignorada");
+
+        var alvo = fitId != null
+            ? candidatas.FirstOrDefault(t => t.FitId == fitId)
+            : candidatas.FirstOrDefault(t => t.FitId == null
+                && Math.Round(t.Valor, 2) == Math.Round(valor, 2)
+                && NormalizarDescricao(t.Descricao) == NormalizarDescricao(descricao));
+
+        if (alvo == null) return;
+        alvo.Status = "Ignorada";
+        await _importRepo.AtualizarAsync(alvo);
+    }
+
+    private async Task<List<TransacaoImportada>> ObterIgnoradasAsync(Guid contaBancariaId) =>
+        (await _importRepo.ListarPorContaAsync(contaBancariaId)).Where(t => t.Status == "Ignorada").ToList();
+
+    // ── Conciliação com contrapartida provisória de Transferência (bug: Pix duplicado) ──────────
+    // Ver TransferenciaService.ConverterLancamentoAsync (cria a provisória) e Models/ItemFinanceiro.
+    private sealed record ProvisoriaCandidata(RegistroDiario Registro, string Tipo, Guid ItemId, decimal Valor);
+
+    private static List<ProvisoriaCandidata> ColetarProvisorias(List<RegistroDiario> registros)
+    {
+        var lista = new List<ProvisoriaCandidata>();
+        foreach (var r in registros)
+        {
+            lista.AddRange(r.Entradas.Where(e => e.Provisoria).Select(e => new ProvisoriaCandidata(r, "Entrada", e.Id, e.Valor)));
+            lista.AddRange(r.Saidas.Where(s => s.Provisoria).Select(s => new ProvisoriaCandidata(r, "Saida", s.Id, s.Valor)));
+        }
+        return lista;
+    }
+
+    private static void ReconciliarProvisoria(ProvisoriaCandidata candidata, TransacaoParseada t)
+    {
+        if (candidata.Tipo == "Entrada")
+        {
+            var item = candidata.Registro.Entradas.First(e => e.Id == candidata.ItemId);
+            item.Descricao = t.Descricao;
+            item.FitId = t.FitId;
+            item.Provisoria = false;
+            candidata.Registro.Entradas = new List<ItemFinanceiro>(candidata.Registro.Entradas);
+        }
+        else
+        {
+            var item = candidata.Registro.Saidas.First(s => s.Id == candidata.ItemId);
+            item.Descricao = t.Descricao;
+            item.FitId = t.FitId;
+            item.Provisoria = false;
+            candidata.Registro.Saidas = new List<ItemFinanceiroSaida>(candidata.Registro.Saidas);
+        }
+        candidata.Registro.SalvoEm = DateTime.UtcNow;
+    }
+
+    // Conta dias úteis (seg-sex, sem calendário de feriados) estritamente ENTRE as duas datas —
+    // aproximação razoável de "±2 dias úteis" sem precisar de uma tabela de feriados no sistema.
+    private static int DiferencaDiasUteis(DateOnly a, DateOnly b)
+    {
+        if (a == b) return 0;
+        var (inicio, fim) = a < b ? (a, b) : (b, a);
+        var dias = 0;
+        for (var d = inicio.AddDays(1); d < fim; d = d.AddDays(1))
+            if (d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)) dias++;
+        return dias;
     }
 
     // ── Sugestão de categoria por palavra-chave ────────────────────────────────
@@ -481,7 +693,8 @@ public class ImportacaoService : IImportacaoService
     // como novas transações. Um `.Any()` simples (o que existia antes) marcaria a segunda
     // ocorrência legítima como duplicata só por ela parecer com a primeira — a diferença de
     // quantidade (multiset) é o que resolve isso sem precisar perguntar nada ao usuário.
-    private static HashSet<int> IdentificarJaImportadas(List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos)
+    private static HashSet<int> IdentificarJaImportadas(
+        List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos, List<TransacaoImportada> ignoradas)
     {
         var jaImportadas = new HashSet<int>();
 
@@ -510,6 +723,19 @@ public class ImportacaoService : IImportacaoService
                 disponivelNoRazao[chave] = restante - 1;
                 jaImportadas.Add(t.Indice);
             }
+        }
+
+        // Lançamentos que o usuário excluiu do extrato não contam mais como "no razão" (os dois
+        // blocos acima não os encontram mais), mas continuam marcados "Ignorada" no histórico de
+        // importação justamente pra não reaparecer aqui — ver ExcluirLancamentoAsync.
+        foreach (var t in parseadas.Where(t => !jaImportadas.Contains(t.Indice)))
+        {
+            var ignorada = t.FitId != null
+                ? ignoradas.Any(i => i.FitId == t.FitId)
+                : ignoradas.Any(i => i.FitId == null && i.Data == t.Data && i.Tipo == t.Tipo
+                    && Math.Round(i.Valor, 2) == Math.Round(t.Valor, 2)
+                    && NormalizarDescricao(i.Descricao) == NormalizarDescricao(t.Descricao));
+            if (ignorada) jaImportadas.Add(t.Indice);
         }
 
         return jaImportadas;

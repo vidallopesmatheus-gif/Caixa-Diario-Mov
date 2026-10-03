@@ -60,6 +60,8 @@ export const importarExtrato = async (
     totalImportadas: Number(d.totalImportadas ?? 0),
     totalPendentesCategorizacao: Number(d.totalPendentesCategorizacao ?? 0),
     totalCategorizadasPorRegra: Number(d.totalCategorizadasPorRegra ?? 0),
+    totalConciliadasTransferencia: Number(d.totalConciliadasTransferencia ?? 0),
+    totalAmbiguasTransferencia: Number(d.totalAmbiguasTransferencia ?? 0),
     totalEntradas: Number(d.totalEntradas ?? 0),
     totalSaidas: Number(d.totalSaidas ?? 0),
   }
@@ -80,4 +82,24 @@ export const categorizarPendentes = async (
     `/api/contas-bancarias/${contaId}/categorizar-pendentes`,
     { method: 'POST', body: JSON.stringify({ itens }) },
   )
+}
+
+export interface ExcluirLancamentoResultado {
+  transferenciaExcluida: boolean
+  tituloReaberto: string | null
+}
+
+export const excluirLancamento = async (
+  contaId: string,
+  item: { id: string; data: string },
+): Promise<ExcluirLancamentoResultado> => {
+  const res = await apiFetch<ApiResponse<unknown>>(
+    `/api/contas-bancarias/${contaId}/excluir-lancamento`,
+    { method: 'POST', body: JSON.stringify(item) },
+  )
+  const d = res.dados as Record<string, unknown>
+  return {
+    transferenciaExcluida: Boolean(d.transferenciaExcluida),
+    tituloReaberto: (d.tituloReaberto as string | null) ?? null,
+  }
 }

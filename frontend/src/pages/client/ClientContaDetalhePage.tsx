@@ -9,7 +9,7 @@ import {
   vincularMeta,
   desvincularMeta,
 } from '../../api/contasBancarias'
-import { previewExtrato, importarExtrato, categorizarPendentes } from '../../api/importacao'
+import { previewExtrato, importarExtrato, categorizarPendentes, excluirLancamento } from '../../api/importacao'
 import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
 import { listarRegras, atualizarRegra } from '../../api/regras'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
@@ -124,7 +124,7 @@ export default function ClientContaDetalhePage() {
 
   useEffect(() => { listarCategorias().then(setCategorias).catch(() => {}) }, [])
 
-  useEffect(() => {
+  const carregarPendencias = useCallback(() => {
     if (!contaId) return
     setLoadingPendencias(true)
     obterPendenciasConta(contaId)
@@ -132,6 +132,8 @@ export default function ClientContaDetalhePage() {
       .catch(() => setMsg('Erro ao carregar pendências.'))
       .finally(() => setLoadingPendencias(false))
   }, [contaId])
+
+  useEffect(() => { carregarPendencias() }, [carregarPendencias])
 
   async function handleArquivoSelecionado(arquivo: File) {
     if (!contaId) return
@@ -197,6 +199,24 @@ export default function ClientContaDetalhePage() {
       carregarExtrato()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao desfazer classificação.')
+    }
+  }
+
+  async function handleExcluirLancamento(lancamento: LancamentoExtrato) {
+    if (!lancamento.id || !contaId) return
+    const avisoTransferencia = lancamento.categoria === 'Transferência'
+      ? ' Esse lançamento é uma ponta de Transferência — a contrapartida na outra conta também será excluída.'
+      : ' Se ele foi usado para dar baixa em alguma conta a pagar/receber, o título volta a ficar em aberto.'
+    if (!confirm(`Excluir "${lancamento.descricao}"? Essa ação não pode ser desfeita.${avisoTransferencia}`)) return
+    setMsg('')
+    try {
+      const resultado = await excluirLancamento(contaId, { id: lancamento.id, data: lancamento.data })
+      if (resultado.tituloReaberto) setMsg(`Lançamento excluído. O título "${resultado.tituloReaberto}" voltou a ficar em aberto.`)
+      carregarConta()
+      carregarExtrato()
+      carregarPendencias()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao excluir lançamento.')
     }
   }
 
@@ -436,6 +456,12 @@ export default function ClientContaDetalhePage() {
       {resultadoImportacao && (
         <div className="cd-msg cd-msg-sucesso">
           ✅ {resultadoImportacao.totalImportadas} lançamento(s) importado(s)
+          {resultadoImportacao.totalConciliadasTransferencia > 0 && (
+            <> — {resultadoImportacao.totalConciliadasTransferencia} conciliado(s) com transferência(s) já classificada(s)</>
+          )}
+          {resultadoImportacao.totalAmbiguasTransferencia > 0 && (
+            <> — {resultadoImportacao.totalAmbiguasTransferencia} com mais de uma transferência pendente parecida (confira manualmente)</>
+          )}
           {resultadoImportacao.totalCategorizadasPorRegra > 0 && (
             <> — {resultadoImportacao.totalCategorizadasPorRegra} categorizado(s) automaticamente por regra</>
           )}
@@ -573,6 +599,17 @@ export default function ClientContaDetalhePage() {
                         style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
                       >
                         ✏️ editar categoria
+                      </button>
+                    )}
+                    {l.id && (
+                      <button
+                        type="button"
+                        aria-label={`Excluir lançamento ${l.descricao}`}
+                        onClick={() => handleExcluirLancamento(l)}
+                        title="Excluir este lançamento"
+                        style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--danger, #e05252)', textDecoration: 'underline', padding: 0 }}
+                      >
+                        🗑️ excluir
                       </button>
                     )}
                   </span>

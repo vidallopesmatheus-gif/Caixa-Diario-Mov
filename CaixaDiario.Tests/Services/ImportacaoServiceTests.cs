@@ -34,6 +34,9 @@ public class ImportacaoServiceTests
         // Nenhuma regra ativa por padrão — os testes que não mexem com regra ficam com o
         // comportamento de sempre (sugestão por palavra-chave / pendente).
         _regraRepoMock.Setup(r => r.ListarAtivasPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<RegraCategorizacao>());
+        // Fallback padrão pro histórico de importação (dedup via FitId/ignoradas) — sem isso,
+        // ObterIgnoradasAsync quebraria em todo teste que não mexe especificamente com exclusão.
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<TransacaoImportada>());
         _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object, _categoriaRepoMock.Object,
             _regraRepoMock.Object, _transferenciaServiceMock.Object);
     }
@@ -850,5 +853,345 @@ public class ImportacaoServiceTests
         await _sut.AtualizarCategoriasAsync(contaId, clienteId, "cliente", dto);
 
         _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    // ── ExcluirLancamentoAsync ──────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExcluirLancamentoAsync_SaidaSimples_RemoveERestituiSaldo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        var itemId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(),
+            Saidas = new() { new() { Id = itemId, Descricao = "Posto", Valor = 150m, Categoria = "Manutenção" } },
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 850m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        RegistroDiario? atualizado = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => atualizado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var resultado = await _sut.ExcluirLancamentoAsync(contaId, clienteId, "cliente",
+            new ExcluirLancamentoDto { Id = itemId, Data = "2026-07-20" });
+
+        Assert.Empty(atualizado!.Saidas);
+        Assert.Equal(1000m, atualizado.SaldoFinal);
+        Assert.False(resultado.TransferenciaExcluida);
+        Assert.Null(resultado.TituloReaberto);
+    }
+
+    [Fact]
+    public async Task ExcluirLancamentoAsync_Entrada_RemoveEReduzSaldo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        var itemId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new() { new() { Id = itemId, Descricao = "Venda balcão", Valor = 300m } },
+            Saidas = new(),
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 1300m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        RegistroDiario? atualizado = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => atualizado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        await _sut.ExcluirLancamentoAsync(contaId, clienteId, "cliente",
+            new ExcluirLancamentoDto { Id = itemId, Data = "2026-07-20" });
+
+        Assert.Empty(atualizado!.Entradas);
+        Assert.Equal(1000m, atualizado.SaldoFinal);
+    }
+
+    [Fact]
+    public async Task ExcluirLancamentoAsync_LancamentoNaoEncontrado_LancaExcecao()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        });
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirLancamentoAsync(contaId, clienteId, "cliente",
+            new ExcluirLancamentoDto { Id = Guid.NewGuid(), Data = "2026-07-20" }));
+
+        Assert.Equal(404, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExcluirLancamentoAsync_PontaDeTransferencia_DelegaParaTransferenciaServiceEExcluiAmbas()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        var itemId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(),
+            Saidas = new() { new() { Id = itemId, Descricao = "Transferência enviada", Valor = 500m, TransferenciaId = transferenciaId, Categoria = "Transferência" } },
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 500m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
+        _transferenciaServiceMock.Setup(t => t.ExcluirAsync(transferenciaId, clienteId, "cliente")).Returns(Task.CompletedTask);
+
+        var resultado = await _sut.ExcluirLancamentoAsync(contaId, clienteId, "cliente",
+            new ExcluirLancamentoDto { Id = itemId, Data = "2026-07-20" });
+
+        Assert.True(resultado.TransferenciaExcluida);
+        _transferenciaServiceMock.Verify(t => t.ExcluirAsync(transferenciaId, clienteId, "cliente"), Times.Once);
+        // A remoção física das pontas é responsabilidade do TransferenciaService, não deste método.
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExcluirLancamentoAsync_VinculadoABaixaDeTitulo_ReabreTitulo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        var itemId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new() { new() { Id = itemId, Descricao = "Pix recebido de Cliente X", Valor = 500m } },
+            Saidas = new(),
+            ContasReceber = new() { new() { Descricao = "Fatura Cliente X", Valor = 500m, Pago = true, DataBaixa = data, ContaBancariaId = contaId, LancamentoVinculadoId = itemId } },
+            ContasPagar = new(),
+            SaldoFinal = 1500m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var atualizados = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => atualizados.Add(r)).ReturnsAsync((RegistroDiario r) => r);
+
+        var resultado = await _sut.ExcluirLancamentoAsync(contaId, clienteId, "cliente",
+            new ExcluirLancamentoDto { Id = itemId, Data = "2026-07-20" });
+
+        Assert.Equal("Fatura Cliente X", resultado.TituloReaberto);
+        var titulo = Assert.Single(atualizados.Last().ContasReceber);
+        Assert.False(titulo.Pago);
+        Assert.Null(titulo.DataBaixa);
+        Assert.Null(titulo.LancamentoVinculadoId);
+        Assert.Empty(atualizados.Last().Entradas);
+    }
+
+    [Fact]
+    public async Task ExcluirLancamentoAsync_ItemImportadoComFitId_MarcaTransacaoImportadaComoIgnorada()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        var itemId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(),
+            Saidas = new() { new() { Id = itemId, Descricao = "Posto", Valor = 150m, FitId = "FIT-123" } },
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 850m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var transacaoOriginal = new TransacaoImportada
+        {
+            Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, Data = data,
+            Valor = 150m, Descricao = "Posto", FitId = "FIT-123", Tipo = "Saida", Status = "Confirmada",
+        };
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada> { transacaoOriginal });
+
+        TransacaoImportada? atualizada = null;
+        _importRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<TransacaoImportada>()))
+            .Callback<TransacaoImportada>(t => atualizada = t).Returns(Task.CompletedTask);
+
+        await _sut.ExcluirLancamentoAsync(contaId, clienteId, "cliente",
+            new ExcluirLancamentoDto { Id = itemId, Data = "2026-07-20" });
+
+        Assert.NotNull(atualizada);
+        Assert.Equal("Ignorada", atualizada!.Status);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_TransacaoMarcadaComoIgnorada_NaoContaComoNova()
+    {
+        // Simula a reimportação do mesmo arquivo depois que o usuário excluiu o lançamento do
+        // extrato — a transação não pode "ressuscitar" como nova (ver ExcluirLancamentoAsync).
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>
+        {
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, Data = new DateOnly(2026, 7, 26),
+                Valor = 50m, Descricao = "Posto", FitId = null, Tipo = "Saida", Status = "Ignorada" },
+        });
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Posto;-50,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Equal(1, resultado.TotalEncontradas);
+        Assert.Equal(1, resultado.TotalJaImportadas);
+        Assert.Equal(0, resultado.TotalNovas);
+    }
+
+    // ── Conciliação com contrapartida provisória de Transferência (Bloco 3C: bug do Pix duplicado) ──
+    // Cenário real: Pix de R$480 classificado como Transferência no Nubank cria uma ENTRADA
+    // provisória de R$480 no C6 (TransferenciaService.ConverterLancamentoAsync). Antes desta
+    // correção, importar o extrato real do C6 trazia "Pix recebido" de R$480 de novo e duplicava —
+    // 2 entradas, saldo inflado em R$480.
+
+    [Fact]
+    public async Task ImportarArquivoAsync_UmaProvisoriaCandidata_ConciliaEmVezDeDuplicarSaldo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        var provisoriaId = Guid.NewGuid();
+        var data = new DateOnly(2026, 9, 26);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 0m));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 0m,
+            Entradas = new() { new ItemFinanceiro
+            {
+                Id = provisoriaId, Descricao = "Transferência de Conta Corrente Nubank", Valor = 480m,
+                Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId, Provisoria = true,
+            } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 480m,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/09/2026;Pix recebido - Matheus Vidal Lopes;480,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        // Sem duplicata: continua 1 única entrada, e é a MESMA (mesmo Id/TransferenciaId) — só os
+        // dados "ganharam realidade" (descrição do banco, deixou de ser provisória).
+        var entrada = Assert.Single(registro.Entradas);
+        Assert.Equal(provisoriaId, entrada.Id);
+        Assert.Equal(transferenciaId, entrada.TransferenciaId);
+        Assert.Equal("Pix recebido - Matheus Vidal Lopes", entrada.Descricao);
+        Assert.False(entrada.Provisoria);
+        Assert.Equal(480m, registro.SaldoFinal); // inalterado — já tinha sido contado quando a provisória nasceu
+
+        Assert.Equal(1, resultado.TotalConciliadasTransferencia);
+        Assert.Equal(0, resultado.TotalAmbiguasTransferencia);
+        Assert.Equal(0, resultado.TotalImportadas); // nada "novo" de verdade entrou
+        Assert.Equal(0, resultado.TotalPendentesCategorizacao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_DuasProvisoriasCandidatas_NaoDecideSozinhoEImportaComoPendente()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 9, 26);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 0m));
+
+        var registroA = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 0m,
+            Entradas = new() { new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Transferência de Conta A", Valor = 480m, TransferenciaId = Guid.NewGuid(), Provisoria = true } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 480m,
+        };
+        var registroB = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data.AddDays(1), Inicio = 480m,
+            Entradas = new() { new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Transferência de Conta B", Valor = 480m, TransferenciaId = Guid.NewGuid(), Provisoria = true } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 960m,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroA, registroB });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/09/2026;Pix recebido - Fulano;480,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        // Nenhuma das duas provisórias é tocada — a transação entra como lançamento novo normal
+        // (pendente), no dia correspondente, pro usuário conciliar manualmente.
+        Assert.Equal(2, registroA.Entradas.Count);
+        Assert.True(registroA.Entradas[0].Provisoria);
+        var novaEntrada = registroA.Entradas[1];
+        Assert.False(novaEntrada.Provisoria);
+        Assert.True(novaEntrada.PendenteCategorizacao);
+        Assert.True(Assert.Single(registroB.Entradas).Provisoria);
+
+        Assert.Equal(0, resultado.TotalConciliadasTransferencia);
+        Assert.Equal(1, resultado.TotalAmbiguasTransferencia);
+        Assert.Equal(1, resultado.TotalImportadas);
+        Assert.Equal(1, resultado.TotalPendentesCategorizacao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ProvisoriaForaDaJanelaDeDiasUteis_NaoConcilia()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var dataProvisoria = new DateOnly(2026, 9, 10); // bem fora da janela de ±2 dias úteis
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 0m));
+
+        var registroAntigo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataProvisoria, Inicio = 0m,
+            Entradas = new() { new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Transferência de Conta A", Valor = 480m, TransferenciaId = Guid.NewGuid(), Provisoria = true } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 480m,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroAntigo });
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/09/2026;Pix recebido - Fulano;480,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.True(Assert.Single(registroAntigo.Entradas).Provisoria); // não tocada
+        Assert.NotNull(criado);
+        Assert.Single(criado!.Entradas);
+        Assert.Equal(0, resultado.TotalConciliadasTransferencia);
+        Assert.Equal(0, resultado.TotalAmbiguasTransferencia);
+        Assert.Equal(1, resultado.TotalImportadas);
     }
 }

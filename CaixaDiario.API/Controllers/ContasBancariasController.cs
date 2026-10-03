@@ -136,4 +136,11 @@ public class ContasBancariasController : ControllerBase
         await _importacaoService.AtualizarCategoriasAsync(contaId, ObterUsuarioId(), ObterPerfil(), dto);
         return Ok(new ApiResponse<object> { Dados = null });
     }
+
+    [HttpPost("{contaId:guid}/excluir-lancamento")]
+    public async Task<IActionResult> ExcluirLancamento(Guid contaId, [FromBody] ExcluirLancamentoDto dto)
+    {
+        var resultado = await _importacaoService.ExcluirLancamentoAsync(contaId, ObterUsuarioId(), ObterPerfil(), dto);
+        return Ok(new ApiResponse<ExcluirLancamentoResultDto> { Dados = resultado });
+    }
 }

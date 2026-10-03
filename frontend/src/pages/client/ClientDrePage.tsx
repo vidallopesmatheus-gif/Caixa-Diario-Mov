@@ -335,10 +335,10 @@ export default function ClientDrePage() {
                 >
                   <span className="dre-linha-label">{linha.label}</span>
                   {!modoComparativo ? (
-                    <>
+                    <span className="dre-linha-valor-wrap">
                       <span className="dre-linha-valor" style={linha.final ? { color: corPositivoNegativo } : undefined}>{fmtBRL(principal.total)}</span>
                       <span className="dre-linha-pct">{fmtPctOuTraco(principal.percentual)}</span>
-                    </>
+                    </span>
                   ) : (
                     valores.map((v, i) => (
                       <span key={periodosComDre[i].periodo.chave} className="dre-cmp-cel">

@@ -10,6 +10,9 @@ public class PreviewImportacaoDto
     public int TotalEncontradas { get; set; }
     public int TotalJaImportadas { get; set; }
     public int TotalNovas { get; set; }
+    // Das "novas", quantas vão conciliar com uma contrapartida provisória de Transferência em vez
+    // de virar lançamento novo de verdade (já estão incluídas em TotalNovas, não somar de novo).
+    public int TotalConciliarAoImportar { get; set; }
     public decimal TotalEntradas { get; set; }
     public decimal TotalSaidas { get; set; }
     // Menor/maior data do arquivo INTEIRO (sem aplicar dataInicio/dataFim) — usado só pra

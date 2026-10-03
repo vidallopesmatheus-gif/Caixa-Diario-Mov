@@ -28,4 +28,13 @@ public interface IImportacaoService
 
     Task AtualizarCategoriasAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, AtualizarCategoriaDto dto);
+
+    /// <summary>
+    /// Exclui um lançamento (Entrada ou Saída) do extrato. Ponta de Transferência exclui as duas
+    /// pontas juntas; lançamento vinculado a uma baixa de conta a pagar/receber reabre o título;
+    /// se veio de importação, marca a transação de origem como "Ignorada" pra não reaparecer numa
+    /// reimportação do mesmo arquivo.
+    /// </summary>
+    Task<ExcluirLancamentoResultDto> ExcluirLancamentoAsync(
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, ExcluirLancamentoDto dto);
 }

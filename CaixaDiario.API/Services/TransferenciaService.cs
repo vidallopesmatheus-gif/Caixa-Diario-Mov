@@ -98,6 +98,45 @@ public class TransferenciaService : ITransferenciaService
             transferencia.Id.ToString(), JsonSerializer.Serialize(transferencia), null);
     }
 
+    // Exclui de verdade as duas pontas — chamado quando o usuário pede "Excluir" num lançamento
+    // que é parte de uma Transferência (ação do extrato, não a de reclassificar/desfazer acima).
+    public async Task ExcluirAsync(Guid id, Guid usuarioLogadoId, string perfil)
+    {
+        var transferencia = await _transferenciaRepo.ObterPorIdAsync(id)
+            ?? throw new ApiException(404, CodigoRetorno.TRANSFERENCIA_NAO_ENCONTRADA, "Transferência não encontrada.");
+        VerificarAcesso(transferencia.ClienteId, usuarioLogadoId, perfil);
+
+        await using var transacao = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
+        var regOrigem = await _registroRepo.ObterPorContaEDataAsync(transferencia.ContaOrigemId, transferencia.Data);
+        var itemOrigem = regOrigem?.Saidas.FirstOrDefault(s => s.TransferenciaId == transferencia.Id);
+        if (regOrigem != null && itemOrigem != null)
+        {
+            regOrigem.Saidas = regOrigem.Saidas.Where(s => s.Id != itemOrigem.Id).ToList();
+            regOrigem.SaldoFinal += itemOrigem.Valor;
+            regOrigem.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(regOrigem);
+        }
+
+        var regDestino = await _registroRepo.ObterPorContaEDataAsync(transferencia.ContaDestinoId, transferencia.Data);
+        var itemDestino = regDestino?.Entradas.FirstOrDefault(e => e.TransferenciaId == transferencia.Id);
+        if (regDestino != null && itemDestino != null)
+        {
+            regDestino.Entradas = regDestino.Entradas.Where(e => e.Id != itemDestino.Id).ToList();
+            regDestino.SaldoFinal -= itemDestino.Valor;
+            regDestino.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(regDestino);
+        }
+
+        await _transferenciaRepo.RemoverAsync(transferencia);
+        if (transacao != null) await transacao.CommitAsync();
+
+        await _auditService.LogAsync(transferencia.ClienteId, usuarioLogadoId, "Transferencia", "Exclusao",
+            transferencia.Id.ToString(), JsonSerializer.Serialize(transferencia), null);
+    }
+
     // Reclassifica um lançamento já existente (ex.: "Aplicação RDB" importado como saída) como
     // Transferência: a ponta original só é relabelada (categoria/tipoCusto/vínculo), sem alterar seu
     // valor/efeito no saldo já aplicado. A contrapartida é vinculada a um lançamento já existente
@@ -174,9 +213,11 @@ public class TransferenciaService : ITransferenciaService
                 {
                     new()
                     {
-                        Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor,
+                        // Provisória: ainda não confirmada pelo extrato real da conta de destino —
+                        // descrição própria (não a do banco) pra não parecer um lançamento já conciliado.
+                        Id = Guid.NewGuid(), Descricao = $"Transferência de {conta.Nome}", Valor = valor,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
-                        RegraCategorizacaoId = dto.RegraCategorizacaoId,
+                        RegraCategorizacaoId = dto.RegraCategorizacaoId, Provisoria = true,
                     },
                 };
                 regDestino.SaldoFinal += valor;
@@ -225,9 +266,11 @@ public class TransferenciaService : ITransferenciaService
                 {
                     new()
                     {
-                        Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor, Subcategoria = string.Empty,
+                        // Provisória: ainda não confirmada pelo extrato real da conta de origem —
+                        // descrição própria (não a do banco) pra não parecer um lançamento já conciliado.
+                        Id = Guid.NewGuid(), Descricao = $"Transferência para {conta.Nome}", Valor = valor, Subcategoria = string.Empty,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
-                        RegraCategorizacaoId = dto.RegraCategorizacaoId,
+                        RegraCategorizacaoId = dto.RegraCategorizacaoId, Provisoria = true,
                     },
                 };
                 regOrigem.SaldoFinal -= valor;
