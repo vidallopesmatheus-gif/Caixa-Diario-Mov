@@ -293,7 +293,6 @@ public class MetricasService : IMetricasService
             .ToList();
 
         var totalDespesas = linhas.Sum(l => l.Total);
-        var resultado = receitaBruta - totalDespesas;
 
         // ---- Análise vertical: mesma lista de saídas, agora em cascata por Tipo ----
         // (-) Deduções/Impostos → grupo "Impostos" (reaproveita o Grupo já existente no Plano de Contas)
@@ -404,8 +403,15 @@ public class MetricasService : IMetricasService
             ReceitaBruta  = receitaBruta,
             GruposDespesa = linhas,
             TotalDespesas = totalDespesas,
-            Resultado     = resultado,
-            Margem        = receitaBruta > 0 ? Math.Round(resultado / receitaBruta * 100, 1) : null,
+            // Resultado/Margem usam a MESMA fonte que ResultadoLiquido/ResultadoLiquidoPercentual
+            // (calculados abaixo) — antes eram uma soma à parte (receitaBruta − soma de GruposDespesa,
+            // que só cobre saídas operacionais), divergindo de ResultadoLiquido sempre que havia
+            // rendimento, investimento, financiamento, despesa não-operacional ou lançamento não
+            // classificado no período. Resultado/Margem ficam só como alias de leitura mais curto
+            // pras telas que ainda os usam (ClientGraficoPage, Margem do período no Dashboard);
+            // não remover ResultadoLiquido, que é a fonte de verdade.
+            Resultado     = resultadoLiquido,
+            Margem        = Percentual(resultadoLiquido),
 
             ReceitaBrutaPercentual = Percentual(receitaBruta),
             Deducoes = deducoes,
