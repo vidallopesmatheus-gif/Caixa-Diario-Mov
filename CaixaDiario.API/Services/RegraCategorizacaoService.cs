@@ -120,6 +120,19 @@ public class RegraCategorizacaoService : IRegraCategorizacaoService
         await _regraRepo.AtualizarAsync(regra);
     }
 
+    public async Task<RegraCategorizacaoDto> AprovarSugestaoAsync(Guid id, Guid usuarioLogadoId, string perfil)
+    {
+        var regra = await ObterComAcessoAsync(id, usuarioLogadoId, perfil);
+        if (!regra.Sugerida)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Esta regra não é uma sugestão pendente de aprovação.");
+
+        regra.Sugerida = false;
+        regra.Ativa = true;
+        regra.AtualizadoEm = DateTime.UtcNow;
+        var atualizada = await _regraRepo.AtualizarAsync(regra);
+        return await MapToDtoAsync(atualizada);
+    }
+
     public async Task ExcluirAsync(Guid id, Guid usuarioLogadoId, string perfil)
     {
         var regra = await ObterComAcessoAsync(id, usuarioLogadoId, perfil);
@@ -282,6 +295,7 @@ public class RegraCategorizacaoService : IRegraCategorizacaoService
         ContaContrapartidaId = regra.ContaContrapartidaId,
         ContaContrapartidaNome = contrapartidaNome,
         Ativa = regra.Ativa,
+        Sugerida = regra.Sugerida,
         Ordem = regra.Ordem,
         QuantidadeAplicada = quantidadeAplicada,
         CriadoEm = regra.CriadoEm,

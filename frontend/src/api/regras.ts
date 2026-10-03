@@ -73,3 +73,11 @@ export const aplicarRegraRetroativamente = async (id: string): Promise<number> =
   })
   return res.dados?.totalCategorizados ?? 0
 }
+
+/** Aprova uma regra sugerida pelo cliente no portal público — passa a valer de verdade. */
+export const aprovarSugestaoRegra = async (id: string): Promise<RegraCategorizacao> => {
+  const res = await apiFetch<ApiResponse<RegraCategorizacao>>(`/api/regras-categorizacao/${id}/aprovar-sugestao`, {
+    method: 'POST',
+  })
+  return res.dados
+}

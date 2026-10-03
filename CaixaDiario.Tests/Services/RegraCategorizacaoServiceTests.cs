@@ -275,4 +275,54 @@ public class RegraCategorizacaoServiceTests
         var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirAsync(regra.Id, Guid.NewGuid(), "cliente"));
         Assert.Equal(403, ex.StatusCode);
     }
+
+    // ── AprovarSugestaoAsync (Bloco 4B) ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AprovarSugestaoAsync_RegraSugerida_PassaAValerDeVerdade()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        ConfigurarContaAsync(conta);
+        var regra = new RegraCategorizacao
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Tipo = "Saida",
+            AcaoTipo = "Categoria", Categoria = "Insumos/Mercadoria", Sugerida = true, Ativa = false,
+        };
+        _regraRepoMock.Setup(r => r.ObterPorIdAsync(regra.Id)).ReturnsAsync(regra);
+        _regraRepoMock.Setup(r => r.AtualizarAsync(regra)).ReturnsAsync(regra);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario>());
+
+        var resultado = await _sut.AprovarSugestaoAsync(regra.Id, clienteId, "cliente");
+
+        Assert.False(resultado.Sugerida);
+        Assert.True(resultado.Ativa);
+        Assert.False(regra.Sugerida);
+        Assert.True(regra.Ativa);
+        _regraRepoMock.Verify(r => r.AtualizarAsync(regra), Times.Once);
+    }
+
+    [Fact]
+    public async Task AprovarSugestaoAsync_RegraQueNaoEraSugestao_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var regra = new RegraCategorizacao { Id = Guid.NewGuid(), ClienteId = clienteId, Sugerida = false, Ativa = true };
+        _regraRepoMock.Setup(r => r.ObterPorIdAsync(regra.Id)).ReturnsAsync(regra);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AprovarSugestaoAsync(regra.Id, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        _regraRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegraCategorizacao>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AprovarSugestaoAsync_ClienteAcessandoSugestaoDeOutroCliente_LancaAcessoNegado()
+    {
+        var regra = new RegraCategorizacao { Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Sugerida = true };
+        _regraRepoMock.Setup(r => r.ObterPorIdAsync(regra.Id)).ReturnsAsync(regra);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AprovarSugestaoAsync(regra.Id, Guid.NewGuid(), "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
+    }
 }

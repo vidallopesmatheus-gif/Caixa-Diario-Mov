@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../../../contexts/AuthContext'
 import {
   listarRegras, atualizarRegra, desativarRegra, reativarRegra, excluirRegra, reordenarRegras,
-  contarCorrespondencias, aplicarRegraRetroativamente,
+  contarCorrespondencias, aplicarRegraRetroativamente, aprovarSugestaoRegra,
 } from '../../../api/regras'
 import { listarContasBancarias } from '../../../api/contasBancarias'
 import { listarCategorias } from '../../../api/categorias'
@@ -44,6 +44,7 @@ export default function RegrasCategorizacaoPage({ clienteIdOverride }: Props) {
   const [salvandoEdit, setSalvandoEdit] = useState(false)
 
   const [aplicandoRetroativo, setAplicandoRetroativo] = useState<string | null>(null)
+  const [aprovandoId, setAprovandoId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!clienteId) return
@@ -68,7 +69,10 @@ export default function RegrasCategorizacaoPage({ clienteIdOverride }: Props) {
   }
 
   const ativas = useMemo(() => regras.filter(r => r.ativa).sort((a, b) => a.ordem - b.ordem), [regras])
-  const inativas = useMemo(() => regras.filter(r => !r.ativa), [regras])
+  // Sugerida nasce com ativa=false (ver ConciliacaoPublicaService.SugerirRegraAsync) mas não é uma
+  // "regra desativada" comum — fica na própria seção até o consultor aprovar ou rejeitar.
+  const sugeridas = useMemo(() => regras.filter(r => r.sugerida), [regras])
+  const inativas = useMemo(() => regras.filter(r => !r.ativa && !r.sugerida), [regras])
 
   function iniciarEdicao(r: RegraCategorizacao) {
     setEditRegra(r)
@@ -163,6 +167,30 @@ export default function RegrasCategorizacaoPage({ clienteIdOverride }: Props) {
     }
   }
 
+  async function handleAprovar(r: RegraCategorizacao) {
+    setAprovandoId(r.id)
+    try {
+      await aprovarSugestaoRegra(r.id)
+      showMsg('Regra aprovada — já vale pros próximos lançamentos.')
+      carregar()
+    } catch (e: unknown) {
+      showMsg(e instanceof Error ? e.message : 'Erro ao aprovar sugestão.', false)
+    } finally {
+      setAprovandoId(null)
+    }
+  }
+
+  async function handleRejeitar(r: RegraCategorizacao) {
+    if (!confirm(`Rejeitar a sugestão baseada em "${r.descricaoReferencia}"? Ela não vai mais aparecer aqui.`)) return
+    try {
+      await excluirRegra(r.id)
+      showMsg('Sugestão rejeitada.')
+      carregar()
+    } catch (e: unknown) {
+      showMsg(e instanceof Error ? e.message : 'Erro ao rejeitar.', false)
+    }
+  }
+
   async function handleAplicarRetroativo(r: RegraCategorizacao) {
     if (!confirm(`Aplicar esta regra a todos os lançamentos PENDENTES já importados nesta conta que casarem com o critério? Lançamentos já categorizados manualmente não são afetados.`)) return
     setAplicandoRetroativo(r.id)
@@ -226,6 +254,35 @@ export default function RegrasCategorizacaoPage({ clienteIdOverride }: Props) {
       </p>
 
       {msg && <div style={{ marginBottom: 12, fontSize: 13, fontWeight: 600, color: msgOk ? '#34c759' : '#ff6b6b' }}>{msg}</div>}
+
+      {sugeridas.length > 0 && (
+        <div className="contas-section" style={{ marginBottom: 20 }}>
+          <h3>📨 Sugeridas pelo cliente ({sugeridas.length})</h3>
+          <p style={{ color: 'var(--tx3)', fontSize: 13, marginBottom: 12 }}>
+            O cliente pediu pra lembrar essa classificação no portal de conciliação. Só passam a valer depois de aprovadas.
+          </p>
+          <div className="cat-lista-compacta">
+            {sugeridas.map(r => (
+              <div key={r.id} className="cat-item-compacta">
+                <span className={r.tipo === 'Entrada' ? 'cat-direcao cat-direcao-entrada' : 'cat-direcao cat-direcao-saida'} title={r.tipo}>
+                  {r.tipo === 'Entrada' ? '↓' : '↑'}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="cat-nome-compacta">{descreverCriterio(r)}</div>
+                  <div style={{ fontSize: 12, color: 'var(--tx3)' }}>{r.contaBancariaNome} · {renderAcao(r)}</div>
+                </div>
+                <div className="cat-acoes-compactas">
+                  <button className="cb-btn-editar" onClick={() => handleAprovar(r)} disabled={aprovandoId === r.id}>
+                    {aprovandoId === r.id ? 'Aprovando...' : '✔ Aprovar'}
+                  </button>
+                  <button className="cb-btn-editar" onClick={() => iniciarEdicao(r)}>Editar</button>
+                  <button className="cat-btn-excluir" onClick={() => handleRejeitar(r)}>Rejeitar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {ativas.length === 0 ? (
         <p style={{ color: 'var(--tx3)', fontSize: 13 }}>

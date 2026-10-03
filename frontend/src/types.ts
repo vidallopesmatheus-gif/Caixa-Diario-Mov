@@ -280,6 +280,8 @@ export interface RegraCategorizacao {
   contaContrapartidaId?: string
   contaContrapartidaNome?: string
   ativa: boolean
+  // Verdadeiro = sugerida pelo cliente no portal público, aguardando aprovação do consultor.
+  sugerida: boolean
   ordem: number
   quantidadeAplicada: number
   criadoEm: string

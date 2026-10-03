@@ -294,6 +294,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Categoria).HasColumnName("categoria");
             entity.Property(e => e.ContaContrapartidaId).HasColumnName("conta_contrapartida_id");
             entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);
+            entity.Property(e => e.Sugerida).HasColumnName("sugerida").HasDefaultValue(false);
             entity.Property(e => e.Ordem).HasColumnName("ordem").HasDefaultValue(0);
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");

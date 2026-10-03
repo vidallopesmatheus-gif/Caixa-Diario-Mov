@@ -22,6 +22,11 @@ public class RegraCategorizacao
     // Preenchido só quando AcaoTipo == "Transferencia".
     public Guid? ContaContrapartidaId { get; set; }
 
+    // Verdadeiro só pra regra nascida de uma sugestão do cliente no portal público de conciliação
+    // (link de 24h) — nasce com Ativa=false (não classifica nada ainda) até o consultor aprovar
+    // (vira Sugerida=false, Ativa=true). Regras criadas normalmente pelo consultor nunca passam
+    // por esse estado. Ver ConciliacaoPublicaService.SugerirRegraAsync / RegraCategorizacaoService.AprovarSugestaoAsync.
+    public bool Sugerida { get; set; }
     public bool Ativa { get; set; } = true;
     // Precedência manual — menor valor vence quando mais de uma regra casa. Regra nova entra no fim.
     public int Ordem { get; set; }
