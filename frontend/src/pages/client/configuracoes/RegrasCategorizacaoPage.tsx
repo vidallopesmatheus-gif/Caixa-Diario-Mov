@@ -4,6 +4,7 @@ import {
   listarRegras, atualizarRegra, desativarRegra, reativarRegra, excluirRegra, reordenarRegras,
   contarCorrespondencias, aplicarRegraRetroativamente, aprovarSugestaoRegra,
 } from '../../../api/regras'
+import { ApiError } from '../../../api/client'
 import { listarContasBancarias } from '../../../api/contasBancarias'
 import { listarCategorias } from '../../../api/categorias'
 import CategoriaCombobox from '../../../components/shared/CategoriaCombobox'
@@ -167,13 +168,20 @@ export default function RegrasCategorizacaoPage({ clienteIdOverride }: Props) {
     }
   }
 
-  async function handleAprovar(r: RegraCategorizacao) {
+  async function handleAprovar(r: RegraCategorizacao, forcarApesarDeConflito = false) {
     setAprovandoId(r.id)
     try {
-      await aprovarSugestaoRegra(r.id)
+      await aprovarSugestaoRegra(r.id, forcarApesarDeConflito)
       showMsg('Regra aprovada — já vale pros próximos lançamentos.')
       carregar()
     } catch (e: unknown) {
+      if (e instanceof ApiError && e.codigo === 'REGRA_CONFLITANTE') {
+        setAprovandoId(null)
+        if (confirm(`${e.message}\n\nAprovar mesmo assim?`)) {
+          await handleAprovar(r, true)
+        }
+        return
+      }
       showMsg(e instanceof Error ? e.message : 'Erro ao aprovar sugestão.', false)
     } finally {
       setAprovandoId(null)

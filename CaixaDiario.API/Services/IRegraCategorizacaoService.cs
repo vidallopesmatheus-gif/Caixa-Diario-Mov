@@ -15,5 +15,5 @@ public interface IRegraCategorizacaoService
     Task<AplicarRetroativoResultDto> AplicarRetroativamenteAsync(Guid id, Guid usuarioLogadoId, string perfil);
     // Aprova uma regra sugerida pelo cliente no portal público (Sugerida=true) — passa a valer de
     // verdade (Sugerida=false, Ativa=true). Rejeitar é só ExcluirAsync, já existente.
-    Task<RegraCategorizacaoDto> AprovarSugestaoAsync(Guid id, Guid usuarioLogadoId, string perfil);
+    Task<RegraCategorizacaoDto> AprovarSugestaoAsync(Guid id, AprovarSugestaoDto dto, Guid usuarioLogadoId, string perfil);
 }
