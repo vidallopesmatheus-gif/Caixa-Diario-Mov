@@ -16,16 +16,19 @@ public class ContaBancariaService : IContaBancariaService
     private readonly IMetaRepository _metaRepo;
     private readonly ITransferenciaRepository _transferenciaRepo;
     private readonly ITransacaoImportadaRepository _transacaoImportadaRepo;
+    private readonly IRegraCategorizacaoRepository _regraRepo;
 
     public ContaBancariaService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, IMetaRepository metaRepo,
-        ITransferenciaRepository transferenciaRepo, ITransacaoImportadaRepository transacaoImportadaRepo)
+        ITransferenciaRepository transferenciaRepo, ITransacaoImportadaRepository transacaoImportadaRepo,
+        IRegraCategorizacaoRepository regraRepo)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _metaRepo = metaRepo;
         _transferenciaRepo = transferenciaRepo;
         _transacaoImportadaRepo = transacaoImportadaRepo;
+        _regraRepo = regraRepo;
     }
 
     public async Task<List<ContaBancariaDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -145,6 +148,11 @@ public class ContaBancariaService : IContaBancariaService
             .OrderBy(r => r.Data)
             .ToList();
 
+        // Nome da regra é só pra exibição ("via regra: ...") — busca uma vez por cliente em vez de
+        // uma consulta por lançamento classificado.
+        var nomesDeRegra = (await _regraRepo.ListarPorClienteAsync(conta.ClienteId))
+            .ToDictionary(r => r.Id, r => DescricaoMatcher.DescreverCriterio(r.CriterioTipo, r.DescricaoReferencia));
+
         var linhas = new List<(DateOnly Data, LancamentoExtratoDto Dto)>();
         decimal saldo = conta.SaldoInicial;
 
@@ -167,6 +175,9 @@ public class ContaBancariaService : IContaBancariaService
                     PendenteCategorizacao = entrada.PendenteCategorizacao,
                     TransferenciaId = entrada.TransferenciaId,
                     RegraCategorizacaoId = entrada.RegraCategorizacaoId,
+                    RegraCategorizacaoNome = entrada.RegraCategorizacaoId.HasValue
+                        ? nomesDeRegra.GetValueOrDefault(entrada.RegraCategorizacaoId.Value)
+                        : null,
                 }));
             }
 
@@ -197,6 +208,9 @@ public class ContaBancariaService : IContaBancariaService
                     PendenteCategorizacao = saida.PendenteCategorizacao,
                     TransferenciaId = saida.TransferenciaId,
                     RegraCategorizacaoId = saida.RegraCategorizacaoId,
+                    RegraCategorizacaoNome = saida.RegraCategorizacaoId.HasValue
+                        ? nomesDeRegra.GetValueOrDefault(saida.RegraCategorizacaoId.Value)
+                        : null,
                 }));
             }
 

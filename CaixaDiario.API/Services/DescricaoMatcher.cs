@@ -37,4 +37,10 @@ public static class DescricaoMatcher
         criterioTipo == "Documento"
             ? ExtrairDocumento(descricao) == criterioValor
             : NormalizarExata(descricao) == criterioValor;
+
+    /// <summary>Texto amigável do critério de uma regra, pra exibir "via regra: ..." no extrato.</summary>
+    public static string DescreverCriterio(string criterioTipo, string descricaoReferencia) =>
+        criterioTipo == "Documento"
+            ? $"Mesmo CNPJ/CPF de \"{descricaoReferencia}\""
+            : $"Descrição igual a \"{descricaoReferencia}\"";
 }
