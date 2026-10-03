@@ -569,6 +569,38 @@ public class ContaBancariaServiceTests
     }
 
     [Fact]
+    public async Task RegistrarRendimentoAsync_ContaComRegistroExistenteNoDia_ReatribuiListaParaEfDetectarMudanca()
+    {
+        // Entradas/Saidas são jsonb sem value comparer — EF só marca a coluna como modificada se
+        // a REFERÊNCIA da lista mudar. Travar isso evita reintroduzir o bug em que o rendimento
+        // nunca era persistido quando a conta já tinha outro lançamento no mesmo dia.
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 1000m);
+        conta.Tipo = "Investimento";
+        var data = new DateOnly(2026, 8, 1);
+        var entradasOriginais = new List<ItemFinanceiro> { new() { Descricao = "Outro lançamento", Valor = 10m } };
+        var registroExistente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data,
+            Entradas = entradasOriginais, Saidas = new(), SaldoFinal = 1010m,
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(registroExistente);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario> { registroExistente });
+        RegistroDiario? persistido = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => persistido = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new RegistrarRendimentoDto { Data = data, Valor = 50m };
+        await _sut.RegistrarRendimentoAsync(conta.Id, dto, clienteId, "cliente");
+
+        Assert.NotNull(persistido);
+        Assert.NotSame(entradasOriginais, persistido!.Entradas);
+        Assert.Equal(2, persistido.Entradas.Count);
+    }
+
+    [Fact]
     public async Task RegistrarRendimentoAsync_ContaNaoInvestimento_LancaDadosInvalidos()
     {
         var clienteId = Guid.NewGuid();

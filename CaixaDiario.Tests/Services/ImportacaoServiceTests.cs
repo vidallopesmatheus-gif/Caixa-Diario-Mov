@@ -542,10 +542,11 @@ public class ImportacaoServiceTests
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
         _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
 
+        var entradasOriginais = new List<ItemFinanceiro>();
         var registroExistente = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 500m,
-            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            Entradas = entradasOriginais, Saidas = new(), ContasReceber = new(), ContasPagar = new(),
             SaldoFinal = 500m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
         };
         _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroExistente });
@@ -562,6 +563,11 @@ public class ImportacaoServiceTests
         Assert.NotNull(atualizado);
         Assert.Equal(600m, atualizado!.SaldoFinal);
         _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+        // Entradas/Saidas são jsonb sem value comparer — EF só marca a coluna como modificada se
+        // a REFERÊNCIA da lista mudar. Trava contra reintroduzir o bug em que a transação
+        // importada nunca era persistida quando o dia já tinha um registro existente.
+        Assert.NotSame(entradasOriginais, atualizado.Entradas);
+        Assert.Single(atualizado.Entradas);
     }
 
     [Fact]

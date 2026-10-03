@@ -266,18 +266,20 @@ public class ContaBancariaService : IContaBancariaService
 
         if (dto.Valor > 0)
         {
-            registro.Entradas.Add(new ItemFinanceiro
+            // Nova lista (não .Add na existente) — força o EF a detectar a mudança (jsonb sem
+            // value comparer), necessário quando `registro` já existia (novo == false).
+            registro.Entradas = new List<ItemFinanceiro>(registro.Entradas)
             {
-                Descricao = descricao, Valor = dto.Valor, Categoria = "Rendimento", TipoCusto = LancamentoFiltro.TipoRendimento,
-            });
+                new() { Descricao = descricao, Valor = dto.Valor, Categoria = "Rendimento", TipoCusto = LancamentoFiltro.TipoRendimento },
+            };
             registro.SaldoFinal += dto.Valor;
         }
         else
         {
-            registro.Saidas.Add(new ItemFinanceiroSaida
+            registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas)
             {
-                Descricao = descricao, Valor = -dto.Valor, Categoria = "Rendimento", TipoCusto = LancamentoFiltro.TipoRendimento,
-            });
+                new() { Descricao = descricao, Valor = -dto.Valor, Categoria = "Rendimento", TipoCusto = LancamentoFiltro.TipoRendimento },
+            };
             registro.SaldoFinal += dto.Valor; // dto.Valor já é negativo aqui
         }
         registro.SalvoEm = DateTime.UtcNow;
