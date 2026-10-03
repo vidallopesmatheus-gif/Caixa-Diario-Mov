@@ -22,19 +22,19 @@ export async function listarCategoriasParaGerenciar(): Promise<CategoriaAdmin[]>
   return res.dados
 }
 
-export async function criarCategoria(nome: string, grupoId: string): Promise<CategoriaAdmin> {
+export async function criarCategoria(nome: string, grupoId: string, ehPessoal = false): Promise<CategoriaAdmin> {
   const res = await apiFetch<ApiResponse<CategoriaAdmin>>('/api/categorias', {
     method: 'POST',
-    body: JSON.stringify({ nome, grupoId }),
+    body: JSON.stringify({ nome, grupoId, ehPessoal }),
   })
   resetCategoriaCache()
   return res.dados
 }
 
-export async function atualizarCategoria(id: string, nome: string, grupoId: string, ativa: boolean): Promise<CategoriaAdmin> {
+export async function atualizarCategoria(id: string, nome: string, grupoId: string, ativa: boolean, ehPessoal = false): Promise<CategoriaAdmin> {
   const res = await apiFetch<ApiResponse<CategoriaAdmin>>(`/api/categorias/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ nome, grupoId, ativa }),
+    body: JSON.stringify({ nome, grupoId, ativa, ehPessoal }),
   })
   resetCategoriaCache()
   return res.dados

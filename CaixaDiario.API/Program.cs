@@ -83,6 +83,7 @@ builder.Services.AddScoped<IUsuarioService, UsuarioService>();
 builder.Services.AddScoped<IRegistroService, RegistroService>();
 builder.Services.AddScoped<IMetaRepository, MetaRepository>();
 builder.Services.AddScoped<IMetaService, MetaService>();
+builder.Services.AddScoped<IConfiguracaoFinanceiraService, ConfiguracaoFinanceiraService>();
 builder.Services.AddScoped<IContaBancariaRepository, ContaBancariaRepository>();
 builder.Services.AddScoped<IContaBancariaService, ContaBancariaService>();
 builder.Services.AddScoped<ITransacaoImportadaRepository, TransacaoImportadaRepository>();

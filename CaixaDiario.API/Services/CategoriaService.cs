@@ -70,6 +70,7 @@ public class CategoriaService : ICategoriaService
             Ordem = maiorOrdem + 1,
             Ativa = true,
             CriadoEm = DateTime.UtcNow,
+            EhPessoal = dto.EhPessoal,
         };
         var criada = await _repo.AdicionarAsync(categoria);
         criada.Grupo = grupo;
@@ -90,6 +91,7 @@ public class CategoriaService : ICategoriaService
         categoria.GrupoId = grupo.Id;
         categoria.Tipo = Blocos.TipoPadrao(grupo.Bloco);
         categoria.Ativa = dto.Ativa;
+        categoria.EhPessoal = dto.EhPessoal;
         var atualizada = await _repo.AtualizarAsync(categoria);
         atualizada.Grupo = grupo;
         return MapToDto(atualizada);
@@ -157,5 +159,6 @@ public class CategoriaService : ICategoriaService
         Ativa = c.Ativa,
         EhEntrada = EhEntrada(c),
         EhSaida = EhSaida(c),
+        EhPessoal = c.EhPessoal,
     };
 }
