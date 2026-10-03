@@ -10,7 +10,7 @@ import { listarFaturasCartao, sugerirFaturaCartao, vincularPagamentoFatura } fro
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { fmtBRL } from '../../utils/format'
 import { useAuth } from '../../contexts/AuthContext'
-import { agruparPorDescricaoSimilar } from '../../utils/descricaoSimilar'
+import { agruparPorDescricaoSimilar, criterioRegra } from '../../utils/descricaoSimilar'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import Modal from '../../components/shared/Modal'
 import type { Categorias, CategoriaAdmin, PendenteCategorizacao, ContaBancaria, LancamentoExtrato, LinkConciliacao } from '../../types'
@@ -27,6 +27,19 @@ function fmtDataHora(iso: string): string {
 
 function urlDoPortal(token: string): string {
   return `${window.location.origin}/portal/conciliacao/${token}`
+}
+
+function chaveDispensados(clienteId: string): string {
+  return `caixaDiario:regraPromptDispensada:${clienteId}`
+}
+
+function carregarDispensados(clienteId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(chaveDispensados(clienteId))
+    return raw ? new Set(JSON.parse(raw)) : new Set()
+  } catch {
+    return new Set()
+  }
 }
 
 export default function ClientExtratoRevisaoPage() {
@@ -66,6 +79,12 @@ export default function ClientExtratoRevisaoPage() {
   const [regraContaContrapartidaId, setRegraContaContrapartidaId] = useState('')
   const [regraContagem, setRegraContagem] = useState<number | null>(null)
   const [criandoRegra, setCriandoRegra] = useState(false)
+
+  // ── Prompt automático pós-classificação: depois de categorizar manualmente, se ainda sobrar
+  // pendente parecido, sugere criar a regra na hora em vez de esperar o cliente notar o botão.
+  // "Agora não" fica gravado por cliente+padrão pra não repetir a mesma sugestão de novo.
+  const [promptRegra, setPromptRegra] = useState<{ itens: PendenteCategorizacao[]; quantidadeSemelhantes: number } | null>(null)
+  const [dispensados, setDispensados] = useState<Set<string>>(new Set())
 
   // ── Marcar como Pagamento de fatura de cartão — a saída não é despesa nova, é quitação de uma
   // dívida já reconhecida quando a compra foi categorizada no cartão (ver FaturaCartaoService).
@@ -155,6 +174,11 @@ export default function ClientExtratoRevisaoPage() {
 
   useEffect(() => { carregar() }, [carregar])
 
+  useEffect(() => {
+    if (!clienteId) return
+    setDispensados(carregarDispensados(clienteId))
+  }, [clienteId])
+
   const grupos = useMemo(() => agruparPorDescricaoSimilar(pendentes), [pendentes])
 
   const tiposSelecionados = useMemo(() => {
@@ -190,6 +214,7 @@ export default function ClientExtratoRevisaoPage() {
         idsAplicados.forEach(id => next.delete(id))
         return next
       })
+      talvezPromptarRegra(itens)
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao salvar categoria.')
     } finally {
@@ -199,6 +224,37 @@ export default function ClientExtratoRevisaoPage() {
         return next
       })
     }
+  }
+
+  // Só sugere criar regra se sobrar outro pendente parecido (senão não tem o que automatizar) e
+  // o cliente não tiver dispensado esse mesmo padrão antes. Falha nessa checagem auxiliar não pode
+  // atrapalhar o fluxo principal — a categoria já foi salva com sucesso de qualquer forma.
+  async function talvezPromptarRegra(itensClassificados: PendenteCategorizacao[]) {
+    if (!contaId || itensClassificados.length === 0) return
+    const referencia = itensClassificados[0]
+    if (dispensados.has(criterioRegra(referencia.tipo, referencia.descricao))) return
+    try {
+      const quantidade = await contarCorrespondencias(contaId, referencia.tipo, referencia.descricao)
+      if (quantidade > 0) setPromptRegra({ itens: itensClassificados, quantidadeSemelhantes: quantidade })
+    } catch {
+      // Checagem auxiliar — sem regra sugerida, mas a categorização já foi salva normalmente.
+    }
+  }
+
+  function aceitarPromptRegra() {
+    if (!promptRegra) return
+    abrirModalRegra(promptRegra.itens)
+    setPromptRegra(null)
+  }
+
+  function dispensarPromptRegra() {
+    if (!promptRegra || !clienteId) return
+    const referencia = promptRegra.itens[0]
+    const novo = new Set(dispensados)
+    novo.add(criterioRegra(referencia.tipo, referencia.descricao))
+    setDispensados(novo)
+    try { localStorage.setItem(chaveDispensados(clienteId), JSON.stringify([...novo])) } catch { /* ignora storage indisponível */ }
+    setPromptRegra(null)
   }
 
   function toggleSelecionado(id: string) {
@@ -451,6 +507,19 @@ export default function ClientExtratoRevisaoPage() {
           </div>
 
           {msg && <div className="er-msg-erro">{msg}</div>}
+
+          {promptRegra && (
+            <div className="er-prompt-regra">
+              <span>
+                ⚙️ Mais <strong>{promptRegra.quantidadeSemelhantes}</strong> lançamento(s) parecido(s) com "{promptRegra.itens[0].descricao}"
+                estão pendentes. Quer criar uma regra pra categorizar automaticamente nas próximas importações?
+              </span>
+              <div className="er-prompt-regra-acoes">
+                <button type="button" className="er-btn-lote" onClick={aceitarPromptRegra}>Criar regra</button>
+                <button type="button" className="er-btn-lote er-btn-lote-ignore" onClick={dispensarPromptRegra}>Agora não</button>
+              </div>
+            </div>
+          )}
 
           <div className="er-acoes-lote">
             <select
