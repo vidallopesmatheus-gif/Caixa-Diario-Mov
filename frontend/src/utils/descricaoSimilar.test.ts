@@ -1,4 +1,4 @@
-import { agruparPorDescricaoSimilar } from './descricaoSimilar'
+import { agruparPorDescricaoSimilar, mascararDocumentos } from './descricaoSimilar'
 
 interface Item {
   id: string
@@ -73,4 +73,42 @@ test('descrições curtas sem prefixo comum relevante não são agrupadas indevi
   const grupos = agruparPorDescricaoSimilar(itens)
 
   expect(grupos).toHaveLength(2)
+})
+
+describe('mascararDocumentos', () => {
+  test('mascara CPF formatado, mantendo os dois blocos do meio', () => {
+    const resultado = mascararDocumentos('Pix recebido - NOME COMPLETO - 111.222.333-44')
+    expect(resultado).toBe('Pix recebido - NOME COMPLETO - •••.222.333-••')
+    expect(resultado).not.toContain('111')
+    expect(resultado).not.toContain('44')
+  })
+
+  test('mascara CPF sem formatação (só dígitos)', () => {
+    expect(mascararDocumentos('Doc 11122233344')).toBe('Doc •••.222.333-••')
+  })
+
+  test('mascara CNPJ formatado, mantendo os dois blocos do meio', () => {
+    const resultado = mascararDocumentos('Pagamento Fornecedor 12.345.678/0001-90')
+    expect(resultado).toBe('Pagamento Fornecedor ••.345.678/0001-••')
+    expect(resultado).not.toContain('12.')
+    expect(resultado).not.toContain('-90')
+  })
+
+  test('mascara CNPJ sem formatação (só dígitos)', () => {
+    expect(mascararDocumentos('Doc 12345678000190')).toBe('Doc ••.345.678/0001-••')
+  })
+
+  test('não altera texto sem CPF/CNPJ', () => {
+    expect(mascararDocumentos('Compra no débito - POSTO SHELL')).toBe('Compra no débito - POSTO SHELL')
+  })
+
+  test('não quebra um CPF já mascarado pelo próprio banco (sem dígitos suficientes pra casar)', () => {
+    const texto = 'Transferência recebida pelo Pix - NOME COMPLETO - •••.123.456-•• - BCO C6 S.A.'
+    expect(mascararDocumentos(texto)).toBe(texto)
+  })
+
+  test('mascara CNPJ e CPF presentes na mesma string, sem interferência entre os dois', () => {
+    const resultado = mascararDocumentos('De 12.345.678/0001-90 para 111.222.333-44')
+    expect(resultado).toBe('De ••.345.678/0001-•• para •••.222.333-••')
+  })
 })

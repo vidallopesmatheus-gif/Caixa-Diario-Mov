@@ -3,6 +3,7 @@ import { fmtBRL, fmtPct, fmtDate } from '../../../utils/format'
 import { ehOperacional } from '../../../utils/lancamentos'
 import { leituraMargemDre } from '../../../utils/leituras'
 import { calcularRankingFavorecidos, type RankingFavorecido } from '../../../utils/favorecidos'
+import { mascararDocumentos } from '../../../utils/descricaoSimilar'
 import { calcularConcentracaoPorDia } from '../../../utils/concentracao'
 import Modal from '../../../components/shared/Modal'
 import type { Dre } from '../../../api/metricas'
@@ -90,7 +91,9 @@ function CardFavorecidos({
               .map((l, i) => (
                 <div key={i} className="dre-drill-item">
                   <span className="dre-drill-data">{fmtDate(l.data)}</span>
-                  <span className="dre-drill-desc">{l.descricao}</span>
+                  {/* Nunca exibe CPF/CNPJ completo — alguns extratos (CSV/XLSX) trazem o documento
+                      sem máscara nenhuma, diferente do Pix já mascarado pelo próprio banco. */}
+                  <span className="dre-drill-desc">{mascararDocumentos(l.descricao)}</span>
                   <span className="dre-drill-valor">{fmtBRL(l.valor)}</span>
                 </div>
               ))}
