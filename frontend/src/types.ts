@@ -120,6 +120,9 @@ export interface LancamentoExtrato {
   // Preenchido quando a categoria veio de uma RegraCategorizacao aplicada na importação (ou
   // aplicação retroativa) — corrigir manualmente não muda isso, só marca a origem pra exibição.
   regraCategorizacaoId?: string
+  // Texto amigável do critério da regra (ex.: "Descrição igual a \"...\""). Nulo se a regra foi
+  // excluída depois de classificar o item.
+  regraCategorizacaoNome?: string | null
 }
 
 export interface PendenciasConta {

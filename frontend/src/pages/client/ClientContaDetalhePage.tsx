@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import {
   listarContasBancarias,
@@ -622,7 +622,13 @@ export default function ClientContaDetalhePage() {
                       <>
                         {l.categoria || '—'}
                         {l.regraCategorizacaoId && (
-                          <span title="Categorizado automaticamente por uma regra" style={{ marginLeft: 4, fontSize: 11, color: 'var(--tx3)' }}>⚙️</span>
+                          <Link
+                            to="/configuracoes/regras"
+                            title={l.regraCategorizacaoNome ? `Via regra: ${l.regraCategorizacaoNome}` : 'Categorizado automaticamente por uma regra'}
+                            style={{ marginLeft: 4, fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline' }}
+                          >
+                            ⚙️ via regra
+                          </Link>
                         )}
                       </>
                     )}
@@ -866,7 +872,13 @@ export default function ClientContaDetalhePage() {
             <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
               "{lancamentoParaEditar.descricao}" · {fmtBRL(Math.abs(lancamentoParaEditar.valor))} · {fmtDate(lancamentoParaEditar.data)}
               {lancamentoParaEditar.regraCategorizacaoId && (
-                <><br />⚙️ Categoria atual veio de uma regra automática.</>
+                <>
+                  <br />
+                  ⚙️ Categoria atual veio de uma regra automática
+                  {lancamentoParaEditar.regraCategorizacaoNome && ` (${lancamentoParaEditar.regraCategorizacaoNome})`}
+                  {' — '}
+                  <Link to="/configuracoes/regras">ver regras</Link>
+                </>
               )}
             </p>
             <div className="inp-group">

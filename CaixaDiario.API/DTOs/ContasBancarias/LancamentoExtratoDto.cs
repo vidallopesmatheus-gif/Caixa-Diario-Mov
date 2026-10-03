@@ -17,4 +17,7 @@ public class LancamentoExtratoDto
     // Preenchido quando a categoria veio de uma RegraCategorizacao (importação automática ou
     // aplicação retroativa) — corrigir manualmente não limpa isso, só marca a origem pra exibição.
     public Guid? RegraCategorizacaoId { get; set; }
+    // Texto amigável do critério da regra (ex.: "Descrição igual a \"...\""), pra exibir
+    // "via regra: ..." no extrato. Nulo se a regra foi excluída depois de classificar o item.
+    public string? RegraCategorizacaoNome { get; set; }
 }

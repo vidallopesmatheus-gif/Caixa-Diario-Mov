@@ -15,6 +15,7 @@ public class ContaBancariaServiceTests
     private readonly Mock<IMetaRepository> _metaRepoMock = new();
     private readonly Mock<ITransferenciaRepository> _transferenciaRepoMock = new();
     private readonly Mock<ITransacaoImportadaRepository> _transacaoImportadaRepoMock = new();
+    private readonly Mock<IRegraCategorizacaoRepository> _regraRepoMock = new();
     private readonly ContaBancariaService _sut;
 
     public ContaBancariaServiceTests()
@@ -25,9 +26,10 @@ public class ContaBancariaServiceTests
         _registroRepoMock.Setup(r => r.ContarTodosPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(0);
         _transferenciaRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Transferencia>());
         _transacaoImportadaRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<TransacaoImportada>());
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<RegraCategorizacao>());
         _sut = new ContaBancariaService(
             _contaRepoMock.Object, _registroRepoMock.Object, _metaRepoMock.Object,
-            _transferenciaRepoMock.Object, _transacaoImportadaRepoMock.Object);
+            _transferenciaRepoMock.Object, _transacaoImportadaRepoMock.Object, _regraRepoMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid id, Guid clienteId, decimal saldoInicial = 1000m) => new()
@@ -137,6 +139,84 @@ public class ContaBancariaServiceTests
         var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
 
         Assert.True(extrato[0].PendenteCategorizacao);
+    }
+
+    [Fact]
+    public async Task ObterExtratoAsync_ComItemClassificadoPorRegra_PreenchenomeDaRegraParaExibicao()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(contaId, clienteId);
+        var dia = new DateOnly(2026, 7, 1);
+        var regraId = Guid.NewGuid();
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(),
+            ClienteId = clienteId,
+            ContaBancariaId = contaId,
+            Data = dia,
+            Inicio = 1000m,
+            Entradas = new List<ItemFinanceiro>
+            {
+                new() { Descricao = "Transferência recebida pelo Pix", Valor = 330m, Categoria = "Vendas", RegraCategorizacaoId = regraId },
+            },
+            Saidas = new(),
+            ContasReceber = new(),
+            ContasPagar = new(),
+            SaldoFinal = 1330m,
+            CriadoEm = DateTime.UtcNow,
+            SalvoEm = DateTime.UtcNow,
+        };
+        var regra = new RegraCategorizacao
+        {
+            Id = regraId, ClienteId = clienteId, CriterioTipo = "DescricaoExata", DescricaoReferencia = "pix recebido",
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegraCategorizacao> { regra });
+
+        var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
+
+        Assert.Equal(regraId, extrato[0].RegraCategorizacaoId);
+        Assert.Equal("Descrição igual a \"pix recebido\"", extrato[0].RegraCategorizacaoNome);
+    }
+
+    [Fact]
+    public async Task ObterExtratoAsync_ComItemClassificadoPorRegraExcluida_DeixaNomeNulo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(contaId, clienteId);
+        var dia = new DateOnly(2026, 7, 1);
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(),
+            ClienteId = clienteId,
+            ContaBancariaId = contaId,
+            Data = dia,
+            Inicio = 1000m,
+            Entradas = new(),
+            Saidas = new List<ItemFinanceiroSaida>
+            {
+                new() { Descricao = "Boleto pago", Valor = 50m, Categoria = "Serviços", RegraCategorizacaoId = Guid.NewGuid() },
+            },
+            ContasReceber = new(),
+            ContasPagar = new(),
+            SaldoFinal = 950m,
+            CriadoEm = DateTime.UtcNow,
+            SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegraCategorizacao>());
+
+        var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
+
+        Assert.Null(extrato[0].RegraCategorizacaoNome);
     }
 
     [Fact]
