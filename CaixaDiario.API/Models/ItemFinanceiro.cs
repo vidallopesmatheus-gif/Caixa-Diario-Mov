@@ -32,4 +32,13 @@ public class ItemFinanceiro
     // não foi confirmada pelo banco. A importação tenta casar essa provisória com a transação real
     // (mesmo valor, mesmo sentido, ±2 dias úteis) em vez de duplicar — ver ImportacaoService.
     public bool Provisoria { get; set; }
+    // Nome do favorecido/pagador já limpo (sem prefixo de banco, CPF/CNPJ, agência/conta) —
+    // preenchido na importação por ContraparteExtractor. Nulo em lançamentos manuais antigos.
+    public string? ContraparteNome { get; set; }
+    // CPF/CNPJ parcial (mascarado — nunca completo, ver Bloco 5B) quando a descrição trazia um.
+    public string? ContraparteDocumento { get; set; }
+    // Chave de agrupamento: "DOC:<dígitos completos>" quando o documento foi extraído sem máscara,
+    // senão "NOME:<nome normalizado>" — usada pra juntar a mesma contraparte entre bancos
+    // diferentes (ex.: 3B) sem expor o documento completo na chave.
+    public string? ContraparteChave { get; set; }
 }
