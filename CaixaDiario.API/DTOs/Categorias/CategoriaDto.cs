@@ -12,4 +12,5 @@ public class CategoriaDto
     public bool Ativa { get; set; }
     public bool EhEntrada { get; set; }
     public bool EhSaida { get; set; }
+    public bool EhPessoal { get; set; }
 }

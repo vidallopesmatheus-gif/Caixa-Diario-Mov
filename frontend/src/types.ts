@@ -181,6 +181,9 @@ export interface CategoriaAdmin {
   ativa: boolean
   ehEntrada: boolean
   ehSaida: boolean
+  // Conta como custo de vida pessoal pro Indicador FIRE (Bloco 7B) — ex.: Pró-labore, Retirada de
+  // Sócio. Marcado manualmente no Plano de Contas.
+  ehPessoal: boolean
 }
 
 /** Grupo — nível entre Bloco (fixo) e Categoria, criado/editado em Configurações > Plano de Contas. */

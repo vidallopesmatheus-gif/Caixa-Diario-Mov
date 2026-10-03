@@ -60,6 +60,7 @@ export default function CategoriasPage() {
   const [editId, setEditId] = useState<string | null>(null)
   const [editNome, setEditNome] = useState('')
   const [editGrupoId, setEditGrupoId] = useState('')
+  const [editEhPessoal, setEditEhPessoal] = useState(false)
   const [salvandoEdit, setSalvandoEdit] = useState(false)
 
   const [emUso, setEmUso] = useState<{ categoria: CategoriaAdmin; quantidade: number } | null>(null)
@@ -192,13 +193,14 @@ export default function CategoriasPage() {
     setEditId(c.id)
     setEditNome(c.nome)
     setEditGrupoId(c.grupoId)
+    setEditEhPessoal(c.ehPessoal)
   }
 
   async function handleSalvarEdit() {
     if (!editId || !editGrupoId) return
     setSalvandoEdit(true)
     try {
-      await atualizarCategoria(editId, editNome.trim(), editGrupoId, true)
+      await atualizarCategoria(editId, editNome.trim(), editGrupoId, true, editEhPessoal)
       setEditId(null)
       showMsg('Categoria atualizada!')
       carregar()
@@ -222,7 +224,7 @@ export default function CategoriasPage() {
 
   async function handleReativar(c: CategoriaAdmin) {
     try {
-      await atualizarCategoria(c.id, c.nome, c.grupoId, true)
+      await atualizarCategoria(c.id, c.nome, c.grupoId, true, c.ehPessoal)
       showMsg('Categoria reativada.')
       carregar()
     } catch (e: unknown) {
@@ -341,6 +343,11 @@ export default function CategoriasPage() {
           <select value={editGrupoId} onChange={e => setEditGrupoId(e.target.value)} style={{ flex: 1, minWidth: 220 }}>
             {gruposAtivos.map(g => <option key={g.id} value={g.id}>{BLOCO_LABEL[g.bloco]} · {g.nome}</option>)}
           </select>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--tx3)', whiteSpace: 'nowrap' }}
+            title="Conta como custo de vida pessoal no Indicador FIRE (ex.: Pró-labore, Retirada de Sócio)">
+            <input type="checkbox" checked={editEhPessoal} onChange={e => setEditEhPessoal(e.target.checked)} />
+            Custo de vida (FIRE)
+          </label>
           <button className="btn-add-conta" onClick={handleSalvarEdit} disabled={salvandoEdit}>
             {salvandoEdit ? 'Salvando...' : '✔ Salvar'}
           </button>
@@ -355,7 +362,14 @@ export default function CategoriasPage() {
           <button disabled={i === ativas.length - 1} onClick={() => handleMover(c.id, 1)} title="Mover para baixo">▼</button>
         </div>
         <DirecaoIcone ehEntrada={c.ehEntrada} ehSaida={c.ehSaida} />
-        <span className="cat-nome-compacta">{c.nome}</span>
+        <span className="cat-nome-compacta">
+          {c.nome}
+          {c.ehPessoal && (
+            <span title="Conta como custo de vida pessoal no Indicador FIRE" style={{ marginLeft: 6, fontSize: 11, color: 'var(--tx3)' }}>
+              🏠
+            </span>
+          )}
+        </span>
         <div className="cat-acoes-compactas">
           <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
           <button className="cb-btn-inativar" onClick={() => handleDesativar(c.id)}>Desativar</button>

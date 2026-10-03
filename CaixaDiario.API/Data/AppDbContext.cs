@@ -41,6 +41,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em");
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
             entity.Property(e => e.UsuarioAtualizacao).HasColumnName("usuario_atualizacao");
+            entity.Property(e => e.CustoVidaMensalManual).HasColumnName("custo_vida_mensal_manual").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxaRetiradaFire).HasColumnName("taxa_retirada_fire").HasColumnType("decimal(5,2)").HasDefaultValue(4m);
         });
 
         modelBuilder.Entity<RegistroDiario>(entity =>
@@ -224,6 +226,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Ordem).HasColumnName("ordem").HasDefaultValue(0);
             entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.EhPessoal).HasColumnName("eh_pessoal").HasDefaultValue(false);
 
             entity.HasOne(e => e.Grupo)
                 .WithMany()

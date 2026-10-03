@@ -6,4 +6,5 @@ public class CriarCategoriaDto
 {
     [Required, MaxLength(100)] public string Nome { get; set; } = string.Empty;
     [Required] public Guid GrupoId { get; set; }
+    public bool EhPessoal { get; set; }
 }

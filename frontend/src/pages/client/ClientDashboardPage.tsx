@@ -26,6 +26,10 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { grupoDaCategoria, CORES_GRUPO } from '../../utils/categorias'
 import { ehOperacional } from '../../utils/lancamentos'
 import { calcularCapitalInvestido, calcularProjecaoSelic } from '../../utils/investimentos'
+import { calcularCustoDeVida, calcularFire } from '../../utils/fire'
+import { listarCategoriasParaGerenciar } from '../../api/categorias'
+import type { CategoriaAdmin } from '../../types'
+import { obterConfiguracaoFinanceira, atualizarConfiguracaoFinanceira } from '../../api/configuracaoFinanceira'
 import './ClientDashboard.css'
 import './dashboard/DashboardResumo.css'
 
@@ -153,6 +157,40 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     })
   }, [])
 
+  // ── Indicador FIRE (Bloco 7B): custo de vida pessoal, nunca a despesa total do negócio ──────
+  const [categoriasAdmin, setCategoriasAdmin] = useState<CategoriaAdmin[]>([])
+  const [custoVidaManual, setCustoVidaManual] = useState<number | null>(null)
+  const [taxaRetiradaFire, setTaxaRetiradaFire] = useState(4)
+  const [custoVidaInlineDisplay, setCustoVidaInlineDisplay] = useState('')
+  const [salvandoCustoVidaInline, setSalvandoCustoVidaInline] = useState(false)
+  const [comoCalculamosFireAberto, setComoCalculamosFireAberto] = useState(false)
+
+  useEffect(() => {
+    listarCategoriasParaGerenciar().then(setCategoriasAdmin).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!clienteId) return
+    obterConfiguracaoFinanceira(clienteId)
+      .then(c => { setCustoVidaManual(c.custoVidaMensalManual); setTaxaRetiradaFire(c.taxaRetiradaFire) })
+      .catch(() => {})
+  }, [clienteId])
+
+  async function handleSalvarCustoVidaInline() {
+    if (!clienteId) return
+    const valor = parseFloat(custoVidaInlineDisplay.replace(/\./g, '').replace(',', '.'))
+    if (!valor || valor <= 0) return
+    setSalvandoCustoVidaInline(true)
+    try {
+      await atualizarConfiguracaoFinanceira(clienteId, { custoVidaMensalManual: valor, taxaRetiradaFire: taxaRetiradaFire })
+      setCustoVidaManual(valor)
+    } catch {
+      // Falha silenciosa aqui é aceitável — o campo inline continua preenchido, o usuário tenta de novo.
+    } finally {
+      setSalvandoCustoVidaInline(false)
+    }
+  }
+
   useEffect(() => {
     if (!clienteId) return
     obterMeta(clienteId, anoAtual)
@@ -210,8 +248,6 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       }
     return Object.entries(acc).map(([name, value]) => ({ name, value })).filter(d => d.value > 0)
   }, [doPeriodo])
-
-  const totalSaida = doPeriodo.reduce((s, r) => s + r.saidas.filter(ehOperacional).reduce((a, e) => a + e.valor, 0), 0)
 
   // Projeção por pagamentos cadastrados (contas a receber/pagar pendentes por mês)
   const projecaoPagamentos = useMemo(() => {
@@ -388,17 +424,17 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     return { meses, anos: Math.floor(meses / 12), mesesRest: meses % 12, ganhoMeses }
   }, [simAporteExtra, tempoAteMeta, editValorSonho, editTaxaRetorno, editTotalInvestido, aporteMensal])
 
-  const fireNumber = useMemo(() => {
-    const investido = capitalInvestido
-    if (!investido || totalSaida <= 0) return null
-    const daysInPeriod = Math.max(1,
-      (new Date(ate).getTime() - new Date(de).getTime()) / 86400000 + 1
-    )
-    const despMensal = (totalSaida / daysInPeriod) * 30
-    const fireTarget = despMensal * 12 / 0.04
-    const pct = Math.min(100, (investido / fireTarget) * 100)
-    return { fireTarget, despMensal, pct, atingido: investido >= fireTarget }
-  }, [capitalInvestido, totalSaida, de, ate])
+  // Custo de vida PESSOAL (nunca a despesa total do negócio) — ver utils/fire.ts. Independente do
+  // período selecionado no topo do Dashboard (de/ate): sempre os últimos 12 meses fechados, por
+  // definição da própria função.
+  const custoDeVida = useMemo(
+    () => calcularCustoDeVida(registros, categoriasAdmin, custoVidaManual),
+    [registros, categoriasAdmin, custoVidaManual]
+  )
+  const fireNumber = useMemo(
+    () => calcularFire(custoDeVida.valor, taxaRetiradaFire, capitalInvestido),
+    [custoDeVida.valor, taxaRetiradaFire, capitalInvestido]
+  )
 
   const atrasadaNaSonho = useMemo(() => {
     if (aporteMensal === null || aporteMensal <= 0) return null
@@ -1037,33 +1073,64 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       {fireNumber ? (
         <div className="meta-card">
           <h3>🔥 Indicador FIRE <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>(Financial Independence, Retire Early)</span></h3>
-          <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
-            Regra dos 4%: patrimônio necessário = despesas mensais × 12 ÷ 4%. Baseado no período selecionado.
+          <p style={{ fontSize: 13, color: 'var(--tx1)', marginBottom: 4 }}>
+            Para viver de renda, você precisa de <strong>{fmtBRL(fireNumber.valorAlvo)}</strong> investidos.
           </p>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--tx3)', marginBottom: 6 }}>
-            <span>Despesa mensal estimada: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(fireNumber.despMensal)}</strong></span>
-            <span>Meta FIRE: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(fireNumber.fireTarget)}</strong></span>
-          </div>
+          <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+            Você tem {fmtBRL(capitalInvestido)} — {fmtPct(fireNumber.percentualAtingido)} do caminho.
+          </p>
           <div style={{ height: 14, background: 'var(--bd)', borderRadius: 8, overflow: 'hidden', marginBottom: 8 }}>
-            <div style={{ width: `${fireNumber.pct}%`, height: '100%', background: fireNumber.atingido ? '#34c759' : '#0a84ff', transition: 'width .3s' }} />
+            <div style={{ width: `${fireNumber.percentualAtingido}%`, height: '100%', background: fireNumber.atingido ? '#34c759' : '#0a84ff', transition: 'width .3s' }} />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
-            <span style={{ color: 'var(--tx3)' }}>{fmtPct(fireNumber.pct)} da independência financeira</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
+            <span style={{ color: 'var(--tx3)' }}>{fmtPct(fireNumber.percentualAtingido)} da independência financeira</span>
             <span style={{ color: fireNumber.atingido ? '#34c759' : '#ff9500' }}>
-              {fireNumber.atingido
-                ? '🎉 FIRE atingido!'
-                : `Faltam ${fmtBRL(fireNumber.fireTarget - capitalInvestido)}`}
+              {fireNumber.atingido ? '🎉 FIRE atingido!' : `Faltam ${fmtBRL(fireNumber.faltam)}`}
             </span>
           </div>
+          <button
+            type="button"
+            onClick={() => setComoCalculamosFireAberto(v => !v)}
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}
+          >
+            {comoCalculamosFireAberto ? '▾' : '▸'} Como calculamos
+          </button>
+          {comoCalculamosFireAberto && (
+            <div style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 8, lineHeight: 1.6 }}>
+              <p style={{ margin: 0 }}>Patrimônio-alvo = custo de vida mensal × 12 ÷ taxa de retirada ({fmtPct(taxaRetiradaFire, 1)} a.a.).</p>
+              <p style={{ margin: 0 }}>
+                Custo de vida mensal: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(custoDeVida.valor ?? 0)}</strong>{' '}
+                ({custoDeVida.origem === 'manual'
+                  ? 'definido manualmente em Configurações'
+                  : `média automática dos últimos ${custoDeVida.mesesConsiderados} meses fechados, categorias marcadas "custo de vida"`}).
+              </p>
+              <p style={{ margin: 0 }}>Nunca é a despesa total do negócio — só o que conta como custo de vida pessoal no Plano de Contas.</p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="meta-card">
           <h3>🔥 Indicador FIRE</h3>
-          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
-            {capitalInvestido <= 0
-              ? 'Cadastre uma conta de investimento para ver esta projeção.'
-              : 'Sem despesas no período selecionado para estimar a meta FIRE.'}
-          </p>
+          {custoDeVida.origem === 'vazio' && custoDeVida.mesesConsiderados > 0 ? (
+            <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+              Só {custoDeVida.mesesConsiderados} {custoDeVida.mesesConsiderados === 1 ? 'mês fechado tem' : 'meses fechados têm'} dado de custo de vida — precisa de pelo menos 3 pra calcular uma média confiável. Enquanto isso, informe manualmente:
+            </p>
+          ) : (
+            <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+              Sem dado suficiente pra estimar o custo de vida pessoal automaticamente (marque categorias como "Custo de vida (FIRE)" em Configurações › Plano de Contas, ou informe manualmente abaixo).
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <input
+              placeholder="Custo de vida mensal (R$)"
+              value={custoVidaInlineDisplay}
+              onChange={e => setCustoVidaInlineDisplay(e.target.value)}
+              style={{ maxWidth: 200 }}
+            />
+            <button className="btn-add-conta" onClick={handleSalvarCustoVidaInline} disabled={salvandoCustoVidaInline || !custoVidaInlineDisplay.trim()}>
+              {salvandoCustoVidaInline ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
         </div>
       )}
 
