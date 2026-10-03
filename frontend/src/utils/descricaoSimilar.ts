@@ -47,6 +47,17 @@ export function mascararDocumentos(texto: string): string {
     })
 }
 
+/**
+ * Mesmo critério que uma regra de categorização usaria (documento, se houver, senão descrição
+ * exata) — identifica de forma estável um "padrão" de lançamento, independente do id do item.
+ * Usado pra lembrar que o cliente já dispensou a sugestão de criar regra pra esse padrão, sem
+ * reperguntar toda vez que ele classificar outro lançamento igual.
+ */
+export function criterioRegra(tipo: 'Entrada' | 'Saida', descricao: string): string {
+  const doc = extrairDocumento(descricao)
+  return `${tipo}::${doc ?? descricao.toUpperCase().trim()}`
+}
+
 function tamanhoPrefixoComum(a: string, b: string): number {
   const max = Math.min(a.length, b.length)
   let i = 0
