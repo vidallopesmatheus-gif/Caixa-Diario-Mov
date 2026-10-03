@@ -7,6 +7,8 @@ public class SaudeFinanceiraServiceTests
 {
     private readonly SaudeFinanceiraService _sut = new();
     private static readonly DateOnly Hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+    // Taxa de Poupança passou a olhar pro último mês FECHADO, não o corrente — ver SaudeFinanceiraService.Calcular.
+    private static readonly DateOnly MesFechado = Hoje.AddMonths(-1);
 
     private static RegistroDiario CriarRegistro(DateOnly data, decimal entradas = 0m, decimal saidas = 0m) => new()
     {
@@ -25,7 +27,7 @@ public class SaudeFinanceiraServiceTests
     [Fact]
     public void Calcular_ComReceitaEDespesasDoMes_CalculaTaxaPoupancaVerde()
     {
-        var registros = new List<RegistroDiario> { CriarRegistro(Hoje, entradas: 1000m, saidas: 700m) };
+        var registros = new List<RegistroDiario> { CriarRegistro(MesFechado, entradas: 1000m, saidas: 700m) };
 
         var resultado = _sut.Calcular(registros, new List<MetaAnual>());
 
@@ -46,7 +48,7 @@ public class SaudeFinanceiraServiceTests
     [Fact]
     public void Calcular_IgnoraRegistrosExcluidos()
     {
-        var excluido = CriarRegistro(Hoje, entradas: 1000m, saidas: 100m);
+        var excluido = CriarRegistro(MesFechado, entradas: 1000m, saidas: 100m);
         excluido.Excluido = true;
 
         var resultado = _sut.Calcular(new List<RegistroDiario> { excluido }, new List<MetaAnual>());
@@ -59,7 +61,7 @@ public class SaudeFinanceiraServiceTests
     [InlineData(1000, 980, "vermelho")]
     public void Calcular_TaxaPoupanca_ClassificaSemaforoPorFaixa(decimal receita, decimal despesa, string semaforoEsperado)
     {
-        var registros = new List<RegistroDiario> { CriarRegistro(Hoje, entradas: receita, saidas: despesa) };
+        var registros = new List<RegistroDiario> { CriarRegistro(MesFechado, entradas: receita, saidas: despesa) };
 
         var resultado = _sut.Calcular(registros, new List<MetaAnual>());
 
@@ -129,8 +131,12 @@ public class SaudeFinanceiraServiceTests
     }
 
     [Fact]
-    public void Calcular_ComMenosDeUmMesDecorrido_RitmoMetaIndisponivel()
+    public void Calcular_MetaRecemCriadaSemInvestimento_RitmoDisponivelImediatamenteComoNoRitmo()
     {
+        // Antes dessa correção, mesesDecorridos <= 0 travava o card inteiro num "Dados
+        // insuficientes — aguarde 1 mês". Com a conta linear (investido vs. esperado até hoje),
+        // o card já responde no dia 0: nada esperado ainda (fração do prazo = 0) e nada investido
+        // ainda é, por definição, estar em dia — não atrasado nem precisa esperar nada.
         var meta = new MetaAnual
         {
             Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ModoMeta = "metodo",
@@ -140,11 +146,30 @@ public class SaudeFinanceiraServiceTests
 
         var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
 
-        Assert.False(resultado.RitmoMeta.Disponivel);
+        Assert.True(resultado.RitmoMeta.Disponivel);
+        Assert.Equal("No ritmo", resultado.RitmoMeta.StatusRitmo);
+        Assert.Equal(0m, resultado.RitmoMeta.DiferencaReais);
     }
 
     [Fact]
-    public void Calcular_ComMetaElegivelEProgressoParcial_CalculaRitmoAmarelo()
+    public void Calcular_MetaRecemCriadaComAlgumInvestimento_RitmoDisponivelComoAdiantado()
+    {
+        var meta = new MetaAnual
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ModoMeta = "metodo",
+            ValorSonho = 4000m, PrazoAnos = 1, TaxaRetorno = 0m, TotalInvestido = 2000m,
+            AtualizadoEm = DateTime.UtcNow, CriadoEm = DateTime.UtcNow,
+        };
+
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
+
+        Assert.True(resultado.RitmoMeta.Disponivel);
+        Assert.Equal("Adiantado", resultado.RitmoMeta.StatusRitmo);
+        Assert.Equal(2000m, resultado.RitmoMeta.DiferencaReais); // 2000 investido − 0 esperado até agora
+    }
+
+    [Fact]
+    public void Calcular_ComMetaElegivelEProgressoAcimaDoEsperado_CalculaRitmoAdiantado()
     {
         var meta = new MetaAnual
         {
@@ -153,28 +178,67 @@ public class SaudeFinanceiraServiceTests
             Sonho = "Aposentadoria",
             ModoMeta = "metodo",
             ValorSonho = 120000m,
-            PrazoAnos = 5,
-            TaxaRetorno = 12m,
+            PrazoAnos = 5, // prazo total = 60 meses, sem DataAlvo definida
+            TaxaRetorno = 12m, // não entra mais na conta — Ritmo da Meta agora é linear, não juros compostos
             TotalInvestido = 20000m,
-            AtualizadoEm = DateTime.UtcNow.AddMonths(-6),
+            AtualizadoEm = DateTime.UtcNow.AddMonths(-6), // 6 meses decorridos
             CriadoEm = DateTime.UtcNow.AddMonths(-6),
         };
 
         var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
 
+        // Esperado linear aos 6/60 meses = 120000 × 0,1 = 12000. Investido (20000) > esperado.
         Assert.True(resultado.RitmoMeta.Disponivel);
-        Assert.Equal(85.3m, resultado.RitmoMeta.Valor);
-        Assert.Equal("amarelo", resultado.RitmoMeta.Semaforo);
+        Assert.Equal("Adiantado", resultado.RitmoMeta.StatusRitmo);
+        Assert.Equal("verde", resultado.RitmoMeta.Semaforo);
+        Assert.Equal(8000m, resultado.RitmoMeta.DiferencaReais);
         Assert.Contains("Aposentadoria", resultado.RitmoMeta.Calculo);
     }
 
     [Fact]
-    public void Calcular_PreencheOMesEAnoDoPeriodo()
+    public void Calcular_ComMetaElegivelEProgressoAbaixoDoEsperado_CalculaRitmoAtrasado()
+    {
+        var meta = new MetaAnual
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Sonho = "Casa própria", ModoMeta = "metodo",
+            ValorSonho = 120000m, PrazoAnos = 5, TaxaRetorno = 12m, TotalInvestido = 5000m,
+            AtualizadoEm = DateTime.UtcNow.AddMonths(-6), CriadoEm = DateTime.UtcNow.AddMonths(-6),
+        };
+
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
+
+        // Esperado linear = 12000; investido (5000) bem abaixo disso.
+        Assert.True(resultado.RitmoMeta.Disponivel);
+        Assert.Equal("Atrasado", resultado.RitmoMeta.StatusRitmo);
+        Assert.Equal("vermelho", resultado.RitmoMeta.Semaforo);
+        Assert.Equal(-7000m, resultado.RitmoMeta.DiferencaReais);
+    }
+
+    [Fact]
+    public void Calcular_MetaComTotalInvestidoMaiorOuIgualAoSonho_StatusAtingida()
+    {
+        var meta = new MetaAnual
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ModoMeta = "metodo",
+            ValorSonho = 10000m, PrazoAnos = 5, TaxaRetorno = 10m, TotalInvestido = 10500m,
+            AtualizadoEm = DateTime.UtcNow.AddMonths(-6), CriadoEm = DateTime.UtcNow.AddMonths(-6),
+        };
+
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
+
+        Assert.True(resultado.RitmoMeta.Disponivel);
+        Assert.Equal("Atingida", resultado.RitmoMeta.StatusRitmo);
+    }
+
+    [Fact]
+    public void Calcular_PreencheOMesEAnoDoUltimoMesFechado()
     {
         var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual>());
 
-        Assert.Contains(Hoje.Year.ToString(), resultado.Periodo);
-        Assert.NotEmpty(resultado.Periodo);
+        // Último mês FECHADO (mês anterior), não o corrente — pode cair num ano diferente de
+        // Hoje.Year em janeiro, daí usar MesFechado.Year e não Hoje.Year aqui.
+        Assert.Contains(MesFechado.Year.ToString(), resultado.Periodo);
+        Assert.Contains("último mês fechado", resultado.Periodo);
     }
 
     [Fact]
@@ -204,26 +268,9 @@ public class SaudeFinanceiraServiceTests
     }
 
     [Fact]
-    public void Calcular_ComMetaTaxaZeradaEMenosDeUmMesDecorrido_MensagemDizAguardarNaoNenhumaMeta()
-    {
-        var meta = new MetaAnual
-        {
-            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ModoMeta = "metodo",
-            ValorSonho = 4000m, PrazoAnos = 1, TaxaRetorno = 0m, TotalInvestido = 2000m,
-            AtualizadoEm = DateTime.UtcNow, CriadoEm = DateTime.UtcNow,
-        };
-
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
-
-        Assert.False(resultado.RitmoMeta.Disponivel);
-        Assert.Contains("aguarde", resultado.RitmoMeta.Calculo, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Nenhuma meta", resultado.RitmoMeta.Calculo);
-    }
-
-    [Fact]
     public void Calcular_IgnoraTransferenciasERendimentoNaTaxaDePoupanca()
     {
-        var registro = CriarRegistro(Hoje, entradas: 1000m, saidas: 700m);
+        var registro = CriarRegistro(MesFechado, entradas: 1000m, saidas: 700m);
         registro.Entradas.Add(new ItemFinanceiro { Descricao = "Resgate", Valor = 5000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
         registro.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aporte", Valor = 2000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
         registro.Entradas.Add(new ItemFinanceiro { Descricao = "Rendimento", Valor = 50m, Categoria = "Rendimento", TipoCusto = "Rendimento" });

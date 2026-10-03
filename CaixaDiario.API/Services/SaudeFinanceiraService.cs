@@ -11,17 +11,24 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
         List<MetaAnual> metas)
     {
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
-        var anoAtual = hoje.Year;
-        var mesAtual = hoje.Month;
+        // Último mês FECHADO (mês anterior ao atual), não o corrente — Taxa de Poupança e
+        // Comprometimento Fixo são indicadores mensais, incompletos enquanto o mês ainda não
+        // terminou (mostravam "sem receita" no dia 1, ou um número com poucos dias de dados).
+        // Comprometimento já usava essa mesma janela internamente (média dos últimos 3 meses
+        // contados a partir de "hoje", o que já exclui o mês corrente); Taxa de Poupança usava o
+        // mês corrente — essa divergência interna era parte do bug relatado.
+        var mesFechado = hoje.AddMonths(-1);
+        var anoRef = mesFechado.Year;
+        var mesRef = mesFechado.Month;
         var reg = registros.Where(r => !r.Excluido).ToList();
-        var nomeMes = CultureInfo.GetCultureInfo("pt-BR").DateTimeFormat.GetMonthName(mesAtual);
+        var nomeMes = CultureInfo.GetCultureInfo("pt-BR").DateTimeFormat.GetMonthName(mesRef);
 
         return new SaudeFinanceiraDto
         {
-            Periodo              = $"{char.ToUpperInvariant(nomeMes[0])}{nomeMes[1..]}/{anoAtual}",
-            TaxaPoupanca        = CalcTaxaPoupanca(reg, anoAtual, mesAtual),
+            Periodo              = $"{char.ToUpperInvariant(nomeMes[0])}{nomeMes[1..]}/{anoRef} · último mês fechado",
+            TaxaPoupanca        = CalcTaxaPoupanca(reg, anoRef, mesRef),
             ComprometimentoFixos = CalcComprometimento(reg, hoje),
-            RitmoMeta           = CalcRitmoMeta(metas, anoAtual, mesAtual),
+            RitmoMeta           = CalcRitmoMeta(metas, hoje),
         };
     }
 
@@ -94,103 +101,86 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
     }
 
     // ── 3. Ritmo da Meta ────────────────────────────────────────────────────
-    private static GaugeIndicadorDto CalcRitmoMeta(
-        List<MetaAnual> metas, int anoAtual, int mesAtual)
+    // Proporcional e linear, não mais "aporte planejado vs. aporte necessário agora" a juros
+    // compostos — essa conta travava num "Dados insuficientes, aguarde 1 mês" sempre que
+    // mesesDecorridos <= 0 (meta recém-criada), e não dava pra mostrar nada em R$ nesse momento,
+    // que é exatamente quando o usuário mais quer ver o card reagir. Acumulado (TotalInvestido)
+    // é comparado direto com o esperado linear até hoje (ValorSonho × fração do prazo decorrida):
+    // funciona desde o dia 1 da meta (fração = 0, esperado = 0) e dá uma diferença em R$ sempre.
+    private static GaugeIndicadorDto CalcRitmoMeta(List<MetaAnual> metas, DateOnly hoje)
     {
-        // TaxaRetorno == 0 é uma meta legítima (guardar sem render) — só < 0 não faz sentido aqui.
-        // A matemática de juros composto abaixo precisa de tratamento linear separado pra 0%
-        // (ver TaxaZerada), senão cai em divisão por zero.
-        var elegiveis = metas.Where(m =>
-            m.ModoMeta == "metodo" && m.ValorSonho > 0
-            && m.PrazoAnos > 0 && m.TaxaRetorno >= 0).ToList();
+        var elegiveis = metas.Where(m => m.ModoMeta == "metodo" && m.ValorSonho > 0).ToList();
 
         if (elegiveis.Count == 0)
             return Indisponivel("Ritmo da Meta",
-                "Progresso real vs. ritmo necessário para atingir a meta de sonho.",
+                "Compara o quanto já foi investido com o esperado linear até hoje, para a meta de sonho.",
                 "Nenhuma meta de investimento configurada.");
 
-        decimal? piorRitmo = null;
-        string melhorCalculo = "";
+        GaugeIndicadorDto? pior = null;
+        decimal piorRazao = decimal.MaxValue;
+        var algumaAtingida = false;
 
         foreach (var meta in elegiveis)
         {
-            var aporteMensal = CalcularAporteMensal(meta);
-            if (aporteMensal <= 0) continue;
+            var label = string.IsNullOrWhiteSpace(meta.Sonho) ? "meta" : $"\"{meta.Sonho}\"";
 
-            var prazoTotal       = meta.PrazoAnos * 12;
-            var mesesDecorridos  = (anoAtual - meta.AtualizadoEm.Year) * 12
-                                 + (mesAtual  - meta.AtualizadoEm.Month);
-            var mesesRestantes   = prazoTotal - mesesDecorridos;
-
-            if (mesesDecorridos <= 0 || mesesRestantes <= 1) continue;
-
-            var i = Math.Pow(1 + (double)meta.TaxaRetorno / 100, 1.0 / 12) - 1;
-            var fvCorrigido  = (double)meta.TotalInvestido * Math.Pow(1 + i, mesesRestantes);
-            var fvNecessario = (double)meta.ValorSonho - fvCorrigido;
-
-            decimal ritmo;
-            if (fvNecessario <= 0)
+            if (meta.TotalInvestido >= meta.ValorSonho)
             {
-                ritmo = 150m; // meta já atingida
-            }
-            else if (TaxaZerada(meta.TaxaRetorno))
-            {
-                var aporteAgoraLinear = (decimal)fvNecessario / mesesRestantes;
-                if (aporteAgoraLinear <= 0) continue;
-                ritmo = aporteMensal / aporteAgoraLinear * 100m;
-            }
-            else
-            {
-                var aporteAgora = (decimal)((fvNecessario * i) / (Math.Pow(1 + i, mesesRestantes) - 1));
-                if (aporteAgora <= 0) continue;
-                ritmo = aporteMensal / aporteAgora * 100m;
+                algumaAtingida = true;
+                continue;
             }
 
-            // Guarda o pior ritmo (menor valor = mais atrasado)
-            if (piorRitmo == null || ritmo < piorRitmo)
+            var dataInicio = DateOnly.FromDateTime(meta.AtualizadoEm);
+            var dataAlvo = meta.DataAlvo ?? dataInicio.AddMonths(meta.PrazoAnos * 12);
+            var prazoTotalMeses = MesesEntre(dataInicio, dataAlvo);
+            if (prazoTotalMeses <= 0) continue; // dado de prazo inconsistente — não dá pra projetar
+
+            var mesesDecorridos = Math.Max(0, MesesEntre(dataInicio, hoje));
+            var fracaoDecorrida = Math.Min(1m, (decimal)mesesDecorridos / prazoTotalMeses);
+            var esperado = meta.ValorSonho * fracaoDecorrida;
+            var diferenca = meta.TotalInvestido - esperado;
+            // Nada esperado ainda (meta criada agora): qualquer valor já investido conta como
+            // adiantado; sem nada investido, trata como "no ritmo" em vez de indisponível.
+            var razao = esperado > 0 ? meta.TotalInvestido / esperado : (meta.TotalInvestido > 0 ? 1.5m : 1m);
+
+            if (razao < piorRazao)
             {
-                piorRitmo = ritmo;
-                var label = string.IsNullOrWhiteSpace(meta.Sonho) ? "meta" : $"\"{meta.Sonho}\"";
-                melhorCalculo = $"Aporte planejado ÷ Aporte necessário agora = {ritmo:F1}% ({label})";
+                piorRazao = razao;
+                var status = razao >= 1.1m ? "Adiantado" : razao >= 0.9m ? "No ritmo" : "Atrasado";
+                pior = new GaugeIndicadorDto
+                {
+                    Titulo           = "Ritmo da Meta",
+                    Valor            = Math.Round(razao * 100m, 1),
+                    ValorNormalizado = Math.Max(0m, Math.Min(100m, razao * 100m)),
+                    Semaforo         = razao >= 0.9m ? "verde" : razao >= 0.7m ? "amarelo" : "vermelho",
+                    Descricao        = "Compara o quanto já foi investido com o esperado linear até hoje, para a meta de sonho.",
+                    Calculo          = $"Investido vs. esperado linear até hoje, {Math.Round(fracaoDecorrida * 100m, 0)}% do prazo decorrido ({label})",
+                    Disponivel       = true,
+                    StatusRitmo      = status,
+                    DiferencaReais   = Math.Round(diferenca, 2),
+                };
             }
         }
 
-        if (piorRitmo == null)
-            return Indisponivel("Ritmo da Meta",
-                "Progresso real vs. ritmo necessário para atingir a meta de sonho.",
-                "Dados insuficientes — aguarde ao menos 1 mês após configurar a meta.");
+        if (pior != null) return pior;
 
-        var val = Math.Round(piorRitmo.Value, 1);
-        return new GaugeIndicadorDto
-        {
-            Titulo           = "Ritmo da Meta",
-            Valor            = val,                              // pode ser >100 se adiantado
-            ValorNormalizado = Math.Max(0m, Math.Min(100m, val)), // arco vai de 0 a 100
-            Semaforo         = val >= 95m ? "verde" : val >= 75m ? "amarelo" : "vermelho",
-            Descricao        = "Compara o aporte planejado com o aporte necessário agora. 100% = exatamente no ritmo; acima = adiantado; abaixo = atrasado.",
-            Calculo          = melhorCalculo,
-            Disponivel       = true,
-        };
+        if (algumaAtingida)
+            return new GaugeIndicadorDto
+            {
+                Titulo = "Ritmo da Meta", Valor = 100m, ValorNormalizado = 100m, Semaforo = "verde",
+                Descricao = "Compara o quanto já foi investido com o esperado linear até hoje, para a meta de sonho.",
+                Calculo = "Meta de sonho já atingida.", Disponivel = true,
+                StatusRitmo = "Atingida", DiferencaReais = 0m,
+            };
+
+        return Indisponivel("Ritmo da Meta",
+            "Compara o quanto já foi investido com o esperado linear até hoje, para a meta de sonho.",
+            "Meta sem prazo configurado (defina o prazo ou a data-alvo).");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
-    private static bool TaxaZerada(decimal taxaRetornoAnual) => taxaRetornoAnual == 0m;
-
-    private static decimal CalcularAporteMensal(MetaAnual meta)
-    {
-        if (meta.ValorSonho <= 0 || meta.PrazoAnos <= 0 || meta.TaxaRetorno < 0) return 0m;
-        var n = meta.PrazoAnos * 12;
-        if (TaxaZerada(meta.TaxaRetorno))
-        {
-            var fvNecessarioLinear = meta.ValorSonho - meta.TotalInvestido;
-            return fvNecessarioLinear <= 0 ? 0m : fvNecessarioLinear / n;
-        }
-        var i = Math.Pow(1 + (double)meta.TaxaRetorno / 100, 1.0 / 12) - 1;
-        var fvAtual      = (double)meta.TotalInvestido * Math.Pow(1 + i, n);
-        var fvNecessario = (double)meta.ValorSonho - fvAtual;
-        if (fvNecessario <= 0) return 0m;
-        return (decimal)((fvNecessario * i) / (Math.Pow(1 + i, n) - 1));
-    }
+    private static int MesesEntre(DateOnly inicio, DateOnly fim) =>
+        (fim.Year - inicio.Year) * 12 + (fim.Month - inicio.Month);
 
     private static GaugeIndicadorDto Indisponivel(string titulo, string descricao, string calculo) =>
         new()
