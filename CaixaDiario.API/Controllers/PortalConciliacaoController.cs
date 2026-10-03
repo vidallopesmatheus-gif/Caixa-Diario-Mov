@@ -30,4 +30,11 @@ public class PortalConciliacaoController : ControllerBase
         await _service.ClassificarAsync(token, dto);
         return Ok(new ApiResponse<object> { Dados = null });
     }
+
+    [HttpPost("{token}/sugerir-regra")]
+    public async Task<IActionResult> SugerirRegra(string token, [FromBody] SugerirRegraPortalDto dto)
+    {
+        await _service.SugerirRegraAsync(token, dto);
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
 }

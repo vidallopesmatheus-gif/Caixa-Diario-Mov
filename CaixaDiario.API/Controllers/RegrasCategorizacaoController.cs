@@ -81,4 +81,11 @@ public class RegrasCategorizacaoController : ControllerBase
         var resultado = await _service.AplicarRetroativamenteAsync(id, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<AplicarRetroativoResultDto> { Dados = resultado });
     }
+
+    [HttpPost("{id:guid}/aprovar-sugestao")]
+    public async Task<IActionResult> AprovarSugestao(Guid id, [FromBody] AprovarSugestaoDto? dto)
+    {
+        var aprovada = await _service.AprovarSugestaoAsync(id, dto ?? new AprovarSugestaoDto(), ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<RegraCategorizacaoDto> { Dados = aprovada });
+    }
 }

@@ -12,4 +12,7 @@ public class CriarRegraDto
     [Required] public string AcaoTipo { get; set; } = string.Empty; // "Categoria" | "Transferencia"
     public string? Categoria { get; set; }
     public Guid? ContaContrapartidaId { get; set; }
+    // Confirmação explícita pra criar mesmo havendo outra regra ativa com o mesmo critério e ação
+    // diferente — sem isso, CriarAsync recusa com REGRA_CONFLITANTE (ver RegraCategorizacaoService).
+    public bool ForcarApesarDeConflito { get; set; }
 }

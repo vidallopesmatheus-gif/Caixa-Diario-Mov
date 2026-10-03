@@ -13,6 +13,7 @@ export interface CriarRegraDto {
   acaoTipo: 'Categoria' | 'Transferencia'
   categoria?: string
   contaContrapartidaId?: string
+  forcarApesarDeConflito?: boolean
 }
 
 export const criarRegra = async (clienteId: string, dto: CriarRegraDto): Promise<RegraCategorizacao> => {
@@ -72,4 +73,13 @@ export const aplicarRegraRetroativamente = async (id: string): Promise<number> =
     method: 'POST',
   })
   return res.dados?.totalCategorizados ?? 0
+}
+
+/** Aprova uma regra sugerida pelo cliente no portal público — passa a valer de verdade. */
+export const aprovarSugestaoRegra = async (id: string, forcarApesarDeConflito = false): Promise<RegraCategorizacao> => {
+  const res = await apiFetch<ApiResponse<RegraCategorizacao>>(`/api/regras-categorizacao/${id}/aprovar-sugestao`, {
+    method: 'POST',
+    body: JSON.stringify({ forcarApesarDeConflito }),
+  })
+  return res.dados
 }

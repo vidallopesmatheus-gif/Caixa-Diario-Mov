@@ -14,6 +14,9 @@ public class RegraCategorizacaoDto
     public Guid? ContaContrapartidaId { get; set; }
     public string? ContaContrapartidaNome { get; set; }
     public bool Ativa { get; set; }
+    // Verdadeiro = sugerida pelo cliente no portal público, aguardando aprovação do consultor —
+    // ainda não classifica nada (Ativa fica false até ser aprovada).
+    public bool Sugerida { get; set; }
     public int Ordem { get; set; }
     // Calculado ao vivo (itens com RegraCategorizacaoId == Id) — nunca armazenado, pra não
     // desalinhar do que realmente existe nos lançamentos.

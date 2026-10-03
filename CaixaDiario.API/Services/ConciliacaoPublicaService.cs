@@ -17,19 +17,22 @@ public class ConciliacaoPublicaService : IConciliacaoPublicaService
     private readonly IContaBancariaRepository _contaRepo;
     private readonly ICategoriaRepository _categoriaRepo;
     private readonly ICategoriaService _categoriaService;
+    private readonly IRegraCategorizacaoRepository _regraRepo;
 
     public ConciliacaoPublicaService(
         ILinkConciliacaoRepository linkRepo,
         IRegistroRepository registroRepo,
         IContaBancariaRepository contaRepo,
         ICategoriaRepository categoriaRepo,
-        ICategoriaService categoriaService)
+        ICategoriaService categoriaService,
+        IRegraCategorizacaoRepository regraRepo)
     {
         _linkRepo = linkRepo;
         _registroRepo = registroRepo;
         _contaRepo = contaRepo;
         _categoriaRepo = categoriaRepo;
         _categoriaService = categoriaService;
+        _regraRepo = regraRepo;
     }
 
     public async Task<PortalConciliacaoDto> ObterPendentesAsync(string token)
@@ -124,6 +127,49 @@ public class ConciliacaoPublicaService : IConciliacaoPublicaService
             link.TotalClassificadosPeloCliente += totalClassificados;
             await _linkRepo.AtualizarAsync(link);
         }
+    }
+
+    public async Task SugerirRegraAsync(string token, SugerirRegraPortalDto dto)
+    {
+        var link = await ObterLinkValidoAsync(token);
+
+        var conta = await _contaRepo.ObterPorIdAsync(dto.ContaBancariaId);
+        // Mesma defesa de ClassificarAsync — nunca confia no contaBancariaId do payload sem
+        // conferir que é mesmo do cliente dono do token (endpoint sem login).
+        if (conta == null || conta.ClienteId != link.ClienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+        if (dto.Tipo is not ("Entrada" or "Saida"))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Tipo deve ser Entrada ou Saida.");
+        if (string.IsNullOrWhiteSpace(dto.Categoria))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe a categoria da regra.", "categoria");
+
+        var (criterioTipo, criterioValor) = DescricaoMatcher.DeterminarCriterio(dto.DescricaoReferencia);
+
+        // Não duplica: já existe regra (sugerida ou aprovada) com o mesmo critério pra esse cliente.
+        var existentes = await _regraRepo.ListarPorClienteAsync(link.ClienteId);
+        if (existentes.Any(r => r.ContaBancariaId == dto.ContaBancariaId && r.Tipo == dto.Tipo
+            && r.CriterioTipo == criterioTipo && r.CriterioValor == criterioValor))
+            return;
+
+        var regra = new RegraCategorizacao
+        {
+            Id = Guid.NewGuid(),
+            ClienteId = link.ClienteId,
+            ContaBancariaId = dto.ContaBancariaId,
+            Tipo = dto.Tipo,
+            CriterioTipo = criterioTipo,
+            CriterioValor = criterioValor,
+            DescricaoReferencia = dto.DescricaoReferencia,
+            AcaoTipo = "Categoria",
+            Categoria = dto.Categoria,
+            // Nasce inativa e marcada como sugestão — só passa a classificar lançamento nenhum
+            // depois que o consultor aprovar (RegraCategorizacaoService.AprovarSugestaoAsync).
+            Ativa = false,
+            Sugerida = true,
+            Ordem = 0,
+            CriadoEm = DateTime.UtcNow,
+        };
+        await _regraRepo.AdicionarAsync(regra);
     }
 
     private static IEnumerable<PendenteCategorizacaoDto> PendentesDoRegistro(RegistroDiario r) =>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
-import { obterPortalConciliacao, classificarPendentePortal } from '../../api/portalConciliacao'
+import { obterPortalConciliacao, classificarPendentePortal, sugerirRegraPortal } from '../../api/portalConciliacao'
 import { PortalApiError } from '../../api/portalClient'
 import { agruparPorDescricaoSimilar } from '../../utils/descricaoSimilar'
 import { fmtBRL } from '../../utils/format'
@@ -56,12 +56,21 @@ export default function PortalConciliacaoPage() {
     [dados],
   )
 
-  async function classificar(conta: ContaPendentesPortal, itens: PendenteCategorizacao[], categoria: string) {
+  async function classificar(
+    conta: ContaPendentesPortal, itens: PendenteCategorizacao[], categoria: string, lembrarRegra?: boolean,
+  ) {
     if (!token || itens.length === 0) return
     setSalvandoIds(prev => new Set([...prev, ...itens.map(i => i.id)]))
     setErroSalvar('')
     try {
       await classificarPendentePortal(token, itens.map(i => ({ id: i.id, data: i.data, contaBancariaId: conta.contaBancariaId, categoria })))
+      if (lembrarRegra) {
+        // Falha aqui não desfaz a classificação já salva — só não nasce a sugestão de regra,
+        // sem problema pro cliente tentar de novo numa próxima classificação parecida.
+        sugerirRegraPortal(token, {
+          contaBancariaId: conta.contaBancariaId, tipo: itens[0].tipo, descricaoReferencia: itens[0].descricao, categoria,
+        }).catch(() => {})
+      }
       const idsAplicados = new Set(itens.map(i => i.id))
       setDados(prev => {
         if (!prev) return prev
@@ -142,7 +151,7 @@ export default function PortalConciliacaoPage() {
                 categoriasEntrada={dados.categoriasEntrada}
                 categoriasSaida={dados.categoriasSaida}
                 salvandoIds={salvandoIds}
-                onClassificar={(itens, categoria) => classificar(conta, itens, categoria)}
+                onClassificar={(itens, categoria, lembrarRegra) => classificar(conta, itens, categoria, lembrarRegra)}
               />
             ))}
           </>
@@ -159,9 +168,10 @@ function ContaSecao({
   categoriasEntrada: CategoriaItem[]
   categoriasSaida: CategoriaItem[]
   salvandoIds: Set<string>
-  onClassificar: (itens: PendenteCategorizacao[], categoria: string) => void
+  onClassificar: (itens: PendenteCategorizacao[], categoria: string, lembrarRegra?: boolean) => void
 }) {
   const grupos = useMemo(() => agruparPorDescricaoSimilar(conta.itens), [conta.itens])
+  const [lembrarPorGrupo, setLembrarPorGrupo] = useState<Record<string, boolean>>({})
 
   return (
     <section className="portal-conta">
@@ -190,9 +200,17 @@ function ContaSecao({
                 <PortalCategoriaSelect
                   categorias={categorias}
                   placeholder="Categorizar todos..."
-                  onSelect={cat => onClassificar(g.itens, cat)}
+                  onSelect={cat => onClassificar(g.itens, cat, lembrarPorGrupo[g.chave])}
                 />
               </div>
+              <label className="portal-lembrar-regra">
+                <input
+                  type="checkbox"
+                  checked={lembrarPorGrupo[g.chave] ?? false}
+                  onChange={e => setLembrarPorGrupo(prev => ({ ...prev, [g.chave]: e.target.checked }))}
+                />
+                Lembrar essa categoria pra lançamentos parecidos no futuro
+              </label>
               {g.itens.map(item => (
                 <PortalLinhaPendente
                   key={item.id}

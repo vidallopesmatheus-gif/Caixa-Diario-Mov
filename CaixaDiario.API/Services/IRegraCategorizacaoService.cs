@@ -13,4 +13,7 @@ public interface IRegraCategorizacaoService
     Task ReordenarAsync(Guid clienteId, List<Guid> ids, Guid usuarioLogadoId, string perfil);
     Task<int> ContarCorrespondenciasAsync(Guid contaBancariaId, string tipo, string descricaoReferencia, Guid usuarioLogadoId, string perfil);
     Task<AplicarRetroativoResultDto> AplicarRetroativamenteAsync(Guid id, Guid usuarioLogadoId, string perfil);
+    // Aprova uma regra sugerida pelo cliente no portal público (Sugerida=true) — passa a valer de
+    // verdade (Sugerida=false, Ativa=true). Rejeitar é só ExcluirAsync, já existente.
+    Task<RegraCategorizacaoDto> AprovarSugestaoAsync(Guid id, AprovarSugestaoDto dto, Guid usuarioLogadoId, string perfil);
 }

@@ -15,3 +15,13 @@ export const classificarPendentePortal = async (
     body: JSON.stringify({ itens }),
   })
 }
+
+export const sugerirRegraPortal = async (
+  token: string,
+  sugestao: { contaBancariaId: string; tipo: 'Entrada' | 'Saida'; descricaoReferencia: string; categoria: string },
+): Promise<void> => {
+  await portalFetch<ApiResponse<null>>(`/api/portal-conciliacao/${token}/sugerir-regra`, {
+    method: 'POST',
+    body: JSON.stringify(sugestao),
+  })
+}

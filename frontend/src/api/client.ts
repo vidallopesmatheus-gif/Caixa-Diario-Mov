@@ -1,5 +1,17 @@
 const BASE = import.meta.env.VITE_API_URL ?? ''
 
+// Carrega o código de erro intacto (ex.: "REGRA_CONFLITANTE") pra quem chama decidir a UI,
+// em vez de só ter a mensagem — mesma ideia do PortalApiError, mas pro cliente autenticado.
+export class ApiError extends Error {
+  codigo: string
+  campo?: string
+  constructor(codigo: string, mensagem: string, campo?: string) {
+    super(mensagem)
+    this.codigo = codigo
+    this.campo = campo
+  }
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -23,7 +35,7 @@ export async function apiFetch<T>(
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err?.mensagem ?? `Erro ${res.status}`)
+    throw new ApiError(err?.codigo ?? 'ERRO_DESCONHECIDO', err?.mensagem ?? `Erro ${res.status}`, err?.campo)
   }
   return res.json()
 }

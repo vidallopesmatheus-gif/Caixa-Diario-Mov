@@ -15,6 +15,7 @@ public class ConciliacaoPublicaServiceTests
     private readonly Mock<IContaBancariaRepository> _contaRepoMock = new();
     private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
     private readonly Mock<ICategoriaService> _categoriaServiceMock = new();
+    private readonly Mock<IRegraCategorizacaoRepository> _regraRepoMock = new();
     private readonly ConciliacaoPublicaService _sut;
 
     public ConciliacaoPublicaServiceTests()
@@ -22,8 +23,14 @@ public class ConciliacaoPublicaServiceTests
         _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
         _categoriaServiceMock.Setup(s => s.ListarAgrupadasAsync()).ReturnsAsync(new CategoriasAgrupadasDto());
         _sut = new ConciliacaoPublicaService(
-            _linkRepoMock.Object, _registroRepoMock.Object, _contaRepoMock.Object, _categoriaRepoMock.Object, _categoriaServiceMock.Object);
+            _linkRepoMock.Object, _registroRepoMock.Object, _contaRepoMock.Object, _categoriaRepoMock.Object,
+            _categoriaServiceMock.Object, _regraRepoMock.Object);
     }
+
+    private static ContaBancaria CriarConta(Guid id, Guid clienteId) => new()
+    {
+        Id = id, ClienteId = clienteId, Nome = "Conta Teste", Tipo = "ContaCorrente", Ativa = true, DataCriacao = DateTime.UtcNow,
+    };
 
     private static LinkConciliacao CriarLinkValido(Guid clienteId) => new()
     {
@@ -156,5 +163,97 @@ public class ConciliacaoPublicaServiceTests
 
         Assert.Equal(0, link.TotalClassificadosPeloCliente);
         _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    // ── SugerirRegraAsync (Bloco 4B) ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SugerirRegraAsync_PedidoValido_CriaRegraComoSugestaoInativa()
+    {
+        var clienteId = Guid.NewGuid();
+        var link = CriarLinkValido(clienteId);
+        _linkRepoMock.Setup(r => r.ObterPorTokenAsync(link.Token)).ReturnsAsync(link);
+        var contaId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegraCategorizacao>());
+
+        RegraCategorizacao? criada = null;
+        _regraRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>()))
+            .Callback<RegraCategorizacao>(r => criada = r).ReturnsAsync((RegraCategorizacao r) => r);
+
+        var dto = new SugerirRegraPortalDto
+        {
+            ContaBancariaId = contaId, Tipo = "Saida", DescricaoReferencia = "Pix enviado - MERCADO X", Categoria = "Insumos/Mercadoria",
+        };
+
+        await _sut.SugerirRegraAsync(link.Token, dto);
+
+        Assert.NotNull(criada);
+        Assert.Equal(clienteId, criada!.ClienteId);
+        Assert.Equal("Insumos/Mercadoria", criada.Categoria);
+        Assert.True(criada.Sugerida);
+        Assert.False(criada.Ativa); // só passa a valer depois de aprovada
+    }
+
+    [Fact]
+    public async Task SugerirRegraAsync_ContaDeOutroCliente_LancaAcessoNegadoSemCriarRegra()
+    {
+        var link = CriarLinkValido(Guid.NewGuid());
+        _linkRepoMock.Setup(r => r.ObterPorTokenAsync(link.Token)).ReturnsAsync(link);
+        var contaDeOutroCliente = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaDeOutroCliente)).ReturnsAsync(CriarConta(contaDeOutroCliente, Guid.NewGuid()));
+
+        var dto = new SugerirRegraPortalDto
+        {
+            ContaBancariaId = contaDeOutroCliente, Tipo = "Saida", DescricaoReferencia = "x", Categoria = "Qualquer",
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SugerirRegraAsync(link.Token, dto));
+
+        Assert.Equal(403, ex.StatusCode);
+        _regraRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SugerirRegraAsync_JaExisteRegraComMesmoCriterio_NaoDuplica()
+    {
+        var clienteId = Guid.NewGuid();
+        var link = CriarLinkValido(clienteId);
+        _linkRepoMock.Setup(r => r.ObterPorTokenAsync(link.Token)).ReturnsAsync(link);
+        var contaId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var existente = new RegraCategorizacao
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Tipo = "Saida",
+            CriterioTipo = "DescricaoExata", CriterioValor = "PIX ENVIADO - MERCADO X", DescricaoReferencia = "Pix enviado - MERCADO X",
+            AcaoTipo = "Categoria", Categoria = "Insumos/Mercadoria", Ativa = true,
+        };
+        _regraRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegraCategorizacao> { existente });
+
+        var dto = new SugerirRegraPortalDto
+        {
+            ContaBancariaId = contaId, Tipo = "Saida", DescricaoReferencia = "Pix enviado - MERCADO X", Categoria = "Insumos/Mercadoria",
+        };
+
+        await _sut.SugerirRegraAsync(link.Token, dto);
+
+        _regraRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegraCategorizacao>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SugerirRegraAsync_SemCategoria_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var link = CriarLinkValido(clienteId);
+        _linkRepoMock.Setup(r => r.ObterPorTokenAsync(link.Token)).ReturnsAsync(link);
+        var contaId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var dto = new SugerirRegraPortalDto { ContaBancariaId = contaId, Tipo = "Saida", DescricaoReferencia = "x", Categoria = "" };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SugerirRegraAsync(link.Token, dto));
+
+        Assert.Equal(400, ex.StatusCode);
     }
 }
