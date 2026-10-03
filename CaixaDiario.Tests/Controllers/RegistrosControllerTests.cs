@@ -83,7 +83,7 @@ public class RegistrosControllerTests
     {
         var dto = CriarRegistroDto(Guid.NewGuid());
         var criarDto = new CriarRegistroDto { ClienteId = dto.ClienteId, Data = dto.Data };
-        _serviceMock.Setup(s => s.SalvarAsync(It.IsAny<CriarRegistroDto>(), "testuser")).ReturnsAsync((dto, true));
+        _serviceMock.Setup(s => s.SalvarAsync(It.IsAny<CriarRegistroDto>(), "testuser", _usuarioId, "admin")).ReturnsAsync((dto, true));
 
         var result = await _sut.Salvar(criarDto);
 
@@ -95,7 +95,7 @@ public class RegistrosControllerTests
     {
         var dto = CriarRegistroDto(Guid.NewGuid());
         var criarDto = new CriarRegistroDto { ClienteId = dto.ClienteId, Data = dto.Data };
-        _serviceMock.Setup(s => s.SalvarAsync(It.IsAny<CriarRegistroDto>(), "testuser")).ReturnsAsync((dto, false));
+        _serviceMock.Setup(s => s.SalvarAsync(It.IsAny<CriarRegistroDto>(), "testuser", _usuarioId, "admin")).ReturnsAsync((dto, false));
 
         var result = await _sut.Salvar(criarDto);
 

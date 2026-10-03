@@ -36,7 +36,7 @@ public class RegistrosController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Salvar([FromBody] CriarRegistroDto dto)
     {
-        var (resultado, criado) = await _registroService.SalvarAsync(dto, ObterNomeUsuario());
+        var (resultado, criado) = await _registroService.SalvarAsync(dto, ObterNomeUsuario(), ObterUsuarioId(), ObterPerfil());
         if (criado)
             return CreatedAtAction(nameof(ObterPorData), new { clienteId = resultado.ClienteId, data = resultado.Data },
                 new ApiResponse<RegistroDto> { Dados = resultado });

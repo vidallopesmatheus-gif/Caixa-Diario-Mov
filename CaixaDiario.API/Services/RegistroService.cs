@@ -50,8 +50,11 @@ public class RegistroService : IRegistroService
         return MapToDto(registro);
     }
 
-    public async Task<(RegistroDto dto, bool criado)> SalvarAsync(CriarRegistroDto dto, string nomeUsuarioLogado)
+    public async Task<(RegistroDto dto, bool criado)> SalvarAsync(CriarRegistroDto dto, string nomeUsuarioLogado, Guid usuarioLogadoId, string perfil)
     {
+        if (perfil == "cliente" && usuarioLogadoId != dto.ClienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+
         if (dto.Saidas.Any(s => string.IsNullOrWhiteSpace(s.Categoria)))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Toda saída deve ter uma categoria.", "categoria");
 
