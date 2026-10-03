@@ -25,6 +25,7 @@ import type { MetaAnual } from '../../types'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, ReferenceLine } from 'recharts'
 import { grupoDaCategoria, CORES_GRUPO } from '../../utils/categorias'
 import { ehOperacional } from '../../utils/lancamentos'
+import { calcularCapitalInvestido, calcularProjecaoSelic } from '../../utils/investimentos'
 import './ClientDashboard.css'
 import './dashboard/DashboardResumo.css'
 
@@ -141,12 +142,14 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [objetivoMsg, setObjetivoMsg] = useState('')
   const [selic, setSelic] = useState(10.5)
   const [selicIndisponivel, setSelicIndisponivel] = useState(false)
+  const [selicDataReferencia, setSelicDataReferencia] = useState<string | null>(null)
   const [simAporteExtra, setSimAporteExtra] = useState('')
 
   useEffect(() => {
     obterSelicAtual().then(r => {
       setSelic(r.valor)
       setSelicIndisponivel(r.fonte === 'indisponivel')
+      setSelicDataReferencia(r.dataReferencia)
     })
   }, [])
 
@@ -319,21 +322,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     return (fvNecessario * i) / (Math.pow(1 + i, n) - 1)
   }, [editValorSonho, mesesAteAlvo, editTaxaRetorno, editTotalInvestido])
 
-  // Capital real de portfólio (soma das contas tipo Investimento) — não o campo "Já investido" de
-  // um objetivo específico, que é sobre o progresso daquele objetivo, não sobre o total investido.
-  const capitalInvestido = useMemo(() =>
-    contasBancarias.filter(c => c.tipo === 'Investimento' && c.ativa).reduce((s, c) => s + c.saldoAtual, 0),
-  [contasBancarias])
+  // Capital real de portfólio — não o campo "Já investido" de um objetivo específico, que é sobre
+  // o progresso daquele objetivo, não sobre o total investido. Ver utils/investimentos.ts.
+  const capitalInvestido = useMemo(() => calcularCapitalInvestido(contasBancarias, registros), [contasBancarias, registros])
 
-  const projecaoSelic = useMemo(() => {
-    const base = capitalInvestido
-    if (!base || !selic) return null
-    return {
-      dez: base * Math.pow(1 + selic / 100, 10),
-      vinte: base * Math.pow(1 + selic / 100, 20),
-      trinta: base * Math.pow(1 + selic / 100, 30),
-    }
-  }, [capitalInvestido, selic])
+  const projecaoSelic = useMemo(() => calcularProjecaoSelic(capitalInvestido, selic), [capitalInvestido, selic])
 
   const trajetorias = useMemo(() => {
     const taxa = Number(editTaxaRetorno)
@@ -1017,9 +1010,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
       {projecaoSelic ? (
         <div className="meta-card">
-          <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({fmtPct(selic, 2)} a.a.)</span></h3>
+          <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({fmtPct(selic, 2)} a.a.{selicDataReferencia ? ` · ref. ${selicDataReferencia}` : ''})</span></h3>
           <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
-            Capital de {fmtBRL(capitalInvestido)} composto à SELIC, sem aportes adicionais.
+            Capital de {fmtBRL(capitalInvestido)} composto à SELIC, sem aportes adicionais. Projeção bruta, sem imposto de renda — simulação, não garantia.
           </p>
           {selicIndisponivel && (
             <p style={{ fontSize: 11, color: '#ff9500', marginBottom: 12 }}>
