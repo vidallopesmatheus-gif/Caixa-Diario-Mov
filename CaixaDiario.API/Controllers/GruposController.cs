@@ -1,4 +1,6 @@
 using CaixaDiario.API.DTOs.Categorias;
+using CaixaDiario.API.Enums;
+using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Responses;
 using CaixaDiario.API.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -14,6 +16,14 @@ public class GruposController : ControllerBase
     private readonly IGrupoService _service;
 
     public GruposController(IGrupoService service) => _service = service;
+
+    // Grupo é global (sem ClienteId) — leitura fica aberta pra qualquer usuário autenticado, mas
+    // mutação é restrita a admin, senão um cliente altera a taxonomia compartilhada de todos.
+    private void VerificarAdmin()
+    {
+        if (User.FindFirst("perfil")?.Value != "admin")
+            throw new ApiException(403, CodigoRetorno.SEM_PERMISSAO, "Acesso restrito a administradores.");
+    }
 
     [HttpGet]
     public async Task<IActionResult> Listar()
@@ -32,6 +42,7 @@ public class GruposController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Criar([FromBody] CriarGrupoDto dto)
     {
+        VerificarAdmin();
         var criado = await _service.CriarAsync(dto);
         return Ok(new ApiResponse<GrupoDto> { Dados = criado });
     }
@@ -39,6 +50,7 @@ public class GruposController : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Atualizar(Guid id, [FromBody] AtualizarGrupoDto dto)
     {
+        VerificarAdmin();
         var atualizado = await _service.AtualizarAsync(id, dto);
         return Ok(new ApiResponse<GrupoDto> { Dados = atualizado });
     }
@@ -46,6 +58,7 @@ public class GruposController : ControllerBase
     [HttpPost("{id:guid}/desativar")]
     public async Task<IActionResult> Desativar(Guid id)
     {
+        VerificarAdmin();
         await _service.DesativarAsync(id);
         return Ok(new ApiResponse<object> { Dados = null });
     }
@@ -53,6 +66,7 @@ public class GruposController : ControllerBase
     [HttpPut("reordenar")]
     public async Task<IActionResult> Reordenar([FromBody] ReordenarGruposDto dto)
     {
+        VerificarAdmin();
         await _service.ReordenarAsync(dto);
         return Ok(new ApiResponse<object> { Dados = null });
     }
