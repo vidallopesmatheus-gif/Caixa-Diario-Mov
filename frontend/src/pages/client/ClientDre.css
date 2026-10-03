@@ -262,6 +262,20 @@
   margin: 16px 0;
 }
 
+/* Flex em vez do grid de 3 colunas de .dre-linha (herdado só pelo padding/gap): rótulo à
+   esquerda, valor+percentual agrupados à direita em .dre-linha-valor-wrap. Sem isso, o valor
+   (coluna de largura fixa) sobrepunha o percentual quando tinha muitos dígitos ou a tela
+   era estreita — ver .dre-linha-valor-wrap logo abaixo, que é quem realmente quebra a linha.
+   :not(.dre-linha-cmp) exclui o modo comparativo, que continua usando o grid dinâmico de
+   .dre-linha-cmp (uma coluna por período, largura calculada por periodosComDre.length). */
+.dre-linha-subtotal:not(.dre-linha-cmp) {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
 .dre-linha-subtotal .dre-linha-label {
   font-size: 13px;
   font-weight: 700;
@@ -299,7 +313,7 @@
 
 .dre-linha-final .dre-linha-valor,
 .dre-linha-final .dre-cmp-cel-valor {
-  font-size: 24px;
+  font-size: clamp(18px, 5vw, 24px);
   font-weight: 800;
 }
 
@@ -307,6 +321,18 @@
   font-size: 16px;
   font-weight: 700;
   color: var(--tx1);
+}
+
+/* Agrupa valor+percentual das linhas de total (.dre-linha-subtotal/.dre-linha-final) num único
+   item flex alinhado à direita — gap fixo entre os dois, e quebra pro percentual descer pra
+   baixo do valor só quando não cabe lado a lado (número grande ou tela estreita). */
+.dre-linha-valor-wrap {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
 }
 
 .dre-expand {
