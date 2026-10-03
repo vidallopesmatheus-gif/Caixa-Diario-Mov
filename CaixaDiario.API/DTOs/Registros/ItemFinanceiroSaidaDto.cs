@@ -16,4 +16,7 @@ public class ItemFinanceiroSaidaDto
     public string? FitId { get; set; }
     public bool PendenteCategorizacao { get; set; }
     public bool ClassificadoPeloCliente { get; set; }
+    public string? ContraparteNome { get; set; }
+    public string? ContraparteDocumento { get; set; }
+    public string? ContraparteChave { get; set; }
 }

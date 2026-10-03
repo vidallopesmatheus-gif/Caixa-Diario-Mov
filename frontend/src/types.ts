@@ -41,6 +41,12 @@ export interface ItemFinanceiro {
   // Verdadeiro quando quem escolheu a categoria foi o cliente, pelo portal de conciliação
   // (link público) — nunca setado quando o consultor categoriza pela tela normal.
   classificadoPeloCliente?: boolean
+  // Preenchidos na importação por ContraparteExtractor (backend) — nome limpo do favorecido/
+  // pagador, documento parcial (nunca completo, ver Bloco 5B) e chave de agrupamento. Opacos pro
+  // usuário — só precisam sobreviver ao carregar/salvar de novo o dia.
+  contraparteNome?: string
+  contraparteDocumento?: string
+  contraparteChave?: string
 }
 
 export interface ItemFinanceiroSaida {
@@ -54,6 +60,9 @@ export interface ItemFinanceiroSaida {
   fitId?: string
   pendenteCategorizacao?: boolean
   classificadoPeloCliente?: boolean
+  contraparteNome?: string
+  contraparteDocumento?: string
+  contraparteChave?: string
 }
 
 

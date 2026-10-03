@@ -212,6 +212,7 @@ public class ImportacaoService : IImportacaoService
                     ? regrasDoTipo.FirstOrDefault(r => DescricaoMatcher.Casa(r.CriterioTipo, r.CriterioValor, t.Descricao))
                     : null;
                 var itemId = Guid.NewGuid();
+                var contraparte = ContraparteExtractor.Extrair(t.Descricao);
 
                 if (t.Tipo == "Entrada")
                 {
@@ -235,6 +236,9 @@ public class ImportacaoService : IImportacaoService
                             && categoriasPorNome.TryGetValue(regraCorrespondente.Categoria, out var tcEntrada) ? tcEntrada : null,
                         RegraCategorizacaoId = categorizadaPorRegra ? regraCorrespondente!.Id : null,
                         PendenteCategorizacao = pendenteEntrada,
+                        ContraparteNome = contraparte.Nome,
+                        ContraparteDocumento = contraparte.DocumentoParcial,
+                        ContraparteChave = contraparte.Chave,
                     });
                     registro.SaldoFinal += t.Valor;
                 }
@@ -282,6 +286,9 @@ public class ImportacaoService : IImportacaoService
                         FitId = t.FitId,
                         RegraCategorizacaoId = regraIdAplicada,
                         PendenteCategorizacao = pendente,
+                        ContraparteNome = contraparte.Nome,
+                        ContraparteDocumento = contraparte.DocumentoParcial,
+                        ContraparteChave = contraparte.Chave,
                     });
                     registro.SaldoFinal -= t.Valor;
                 }
@@ -553,12 +560,17 @@ public class ImportacaoService : IImportacaoService
 
     private static void ReconciliarProvisoria(ProvisoriaCandidata candidata, TransacaoParseada t)
     {
+        var contraparte = ContraparteExtractor.Extrair(t.Descricao);
+
         if (candidata.Tipo == "Entrada")
         {
             var item = candidata.Registro.Entradas.First(e => e.Id == candidata.ItemId);
             item.Descricao = t.Descricao;
             item.FitId = t.FitId;
             item.Provisoria = false;
+            item.ContraparteNome = contraparte.Nome;
+            item.ContraparteDocumento = contraparte.DocumentoParcial;
+            item.ContraparteChave = contraparte.Chave;
             candidata.Registro.Entradas = new List<ItemFinanceiro>(candidata.Registro.Entradas);
         }
         else
@@ -567,6 +579,9 @@ public class ImportacaoService : IImportacaoService
             item.Descricao = t.Descricao;
             item.FitId = t.FitId;
             item.Provisoria = false;
+            item.ContraparteNome = contraparte.Nome;
+            item.ContraparteDocumento = contraparte.DocumentoParcial;
+            item.ContraparteChave = contraparte.Chave;
             candidata.Registro.Saidas = new List<ItemFinanceiroSaida>(candidata.Registro.Saidas);
         }
         candidata.Registro.SalvoEm = DateTime.UtcNow;
