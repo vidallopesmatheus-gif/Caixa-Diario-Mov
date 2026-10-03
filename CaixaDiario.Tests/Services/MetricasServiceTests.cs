@@ -958,7 +958,12 @@ public class MetricasServiceTests
         Assert.Equal(1000m, dre.ReceitaBruta); // resgate (transferência) não entra na receita
         Assert.Equal(400m, dre.TotalDespesas); // só o aluguel — transferência e rendimento ficam de fora
         Assert.Equal(0m, dre.NaoClassificado.Total); // não viram "Não Classificado": são excluídos, não desconhecidos
-        Assert.Equal(600m, dre.Resultado);
+        // Resultado é alias de ResultadoLiquido (inclui o rendimento negativo de -30, que
+        // TotalDespesas não conta — ver comentário em MetricasService.MontarDre) — nunca mais os
+        // dois campos divergem entre si.
+        Assert.Equal(570m, dre.Resultado);
+        Assert.Equal(dre.ResultadoLiquido, dre.Resultado);
+        Assert.Equal(dre.ResultadoLiquidoPercentual, dre.Margem);
     }
 
     [Fact]
@@ -982,6 +987,11 @@ public class MetricasServiceTests
         Assert.Equal(600m, dre.ResultadoOperacional); // 1000 - 400, sem o rendimento
         Assert.Equal(80m, dre.ReceitaFinanceira.Total); // 100 (rendimento) - 20 (rendimento negativo)
         Assert.Equal(680m, dre.ResultadoLiquido); // 600 (operacional) + 80 (financeira)
+        // Bug relatado (Bloco 5A): Resultado (tela Gráfico) divergia de ResultadoLiquido (tela DRE)
+        // exatamente nesse cenário — Resultado ficava em 600 (igual ao Operacional, ignorando a
+        // receita financeira), dois números de "resultado" diferentes pro mesmo período.
+        Assert.Equal(680m, dre.Resultado);
+        Assert.Equal(dre.ResultadoLiquidoPercentual, dre.Margem);
     }
 
     [Fact]
