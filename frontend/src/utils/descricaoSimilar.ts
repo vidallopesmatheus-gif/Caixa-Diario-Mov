@@ -27,6 +27,26 @@ export function extrairDocumento(descricao: string): string | null {
   return null
 }
 
+// Mesmo padrão de mascaramento que os bancos já usam nas próprias descrições de Pix (ex.:
+// "•••.123.456-••") — aplicado aqui porque nem todo extrato chega assim; CSV/XLSX de alguns
+// bancos trazem o CPF/CNPJ completo, e a Análise de Padrão (DreKpisPanel) não pode exibir
+// documento completo em lugar nenhum, nem no drill-down de lançamentos de um favorecido.
+const REGEX_CNPJ_MASCARA = /\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/g
+const REGEX_CPF_MASCARA = /\d{3}\.?\d{3}\.?\d{3}-?\d{2}/g
+
+/** Mascara CNPJ/CPF encontrados no texto — nunca exibe o documento completo. */
+export function mascararDocumentos(texto: string): string {
+  return texto
+    .replace(REGEX_CNPJ_MASCARA, m => {
+      const d = m.replace(/\D/g, '')
+      return `••.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-••`
+    })
+    .replace(REGEX_CPF_MASCARA, m => {
+      const d = m.replace(/\D/g, '')
+      return `•••.${d.slice(3, 6)}.${d.slice(6, 9)}-••`
+    })
+}
+
 function tamanhoPrefixoComum(a: string, b: string): number {
   const max = Math.min(a.length, b.length)
   let i = 0

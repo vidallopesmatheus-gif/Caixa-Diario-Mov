@@ -1,4 +1,4 @@
-import { agruparPorDescricaoSimilar, removerPrefixoRecorrente } from './descricaoSimilar'
+import { agruparPorDescricaoSimilar, removerPrefixoRecorrente, mascararDocumentos } from './descricaoSimilar'
 
 /**
  * Ranking de favorecidos (pra quem mais se pagou) ou pagadores (de quem mais se recebeu) num
@@ -36,7 +36,11 @@ export function calcularRankingFavorecidos(
       // o agrupamento usou CNPJ/CPF como chave (agruparPorDescricaoSimilar não calcula rótulo
       // nesse caso, só a chave de agrupamento).
       const idxRepresentante = comId.findIndex(i => i.id === g.itens[0].id)
-      const rotulo = removerPrefixoRecorrente(normalizadas[idxRepresentante], normalizadas) || g.itens[0].descricao
+      const rotuloBruto = removerPrefixoRecorrente(normalizadas[idxRepresentante], normalizadas) || g.itens[0].descricao
+      // Mascara CPF/CNPJ mesmo aqui: a remoção de prefixo às vezes não consegue cortar o documento
+      // (ex.: ele aparece no meio ou no fim da descrição, não no prefixo comum ao lote), e o
+      // fallback pra descrição bruta nunca deve expor o documento completo no rótulo visível.
+      const rotulo = mascararDocumentos(rotuloBruto)
 
       return {
         rotulo,
