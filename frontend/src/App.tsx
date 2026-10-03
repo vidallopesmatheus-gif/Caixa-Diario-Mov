@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage'
 import AdminOverviewPage from './pages/admin/AdminOverviewPage'
 import AdminClientsPage from './pages/admin/AdminClientsPage'
 import AdminCaixaPage from './pages/admin/AdminCaixaPage'
+import CategoriasPage from './pages/client/configuracoes/CategoriasPage'
 import ClientCaixaPage from './pages/client/ClientCaixaPage'
 import ClientContasPage from './pages/client/ClientContasPage'
 import ClientDashboardPage from './pages/client/ClientDashboardPage'
@@ -34,6 +35,8 @@ function ProtectedRoutes() {
           <Route path="/admin/overview" element={<AdminOverviewPage />} />
           <Route path="/admin/clientes" element={<AdminClientsPage />} />
           <Route path="/admin/caixa/:clienteId" element={<AdminCaixaPage />} />
+          {/* Plano de Contas (categorias/grupos) é global — não pertence a um cliente específico */}
+          <Route path="/admin/categorias" element={<CategoriasPage />} />
           <Route path="*" element={<Navigate to="/admin/overview" replace />} />
         </Routes>
       </Layout>
