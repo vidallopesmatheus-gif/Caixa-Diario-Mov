@@ -56,6 +56,16 @@ public class RegraCategorizacaoService : IRegraCategorizacaoService
         var regrasExistentes = await _regraRepo.ListarPorClienteAsync(clienteId);
         var proximaOrdem = regrasExistentes.Count == 0 ? 0 : regrasExistentes.Max(r => r.Ordem) + 1;
 
+        if (!dto.ForcarApesarDeConflito)
+        {
+            var conflitante = EncontrarConflito(regrasExistentes, dto.ContaBancariaId, dto.Tipo, criterioTipo, criterioValor,
+                dto.AcaoTipo, dto.Categoria, dto.ContaContrapartidaId);
+            if (conflitante != null)
+                throw new ApiException(409, CodigoRetorno.REGRA_CONFLITANTE,
+                    $"Já existe uma regra ativa pra esse critério, com uma ação diferente: {DescreverAcao(conflitante)}. " +
+                    "Confirme se quer mesmo criar outra regra com o mesmo critério.");
+        }
+
         var regra = new RegraCategorizacao
         {
             Id = Guid.NewGuid(),
@@ -315,6 +325,19 @@ public class RegraCategorizacaoService : IRegraCategorizacaoService
         if (!contrapartida.Ativa)
             throw new ApiException(400, CodigoRetorno.CONTA_INATIVA, "A conta contrapartida deve estar ativa.");
     }
+
+    // Mesmo critério (conta+tipo+condição) já coberto por outra regra ATIVA, com ação diferente —
+    // categoria diferente, ou um dos dois sendo Transferência e o outro não, ou contrapartidas
+    // diferentes. Regras com a MESMA ação não contam como conflito (resultado idêntico).
+    private static RegraCategorizacao? EncontrarConflito(
+        List<RegraCategorizacao> candidatas, Guid contaBancariaId, string tipo, string criterioTipo, string criterioValor,
+        string acaoTipo, string? categoria, Guid? contaContrapartidaId) =>
+        candidatas.FirstOrDefault(r => r.Ativa && r.ContaBancariaId == contaBancariaId && r.Tipo == tipo
+            && r.CriterioTipo == criterioTipo && r.CriterioValor == criterioValor
+            && (r.AcaoTipo != acaoTipo || r.Categoria != categoria || r.ContaContrapartidaId != contaContrapartidaId));
+
+    private static string DescreverAcao(RegraCategorizacao r) =>
+        r.AcaoTipo == "Categoria" ? $"categoria \"{r.Categoria}\"" : "transferência pra outra conta";
 
     private static void ValidarDto(string tipo, string acaoTipo, string? categoria, Guid? contaContrapartidaId)
     {

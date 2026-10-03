@@ -5,6 +5,7 @@ import { listarContasBancarias } from '../../api/contasBancarias'
 import { listarCategorias } from '../../api/categorias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
 import { criarRegra, contarCorrespondencias } from '../../api/regras'
+import { ApiError } from '../../api/client'
 import { gerarLinkConciliacao, listarLinksConciliacao, revogarLinkConciliacao } from '../../api/linksConciliacao'
 import { listarFaturasCartao, sugerirFaturaCartao, vincularPagamentoFatura } from '../../api/faturasCartao'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
@@ -380,7 +381,7 @@ export default function ClientExtratoRevisaoPage() {
     return () => { cancelado = true }
   }, [regraOrigemItens, contaId])
 
-  async function confirmarCriarRegra() {
+  async function confirmarCriarRegra(forcarApesarDeConflito = false) {
     if (!regraOrigemItens || !contaId) return
     if (regraAcaoTipo === 'Categoria' && !regraCategoria) return
     if (regraAcaoTipo === 'Transferencia' && !regraContaContrapartidaId) return
@@ -394,10 +395,18 @@ export default function ClientExtratoRevisaoPage() {
         acaoTipo: regraAcaoTipo,
         categoria: regraAcaoTipo === 'Categoria' ? regraCategoria : undefined,
         contaContrapartidaId: regraAcaoTipo === 'Transferencia' ? regraContaContrapartidaId : undefined,
+        forcarApesarDeConflito,
       })
       setRegraOrigemItens(null)
       setMsg('Regra criada! Vai valer nas próximas importações desta conta — edite ou desative em Configurações → Regras.')
     } catch (e: unknown) {
+      // Já existe outra regra ativa pro mesmo critério com ação diferente — avisa e deixa escolher
+      // em vez de recusar direto (ver RegraCategorizacaoService.EncontrarConflito).
+      if (e instanceof ApiError && e.codigo === 'REGRA_CONFLITANTE' && confirm(`${e.message}\n\nCriar mesmo assim?`)) {
+        setCriandoRegra(false)
+        await confirmarCriarRegra(true)
+        return
+      }
       setMsg(e instanceof Error ? e.message : 'Erro ao criar regra.')
     } finally {
       setCriandoRegra(false)
@@ -722,7 +731,7 @@ export default function ClientExtratoRevisaoPage() {
             <button className="er-btn-lote" onClick={() => setRegraOrigemItens(null)} disabled={criandoRegra}>Cancelar</button>
             <button
               className="btn-save"
-              onClick={confirmarCriarRegra}
+              onClick={() => confirmarCriarRegra()}
               disabled={criandoRegra || (regraAcaoTipo === 'Categoria' ? !regraCategoria : !regraContaContrapartidaId)}
             >
               {criandoRegra ? 'Criando...' : 'Criar regra'}

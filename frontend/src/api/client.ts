@@ -1,5 +1,18 @@
 const BASE = import.meta.env.VITE_API_URL ?? ''
 
+// Preserva o código de erro do backend (ex.: "REGRA_CONFLITANTE") pra quem chama decidir o que
+// fazer, além da mensagem genérica — mesmo padrão de PortalApiError (api/portalClient.ts), só que
+// pro cliente autenticado em vez do portal público.
+export class ApiError extends Error {
+  codigo: string
+  campo?: string
+  constructor(codigo: string, mensagem: string, campo?: string) {
+    super(mensagem)
+    this.codigo = codigo
+    this.campo = campo
+  }
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -23,7 +36,7 @@ export async function apiFetch<T>(
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err?.mensagem ?? `Erro ${res.status}`)
+    throw new ApiError(err?.codigo ?? 'ERRO_DESCONHECIDO', err?.mensagem ?? `Erro ${res.status}`, err?.campo)
   }
   return res.json()
 }
