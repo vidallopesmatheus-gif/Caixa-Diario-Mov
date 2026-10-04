@@ -39,8 +39,10 @@ function agruparPorConta<T extends { contaId: string }>(itens: T[]): Map<string,
   return mapa
 }
 
+// `!n` trataria 0 como "vazio" e devolveria '' — faria um valor de R$ 0,00 recém-digitado voltar
+// a mostrar o placeholder cinza no blur, como se o campo nunca tivesse sido preenchido.
 function fmtNum(n: number) {
-  if (!n) return ''
+  if (Number.isNaN(n)) return ''
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 function parseBRL(s: string): number {

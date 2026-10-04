@@ -20,8 +20,10 @@ const TIPO_LABEL: Record<string, string> = {
   CartaoCredito: '💳 Cartão de Crédito',
 }
 
+// `!n` trataria 0 como "vazio" e devolveria '' — um saldo/limite legitimamente de R$ 0,00
+// apareceria como campo vazio (sem formatação "0,00") ao carregar pra edição.
 function fmtNum(n: number) {
-  if (!n) return ''
+  if (Number.isNaN(n)) return ''
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 function parseBRL(s: string): number {
