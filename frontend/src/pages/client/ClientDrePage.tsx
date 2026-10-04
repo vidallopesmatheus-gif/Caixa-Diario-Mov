@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { obterDre } from '../../api/metricas'
 import { listarContasBancarias } from '../../api/contasBancarias'
@@ -157,25 +157,26 @@ export default function ClientDrePage() {
     })
   }, [comparar, qtdPeriodos, tipo, ano, mes])
 
-  const carregar = useCallback(async () => {
+  useEffect(() => {
     if (!clienteId) return
+    let cancelado = false
     setLoading(true)
     setErro('')
-    try {
-      const resultados = await Promise.all(
-        periodos.map(p => obterDre(clienteId, p.de, p.ate, contaFiltro || undefined))
-      )
-      const mapa: Record<string, Dre> = {}
-      periodos.forEach((p, i) => { mapa[p.chave] = resultados[i] })
-      setDresPorPeriodo(mapa)
-    } catch (e: unknown) {
-      setErro(e instanceof Error ? e.message : 'Erro ao carregar DRE.')
-    } finally {
-      setLoading(false)
-    }
+    Promise.all(periodos.map(p => obterDre(clienteId, p.de, p.ate, contaFiltro || undefined)))
+      .then(resultados => {
+        if (cancelado) return
+        const mapa: Record<string, Dre> = {}
+        periodos.forEach((p, i) => { mapa[p.chave] = resultados[i] })
+        setDresPorPeriodo(mapa)
+      })
+      .catch((e: unknown) => {
+        if (!cancelado) setErro(e instanceof Error ? e.message : 'Erro ao carregar DRE.')
+      })
+      .finally(() => {
+        if (!cancelado) setLoading(false)
+      })
+    return () => { cancelado = true }
   }, [clienteId, periodos, contaFiltro])
-
-  useEffect(() => { carregar() }, [carregar])
 
   function toggleBloco(bloco: Bloco) {
     setBlocosExpandidos(prev => {

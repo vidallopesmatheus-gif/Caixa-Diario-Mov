@@ -108,15 +108,23 @@ export default function ClientContaDetalhePage() {
 
   useEffect(() => { carregarConta() }, [carregarConta])
 
+  // carregarExtrato é chamado tanto pelo efeito abaixo (ao trocar conta/período) quanto depois de
+  // várias ações (excluir lançamento, editar categoria, confirmar transferência...). Um contador de
+  // requisição garante que só a chamada mais recente aplica seu resultado — sem isso, uma troca
+  // rápida de período podia deixar o extrato mostrando dados de um período que não é mais o selecionado.
+  const extratoRequestIdRef = useRef(0)
   const carregarExtrato = useCallback(async () => {
     if (!contaId) return
+    const requestId = ++extratoRequestIdRef.current
     setLoadingExtrato(true)
     try {
-      setLancamentos(await obterExtratoConta(contaId, de, ate))
+      const dados = await obterExtratoConta(contaId, de, ate)
+      if (requestId !== extratoRequestIdRef.current) return
+      setLancamentos(dados)
     } catch {
-      setMsg('Erro ao carregar extrato.')
+      if (requestId === extratoRequestIdRef.current) setMsg('Erro ao carregar extrato.')
     } finally {
-      setLoadingExtrato(false)
+      if (requestId === extratoRequestIdRef.current) setLoadingExtrato(false)
     }
   }, [contaId, de, ate])
 

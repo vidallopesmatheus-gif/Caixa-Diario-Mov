@@ -93,12 +93,20 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   useEffect(() => {
     if (!clienteId) return
+    let cancelado = false
     Promise.all([
       obterDre(clienteId, janela.de, janela.ate, contaFiltro ?? undefined),
       obterDre(clienteId, janela.deAnterior, janela.ateAnterior, contaFiltro ?? undefined),
     ])
-      .then(([atual, anterior]) => { setDreAtual(atual); setDreAnterior(anterior); setDreLoading(false) })
-      .catch(() => { setDreAtual(null); setDreAnterior(null); setDreLoading(false) })
+      .then(([atual, anterior]) => {
+        if (cancelado) return
+        setDreAtual(atual); setDreAnterior(anterior); setDreLoading(false)
+      })
+      .catch(() => {
+        if (cancelado) return
+        setDreAtual(null); setDreAnterior(null); setDreLoading(false)
+      })
+    return () => { cancelado = true }
   }, [clienteId, janela.de, janela.ate, janela.deAnterior, janela.ateAnterior, contaFiltro])
 
   // Projeção de saldo (30 dias) — única busca, usada tanto no card "Saldo Projetado" quanto no
@@ -107,7 +115,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [projecao, setProjecao] = useState<Projecao | null>(null)
   useEffect(() => {
     if (!clienteId) return
-    obterProjecao(clienteId, 30, contaFiltro ?? undefined).then(setProjecao).catch(() => setProjecao(null))
+    let cancelado = false
+    obterProjecao(clienteId, 30, contaFiltro ?? undefined)
+      .then(p => { if (!cancelado) setProjecao(p) })
+      .catch(() => { if (!cancelado) setProjecao(null) })
+    return () => { cancelado = true }
   }, [clienteId, contaFiltro])
 
   const hoje = new Date()
