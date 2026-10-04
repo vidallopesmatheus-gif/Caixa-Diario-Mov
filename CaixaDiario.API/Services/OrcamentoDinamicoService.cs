@@ -60,7 +60,11 @@ public class OrcamentoDinamicoService : IOrcamentoDinamicoService
             .Where(r => r.Data.Year == anoAtual && r.Data.Month == mesAtual)
             .SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
 
-        var ultrapassado = saldoLivre > 0 && gastoVariavelAtual > saldoLivre;
+        // Compromissos fixos + aportes sozinhos já excedem a receita esperada (saldoLivre < 0) —
+        // não sobra orçamento nenhum pra gasto variável, então já está ultrapassado por definição,
+        // mesmo com gastoVariavelAtual = 0. Sem isso, "sem margem" aparecia como "dentro do limite".
+        // saldoLivre == 0 exato (ex.: sem nenhum dado histórico ainda) não conta como ultrapassado.
+        var ultrapassado = saldoLivre < 0 || gastoVariavelAtual > saldoLivre;
         var percentualUtilizado = saldoLivre > 0
             ? Math.Round(gastoVariavelAtual / saldoLivre * 100m, 1)
             : 0m;
