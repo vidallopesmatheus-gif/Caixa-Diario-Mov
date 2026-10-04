@@ -98,6 +98,33 @@ public class OrcamentoDinamicoServiceTests
     }
 
     [Fact]
+    public void Calcular_CompromissosFixosSozinhosExcedemReceitaEsperada_MarcaUltrapassado()
+    {
+        // Compromissos fixos (sem nenhum gasto variável ainda) já consomem mais que a receita
+        // esperada — saldoLivre fica negativo. Isso já é "sem margem" por definição, mesmo que
+        // GastoVariavelAtual seja zero.
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(Hoje.AddMonths(-1), entradas: 1000m),
+        };
+        var registroComPagar = CriarRegistro(Hoje);
+        registroComPagar.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Fornecedor", Valor = 1500m, Pago = false,
+            DataVencimento = new DateOnly(Hoje.Year, Hoje.Month, Math.Min(20, DateTime.DaysInMonth(Hoje.Year, Hoje.Month))),
+        });
+        registros.Add(registroComPagar);
+
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), new List<MetaAnual>());
+
+        Assert.Equal(1000m, resultado.ReceitaEsperada);
+        Assert.Equal(1500m, resultado.CompromissosFixos);
+        Assert.Equal(-500m, resultado.SaldoLivre);
+        Assert.Equal(0m, resultado.GastoVariavelAtual);
+        Assert.True(resultado.Ultrapassado);
+    }
+
+    [Fact]
     public void Calcular_IgnoraMetasSemModoMetodo()
     {
         var metaSimples = new MetaAnual
