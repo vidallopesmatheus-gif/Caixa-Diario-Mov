@@ -203,9 +203,18 @@ test('atualiza campo de descrição de saída', () => {
 test('atualiza campo de valor de saída', () => {
   mockHooks()
   render(<ClientCaixaPage />)
-  const valorInputs = screen.getAllByPlaceholderText('R$')
+  const valorInputs = screen.getAllByPlaceholderText('0,00')
   fireEvent.change(valorInputs[0], { target: { value: '150' } })
   expect((valorInputs[0] as HTMLInputElement).value).toBe('150')
+})
+
+test('digitar 0 num valor e sair do campo formata como 0,00, não deixa vazio', () => {
+  mockHooks()
+  render(<ClientCaixaPage />)
+  const valorInputs = screen.getAllByPlaceholderText('0,00')
+  fireEvent.change(valorInputs[0], { target: { value: '0' } })
+  fireEvent.blur(valorInputs[0])
+  expect((valorInputs[0] as HTMLInputElement).value).toBe('0,00')
 })
 
 test('salvar sem categoria em saída exibe mensagem e não chama a API', async () => {
@@ -217,7 +226,7 @@ test('salvar sem categoria em saída exibe mensagem e não chama a API', async (
   const saidasContainer = within(saidasSection)
   // preenche descrição e valor da primeira linha de saída para que ela passe no filtro (descricao || valor)
   fireEvent.change(saidasContainer.getByPlaceholderText('Descrição'), { target: { value: 'Aluguel' } })
-  fireEvent.change(saidasContainer.getByPlaceholderText('R$'), { target: { value: '100' } })
+  fireEvent.change(saidasContainer.getByPlaceholderText('0,00'), { target: { value: '100' } })
   // não seleciona categoria — clica em salvar
   fireEvent.click(screen.getByText(/Salvar e sincronizar/))
   await waitFor(() =>

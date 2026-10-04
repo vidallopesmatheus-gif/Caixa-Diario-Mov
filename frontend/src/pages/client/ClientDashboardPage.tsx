@@ -34,8 +34,10 @@ interface Props { clienteIdOverride?: string }
 const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 const MONTH_NAMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
+// `!n` trataria 0 como "vazio" e devolveria '' — faria uma meta de receita/lucro legitimamente
+// zerada aparecer como campo vazio (sem formatação "0,00") ao carregar pra edição.
 function fmtNum(n: number) {
-  if (!n) return ''
+  if (Number.isNaN(n)) return ''
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 function parseBRL(s: string): number {
