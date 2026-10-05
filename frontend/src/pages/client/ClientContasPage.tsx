@@ -15,10 +15,11 @@ interface Props { clienteIdOverride?: string }
 
 interface ContaView {
   registroData: string
-  // Conta bancária do RegistroDiario onde esta ContaProvisionada realmente vive — necessário pra
-  // localizar o registro sem ambiguidade quando existe mais de um registro na mesma data (uma por
-  // conta bancária diferente).
-  registroContaId?: string
+  // Id do RegistroDiario onde esta ContaProvisionada realmente vive — identifica sem ambiguidade
+  // qual registro editar/salvar quando existe mais de um na mesma data (uma por conta bancária
+  // diferente). Usar (data, contaBancariaId) como antes falhava quando contaBancariaId vinha
+  // undefined em mais de um registro da mesma data — o id é sempre único.
+  registroId: string
   tipo: 'receber' | 'pagar'
   index: number
   conta: ContaProvisionada
@@ -202,8 +203,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const todasContas = useMemo<ContaView[]>(() => {
     const acc: ContaView[] = []
     for (const reg of registros) {
-      reg.contasAReceber.forEach((c, i) => acc.push({ registroData: reg.data, registroContaId: reg.contaBancariaId, tipo: 'receber', index: i, conta: c }))
-      reg.contasAPagar.forEach((c, i) => acc.push({ registroData: reg.data, registroContaId: reg.contaBancariaId, tipo: 'pagar', index: i, conta: c }))
+      reg.contasAReceber.forEach((c, i) => acc.push({ registroData: reg.data, registroId: reg.id, tipo: 'receber', index: i, conta: c }))
+      reg.contasAPagar.forEach((c, i) => acc.push({ registroData: reg.data, registroId: reg.id, tipo: 'pagar', index: i, conta: c }))
     }
     return acc.sort((a, b) => {
       const da = a.conta.dataVencimento ?? a.registroData
@@ -219,14 +220,15 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const contaSelecionada = contasBancarias.find(c => c.id === contaSelecionadaId)
 
   function origemRegistro(view: ContaView) {
-    return registros.find(r => r.data === view.registroData && r.contaBancariaId === view.registroContaId)
-      ?? registros.find(r => r.data === view.registroData)
+    return registros.find(r => r.id === view.registroId)
   }
 
   async function persistirListas(view: ContaView, transformar: (contas: ContaProvisionada[]) => ContaProvisionada[]) {
     if (!clienteId) return
     const reg = origemRegistro(view)
-    if (!reg) return
+    // Nunca falha em silêncio: sem isso, a tela mostrava "sucesso" mesmo quando o registro de
+    // origem não era encontrado (ex.: excluído em outra aba) e nada era salvo de verdade.
+    if (!reg) throw new Error('Não foi possível localizar o registro original desta conta — atualize a página e tente de novo.')
     await salvar({
       clienteId, contaBancariaId: reg.contaBancariaId, data: reg.data, saldoInicio: reg.saldoInicio,
       entradas: reg.entradas, saidas: reg.saidas,
@@ -458,7 +460,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     const contaNome = contasBancarias.find(c => c.id === view.conta.contaBancariaId)?.nome ?? contaCaixaPadrao?.nome ?? 'Conta padrão'
 
     return (
-    <div key={`${view.registroData}-${view.tipo}-${view.index}`} className={`conta-item ${view.conta.pago ? 'pago' : ''}`}>
+    <div key={`${view.registroId}-${view.tipo}-${view.index}`} className={`conta-item ${view.conta.pago ? 'pago' : ''}`}>
       <button
         onClick={() => view.conta.pago ? abrirEstorno(view, false) : togglePago(view)}
         style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,

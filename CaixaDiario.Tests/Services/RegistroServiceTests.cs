@@ -150,6 +150,40 @@ public class RegistroServiceTests
     }
 
     [Fact]
+    public async Task SalvarAsync_DtoSemUmaContaReceberQueExistiaAntes_RemoveEla()
+    {
+        // Reproduz o fluxo da tela de Contas: o front le a lista atual, remove o item que o
+        // usuario quer excluir, e reenvia a lista resultante inteira.
+        var clienteId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var registroExistente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new(), Saidas = new(), ContasPagar = new(),
+            ContasReceber = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Pollye", Valor = 600m, DataVencimento = new DateOnly(2026, 9, 10), Pago = false },
+            },
+            SaldoFinal = 0m,
+        };
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(),
+            ContasReceber = new(), // front manda a lista ja sem o item excluido
+            ContasPagar = new(),
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Empty(resultado.ContasReceber);
+        _repoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(rd => rd.ContasReceber.Count == 0)), Times.Once);
+    }
+
+    [Fact]
     public async Task SalvarAsync_Novo_ChamaAuditCriacao()
     {
         var clienteId = Guid.NewGuid();
