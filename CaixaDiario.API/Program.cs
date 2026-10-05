@@ -88,6 +88,7 @@ builder.Services.AddScoped<IContaBancariaService, ContaBancariaService>();
 builder.Services.AddScoped<ITransacaoImportadaRepository, TransacaoImportadaRepository>();
 builder.Services.AddScoped<IImportacaoService, ImportacaoService>();
 builder.Services.AddScoped<IContaRecorrenteRepository, ContaRecorrenteRepository>();
+builder.Services.AddScoped<IOcorrenciaRecorrenteDispensadaRepository, OcorrenciaRecorrenteDispensadaRepository>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IRecorrenciaService, RecorrenciaService>();
 builder.Services.AddScoped<IContaRecorrenteService, ContaRecorrenteService>();

@@ -7,11 +7,25 @@ public class RecorrenciaService : IRecorrenciaService
 {
     private readonly IContaRecorrenteRepository _contaRepo;
     private readonly IRegistroRepository _registroRepo;
+    private readonly IOcorrenciaRecorrenteDispensadaRepository _dispensadaRepo;
 
-    public RecorrenciaService(IContaRecorrenteRepository contaRepo, IRegistroRepository registroRepo)
+    public RecorrenciaService(
+        IContaRecorrenteRepository contaRepo, IRegistroRepository registroRepo,
+        IOcorrenciaRecorrenteDispensadaRepository dispensadaRepo)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
+        _dispensadaRepo = dispensadaRepo;
+    }
+
+    public async Task DispensarOcorrenciaAsync(Guid clienteId, Guid recorrenciaId, DateOnly dataVencimento)
+    {
+        if (await _dispensadaRepo.ExisteAsync(recorrenciaId, dataVencimento)) return;
+        await _dispensadaRepo.AdicionarAsync(new OcorrenciaRecorrenteDispensada
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, RecorrenciaId = recorrenciaId,
+            DataVencimento = dataVencimento, CriadoEm = DateTime.UtcNow,
+        });
     }
 
     private static int DiffMeses(DateOnly a, DateOnly b) => (b.Year - a.Year) * 12 + (b.Month - a.Month);
@@ -103,6 +117,12 @@ public class RecorrenciaService : IRecorrenciaService
                     .Where(c => c.RecorrenciaId.HasValue && c.DataVencimento.HasValue)
                     .Select(c => (c.RecorrenciaId!.Value, c.DataVencimento!.Value))));
 
+        // Ocorrências que o cliente excluiu explicitamente — "não materializado neste mês" não
+        // significa "ainda não gerado" quando o motivo é essa exclusão deliberada.
+        var dispensadas = new HashSet<(Guid, DateOnly)>(
+            (await _dispensadaRepo.ListarPorClienteAsync(clienteId))
+                .Select(d => (d.RecorrenciaId, d.DataVencimento)));
+
         // Calcula todas as (conta, dia) a materializar neste mês.
         var aMaterializar = new List<(ContaRecorrente Conta, DateOnly Dia)>();
         foreach (var conta in ativas)
@@ -111,6 +131,7 @@ public class RecorrenciaService : IRecorrenciaService
             {
                 if (!OcorreEm(conta, dia)) continue;
                 if (materializados.Contains((conta.Id, dia))) continue;
+                if (dispensadas.Contains((conta.Id, dia))) continue;
                 aMaterializar.Add((conta, dia));
             }
         }

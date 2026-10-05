@@ -23,6 +23,7 @@ public class AppDbContext : DbContext
     public DbSet<RegraCategorizacao> RegrasCategorizacao { get; set; }
     public DbSet<LinkConciliacao> LinksConciliacao { get; set; }
     public DbSet<PagamentoFatura> PagamentosFatura { get; set; }
+    public DbSet<OcorrenciaRecorrenteDispensada> OcorrenciasRecorrentesDispensadas { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -148,6 +149,19 @@ public class AppDbContext : DbContext
                 .IsRequired(false)
                 .OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(e => new { e.ClienteId, e.Ativo });
+        });
+
+        modelBuilder.Entity<OcorrenciaRecorrenteDispensada>(entity =>
+        {
+            entity.ToTable("ocorrencias_recorrentes_dispensadas");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.RecorrenciaId).HasColumnName("recorrencia_id");
+            entity.Property(e => e.DataVencimento).HasColumnName("data_vencimento");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            // Uma ocorrência específica (recorrência + vencimento) só pode ser dispensada uma vez.
+            entity.HasIndex(e => new { e.RecorrenciaId, e.DataVencimento }).IsUnique();
         });
 
         modelBuilder.Entity<ContaBancaria>(entity =>

@@ -184,6 +184,83 @@ public class RegistroServiceTests
     }
 
     [Fact]
+    public async Task SalvarAsync_RemoveOcorrenciaDeContaRecorrente_RegistraDispensaPraNaoSerRecriada()
+    {
+        // Bug real relatado em produção: excluir uma ocorrência de conta recorrente (RecorrenciaId
+        // preenchido) "funcionava" (sem erro), mas a próxima vez que a lista era recarregada a
+        // MaterializarMesAtualAsync recriava a mesma ocorrência, porque só via "não existe nos
+        // registros atuais" — sem saber que foi uma exclusão deliberada. SalvarAsync precisa
+        // avisar o RecorrenciaService pra essa ocorrência não ser recriada.
+        var clienteId = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var vencimento = new DateOnly(2026, 9, 10);
+        var registroExistente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new(), Saidas = new(), ContasPagar = new(),
+            ContasReceber = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Pollye", Valor = 600m, DataVencimento = vencimento, Pago = false, RecorrenciaId = recorrenciaId },
+            },
+            SaldoFinal = 0m,
+        };
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(),
+            ContasReceber = new(), ContasPagar = new(),
+        };
+
+        await _sut.SalvarAsync(dto, "admin");
+
+        _recorrenciaMock.Verify(r => r.DispensarOcorrenciaAsync(clienteId, recorrenciaId, vencimento), Times.Once);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_MantemContaRecorrenteQueContinuaNaLista_NaoRegistraDispensa()
+    {
+        // Mesma conta recorrente, mas só editada (não excluída) — não é uma dispensa.
+        var clienteId = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var vencimento = new DateOnly(2026, 9, 10);
+        var registroExistente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
+            Entradas = new(), Saidas = new(), ContasPagar = new(),
+            ContasReceber = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Pollye", Valor = 600m, DataVencimento = vencimento, Pago = false, RecorrenciaId = recorrenciaId },
+            },
+            SaldoFinal = 0m,
+        };
+
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(),
+            // Igual ao fluxo real de edição em ClientContasPage.tsx: o front preserva recorrenciaId
+            // via spread ({ ...c, descricao: novo, valor: novo }) e reenvia ele no payload.
+            ContasReceber = new List<ContaProvisionadaDto>
+            {
+                new() { Descricao = "Pollye editada", Valor = 650m, DataVencimento = vencimento, Pago = false, RecorrenciaId = recorrenciaId },
+            },
+            ContasPagar = new(),
+        };
+
+        await _sut.SalvarAsync(dto, "admin");
+
+        _recorrenciaMock.Verify(r => r.DispensarOcorrenciaAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateOnly>()), Times.Never);
+    }
+
+    [Fact]
     public async Task SalvarAsync_Novo_ChamaAuditCriacao()
     {
         var clienteId = Guid.NewGuid();
