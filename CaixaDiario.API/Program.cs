@@ -129,12 +129,17 @@ builder.Services.AddScoped<IChatService, ChatService>();
 
 var app = builder.Build();
 
+// index.html e os arquivos do Service Worker (PWA) nunca podem ficar em cache — um sw.js
+// desatualizado preso no navegador/CDN continua rodando a lógica antiga indefinidamente, mesmo
+// em aba anônima ou depois de limpar o site: o browser só percebe a atualização se baixar o
+// sw.js novo, e esse download só acontece se o arquivo em si não estiver cacheado.
+var arquivosSemCache = new HashSet<string> { "index.html", "sw.js", "registerSW.js", "manifest.webmanifest" };
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
     OnPrepareResponse = ctx =>
     {
-        if (ctx.File.Name == "index.html")
+        if (arquivosSemCache.Contains(ctx.File.Name))
             ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
     }
 });
