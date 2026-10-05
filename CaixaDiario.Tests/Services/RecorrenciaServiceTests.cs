@@ -9,10 +9,15 @@ public class RecorrenciaServiceTests
 {
     private readonly Mock<IContaRecorrenteRepository> _contaRepoMock = new();
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
+    private readonly Mock<IOcorrenciaRecorrenteDispensadaRepository> _dispensadaRepoMock = new();
     private readonly RecorrenciaService _sut;
 
-    public RecorrenciaServiceTests() =>
-        _sut = new RecorrenciaService(_contaRepoMock.Object, _registroRepoMock.Object);
+    public RecorrenciaServiceTests()
+    {
+        _dispensadaRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>()))
+            .ReturnsAsync(new List<OcorrenciaRecorrenteDispensada>());
+        _sut = new RecorrenciaService(_contaRepoMock.Object, _registroRepoMock.Object, _dispensadaRepoMock.Object);
+    }
 
     // DataInicio ancorada em "hoje" para que a ocorrência mensal (D6) caia no dia de hoje,
     // alinhando-se aos cenários de materialização que operam sobre o registro de hoje.
@@ -244,6 +249,61 @@ public class RecorrenciaServiceTests
         _registroRepoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(rd =>
             rd.ContasPagar.Count == 1 &&
             rd.ContasPagar[0].RecorrenciaId == conta.Id)), Times.Once);
+    }
+
+    [Fact]
+    public async Task MaterializarMesAtual_OcorrenciaDispensadaPeloCliente_NaoRecria()
+    {
+        // Reproduz o bug relatado: cliente exclui a ocorrência do dia (RegistroService grava a
+        // dispensa) e, na materialização seguinte (toda vez que a lista é recarregada), ela não
+        // pode reaparecer — antes disso, "não está nos registros do mês" era tratado como
+        // "ainda não foi gerada", recriando a ocorrência na hora.
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId, tipo: "Pagar");
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
+        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+
+        _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaRecorrente> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorPeriodoAsync(clienteId, primeiroDia, ultimoDia))
+            .ReturnsAsync(new List<RegistroDiario>());
+        _dispensadaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<OcorrenciaRecorrenteDispensada>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, RecorrenciaId = conta.Id, DataVencimento = hoje, CriadoEm = DateTime.UtcNow },
+        });
+
+        await _sut.MaterializarMesAtualAsync(clienteId);
+
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DispensarOcorrenciaAsync_RegistraNoRepositorio()
+    {
+        var clienteId = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var data = new DateOnly(2026, 9, 10);
+        _dispensadaRepoMock.Setup(r => r.ExisteAsync(recorrenciaId, data)).ReturnsAsync(false);
+
+        await _sut.DispensarOcorrenciaAsync(clienteId, recorrenciaId, data);
+
+        _dispensadaRepoMock.Verify(r => r.AdicionarAsync(It.Is<OcorrenciaRecorrenteDispensada>(o =>
+            o.ClienteId == clienteId && o.RecorrenciaId == recorrenciaId && o.DataVencimento == data)), Times.Once);
+    }
+
+    [Fact]
+    public async Task DispensarOcorrenciaAsync_JaDispensada_NaoDuplica()
+    {
+        var clienteId = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var data = new DateOnly(2026, 9, 10);
+        _dispensadaRepoMock.Setup(r => r.ExisteAsync(recorrenciaId, data)).ReturnsAsync(true);
+
+        await _sut.DispensarOcorrenciaAsync(clienteId, recorrenciaId, data);
+
+        _dispensadaRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<OcorrenciaRecorrenteDispensada>()), Times.Never);
     }
 
     [Fact]

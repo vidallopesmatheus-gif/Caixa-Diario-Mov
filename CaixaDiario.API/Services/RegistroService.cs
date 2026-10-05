@@ -110,6 +110,14 @@ public class RegistroService : IRegistroService
             existente.AtualizadoEm = DateTime.UtcNow;
             existente.UsuarioAtualizacao = nomeUsuarioLogado;
 
+            // Antes de persistir: alguma ocorrência de recorrência que estava aqui e sumiu da
+            // lista final foi excluída pelo cliente — registra a dispensa, senão a próxima
+            // materialização (toda vez que a lista é recarregada) recria ela na hora.
+            var removidas = OcorrenciasRecorrentesRemovidas(contasReceberAntes, existente.ContasReceber)
+                .Concat(OcorrenciasRecorrentesRemovidas(contasPagarAntes, existente.ContasPagar));
+            foreach (var (recorrenciaId, dataVencimento) in removidas)
+                await _recorrenciaService.DispensarOcorrenciaAsync(existente.ClienteId, recorrenciaId, dataVencimento);
+
             var atualizado = await _registroRepository.AtualizarAsync(existente);
             var resultDto = MapToDto(atualizado);
 
@@ -371,6 +379,16 @@ public class RegistroService : IRegistroService
         Math.Abs(a.Valor - b.Valor) < 0.01m &&
         a.DataVencimento == b.DataVencimento &&
         a.ContaBancariaId == b.ContaBancariaId;
+
+    // Ocorrências de conta recorrente (RecorrenciaId preenchido) que estavam na lista antes do
+    // merge e não estão mais depois — o cliente excluiu essa ocorrência específica.
+    private static IEnumerable<(Guid RecorrenciaId, DateOnly DataVencimento)> OcorrenciasRecorrentesRemovidas(
+        List<ContaProvisionada> antes, List<ContaProvisionada> depois) =>
+        antes
+            .Where(a => a.RecorrenciaId.HasValue && a.DataVencimento.HasValue)
+            .Where(a => !depois.Any(d => d.RecorrenciaId == a.RecorrenciaId && d.DataVencimento == a.DataVencimento))
+            .Select(a => (a.RecorrenciaId!.Value, a.DataVencimento!.Value))
+            .Distinct();
 
     private static RegistroDto MapToDto(RegistroDiario r) => new()
     {
