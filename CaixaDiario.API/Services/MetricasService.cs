@@ -5,7 +5,7 @@ namespace CaixaDiario.API.Services;
 
 public class MetricasService : IMetricasService
 {
-    public MetricasPeriodoDto CalcularPeriodo(List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal multiplo = 3m)
+    public MetricasPeriodoDto CalcularPeriodo(List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal saldoConsolidado, decimal multiplo = 3m)
     {
         var entradas = registrosDoPeriodo.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).ToList();
         var saidas = registrosDoPeriodo.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).ToList();
@@ -64,7 +64,7 @@ public class MetricasService : IMetricasService
             }
         }
 
-        var saldoAtual = todosRegistros.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0;
+        var saldoAtual = saldoConsolidado;
         var totalReceber = todosRegistros.SelectMany(r => r.ContasReceber).Where(c => !c.Pago).Sum(c => c.Valor);
         var totalPagar = todosRegistros.SelectMany(r => r.ContasPagar).Where(c => !c.Pago).Sum(c => c.Valor);
         dto.SaldoProjetado = saldoAtual + totalReceber - totalPagar;

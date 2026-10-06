@@ -1,6 +1,7 @@
 using CaixaDiario.API.DTOs.Metricas;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
+using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
 using CaixaDiario.API.Responses;
 using CaixaDiario.API.Services;
@@ -17,15 +18,26 @@ public class MetricasController : ControllerBase
     private readonly IMetricasService _metricasService;
     private readonly IRegistroRepository _registroRepo;
     private readonly ICategoriaRepository _categoriaRepo;
+    private readonly IContaBancariaRepository _contaBancariaRepo;
 
     public MetricasController(
         IMetricasService metricasService,
         IRegistroRepository registroRepo,
-        ICategoriaRepository categoriaRepo)
+        ICategoriaRepository categoriaRepo,
+        IContaBancariaRepository contaBancariaRepo)
     {
         _metricasService = metricasService;
         _registroRepo = registroRepo;
         _categoriaRepo = categoriaRepo;
+        _contaBancariaRepo = contaBancariaRepo;
+    }
+
+    // Mesmo cálculo de /banco: soma o saldo atual de cada conta ATIVA do cliente — nunca o
+    // SaldoFinal de "o registro mais recente", que é só uma conta aleatória, não o consolidado.
+    private async Task<decimal> CalcularSaldoConsolidadoAsync(Guid clienteId, List<RegistroDiario> registros)
+    {
+        var contas = await _contaBancariaRepo.ListarPorClienteAsync(clienteId);
+        return contas.Where(c => c.Ativa).Sum(c => ContaBancariaService.ObterSaldoAtual(c, registros));
     }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
@@ -43,7 +55,8 @@ public class MetricasController : ControllerBase
         VerificarAcesso(clienteId);
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
         var doPeriodo = todos.Where(r => r.Data >= de && r.Data <= ate).ToList();
-        var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo, multiplo);
+        var saldoConsolidado = await CalcularSaldoConsolidadoAsync(clienteId, todos);
+        var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo, saldoConsolidado, multiplo);
         return Ok(new ApiResponse<MetricasPeriodoDto> { Dados = resultado });
     }
 
