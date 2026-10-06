@@ -30,7 +30,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m) },
             new() { Item("Aluguel", 300m) });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Null(resultado.Ebitda);
     }
 
@@ -44,7 +44,7 @@ public class MetricasServiceTests
                 Item("Aluguel", 300m, "Aluguel", "CustoFixo"),
                 Item("Insumos", 200m, "Insumos/Mercadoria", "CustoVariavel"),
             });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.NotNull(resultado.Ebitda);
         Assert.Equal(500m, resultado.Ebitda!.Valor);
         Assert.Equal(0.5m, resultado.Ebitda.Percentual);
@@ -57,7 +57,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Manutenção", 200m, "Manutenção", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.NotNull(resultado.Ebitda);
         Assert.Equal(1000m, resultado.Ebitda!.Valor);
     }
@@ -68,7 +68,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Aluguel", 300m, "Aluguel", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Null(resultado.PrimeCost);
     }
 
@@ -82,7 +82,7 @@ public class MetricasServiceTests
                 Item("Salários", 400m, "Salários/Folha", "CustoFixo"),
                 Item("Insumos", 300m, "Insumos/Mercadoria", "CustoVariavel"),
             });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.NotNull(resultado.PrimeCost);
         Assert.Equal(0.7m, resultado.PrimeCost!.Percentual);
         Assert.Equal("amarelo", resultado.PrimeCost.Semaforo);
@@ -94,7 +94,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m) },
             new() { Item("Aluguel", 300m) });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Null(resultado.PontoDeEquilibrio);
     }
 
@@ -108,7 +108,7 @@ public class MetricasServiceTests
                 Item("Aluguel", 300m, "Aluguel", "CustoFixo"),
                 Item("Insumos", 200m, "Insumos/Mercadoria", "CustoVariavel"),
             });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.NotNull(resultado.PontoDeEquilibrio);
         Assert.Equal(375m, resultado.PontoDeEquilibrio!.Valor);
         Assert.Equal("verde", resultado.PontoDeEquilibrio.Semaforo);
@@ -118,7 +118,7 @@ public class MetricasServiceTests
     public void CalcularPeriodo_ReceitaZero_NaoDividePorZero()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1), new(), new());
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Null(resultado.Ebitda);
         Assert.Null(resultado.PrimeCost);
         Assert.Null(resultado.PontoDeEquilibrio);
@@ -158,7 +158,7 @@ public class MetricasServiceTests
                 new() { Item("Custo", 1000m, "Aluguel", "CustoFixo") }));
         }
 
-        var resultado = _sut.CalcularPeriodo(registros, registros);
+        var resultado = _sut.CalcularPeriodo(registros, registros, 0m);
 
         Assert.NotNull(resultado.Valuation);
         Assert.True(resultado.Valuation!.Valor > 0);
@@ -173,7 +173,7 @@ public class MetricasServiceTests
             new() { Item("Custo", 1000m, "Aluguel", "CustoFixo") },
             saldoFinal: 0m);
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 0m);
 
         Assert.NotNull(resultado.Runway);
         Assert.Equal(0m, resultado.Runway!.Meses);
@@ -185,7 +185,7 @@ public class MetricasServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var registro = CriarRegistro(hoje, new(), new(), saldoFinal: 5000m);
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 5000m);
 
         Assert.NotNull(resultado.Liquidez);
         Assert.True(resultado.Liquidez!.AltaLiquidez);
@@ -204,7 +204,7 @@ public class MetricasServiceTests
             ContasPagar = new() { new() { Descricao = "Aluguel", Valor = 1000m, DataVencimento = amanha, Pago = false } },
         };
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 3000m);
 
         Assert.NotNull(resultado.Liquidez);
         Assert.Equal(3.0m, resultado.Liquidez!.Indice);
@@ -224,7 +224,7 @@ public class MetricasServiceTests
             ContasReceber = new() { new() { Descricao = "Cliente X", Valor = 2000m, DataVencimento = amanha, Pago = false } },
             ContasPagar = new() { new() { Descricao = "Aluguel", Valor = 1000m, DataVencimento = amanha, Pago = false } },
         };
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 1000m);
         // (1000 + 2000) / 1000 = 3.0
         Assert.NotNull(resultado.Liquidez);
         Assert.Equal(3.0m, resultado.Liquidez!.Indice);
@@ -238,7 +238,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda 1", 600m, "Vendas", "Receita"), Item("Venda 2", 400m, "Vendas", "Receita") },
             new());
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.NotNull(resultado.TicketMedio);
         Assert.Equal(2, resultado.TicketMedio!.QuantidadeRecebimentos);
         Assert.Equal(500m, resultado.TicketMedio.Valor);
@@ -248,7 +248,7 @@ public class MetricasServiceTests
     public void CalcularPeriodo_SemRecebimentos_TicketMedioNull()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1), new(), new() { Item("Aluguel", 300m, "Aluguel", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Null(resultado.TicketMedio);
     }
 
@@ -264,8 +264,8 @@ public class MetricasServiceTests
                 new() { Item("Venda", 2000m, "Vendas", "Receita") },
                 new() { Item("Custo", 1000m, "Aluguel", "CustoFixo") }));
 
-        var v3 = _sut.CalcularPeriodo(registros, registros, 3m).Valuation!.Valor;
-        var v6 = _sut.CalcularPeriodo(registros, registros, 6m).Valuation!.Valor;
+        var v3 = _sut.CalcularPeriodo(registros, registros, 0m, 3m).Valuation!.Valor;
+        var v6 = _sut.CalcularPeriodo(registros, registros, 0m, 6m).Valuation!.Valor;
         Assert.Equal(v3 * 2, v6);
     }
 
@@ -280,7 +280,7 @@ public class MetricasServiceTests
             CriarRegistro(hoje, new() { Item("Venda", 100m, "Vendas", "Receita") },
                 new() { Item("Custo", 900m, "Aluguel", "CustoFixo") }, saldoFinal: 1000m),
         };
-        var resultado = _sut.CalcularPeriodo(registros, registros);
+        var resultado = _sut.CalcularPeriodo(registros, registros, 1000m);
         Assert.NotNull(resultado.BurnRate);
         Assert.Equal(900m, resultado.BurnRate);
     }
@@ -629,7 +629,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Custo", 920m, "Aluguel", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Equal("amarelo", resultado.Ebitda!.Semaforo);
     }
 
@@ -639,7 +639,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Custo", 980m, "Aluguel", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Equal("vermelho", resultado.Ebitda!.Semaforo);
     }
 
@@ -651,7 +651,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Salarios", 500m, "Salários/Folha", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Equal("verde", resultado.PrimeCost!.Semaforo);
     }
 
@@ -661,7 +661,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Salarios", 800m, "Salários/Folha", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Equal("vermelho", resultado.PrimeCost!.Semaforo);
     }
 
@@ -673,7 +673,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Custo", 900m, "Aluguel", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Equal(900m, resultado.PontoDeEquilibrio!.Valor);
         Assert.Equal("amarelo", resultado.PontoDeEquilibrio.Semaforo);
     }
@@ -684,7 +684,7 @@ public class MetricasServiceTests
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Custo", 1200m, "Aluguel", "CustoFixo") });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Equal("vermelho", resultado.PontoDeEquilibrio!.Semaforo);
     }
 
@@ -698,7 +698,7 @@ public class MetricasServiceTests
                 Item("Custo Fixo", 100m, "Aluguel", "CustoFixo"),
                 Item("Custo Variavel", 1000m, "Insumos/Mercadoria", "CustoVariavel"),
             });
-        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg });
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
         Assert.Equal(0m, resultado.PontoDeEquilibrio!.Valor);
         Assert.Equal("verde", resultado.PontoDeEquilibrio.Semaforo);
     }
@@ -715,7 +715,7 @@ public class MetricasServiceTests
             CriarRegistro(hoje.AddMonths(-1), new() { Item("Venda", 500m, "Vendas", "Receita") }, new() { Item("Custo", 500m, "Aluguel", "CustoFixo") }),
         };
 
-        var resultado = _sut.CalcularPeriodo(registros, registros);
+        var resultado = _sut.CalcularPeriodo(registros, registros, 0m);
 
         Assert.Equal("cinza", resultado.Valuation!.Semaforo);
     }
@@ -730,7 +730,7 @@ public class MetricasServiceTests
             CriarRegistro(hoje.AddMonths(-1), new() { Item("Venda", 1000m, "Vendas", "Receita") }, new()),
         };
 
-        var resultado = _sut.CalcularPeriodo(registros, registros);
+        var resultado = _sut.CalcularPeriodo(registros, registros, 0m);
 
         Assert.Equal("verde", resultado.Valuation!.Semaforo);
     }
@@ -745,7 +745,7 @@ public class MetricasServiceTests
             CriarRegistro(hoje.AddMonths(-1), new() { Item("Venda", 1000m, "Vendas", "Receita") }, new()),
         };
 
-        var resultado = _sut.CalcularPeriodo(registros, registros);
+        var resultado = _sut.CalcularPeriodo(registros, registros, 0m);
 
         Assert.Equal("vermelho", resultado.Valuation!.Semaforo);
     }
@@ -760,7 +760,7 @@ public class MetricasServiceTests
             CriarRegistro(hoje.AddMonths(-1), new() { Item("Venda", 1000m, "Vendas", "Receita") }, new()),
         };
 
-        var resultado = _sut.CalcularPeriodo(registros, registros);
+        var resultado = _sut.CalcularPeriodo(registros, registros, 0m);
 
         Assert.Equal("amarelo", resultado.Valuation!.Semaforo);
     }
@@ -773,7 +773,7 @@ public class MetricasServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var registro = CriarRegistro(hoje, new() { Item("Venda", 500m, "Vendas", "Receita") }, new(), saldoFinal: 1000m);
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 1000m);
 
         Assert.Equal("cinza", resultado.Runway!.Semaforo);
     }
@@ -784,7 +784,7 @@ public class MetricasServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var registro = CriarRegistro(hoje, new(), new() { Item("Custo", 100m, "Aluguel", "CustoFixo") }, saldoFinal: 800m);
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 800m);
 
         Assert.Equal(8.0m, resultado.Runway!.Meses);
         Assert.Equal("verde", resultado.Runway.Semaforo);
@@ -796,7 +796,7 @@ public class MetricasServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var registro = CriarRegistro(hoje, new(), new() { Item("Custo", 100m, "Aluguel", "CustoFixo") }, saldoFinal: 400m);
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 400m);
 
         Assert.Equal(4.0m, resultado.Runway!.Meses);
         Assert.Equal("amarelo", resultado.Runway.Semaforo);
@@ -808,7 +808,7 @@ public class MetricasServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var registro = CriarRegistro(hoje, new(), new() { Item("Custo", 100m, "Aluguel", "CustoFixo") }, saldoFinal: 100m);
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 100m);
 
         Assert.Equal(1.0m, resultado.Runway!.Meses);
         Assert.Equal("vermelho", resultado.Runway.Semaforo);
@@ -829,7 +829,7 @@ public class MetricasServiceTests
             ContasPagar = new() { new() { Descricao = "Fornecedor", Valor = 1000m, DataVencimento = amanha, Pago = false } },
         };
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 1200m);
 
         Assert.Equal(1.2m, resultado.Liquidez!.Indice);
         Assert.Equal("amarelo", resultado.Liquidez.Semaforo);
@@ -848,7 +848,7 @@ public class MetricasServiceTests
             ContasPagar = new() { new() { Descricao = "Fornecedor", Valor = 1000m, DataVencimento = amanha, Pago = false } },
         };
 
-        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro });
+        var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 300m);
 
         Assert.Equal(0.3m, resultado.Liquidez!.Indice);
         Assert.Equal("vermelho", resultado.Liquidez.Semaforo);

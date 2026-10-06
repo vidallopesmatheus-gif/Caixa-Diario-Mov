@@ -17,15 +17,17 @@ public class MetricasControllerTests
     private readonly Mock<IMetricasService> _metricasMock = new();
     private readonly Mock<IRegistroRepository> _registroMock = new();
     private readonly Mock<ICategoriaRepository> _categoriaMock = new();
+    private readonly Mock<IContaBancariaRepository> _contaBancariaMock = new();
 
     public MetricasControllerTests()
     {
         _categoriaMock.Setup(c => c.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<ContaBancaria>());
     }
 
     private MetricasController CriarSut(Guid usuarioId, string perfil)
     {
-        var sut = new MetricasController(_metricasMock.Object, _registroMock.Object, _categoriaMock.Object);
+        var sut = new MetricasController(_metricasMock.Object, _registroMock.Object, _categoriaMock.Object, _contaBancariaMock.Object);
         var claims = new[] { new Claim("id", usuarioId.ToString()), new Claim("perfil", perfil) };
         sut.ControllerContext = new ControllerContext
         {
@@ -47,6 +49,33 @@ public class MetricasControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.IsType<ApiResponse<MetricasPeriodoDto>>(ok.Value);
+    }
+
+    [Fact]
+    public async Task ObterMetricas_ComMultiplasContas_PassaSaldoConsolidadoDeTodasAsContasAtivas()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaComRegistro = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Ativa = true, SaldoInicial = 0m };
+        var contaSemRegistro = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Ativa = true, SaldoInicial = 200m };
+        var contaInativa = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Ativa = false, SaldoInicial = 9999m };
+
+        var registros = new List<RegistroDiario>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaComRegistro.Id, Data = new DateOnly(2026, 1, 15), SaldoFinal = 500m },
+        };
+
+        _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(registros);
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { contaComRegistro, contaSemRegistro, contaInativa });
+        _metricasMock.Setup(m => m.CalcularPeriodo(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), It.IsAny<decimal>(), It.IsAny<decimal>()))
+            .Returns(new MetricasPeriodoDto());
+
+        await CriarSut(Guid.NewGuid(), "admin")
+            .ObterMetricas(clienteId, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+
+        // 500 (conta com registro) + 200 (conta sem registro, usa SaldoInicial) — a inativa (9999) não entra.
+        _metricasMock.Verify(m => m.CalcularPeriodo(
+            It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), 700m, It.IsAny<decimal>()), Times.Once);
     }
 
     [Fact]
