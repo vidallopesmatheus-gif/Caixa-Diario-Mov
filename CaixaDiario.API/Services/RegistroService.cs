@@ -56,7 +56,6 @@ public class RegistroService : IRegistroService
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Toda saída deve ter uma categoria.", "categoria");
 
         var contas = await _contaBancariaRepository.ListarPorClienteAsync(dto.ClienteId);
-        var contaId = ResolverContaPadrao(contas, dto.ContaBancariaId);
 
         // Cada item de ContasReceber/ContasPagar pode trazer sua própria ContaBancariaId (ex.: modal
         // "Confirmar recebimento" escolhendo uma conta diferente da conta padrão do registro) — sem essa
@@ -64,8 +63,19 @@ public class RegistroService : IRegistroService
         foreach (var item in dto.ContasReceber.Concat(dto.ContasPagar))
             ValidarContaVinculada(contas, item.ContaBancariaId);
 
-        var existente = await _registroRepository.ObterPorContaEDataAsync(contaId, dto.Data)
-            ?? await _registroRepository.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data);
+        // Localiza o registro já existente pela conta EXATA informada (inclusive ausente) — nunca
+        // resolvendo pra uma "conta padrão" aqui. Um registro sem conta vinculada (ex.: ocorrência
+        // de recorrência materializada sem ContaBancariaId) é um registro DIFERENTE do registro da
+        // conta padrão naquele mesmo dia; resolver a conta antes de buscar fazia a edição de um
+        // mirar (e sobrescrever) o registro errado sempre que ContaBancariaId vinha null.
+        var existente = dto.ContaBancariaId.HasValue
+            ? await _registroRepository.ObterPorContaEDataAsync(dto.ContaBancariaId.Value, dto.Data)
+            : await _registroRepository.ObterPorClienteEDataSemContaAsync(dto.ClienteId, dto.Data);
+
+        // Só resolve pra uma conta padrão quando precisamos de ALGUMA conta concreta: pra criar um
+        // registro novo, ou pra atribuir aos itens de ContasReceber/ContasPagar que não trazem a
+        // própria conta. Preservar o ContaBancariaId do registro já existente, quando há um.
+        var contaId = existente?.ContaBancariaId ?? ResolverContaPadrao(contas, dto.ContaBancariaId);
 
         // Só bloqueia data futura pra registro NOVO — um lançamento manual de Caixa num dia que
         // ainda não aconteceu. Um registro já EXISTENTE pode legitimamente ter Data futura:

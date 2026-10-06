@@ -99,7 +99,7 @@ public class RegistroServiceTests
             },
             SaldoFinal = 0m,
         };
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, dataFutura)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, dataFutura)).ReturnsAsync(registroExistente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -124,7 +124,7 @@ public class RegistroServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var registroExistente = CriarRegistroComContas(clienteId, hoje);
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje))
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje))
             .ReturnsAsync(registroExistente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
             .ReturnsAsync((RegistroDiario r) => r);
@@ -167,7 +167,7 @@ public class RegistroServiceTests
             SaldoFinal = 0m,
         };
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -181,6 +181,56 @@ public class RegistroServiceTests
 
         Assert.Empty(resultado.ContasReceber);
         _repoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(rd => rd.ContasReceber.Count == 0)), Times.Once);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ExcluirContaDeRegistroSemContaVinculada_NaoAfetaRegistroDeOutraContaNoMesmoDia()
+    {
+        // Bug real relatado em produção: o cliente tem DOIS RegistroDiario na mesma data — um
+        // "sem conta vinculada" (onde a ocorrência recorrente "Pollye" vive, ContaBancariaId=null)
+        // e outro de uma conta de verdade (Nubank, com lançamentos reais do dia). Resolver a conta
+        // ANTES de localizar o registro existente (ResolverContaPadrao(dto.ContaBancariaId=null)
+        // caindo na "primeira conta ativa") fazia a exclusão mirar e sobrescrever o registro do
+        // Nubank — apagando as entradas/saídas reais dele — em vez do registro sem conta.
+        var clienteId = Guid.NewGuid();
+        var nubankId = Guid.NewGuid();
+        var hoje = new DateOnly(2026, 9, 10);
+
+        var registroNubank = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = nubankId, Data = hoje,
+            Entradas = new List<ItemFinanceiro> { new() { Descricao = "Venda real", Valor = 100m, Categoria = "Vendas", TipoCusto = "Receita" } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            Inicio = 481.93m, SaldoFinal = 581.93m,
+        };
+        var registroSemConta = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = null, Data = hoje,
+            Entradas = new(), Saidas = new(), ContasPagar = new(),
+            ContasReceber = new List<ContaProvisionada> { new() { Descricao = "Pollye", Valor = 600m, DataVencimento = hoje, Pago = false } },
+            SaldoFinal = 0m,
+        };
+
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { new() { Id = nubankId, Tipo = "ContaCorrente", Ativa = true } });
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(registroSemConta);
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(nubankId, hoje)).ReturnsAsync(registroNubank);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        // Front envia o registro SEM conta (contaBancariaId ausente), já sem a Pollye na lista.
+        var dto = new CriarRegistroDto
+        {
+            ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(),
+            ContasReceber = new(), ContasPagar = new(),
+        };
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(registroSemConta.Id, resultado.Id);
+        Assert.Empty(resultado.ContasReceber);
+        // O registro do Nubank nunca é tocado — suas entradas reais continuam lá.
+        _repoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(rd => rd.Id == registroNubank.Id)), Times.Never);
+        Assert.Single(registroNubank.Entradas);
     }
 
     [Fact]
@@ -206,7 +256,7 @@ public class RegistroServiceTests
             SaldoFinal = 0m,
         };
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -239,7 +289,7 @@ public class RegistroServiceTests
             SaldoFinal = 0m,
         };
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(registroExistente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -266,7 +316,7 @@ public class RegistroServiceTests
         var clienteId = Guid.NewGuid();
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto { ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new() };
@@ -287,7 +337,7 @@ public class RegistroServiceTests
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
         var transferenciaId = Guid.NewGuid();
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -336,7 +386,7 @@ public class RegistroServiceTests
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaBancaria> { new() { Id = contaId, ClienteId = clienteId, Tipo = "ContaCorrente", Ativa = true } });
         _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registroExistente });
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -402,7 +452,7 @@ public class RegistroServiceTests
     public async Task Salvar_RegistroNovo_RetornaCriadoTrue()
     {
         var dto = CriarDto();
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(dto.ClienteId, dto.Data)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var (resultado, criado) = await _sut.SalvarAsync(dto, "joao");
@@ -422,7 +472,7 @@ public class RegistroServiceTests
             SaldoFinal = 0, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(dto.ClienteId, dto.Data)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var (resultado, criado) = await _sut.SalvarAsync(dto, "joao");
@@ -653,7 +703,7 @@ public class RegistroServiceTests
             SaldoFinal = 1000m, // frontend reenvia o saldo inalterado
         };
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
         return (existente, dto);
     }
@@ -743,7 +793,7 @@ public class RegistroServiceTests
             ContasPagar = new(),
             SaldoFinal = 1500m, // frontend reenvia o saldo inalterado — a entrada já estava contada
         };
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
@@ -783,7 +833,7 @@ public class RegistroServiceTests
             ContasPagar = new(),
             SaldoFinal = 1500m,
         };
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
@@ -808,7 +858,7 @@ public class RegistroServiceTests
             ContasPagar = new List<ContaProvisionadaDto> { new() { Descricao = "CP", Valor = 30m, Pago = true } },
             SaldoFinal = 520m
         };
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(dto.ClienteId, dto.Data)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
@@ -829,7 +879,7 @@ public class RegistroServiceTests
         var clienteId = Guid.NewGuid();
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -861,7 +911,7 @@ public class RegistroServiceTests
         var clienteId = Guid.NewGuid();
         var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -907,7 +957,7 @@ public class RegistroServiceTests
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         // reenvia a mesma conta como paga (sem transição)
@@ -954,7 +1004,7 @@ public class RegistroServiceTests
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -1000,7 +1050,7 @@ public class RegistroServiceTests
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         // frontend reenvia pago=false, mas a auto-baixa marca true novamente
@@ -1047,7 +1097,7 @@ public class RegistroServiceTests
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
@@ -1092,7 +1142,7 @@ public class RegistroServiceTests
             ContasPagar = new(),
             SaldoFinal = 0m
         };
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(dto.ClienteId, dto.Data))
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(dto.ClienteId, dto.Data))
                  .ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
                  .ReturnsAsync((RegistroDiario r) => r);
@@ -1118,7 +1168,7 @@ public class RegistroServiceTests
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaBancaria> { c6Bank });
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         RegistroDiario? criado = null;
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
             .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
@@ -1164,7 +1214,7 @@ public class RegistroServiceTests
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaBancaria> { contaCorrente, caixa });
 
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto { ClienteId = clienteId, Data = hoje, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new() };
@@ -1182,7 +1232,7 @@ public class RegistroServiceTests
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { contaEscolhida });
 
         _repoMock.Setup(r => r.ObterPorContaEDataAsync(contaEscolhida.Id, hoje)).ReturnsAsync((RegistroDiario?)null);
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var dto = new CriarRegistroDto
