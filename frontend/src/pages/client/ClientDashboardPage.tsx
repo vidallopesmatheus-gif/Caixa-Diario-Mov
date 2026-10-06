@@ -271,8 +271,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       // Meta distribuída em todos os meses do período, inclusive os que já passaram — sempre que a
       // meta é editada, o restante é redistribuído a partir daqui pra frente, mas o mês em si
       // sempre mostra a meta (não fica em branco só por ter sido editada depois daquele mês).
-      const targetReceita = remainingReceita / remainingMonths
-      const targetLucro = remainingLucro / remainingMonths
+      // remainingReceita/remainingLucro podem ficar negativos quando um mês anterior supera a meta
+      // dele — o Math.max(0, ...) aqui evita que isso vire uma "meta negativa" pros meses
+      // seguintes; o remaining em si continua negativo pros próximos cálculos (meta já superada).
+      const targetReceita = Math.max(0, remainingReceita) / remainingMonths
+      const targetLucro = Math.max(0, remainingLucro) / remainingMonths
 
       if (isPassado || isAtual) {
         remainingReceita -= receitaReal
