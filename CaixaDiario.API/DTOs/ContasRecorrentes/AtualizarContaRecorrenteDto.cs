@@ -9,6 +9,8 @@ public class AtualizarContaRecorrenteDto
     public DateOnly? DataFim { get; set; }
     public string? Periodicidade { get; set; }
     public Guid? ContaBancariaId { get; set; }
+    public bool? ValorVariavel { get; set; }
+    public int? DiaVencimento { get; set; }
     // Quando true, propaga Descricao/Valor/Categoria/ContaBancariaId pras ocorrências pendentes
     // (não pagas) já materializadas — as já pagas nunca são tocadas. DataVencimento de cada
     // ocorrência é intrínseca a quando ela foi gerada e nunca muda por aqui.

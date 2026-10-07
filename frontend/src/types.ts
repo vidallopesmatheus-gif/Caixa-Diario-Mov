@@ -58,6 +58,9 @@ export interface ItemFinanceiroSaida {
 
 
 export interface ContaProvisionada {
+  // Ausente só em itens muito antigos, nunca resalvos desde a Fase 0.4 — editar/excluir por Id
+  // exige que esteja presente (ver api/contasProvisionadas.ts).
+  id?: string
   descricao: string
   valor: number
   dataVencimento?: string
@@ -65,6 +68,8 @@ export interface ContaProvisionada {
   categoria?: string
   recorrenciaId?: string
   dataBaixa?: string
+  // Preenchido só quando o valor pago (juros/multa/desconto) difere do valor original do título.
+  valorRealizado?: number
   contaBancariaId?: string
   // Preenchido quando a baixa foi vinculada a um lançamento (Entrada/Saída) já existente,
   // em vez de gerar um novo — evita contar o mesmo dinheiro duas vezes no saldo.
@@ -155,7 +160,12 @@ export interface ContaRecorrente {
   quantidadeParcelas?: number
   ativo: boolean
   criadoEm: string
-  contaBancariaId?: string
+  contaBancariaId: string
+  // Fase 1.1: quando true, o valor previsto de cada ocorrência é recalculado (média das últimas
+  // 3 pagas) em vez de usar `valor` cadastrado fixo.
+  valorVariavel: boolean
+  // Override do dia de vencimento (1-31), independente de dataInicio.
+  diaVencimento?: number
 }
 
 export interface CategoriaItem {
@@ -235,8 +245,34 @@ export interface ChatMessage {
   content: string
 }
 
+/** Fase 1.7: transação que bate com um lançamento manual (sem FitId, sem histórico de
+ * importação) — a única coisa que a tela de revisão mostra linha a linha. */
+export interface DuplicataManual {
+  transacaoIndice: number
+  descricaoBanco: string
+  dataBanco: string
+  valor: number
+  tipo: 'Entrada' | 'Saida'
+  lancamentoManualId: string
+  descricaoManual: string
+  dataManual: string
+}
+
+/** Fase 1.7: provável duplicata entre dois arquivos importados (ex.: CSV + OFX do mesmo banco) —
+ * só informativo, sempre importa mesmo sem decisão do usuário. */
+export interface DuplicataEntreArquivos {
+  transacaoIndice: number
+  descricaoBanco: string
+  dataBanco: string
+  valor: number
+  tipo: 'Entrada' | 'Saida'
+  descricaoJaImportada: string
+  dataJaImportada: string
+}
+
 /** Transação encontrada no arquivo antes de qualquer persistência — só pré-visualização. */
-/** Resumo agregado do arquivo antes de importar — sem lista linha a linha. */
+/** Resumo agregado do arquivo antes de importar — sem lista linha a linha, exceto as duplicatas
+ * manuais (Fase 1.7), que são as únicas que pedem uma decisão explícita do usuário. */
 export interface ResumoImportacao {
   totalEncontradas: number
   totalJaImportadas: number
@@ -245,6 +281,8 @@ export interface ResumoImportacao {
   totalSaidas: number
   dataInicioArquivo: string
   dataFimArquivo: string
+  duplicatasManuais: DuplicataManual[]
+  duplicatasEntreArquivos: DuplicataEntreArquivos[]
 }
 
 export interface ResultadoImportacao {
@@ -255,6 +293,9 @@ export interface ResultadoImportacao {
   totalAmbiguasTransferencia: number
   totalEntradas: number
   totalSaidas: number
+  totalMescladasComManual: number
+  totalDuplicatasEntreArquivosSinalizadas: number
+  totalSugestoesVinculo: number
 }
 
 /** Lançamento já real (afeta saldo) que ainda não tem categoria. */

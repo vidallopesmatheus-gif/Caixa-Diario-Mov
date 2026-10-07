@@ -6,7 +6,7 @@ namespace CaixaDiario.Tests.Services;
 public class InsightServiceTests
 {
     private readonly InsightService _sut = new();
-    private static readonly DateOnly Hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+    private static readonly DateOnly Hoje = DataLocalHelper.Hoje();
     private static readonly int DiasDecorridos = Math.Max(1, Hoje.Day);
     private static readonly int DiasNoMes = DateTime.DaysInMonth(Hoje.Year, Hoje.Month);
 

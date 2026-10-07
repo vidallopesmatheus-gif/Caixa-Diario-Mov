@@ -193,7 +193,7 @@ public class FaturaCartaoService : IFaturaCartaoService
     {
         var registros = (await _registroRepo.ListarPorContaAsync(contaCartao.Id)).Where(r => !r.Excluido);
         var pagamentos = await _pagamentoRepo.ListarPorContaCartaoAsync(contaCartao.Id);
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
 
         var comprasPorCompetencia = registros
             .SelectMany(r => r.Saidas

@@ -7,8 +7,8 @@ import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { listarCategorias } from '../../api/categorias'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
-import { ORDEM_GRUPOS } from '../../utils/categorias'
-import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, ContaBancaria } from '../../types'
+import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
+import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, ContaBancaria, CategoriaAdmin } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
@@ -172,6 +172,24 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setMsg('')
   }
 
+  // Mesma lógica de carregamento do efeito de troca de dia/conta — chamada aqui pra garantir que,
+  // depois de salvar, a tela reflita exatamente o que ficou gravado no servidor (nunca os arrays
+  // locais, que já foram enviados e não devem ser reenviados numa próxima sincronização).
+  async function recarregarRegistroAtual() {
+    if (!clienteId || !contaId) return
+    const reg = await buscarPorData(data, contaId)
+    setSavedEntradas(reg ? reg.entradas.map(e => ({ ...e, contaId })) : [])
+    setSavedSaidas(reg ? reg.saidas.map(s => ({ ...s, contaId })) : [])
+    if (reg) {
+      setInicio(reg.saldoInicio)
+      setConfirmado(String(reg.saldoConfirmado))
+    }
+    setEntradas([novaEntrada(ultimaContaUsada || contaId)])
+    setSaidas([novaSaida(ultimaContaUsada || contaId)])
+    setEntradaDisplays([''])
+    setSaidaDisplays([''])
+  }
+
   async function handleSave() {
     if (!clienteId) return
     setSaving(true)
@@ -232,6 +250,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         }
       }
 
+      await recarregarRegistroAtual()
       setSaveSuccess(true)
       setMsg('Salvo com sucesso!')
     } catch (e: unknown) {
@@ -297,26 +316,48 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setUltimaContaUsada(novaContaId)
   }
 
-  function handleSelectCat(nome: string) {
-    if (!catOpen) return
-    if (catOpen.tipo === 'entrada') updateEntrada(catOpen.idx, 'categoria', nome)
-    else updateSaida(catOpen.idx, 'categoria', nome)
-    setCatOpen(null)
-  }
-
-  function abrirEscolhaDeContrapartida() {
+  function abrirEscolhaDeContrapartida(tipo: 'entrada' | 'saida', idx: number) {
+    setCatOpen({ tipo, idx })
     setEscolhendoContrapartida(true)
   }
 
-  function catItemsForSaida() {
-    return ORDEM_GRUPOS
-      .map(g => ({ grupo: g, itens: categorias.saidas.filter(c => (c.grupo ?? 'Outros') === g) }))
-      .filter(g => g.itens.length > 0)
+  function cancelarEscolhaDeContrapartida() {
+    setCatOpen(null)
+    setEscolhendoContrapartida(false)
+  }
+
+  // Caixa é lançamento rápido do dia a dia — só receita/devolução entram aqui; Investimento e
+  // Financiamento (que também contam como entrada no combobox do Banco) ficam de fora.
+  function categoriasEntradaPermitidas() {
+    return categorias.entradas.filter(c => c.tipoCusto === 'Receita' || c.grupo === 'Devolução e Estorno')
+  }
+
+  function handleCategoriaCriada(nova: CategoriaAdmin) {
+    const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupoNome }
+    if (nova.ehEntrada) setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
+    if (nova.ehSaida) setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
+  }
+
+  // Linhas em edição (ainda não salvas individualmente com ✔) que seriam perdidas ao trocar de
+  // dia ou de conta — savedEntradas/savedSaidas não entram aqui porque já estão persistidas.
+  function temRascunhoNaoSalvo() {
+    return entradas.some(e => e.descricao || e.valor) || saidas.some(s => s.descricao || s.valor)
+  }
+
+  function podeTrocarDeTelaAgora() {
+    if (!temRascunhoNaoSalvo()) return true
+    return confirm('Você tem lançamentos não salvos nesta tela. Trocar de dia ou de conta agora vai descartá-los. Continuar?')
   }
 
   return (
     <>
-      <DayNav date={data} onPrev={() => setData(d => addDays(d, -1))} onNext={() => setData(d => addDays(d, 1))} />
+      <DayNav
+        date={data}
+        max={todayISO()}
+        onPrev={() => { if (podeTrocarDeTelaAgora()) setData(d => addDays(d, -1)) }}
+        onNext={() => { if (podeTrocarDeTelaAgora()) setData(d => addDays(d, 1)) }}
+        onPick={novaData => { if (podeTrocarDeTelaAgora()) setData(novaData) }}
+      />
       <div className="stats-grid">
         <StatCard label="📥 Início" value={fmtBRL(inicio)} />
         <StatCard label="📤 Entradas" value={fmtBRL(totalEntradas)} className="val-green" />
@@ -328,7 +369,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
           <span style={{ fontSize: 13, color: 'var(--tx3)' }}>Conta:</span>
           {contas.filter(c => c.ativa).map(c => (
-            <button key={c.id} type="button" onClick={() => { setContaId(c.id); setUltimaContaUsada(c.id) }}
+            <button key={c.id} type="button"
+              onClick={() => { if (podeTrocarDeTelaAgora()) { setContaId(c.id); setUltimaContaUsada(c.id) } }}
               style={{
                 padding: '5px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
                 border: '1px solid var(--bd)',
@@ -378,47 +420,40 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   }}
                 />
               </div>
-              <div style={{ position: 'relative' }}>
-                <button className="cat-btn cat-btn-entrada"
-                  onClick={() => {
-                    const jaAberta = catOpen?.tipo === 'entrada' && catOpen.idx === i
-                    setCatOpen(jaAberta ? null : { tipo: 'entrada', idx: i })
-                    setEscolhendoContrapartida(false)
-                  }}>
-                  {e.transferenciaContaId
-                    ? `🔁 ${contas.find(c => c.id === e.transferenciaContaId)?.nome ?? 'Transferência'}`
-                    : (e.categoria || 'Categoria')}
-                </button>
-                {catOpen?.tipo === 'entrada' && catOpen.idx === i && (
-                  <div className="cat-dropdown" ref={dropdownRef}>
-                    {escolhendoContrapartida ? (
-                      <div className="cat-items" style={{ padding: 6 }}>
-                        <div style={{ fontSize: 11, color: 'var(--tx3)', padding: '2px 6px 6px' }}>De qual conta veio?</div>
-                        {contas.filter(c => c.ativa && c.id !== (e.contaId || ultimaContaUsada)).map(c => (
-                          <button key={c.id} className="cat-item" style={{ borderColor: '#007aff44' }}
-                            onClick={() => marcarTransferencia('entrada', i, c.id)}>
-                            {c.nome}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="cat-items" style={{ padding: 6 }}>
-                        {contas.filter(c => c.ativa).length > 1 && (
-                          <button className="cat-item" style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}
-                            onClick={abrirEscolhaDeContrapartida}>
-                            🔁 É uma transferência
-                          </button>
-                        )}
-                        {categorias.entradas.map(c => (
-                          <button key={c.nome} className="cat-item"
-                            style={{ borderColor: '#007aff44' }}
-                            onClick={() => handleSelectCat(c.nome)}>
-                            {c.nome}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, minWidth: 170 }}>
+                {e.transferenciaContaId ? (
+                  <button type="button" className="cat-btn cat-btn-entrada" style={{ flex: 1 }}
+                    onClick={() => updateEntrada(i, 'categoria', '')}>
+                    🔁 {contas.find(c => c.id === e.transferenciaContaId)?.nome ?? 'Transferência'} ✕
+                  </button>
+                ) : catOpen?.tipo === 'entrada' && catOpen.idx === i && escolhendoContrapartida ? (
+                  <div className="cat-dropdown" ref={dropdownRef} style={{ position: 'absolute', top: 0 }}>
+                    <div className="cat-items" style={{ padding: 6 }}>
+                      <div style={{ fontSize: 11, color: 'var(--tx3)', padding: '2px 6px 6px', width: '100%' }}>De qual conta veio?</div>
+                      {contas.filter(c => c.ativa && c.id !== (e.contaId || ultimaContaUsada)).map(c => (
+                        <button key={c.id} className="cat-item" style={{ borderColor: '#007aff44' }}
+                          onClick={() => marcarTransferencia('entrada', i, c.id)}>
+                          {c.nome}
+                        </button>
+                      ))}
+                      <button className="cat-item" onClick={cancelarEscolhaDeContrapartida}>Cancelar</button>
+                    </div>
                   </div>
+                ) : (
+                  <>
+                    <CategoriaCombobox
+                      categorias={categoriasEntradaPermitidas()}
+                      value={e.categoria ?? ''}
+                      onChange={nome => updateEntrada(i, 'categoria', nome)}
+                      onCategoriaCriada={handleCategoriaCriada}
+                      blocoPadraoNovaCategoria="RECEITAS OPERACIONAIS"
+                      placeholder="Categoria"
+                    />
+                    {contas.filter(c => c.ativa).length > 1 && (
+                      <button type="button" className="cat-btn cat-btn-entrada" title="É uma transferência"
+                        onClick={() => abrirEscolhaDeContrapartida('entrada', i)}>🔁</button>
+                    )}
+                  </>
                 )}
               </div>
               <button className="btn-item-save btn-item-save-entrada"
@@ -481,56 +516,40 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   }}
                 />
               </div>
-              <div style={{ position: 'relative' }}>
-                <button className={`cat-btn ${s.categoria ? 'cat-btn-saida com-cat' : 'cat-btn-saida sem-cat'}`}
-                  onClick={() => {
-                    const jaAberta = catOpen?.tipo === 'saida' && catOpen.idx === i
-                    setCatOpen(jaAberta ? null : { tipo: 'saida', idx: i })
-                    setEscolhendoContrapartida(false)
-                  }}>
-                  {s.transferenciaContaId
-                    ? `🔁 ${contas.find(c => c.id === s.transferenciaContaId)?.nome ?? 'Transferência'}`
-                    : (s.categoria || 'Categoria')}
-                </button>
-                {catOpen?.tipo === 'saida' && catOpen.idx === i && (
-                  <div className="cat-dropdown" ref={dropdownRef}>
-                    {escolhendoContrapartida ? (
-                      <div className="cat-items" style={{ padding: 6 }}>
-                        <div style={{ fontSize: 11, color: 'var(--tx3)', padding: '2px 6px 6px' }}>Pra qual conta foi?</div>
-                        {contas.filter(c => c.ativa && c.id !== (s.contaId || ultimaContaUsada)).map(c => (
-                          <button key={c.id} className="cat-item" style={{ borderColor: '#ff6b6b44' }}
-                            onClick={() => marcarTransferencia('saida', i, c.id)}>
-                            {c.nome}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <>
-                        {contas.filter(c => c.ativa).length > 1 && (
-                          <div className="cat-items" style={{ padding: '6px 6px 0' }}>
-                            <button className="cat-item" style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}
-                              onClick={abrirEscolhaDeContrapartida}>
-                              🔁 É uma transferência
-                            </button>
-                          </div>
-                        )}
-                        {catItemsForSaida().map(({ grupo, itens }) => (
-                          <div key={grupo} className="cat-group" style={{ padding: '6px 8px 0' }}>
-                            <div className="cat-group-label" style={{ borderColor: '#ff6b6b' }}>{grupo}</div>
-                            <div className="cat-items">
-                              {itens.map(c => (
-                                <button key={c.nome} className="cat-item"
-                                  style={{ borderColor: '#ff6b6b44' }}
-                                  onClick={() => handleSelectCat(c.nome)}>
-                                  {c.nome}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </>
-                    )}
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, minWidth: 170 }}>
+                {s.transferenciaContaId ? (
+                  <button type="button" className="cat-btn cat-btn-saida com-cat" style={{ flex: 1 }}
+                    onClick={() => updateSaida(i, 'categoria', '')}>
+                    🔁 {contas.find(c => c.id === s.transferenciaContaId)?.nome ?? 'Transferência'} ✕
+                  </button>
+                ) : catOpen?.tipo === 'saida' && catOpen.idx === i && escolhendoContrapartida ? (
+                  <div className="cat-dropdown" ref={dropdownRef} style={{ position: 'absolute', top: 0 }}>
+                    <div className="cat-items" style={{ padding: 6 }}>
+                      <div style={{ fontSize: 11, color: 'var(--tx3)', padding: '2px 6px 6px', width: '100%' }}>Pra qual conta foi?</div>
+                      {contas.filter(c => c.ativa && c.id !== (s.contaId || ultimaContaUsada)).map(c => (
+                        <button key={c.id} className="cat-item" style={{ borderColor: '#ff6b6b44' }}
+                          onClick={() => marcarTransferencia('saida', i, c.id)}>
+                          {c.nome}
+                        </button>
+                      ))}
+                      <button className="cat-item" onClick={cancelarEscolhaDeContrapartida}>Cancelar</button>
+                    </div>
                   </div>
+                ) : (
+                  <>
+                    <CategoriaCombobox
+                      categorias={categorias.saidas}
+                      value={s.categoria}
+                      onChange={nome => updateSaida(i, 'categoria', nome)}
+                      onCategoriaCriada={handleCategoriaCriada}
+                      blocoPadraoNovaCategoria="DESPESAS OPERACIONAIS"
+                      placeholder="Categoria"
+                    />
+                    {contas.filter(c => c.ativa).length > 1 && (
+                      <button type="button" className="cat-btn cat-btn-saida sem-cat" title="É uma transferência"
+                        onClick={() => abrirEscolhaDeContrapartida('saida', i)}>🔁</button>
+                    )}
+                  </>
                 )}
               </div>
               <button className="btn-item-save btn-item-save-saida"

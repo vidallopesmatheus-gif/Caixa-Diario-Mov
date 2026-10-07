@@ -1,5 +1,7 @@
 using CaixaDiario.API.DTOs.ContasBancarias;
 using CaixaDiario.API.DTOs.Importacao;
+using CaixaDiario.API.Enums;
+using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Responses;
 using CaixaDiario.API.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -115,10 +117,28 @@ public class ContasBancariasController : ControllerBase
     [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
     public async Task<IActionResult> ImportarExtrato(
         Guid contaId, IFormFile arquivo,
-        [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim)
+        [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim,
+        // Fase 1.7: JSON [{"transacaoIndice":N,"acao":"Mesclar"|"ImportarComoNovo"}] — só pras
+        // transações que a tela de revisão listou em DuplicatasManuais; índice ausente = Mesclar.
+        [FromForm] string? resolucoesDuplicatasJson = null)
     {
+        List<ResolucaoDuplicataDto>? resolucoes = null;
+        if (!string.IsNullOrWhiteSpace(resolucoesDuplicatasJson))
+        {
+            try
+            {
+                resolucoes = System.Text.Json.JsonSerializer.Deserialize<List<ResolucaoDuplicataDto>>(
+                    resolucoesDuplicatasJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                    "resolucoesDuplicatasJson inválido.", "resolucoesDuplicatasJson");
+            }
+        }
+
         var resultado = await _importacaoService.ImportarArquivoAsync(
-            contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim);
+            contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim, resolucoes);
         return Ok(new ApiResponse<ResultadoImportacaoDto> { Dados = resultado });
     }
 

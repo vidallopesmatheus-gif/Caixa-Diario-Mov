@@ -127,7 +127,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularEvolucao_RetornaMesesCorretos()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje.AddDays(-5),
@@ -148,7 +148,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_TresMesesDeDados_CalculaValuation()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>();
         for (int i = 2; i >= 0; i--)
         {
@@ -167,7 +167,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_SaldoZero_RunwayRetornaZero()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registro = CriarRegistro(hoje,
             new() { Item("Venda", 500m, "Vendas", "Receita") },
             new() { Item("Custo", 1000m, "Aluguel", "CustoFixo") },
@@ -182,7 +182,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_SemContasPagarProximos30Dias_LiquidezAltaLiquidez()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registro = CriarRegistro(hoje, new(), new(), saldoFinal: 5000m);
 
         var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 5000m);
@@ -194,7 +194,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_ComContasPagarProximos30Dias_CalculaLiquidez()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var amanha = hoje.AddDays(1);
         var registro = new RegistroDiario
         {
@@ -215,7 +215,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_ComContasReceberProximos30Dias_SomaNoNumeradorLiquidez()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var amanha = hoje.AddDays(1);
         var registro = new RegistroDiario
         {
@@ -257,7 +257,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_MultiploCustomizado_AplicaNoValuation()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>();
         for (int i = 2; i >= 0; i--)
             registros.Add(CriarRegistro(hoje.AddMonths(-i).AddDays(-5),
@@ -274,7 +274,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_ComSaidas3Meses_CalculaBurnRate()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new() { Item("Venda", 100m, "Vendas", "Receita") },
@@ -290,7 +290,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_FixoVariavelNaoClassificado_ReconciliaComTotalDespesas()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje,
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new()
@@ -311,7 +311,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_RankingCategorias_CalculaPercentualSobreReceita()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje,
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Aluguel", 200m, "Aluguel", "CustoFixo") });
@@ -327,7 +327,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_CategoriaComHistoricoAnterior_CalculaMediaEVariacaoPositiva()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new(), new() { Item("Aluguel", 300m, "Aluguel", "CustoFixo") }),
@@ -346,7 +346,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_CategoriaSemHistoricoAnterior_MediaEVariacaoNulas()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje, new(), new() { Item("Software", 80m, "Software", "CustoFixo") });
 
         var resultado = _sut.CalcularIndicadores(new() { reg });
@@ -361,7 +361,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_PontoEquilibrio_CalculaValorMensalDiaUtilEDistancia()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje,
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new()
@@ -384,7 +384,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_PontoEquilibrio_CustoVariavelMaiorQueReceita_Indisponivel()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje,
             new() { Item("Venda", 100m, "Vendas", "Receita") },
             new() { Item("Insumos", 200m, "Insumos/Mercadoria", "CustoVariavel") });
@@ -399,7 +399,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_PontoEquilibrio_SemReceita_Indisponivel()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje, new(), new() { Item("Aluguel", 300m, "Aluguel", "CustoFixo") });
 
         var resultado = _sut.CalcularIndicadores(new() { reg }).PontoEquilibrio;
@@ -413,7 +413,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_FolegoCaixa_CalculaMesesEFaixaConfortavel()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var contaId = Guid.NewGuid();
         var registros = new List<RegistroDiario>();
         for (int i = 0; i < 3; i++)
@@ -438,7 +438,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_FolegoCaixa_SaldoBaixo_FaixaCritica()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var contaId = Guid.NewGuid();
         var reg = CriarRegistro(hoje,
             new() { Item("Venda", 2000m, "Vendas", "Receita") },
@@ -456,7 +456,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_FolegoCaixa_SemCustoFixo_Indisponivel()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje, new() { Item("Venda", 2000m, "Vendas", "Receita") }, new());
         reg.ContaBancariaId = Guid.NewGuid();
 
@@ -471,7 +471,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_CustoFixoMensal_RetornaSeisMesesComPercentual()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje,
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
             new() { Item("Aluguel", 400m, "Aluguel", "CustoFixo") });
@@ -490,7 +490,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_PrazoRecebimento_PoucasAmostras_Indisponivel()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje, new(), new());
         reg.ContasReceber = new()
         {
@@ -506,7 +506,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_PrazoRecebimento_MaioriaMesmoDia_IndisponivelComMensagemExplicativa()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje, new(), new());
         reg.ContasReceber = Enumerable.Range(0, 6)
             .Select(i => new ContaProvisionada { Descricao = $"C{i}", Valor = 100m, Pago = true, DataVencimento = hoje.AddDays(-i), DataBaixa = hoje.AddDays(-i) })
@@ -521,7 +521,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_PrazoRecebimento_ComAtrasoReal_CalculaMediaDias()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje, new(), new());
         var atrasos = new[] { 5, 10, 3, 7, 15 };
         reg.ContasReceber = atrasos
@@ -538,7 +538,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_ContaMesesComAtividadeCorretamente()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new() { Item("Venda", 500m, "Vendas", "Receita") }, new()),
@@ -553,7 +553,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_MesesEvolucaoMenorQue13_VariacaoAnoAnteriorNula()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje, new() { Item("Venda", 500m, "Vendas", "Receita") }, new());
 
         var resultado = _sut.CalcularIndicadores(new() { reg }, mesesEvolucao: 6);
@@ -564,7 +564,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_ComMesAnteriorComReceita_CalculaVariacaoMesAMes()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new() { Item("Venda", 1200m, "Vendas", "Receita") }, new()),
@@ -579,7 +579,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_MesAnteriorSemReceita_VariacaoMesAMesNula()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var reg = CriarRegistro(hoje, new() { Item("Venda", 1200m, "Vendas", "Receita") }, new());
 
         var resultado = _sut.CalcularIndicadores(new() { reg }, mesesEvolucao: 6);
@@ -590,7 +590,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_Com13MesesEMesmoMesAnoAnterior_CalculaVariacaoAnoAnterior()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new() { Item("Venda", 1500m, "Vendas", "Receita") }, new()),
@@ -605,7 +605,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularIndicadores_CategoriaComGastoAtualMenorQueMedia_VariacaoPercentualNegativa()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new(), new() { Item("Aluguel", 10m, "Aluguel", "CustoFixo") }),
@@ -708,7 +708,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_LucroAnteriorZero_ValuationSemaforoCinza()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new() { Item("Venda", 1000m, "Vendas", "Receita") }, new() { Item("Custo", 500m, "Aluguel", "CustoFixo") }),
@@ -723,7 +723,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_LucroSubiuMaisDe5Porcento_ValuationSemaforoVerde()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new() { Item("Venda", 1200m, "Vendas", "Receita") }, new()),
@@ -738,7 +738,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_LucroCaiuMaisDe5Porcento_ValuationSemaforoVermelho()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new() { Item("Venda", 800m, "Vendas", "Receita") }, new()),
@@ -753,7 +753,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_LucroEstavel_ValuationSemaforoAmarelo()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registros = new List<RegistroDiario>
         {
             CriarRegistro(hoje, new() { Item("Venda", 1020m, "Vendas", "Receita") }, new()),
@@ -770,7 +770,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_SemGastosNosUltimos3Meses_RunwaySemaforoCinza()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registro = CriarRegistro(hoje, new() { Item("Venda", 500m, "Vendas", "Receita") }, new(), saldoFinal: 1000m);
 
         var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 1000m);
@@ -781,7 +781,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_RunwayMaiorQue6Meses_SemaforoVerde()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registro = CriarRegistro(hoje, new(), new() { Item("Custo", 100m, "Aluguel", "CustoFixo") }, saldoFinal: 800m);
 
         var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 800m);
@@ -793,7 +793,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_RunwayEntre3e6Meses_SemaforoAmarelo()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registro = CriarRegistro(hoje, new(), new() { Item("Custo", 100m, "Aluguel", "CustoFixo") }, saldoFinal: 400m);
 
         var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 400m);
@@ -805,7 +805,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_RunwayMenorQue3Meses_SemaforoVermelho()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registro = CriarRegistro(hoje, new(), new() { Item("Custo", 100m, "Aluguel", "CustoFixo") }, saldoFinal: 100m);
 
         var resultado = _sut.CalcularPeriodo(new() { registro }, new() { registro }, 100m);
@@ -819,7 +819,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_IndiceLiquidezEntre1e15_SemaforoAmarelo()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var amanha = hoje.AddDays(1);
         var registro = new RegistroDiario
         {
@@ -838,7 +838,7 @@ public class MetricasServiceTests
     [Fact]
     public void CalcularPeriodo_IndiceLiquidezAbaixoDe1_SemaforoVermelho()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var amanha = hoje.AddDays(1);
         var registro = new RegistroDiario
         {

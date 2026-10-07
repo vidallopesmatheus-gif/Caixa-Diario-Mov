@@ -71,7 +71,7 @@ public class MetricasService : IMetricasService
 
         // Valuation
         var ultimos3Meses = Enumerable.Range(0, 3)
-            .Select(i => DateOnly.FromDateTime(DateTime.UtcNow).AddMonths(-i))
+            .Select(i => DataLocalHelper.Hoje().AddMonths(-i))
             .Select(m => todosRegistros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month).ToList())
             .ToList();
 
@@ -114,7 +114,7 @@ public class MetricasService : IMetricasService
         };
 
         // Liquidez
-        var hoje30 = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje30 = DataLocalHelper.Hoje();
         var em30dias = hoje30.AddDays(30);
         var contasPagarProximas = todosRegistros
             .SelectMany(r => r.ContasPagar)
@@ -149,7 +149,7 @@ public class MetricasService : IMetricasService
 
     public List<EvolucaoMensalDto> CalcularEvolucao(List<RegistroDiario> registros, int meses)
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var resultado = new List<EvolucaoMensalDto>();
 
         for (int i = meses - 1; i >= 0; i--)
@@ -507,7 +507,7 @@ public class MetricasService : IMetricasService
 
     public IndicadoresDecisaoDto CalcularIndicadores(List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null)
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var doMesAtual = registros.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month).ToList();
 
         var dre = CalcularDre(doMesAtual, categorias);

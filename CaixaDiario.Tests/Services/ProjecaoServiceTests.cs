@@ -6,7 +6,7 @@ namespace CaixaDiario.Tests.Services;
 public class ProjecaoServiceTests
 {
     private readonly ProjecaoService _sut = new();
-    private static readonly DateOnly Hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+    private static readonly DateOnly Hoje = DataLocalHelper.Hoje();
 
     private static RegistroDiario CriarRegistro(Guid contaId, DateOnly data, decimal saldoFinal) => new()
     {
@@ -150,6 +150,36 @@ public class ProjecaoServiceTests
         var lancamento = Assert.Single(dia.Saidas);
         Assert.Equal("Provisionado", lancamento.Origem);
         Assert.Equal(200m, dia.TotalSaidas);
+    }
+
+    [Fact]
+    public void Calcular_ComRecorrenciaValorVariavel_ProjetaComMediaDasUltimas3PagasNaoComValorCadastrado()
+    {
+        var contaA = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var dataOcorrencia = Hoje.AddDays(4);
+
+        var recorrencia = new ContaRecorrente
+        {
+            Id = recorrenciaId, ClienteId = Guid.NewGuid(), Descricao = "Energia", Valor = 100m,
+            Tipo = "Pagar", Ativo = true, Periodicidade = "Mensal", DataInicio = dataOcorrencia,
+            ContaBancariaId = contaA, ValorVariavel = true, CriadoEm = DateTime.UtcNow,
+        };
+
+        var historico = CriarRegistro(contaA, Hoje.AddDays(-1), 1000m);
+        historico.ContasPagar.AddRange(new[]
+        {
+            new ContaProvisionada { RecorrenciaId = recorrenciaId, Valor = 100m, Pago = true, DataBaixa = Hoje.AddMonths(-3) },
+            new ContaProvisionada { RecorrenciaId = recorrenciaId, Valor = 110m, Pago = true, DataBaixa = Hoje.AddMonths(-2) },
+            new ContaProvisionada { RecorrenciaId = recorrenciaId, Valor = 120m, Pago = true, DataBaixa = Hoje.AddMonths(-1) },
+        });
+
+        var resultado = _sut.Calcular(new List<RegistroDiario> { historico }, new List<ContaRecorrente> { recorrencia }, 5, null);
+
+        var dia = resultado.Dias.Single(d => d.Data == dataOcorrencia);
+        // Média das 3 últimas pagas (100+110+120)/3 = 110, não o Valor cadastrado (100).
+        Assert.Equal(110m, dia.TotalSaidas);
+        Assert.Equal("Recorrente", Assert.Single(dia.Saidas).Origem);
     }
 
     [Fact]

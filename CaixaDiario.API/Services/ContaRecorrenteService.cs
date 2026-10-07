@@ -14,13 +14,28 @@ public class ContaRecorrenteService : IContaRecorrenteService
 
     private readonly IContaRecorrenteRepository _repo;
     private readonly IRegistroRepository _registroRepo;
+    private readonly IContaBancariaRepository _contaBancariaRepo;
     private readonly IAuditService _auditService;
 
-    public ContaRecorrenteService(IContaRecorrenteRepository repo, IRegistroRepository registroRepo, IAuditService auditService)
+    public ContaRecorrenteService(
+        IContaRecorrenteRepository repo, IRegistroRepository registroRepo,
+        IContaBancariaRepository contaBancariaRepo, IAuditService auditService)
     {
         _repo = repo;
         _registroRepo = registroRepo;
+        _contaBancariaRepo = contaBancariaRepo;
         _auditService = auditService;
+    }
+
+    // Mesma checagem de RegistroService.ValidarContaVinculada — sem ela, um payload adulterado
+    // conseguia atribuir a recorrência a uma conta de outro cliente ou inativa.
+    private async Task ValidarContaVinculadaAsync(Guid clienteId, Guid contaBancariaId)
+    {
+        var contas = await _contaBancariaRepo.ListarPorClienteAsync(clienteId);
+        var conta = contas.FirstOrDefault(c => c.Id == contaBancariaId)
+            ?? throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Conta bancária não pertence a este cliente.");
+        if (!conta.Ativa)
+            throw new ApiException(400, CodigoRetorno.CONTA_INATIVA, "A conta bancária selecionada está inativa.");
     }
 
     public async Task<List<ContaRecorrenteDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -50,6 +65,15 @@ public class ContaRecorrenteService : IContaRecorrenteService
         if (dto.QuantidadeParcelas.HasValue && dto.QuantidadeParcelas.Value > 360)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Quantidade de parcelas não pode ser maior que 360.", "quantidadeParcelas");
 
+        // [Required] não pega Guid.Empty (não é "ausente" pro model binding de um tipo de valor) —
+        // sem essa checagem, uma conta recorrente conseguia nascer sem conta bancária de novo.
+        if (dto.ContaBancariaId == Guid.Empty)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Conta bancária é obrigatória.", "contaBancariaId");
+        await ValidarContaVinculadaAsync(dto.ClienteId, dto.ContaBancariaId);
+
+        if (dto.DiaVencimento is < 1 or > 31)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Dia de vencimento deve estar entre 1 e 31.", "diaVencimento");
+
         var conta = new ContaRecorrente
         {
             Id = Guid.NewGuid(),
@@ -63,6 +87,8 @@ public class ContaRecorrenteService : IContaRecorrenteService
             Periodicidade = dto.Periodicidade,
             QuantidadeParcelas = dto.QuantidadeParcelas,
             ContaBancariaId = dto.ContaBancariaId,
+            ValorVariavel = dto.ValorVariavel,
+            DiaVencimento = dto.DiaVencimento,
             Ativo = true,
             CriadoEm = DateTime.UtcNow,
         };
@@ -85,6 +111,9 @@ public class ContaRecorrenteService : IContaRecorrenteService
         if (dto.Periodicidade != null && !PeriodicidadesValidas.Contains(dto.Periodicidade))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Periodicidade inválida.", "periodicidade");
 
+        if (dto.DiaVencimento is < 1 or > 31)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Dia de vencimento deve estar entre 1 e 31.", "diaVencimento");
+
         var antes = JsonSerializer.Serialize(MapToDto(conta));
 
         if (dto.Descricao != null) conta.Descricao = dto.Descricao;
@@ -93,7 +122,15 @@ public class ContaRecorrenteService : IContaRecorrenteService
         if (dto.DataInicio.HasValue) conta.DataInicio = dto.DataInicio.Value;
         if (dto.DataFim.HasValue) conta.DataFim = dto.DataFim;
         if (dto.Periodicidade != null) conta.Periodicidade = dto.Periodicidade;
-        if (dto.ContaBancariaId.HasValue) conta.ContaBancariaId = dto.ContaBancariaId;
+        if (dto.ValorVariavel.HasValue) conta.ValorVariavel = dto.ValorVariavel.Value;
+        if (dto.DiaVencimento.HasValue) conta.DiaVencimento = dto.DiaVencimento;
+        if (dto.ContaBancariaId.HasValue)
+        {
+            if (dto.ContaBancariaId.Value == Guid.Empty)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Conta bancária é obrigatória.", "contaBancariaId");
+            await ValidarContaVinculadaAsync(clienteId, dto.ContaBancariaId.Value);
+            conta.ContaBancariaId = dto.ContaBancariaId.Value;
+        }
         conta.AtualizadoEm = DateTime.UtcNow;
 
         var atualizada = await _repo.AtualizarAsync(conta);
@@ -134,10 +171,13 @@ public class ContaRecorrenteService : IContaRecorrenteService
     private async Task AtualizarOcorrenciasPendentesAsync(Guid clienteId, ContaRecorrente conta)
     {
         var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
+        // Mesma fonte de verdade de RecorrenciaService/ProjecaoService — se ValorVariavel, o valor
+        // propagado é a média recalculada, nunca o Valor cadastrado puro.
+        var valorPrevisto = RecorrenciaService.CalcularValorPrevisto(conta, registros);
         foreach (var registro in registros)
         {
-            var mudouReceber = AplicarNaLista(registro.ContasReceber, conta);
-            var mudouPagar = AplicarNaLista(registro.ContasPagar, conta);
+            var mudouReceber = AplicarNaLista(registro.ContasReceber, conta, valorPrevisto);
+            var mudouPagar = AplicarNaLista(registro.ContasPagar, conta, valorPrevisto);
             if (!mudouReceber && !mudouPagar) continue;
 
             // Reatribui a lista — jsonb sem value comparer, EF só detecta mudança na referência.
@@ -148,14 +188,14 @@ public class ContaRecorrenteService : IContaRecorrenteService
         }
     }
 
-    private static bool AplicarNaLista(List<ContaProvisionada> contas, ContaRecorrente conta)
+    private static bool AplicarNaLista(List<ContaProvisionada> contas, ContaRecorrente conta, decimal valorPrevisto)
     {
         var mudou = false;
         foreach (var c in contas)
         {
             if (c.RecorrenciaId != conta.Id || c.Pago) continue;
             c.Descricao = conta.Descricao;
-            c.Valor = conta.Valor;
+            c.Valor = valorPrevisto;
             c.Categoria = conta.Categoria;
             c.ContaBancariaId = conta.ContaBancariaId;
             mudou = true;
@@ -188,5 +228,6 @@ public class ContaRecorrenteService : IContaRecorrenteService
         Categoria = c.Categoria, Tipo = c.Tipo, DataInicio = c.DataInicio, DataFim = c.DataFim,
         Periodicidade = c.Periodicidade, QuantidadeParcelas = c.QuantidadeParcelas,
         Ativo = c.Ativo, CriadoEm = c.CriadoEm, ContaBancariaId = c.ContaBancariaId,
+        ValorVariavel = c.ValorVariavel, DiaVencimento = c.DiaVencimento,
     };
 }

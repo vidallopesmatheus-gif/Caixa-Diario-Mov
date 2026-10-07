@@ -211,7 +211,7 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("cliente_id");
 
-                    b.Property<Guid?>("ContaBancariaId")
+                    b.Property<Guid>("ContaBancariaId")
                         .HasColumnType("uuid")
                         .HasColumnName("conta_bancaria_id");
 
@@ -234,6 +234,10 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("text")
                         .HasColumnName("descricao");
 
+                    b.Property<int?>("DiaVencimento")
+                        .HasColumnType("integer")
+                        .HasColumnName("dia_vencimento");
+
                     b.Property<string>("Periodicidade")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -253,6 +257,12 @@ namespace CaixaDiario.API.Migrations
                     b.Property<decimal>("Valor")
                         .HasColumnType("decimal(18,2)")
                         .HasColumnName("valor");
+
+                    b.Property<bool>("ValorVariavel")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("valor_variavel");
 
                     b.HasKey("Id");
 
@@ -893,7 +903,8 @@ namespace CaixaDiario.API.Migrations
                     b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaBancaria")
                         .WithMany()
                         .HasForeignKey("ContaBancariaId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Cliente");
 

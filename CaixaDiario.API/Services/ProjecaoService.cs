@@ -11,7 +11,7 @@ public class ProjecaoService : IProjecaoService
         int dias,
         Guid? contaBancariaId)
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
 
         // Saldo atual: último SaldoFinal considerando filtro de conta
         List<RegistroDiario> registrosFiltrados;
@@ -99,7 +99,9 @@ public class ProjecaoService : IProjecaoService
                 entradas.Add(new ProjecaoItemDto
                 {
                     Descricao = rec.Descricao,
-                    Valor     = rec.Valor,
+                    // Fase 1.6: ValorVariavel usa o previsto recalculado (média), nunca o Valor
+                    // cadastrado cru — mesma fonte de verdade de RecorrenciaService/relatório 1.5.
+                    Valor     = RecorrenciaService.CalcularValorPrevisto(rec, registros),
                     Categoria = rec.Categoria,
                     Origem    = "Recorrente",
                 });
@@ -112,7 +114,7 @@ public class ProjecaoService : IProjecaoService
                 saidas.Add(new ProjecaoItemDto
                 {
                     Descricao = rec.Descricao,
-                    Valor     = rec.Valor,
+                    Valor     = RecorrenciaService.CalcularValorPrevisto(rec, registros),
                     Categoria = rec.Categoria,
                     Origem    = "Recorrente",
                 });
@@ -183,7 +185,7 @@ public class ProjecaoService : IProjecaoService
         int mesesFuturo,
         Guid? contaBancariaId)
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var filtrarPorConta = contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty;
 
         var registrosFiltrados = filtrarPorConta
@@ -246,9 +248,11 @@ public class ProjecaoService : IProjecaoService
         {
             var dia = hoje.AddDays(d);
             var totalEntradas = receberPendentes.Where(c => c.DataVencimento == dia).Sum(c => c.Valor)
-                + recorrentesReceber.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia))).Sum(r => r.Valor);
+                + recorrentesReceber.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia)))
+                    .Sum(r => RecorrenciaService.CalcularValorPrevisto(r, registros));
             var totalSaidas = pagarPendentes.Where(c => c.DataVencimento == dia).Sum(c => c.Valor)
-                + recorrentesPagar.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia))).Sum(r => r.Valor);
+                + recorrentesPagar.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia)))
+                    .Sum(r => RecorrenciaService.CalcularValorPrevisto(r, registros));
             saldoCorrendo += totalEntradas - totalSaidas;
 
             var marco = hoje.AddMonths(proximoMarco);

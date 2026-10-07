@@ -150,11 +150,14 @@ public class TransferenciaServiceTests
         Assert.Equal("Transferencia", entradaDestino.TipoCusto);
         Assert.Equal(500m, entradaDestino.Valor);
         Assert.Equal(500m, registroDestinoCriado.SaldoFinal); // 0 + 500
+        // Nunca pode existir uma contrapartida nova sem TransferenciaId — seria uma cópia solta,
+        // indistinguível de um lançamento duplicado de verdade.
+        Assert.NotNull(entradaDestino.TransferenciaId);
         Assert.Equal(saidaOriginal.TransferenciaId, entradaDestino.TransferenciaId);
         // Provisória: ainda não confirmada pelo extrato real da conta de destino (ver Bloco 3C —
         // é o que permite a importação casar com ela em vez de duplicar).
         Assert.True(entradaDestino.Provisoria);
-        Assert.Equal($"Transferência de {contaCorrente.Nome}", entradaDestino.Descricao);
+        Assert.Equal("Aplicação RDB", entradaDestino.Descricao); // mesma descrição do lançamento original
 
         Assert.Equal(contaCorrente.Id, resultado.ContaOrigemId);
         Assert.Equal(contaInvestimento.Id, resultado.ContaDestinoId);
@@ -207,8 +210,12 @@ public class TransferenciaServiceTests
         Assert.Equal("Transferencia", saidaDestino.TipoCusto);
         Assert.Equal(500m, saidaDestino.Valor);
         Assert.Equal(500m, registroDestinoCriado.SaldoFinal); // 1000 - 500
+        // Nunca pode existir uma contrapartida nova sem TransferenciaId — seria uma cópia solta,
+        // indistinguível de um lançamento duplicado de verdade.
+        Assert.NotNull(saidaDestino.TransferenciaId);
+        Assert.Equal(entradaOriginal.TransferenciaId, saidaDestino.TransferenciaId);
         Assert.True(saidaDestino.Provisoria);
-        Assert.Equal($"Transferência para {contaCorrente.Nome}", saidaDestino.Descricao);
+        Assert.Equal("Resgate RDB", saidaDestino.Descricao); // mesma descrição do lançamento original
 
         Assert.Equal(contaInvestimento.Id, resultado.ContaOrigemId);
         Assert.Equal(contaCorrente.Id, resultado.ContaDestinoId);

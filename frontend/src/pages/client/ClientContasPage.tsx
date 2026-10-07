@@ -6,6 +6,8 @@ import {
   listarContasRecorrentes, criarContaRecorrente, atualizarContaRecorrente, desativarContaRecorrente,
 } from '../../api/contasRecorrentes'
 import { listarContasBancarias } from '../../api/contasBancarias'
+import { criarContaProvisionada, atualizarContaProvisionada, excluirContaProvisionada } from '../../api/contasProvisionadas'
+import { listarSugestoesVinculo, type SugestaoVinculo } from '../../api/conciliacao'
 import Modal from '../../components/shared/Modal'
 import type { ContaProvisionada, ContaRecorrente, ContaBancaria } from '../../types'
 import './ClientContas.css'
@@ -55,6 +57,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [recFim, setRecFim] = useState('')
   const [recPeriodicidade, setRecPeriodicidade] = useState('Mensal')
   const [recParcelas, setRecParcelas] = useState('')
+  const [recValorVariavel, setRecValorVariavel] = useState(false)
+  const [recDiaVencimento, setRecDiaVencimento] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [msgOk, setMsgOk] = useState(true)
@@ -73,6 +77,9 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [modalBaixa, setModalBaixa] = useState(false)
   const [baixaView, setBaixaView] = useState<ContaView | null>(null)
   const [baixaContaId, setBaixaContaId] = useState('')
+  const [baixaData, setBaixaData] = useState(todayISO())
+  const [baixaValorDisplay, setBaixaValorDisplay] = useState('')
+  const [baixaValor, setBaixaValor] = useState(0)
   const [confirmandoBaixa, setConfirmandoBaixa] = useState(false)
 
   // ── Estornar baixa: sempre pede confirmação e avisa o impacto no saldo. Se `paraEditar` for
@@ -102,6 +109,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [editRecInicio, setEditRecInicio] = useState('')
   const [editRecFim, setEditRecFim] = useState('')
   const [editRecContaId, setEditRecContaId] = useState('')
+  const [editRecValorVariavel, setEditRecValorVariavel] = useState(false)
+  const [editRecDiaVencimento, setEditRecDiaVencimento] = useState('')
   // '' força o usuário a escolher — nunca decide silenciosamente o que acontece com as já geradas.
   const [editRecAlcance, setEditRecAlcance] = useState<'' | 'futuras' | 'todas'>('')
   const [salvandoEditRec, setSalvandoEditRec] = useState(false)
@@ -111,11 +120,52 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [excluirRecPendentes, setExcluirRecPendentes] = useState<'' | 'manter' | 'remover'>('')
   const [excluindoRec, setExcluindoRec] = useState(false)
 
+  // ── Fase 1.2/1.3: sugestões de vínculo (título pendente × lançamento já importado) ──────────
+  const [sugestoes, setSugestoes] = useState<SugestaoVinculo[]>([])
+  const [sugestoesIgnoradas, setSugestoesIgnoradas] = useState<Set<string>>(new Set())
+  const [vinculandoSugestaoId, setVinculandoSugestaoId] = useState<string | null>(null)
+
   useEffect(() => {
     if (!clienteId) return
     listarContasRecorrentes(clienteId).then(setRecorrentes).catch(console.error)
     listarContasBancarias(clienteId).then(setContasBancarias).catch(console.error)
   }, [clienteId])
+
+  useEffect(() => {
+    if (!clienteId) return
+    const de = addDays(todayISO(), -90)
+    const ate = addDays(todayISO(), 90)
+    listarSugestoesVinculo(clienteId, de, ate).then(setSugestoes).catch(console.error)
+    // Re-busca sempre que `registros` mudar (toda baixa/import/edição chama recarregar()) — sem
+    // cache, igual ao plano da Fase 1.2.
+  }, [clienteId, registros])
+
+  const sugestoesVisiveis = useMemo(
+    () => sugestoes.filter(s => !sugestoesIgnoradas.has(s.contaProvisionadaId)),
+    [sugestoes, sugestoesIgnoradas],
+  )
+
+  async function vincularSugestao(s: SugestaoVinculo) {
+    if (!clienteId) return
+    setVinculandoSugestaoId(s.contaProvisionadaId)
+    try {
+      await atualizarContaProvisionada(clienteId, s.contaProvisionadaId, {
+        pago: true, contaBancariaId: s.contaBancariaId, dataPagamento: s.lancamentoData, lancamentoVinculadoId: s.lancamentoId,
+      })
+      await recarregar()
+      setMsg('Baixa vinculada ao lançamento sugerido.')
+      setMsgOk(true)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
+    } finally {
+      setVinculandoSugestaoId(null)
+    }
+  }
+
+  function ignorarSugestao(contaProvisionadaId: string) {
+    setSugestoesIgnoradas(prev => new Set(prev).add(contaProvisionadaId))
+  }
 
   useEffect(() => {
     if (!contasBancarias.length) return
@@ -128,6 +178,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   function resetForm() {
     setDesc(''); setValorDisplay(''); setValor(0); setVenc(todayISO())
     setRecInicio(todayISO()); setRecFim(''); setRecPeriodicidade('Mensal'); setRecParcelas('')
+    setRecValorVariavel(false); setRecDiaVencimento('')
   }
 
   function encontrarDuplicata(conta: ContaProvisionada, registroData: string) {
@@ -149,13 +200,16 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     try {
       if (isRecorrente) {
         if (!recInicio) { setMsg('Informe a data de início.'); setMsgOk(false); return }
+        if (!contaSelecionadaId) { setMsg('Cadastre uma conta bancária em Configurações antes de continuar.'); setMsgOk(false); return }
         const nova = await criarContaRecorrente({
           clienteId, descricao: desc, valor,
           tipo: tipo === 'receber' ? 'Receber' : 'Pagar',
           dataInicio: recInicio, dataFim: recFim || undefined,
           periodicidade: recPeriodicidade,
           quantidadeParcelas: recParcelas ? Number(recParcelas) : undefined,
-          contaBancariaId: contaSelecionadaId || undefined,
+          contaBancariaId: contaSelecionadaId,
+          valorVariavel: recValorVariavel,
+          diaVencimento: recDiaVencimento ? Number(recDiaVencimento) : undefined,
         })
         setRecorrentes(prev => [...prev, nova])
         setMsg('Conta recorrente adicionada!')
@@ -163,9 +217,6 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       } else {
         if (!contaSelecionadaId) { setMsg('Cadastre uma conta bancária em Configurações antes de continuar.'); setMsgOk(false); return }
         const hoje = todayISO()
-        // Precisa ser o registro da MESMA conta escolhida — senão a mesclagem pega
-        // entradas/saídas/pendências de uma conta diferente ou fica sem nenhuma base.
-        const reg = registros.find(r => r.data === hoje && r.contaBancariaId === contaSelecionadaId)
         const novaConta: ContaProvisionada = {
           descricao: desc,
           valor,
@@ -179,15 +230,13 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           setShowDuplicateModal(true)
           return
         }
-        await salvar({
-          clienteId, contaBancariaId: contaSelecionadaId, data: hoje,
-          saldoInicio: reg?.saldoInicio ?? 0,
-          entradas: reg?.entradas ?? [],
-          saidas: reg?.saidas ?? [],
-          contasAReceber: tipo === 'receber' ? [...(reg?.contasAReceber ?? []), novaConta] : (reg?.contasAReceber ?? []),
-          contasAPagar: tipo === 'pagar' ? [...(reg?.contasAPagar ?? []), novaConta] : (reg?.contasAPagar ?? []),
-          saldoConfirmado: reg?.saldoConfirmado ?? 0,
+        // Fase 0.4: endpoint dedicado — não reenvia o RegistroDiario inteiro (que encontra/cria
+        // sozinho, do lado do backend, usando o saldo anterior real da conta como ponto de partida).
+        await criarContaProvisionada({
+          clienteId, contaBancariaId: contaSelecionadaId, tipo: tipo === 'receber' ? 'Receber' : 'Pagar',
+          descricao: desc, valor, dataVencimento: venc || undefined,
         })
+        await recarregar()
         setMsg('Conta adicionada!')
         setMsgOk(true)
       }
@@ -239,13 +288,24 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   }
 
   async function desfazerBaixa(view: ContaView) {
+    if (!clienteId) return
+    // Fase 0.4: por Id quando disponível — desfaz só o lançamento que a própria baixa criou,
+    // nunca um que já existia e só foi vinculado (ver ContaProvisionadaService.EstornarAsync).
+    if (view.conta.id) {
+      await atualizarContaProvisionada(clienteId, view.conta.id, { pago: false })
+      await recarregar()
+      return
+    }
     await persistirListas(view, contas => contas.map((c, i) =>
-      i === view.index ? { ...c, pago: false, dataBaixa: undefined, lancamentoVinculadoId: undefined } : c))
+      i === view.index ? { ...c, pago: false, dataBaixa: undefined, valorRealizado: undefined, lancamentoVinculadoId: undefined } : c))
   }
 
   function togglePago(view: ContaView) {
     setBaixaView(view)
     setBaixaContaId(view.conta.contaBancariaId || contaSelecionadaId)
+    setBaixaData(todayISO())
+    setBaixaValor(view.conta.valor)
+    setBaixaValorDisplay(fmtNum(view.conta.valor))
     setModalBaixa(true)
   }
 
@@ -265,8 +325,22 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     setConfirmandoBaixa(true)
     try {
       const lancamentoVinculadoId = vincular && lancamentoDuplicado?.id ? lancamentoDuplicado.id : undefined
-      await persistirListas(baixaView, contas => contas.map((c, i) =>
-        i === baixaView.index ? { ...c, pago: true, contaBancariaId: baixaContaId, lancamentoVinculadoId } : c))
+      // valorRealizado só vai além de undefined quando difere do valor do título — mantém o Valor
+      // original intacto (é ele que identifica o item em futuras edições).
+      const valorRealizado = Math.abs(baixaValor - baixaView.conta.valor) >= 0.01 ? baixaValor : undefined
+      if (baixaView.conta.id) {
+        // Fase 0.5: sempre gera um lançamento real (ou vincula a um existente) na conta+data do
+        // pagamento — nunca mais um ajuste de saldo "fantasma" sem contrapartida no extrato.
+        await atualizarContaProvisionada(clienteId, baixaView.conta.id, {
+          pago: true, contaBancariaId: baixaContaId, dataPagamento: baixaData, valorRealizado, lancamentoVinculadoId,
+        })
+        await recarregar()
+      } else {
+        await persistirListas(baixaView, contas => contas.map((c, i) =>
+          i === baixaView.index
+            ? { ...c, pago: true, contaBancariaId: baixaContaId, dataBaixa: baixaData, valorRealizado, lancamentoVinculadoId }
+            : c))
+      }
       setMsg(vincular ? 'Baixa vinculada ao lançamento existente.' : 'Baixa confirmada.')
       setMsgOk(true)
       setModalBaixa(false)
@@ -313,12 +387,19 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   // ── Editar conta pendente ────────────────────────────────────────────────────────────────
   async function confirmarEdicaoConta() {
-    if (!editView || !editDesc.trim() || !editValor) return
+    if (!editView || !editDesc.trim() || !editValor || !clienteId) return
     setSalvandoEdit(true)
     try {
-      await persistirListas(editView, contas => contas.map((c, i) => i === editView.index
-        ? { ...c, descricao: editDesc.trim(), valor: editValor, dataVencimento: editVenc || undefined, contaBancariaId: editContaId || undefined }
-        : c))
+      if (editView.conta.id) {
+        await atualizarContaProvisionada(clienteId, editView.conta.id, {
+          descricao: editDesc.trim(), valor: editValor, dataVencimento: editVenc || undefined, contaBancariaId: editContaId || undefined,
+        })
+        await recarregar()
+      } else {
+        await persistirListas(editView, contas => contas.map((c, i) => i === editView.index
+          ? { ...c, descricao: editDesc.trim(), valor: editValor, dataVencimento: editVenc || undefined, contaBancariaId: editContaId || undefined }
+          : c))
+      }
       setMsg('Conta atualizada!')
       setMsgOk(true)
       setEditView(null)
@@ -332,10 +413,15 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   // ── Excluir conta pendente ───────────────────────────────────────────────────────────────
   async function confirmarExclusaoConta() {
-    if (!excluirView) return
+    if (!excluirView || !clienteId) return
     setExcluindo(true)
     try {
-      await persistirListas(excluirView, contas => contas.filter((_, i) => i !== excluirView.index))
+      if (excluirView.conta.id) {
+        await excluirContaProvisionada(clienteId, excluirView.conta.id)
+        await recarregar()
+      } else {
+        await persistirListas(excluirView, contas => contas.filter((_, i) => i !== excluirView.index))
+      }
       setMsg('Conta excluída.')
       setMsgOk(true)
       setExcluirView(null)
@@ -356,6 +442,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     setEditRecInicio(r.dataInicio)
     setEditRecFim(r.dataFim ?? '')
     setEditRecContaId(r.contaBancariaId ?? '')
+    setEditRecValorVariavel(r.valorVariavel)
+    setEditRecDiaVencimento(r.diaVencimento ? String(r.diaVencimento) : '')
     setEditRecAlcance('')
   }
 
@@ -369,6 +457,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         dataInicio: editRecInicio,
         dataFim: editRecFim || undefined,
         contaBancariaId: editRecContaId || undefined,
+        valorVariavel: editRecValorVariavel,
+        diaVencimento: editRecDiaVencimento ? Number(editRecDiaVencimento) : undefined,
         aplicarAsPendentes: editRecAlcance === 'todas',
       })
       setRecorrentes(prev => prev.map(r => r.id === atualizada.id ? atualizada : r))
@@ -411,21 +501,16 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   async function confirmarDuplicata(linkToExisting: boolean) {
     if (!pendingDuplicate || !clienteId) return
-    const hoje = todayISO()
     const contaAlvo = pendingDuplicate.conta.contaBancariaId || contaSelecionadaId
-    const reg = registros.find(r => r.data === hoje && r.contaBancariaId === contaAlvo)
 
     try {
       if (!linkToExisting) {
-        await salvar({
-          clienteId, contaBancariaId: contaAlvo, data: hoje,
-          saldoInicio: reg?.saldoInicio ?? 0,
-          entradas: reg?.entradas ?? [],
-          saidas: reg?.saidas ?? [],
-          contasAReceber: pendingDuplicate.tipo === 'receber' ? [...(reg?.contasAReceber ?? []), pendingDuplicate.conta] : (reg?.contasAReceber ?? []),
-          contasAPagar: pendingDuplicate.tipo === 'pagar' ? [...(reg?.contasAPagar ?? []), pendingDuplicate.conta] : (reg?.contasAPagar ?? []),
-          saldoConfirmado: reg?.saldoConfirmado ?? 0,
+        await criarContaProvisionada({
+          clienteId, contaBancariaId: contaAlvo, tipo: pendingDuplicate.tipo === 'receber' ? 'Receber' : 'Pagar',
+          descricao: pendingDuplicate.conta.descricao, valor: pendingDuplicate.conta.valor,
+          dataVencimento: pendingDuplicate.conta.dataVencimento,
         })
+        await recarregar()
         setMsg('Nova conta criada.')
       } else {
         setMsg('Conta semelhante já existente; nenhuma nova entrada foi criada.')
@@ -497,7 +582,9 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     )
   }
 
-  const podeAdicionar = !!desc && valor > 0 && (!isRecorrente || !!recInicio) && (isRecorrente || !!contaSelecionadaId)
+  // Conta bancária agora é obrigatória pra QUALQUER lançamento, recorrente ou não (Fase 0.2) —
+  // antes, isRecorrente pulava essa checagem e deixava nascer recorrência sem conta vinculada.
+  const podeAdicionar = !!desc && valor > 0 && (!isRecorrente || !!recInicio) && !!contaSelecionadaId
 
   return (
     <>
@@ -526,7 +613,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
             </select>
             {contaSelecionada && (
               <div className="conta-field-hint">
-                {isRecorrente ? `Conta sugerida na baixa de cada ocorrência: ${contaSelecionada.nome}.` : `O lançamento será vinculado a ${contaSelecionada.nome}.`}
+                {isRecorrente ? `Cada ocorrência será gerada no registro de ${contaSelecionada.nome}.` : `O lançamento será vinculado a ${contaSelecionada.nome}.`}
               </div>
             )}
           </div>
@@ -606,6 +693,20 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
                   onChange={e => setRecParcelas(e.target.value)} className="rec-field-input" />
               </div>
             </div>
+            <div className="conta-form-row" style={{ marginTop: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label className="rec-field-label">Dia de vencimento (opcional)</label>
+                <input type="number" min="1" max="31" placeholder={`Padrão: dia ${recInicio ? new Date(recInicio + 'T12:00:00').getDate() : '—'}`}
+                  value={recDiaVencimento} onChange={e => setRecDiaVencimento(e.target.value)} className="rec-field-input" />
+              </div>
+              <div style={{ flex: 2, display: 'flex', alignItems: 'center', gap: 6, paddingTop: 18 }}>
+                <input id="rec-valor-variavel" type="checkbox" checked={recValorVariavel}
+                  onChange={e => setRecValorVariavel(e.target.checked)} />
+                <label htmlFor="rec-valor-variavel" style={{ fontSize: 13, color: 'var(--tx2)' }}>
+                  Valor variável — previsto = média das últimas 3 ocorrências pagas
+                </label>
+              </div>
+            </div>
           </div>
         )}
 
@@ -616,6 +717,32 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         </div>
         {msg && <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: msgOk ? '#34c759' : '#ff6b6b' }}>{msg}</div>}
       </div>
+
+      {sugestoesVisiveis.length > 0 && (
+        <div className="contas-section">
+          <h3>💡 Possíveis pagamentos encontrados ({sugestoesVisiveis.length})</h3>
+          {sugestoesVisiveis.map(s => (
+            <div key={s.contaProvisionadaId} className="conta-item" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <strong>{s.descricao}</strong> — {fmtBRL(s.valor)}{s.dataVencimento ? ` (venc. ${fmtDate(s.dataVencimento)})` : ''}
+                <div style={{ fontSize: 12, color: 'var(--tx3)' }}>
+                  Lançamento no extrato: {s.lancamentoDescricao} — {fmtBRL(s.lancamentoValor)} em {fmtDate(s.lancamentoData)} · {s.score}% de confiança
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn-confirm" disabled={vinculandoSugestaoId === s.contaProvisionadaId}
+                  onClick={() => vincularSugestao(s)}>
+                  {vinculandoSugestaoId === s.contaProvisionadaId ? 'Vinculando...' : '🔗 Vincular'}
+                </button>
+                <button className="btn-cancel" disabled={vinculandoSugestaoId === s.contaProvisionadaId}
+                  onClick={() => ignorarSugestao(s.contaProvisionadaId)}>
+                  Ignorar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="contas-section">
         <h3>📥 A Receber ({pendentesReceber.length})</h3>
@@ -698,6 +825,31 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
                   <option key={c.id} value={c.id}>{c.nome}</option>
                 ))}
               </select>
+            </div>
+            <div className="inp-group">
+              <label>Data de pagamento</label>
+              <input type="date" value={baixaData} max={todayISO()} onChange={e => e.target.value && setBaixaData(e.target.value)} />
+            </div>
+            <div className="inp-group">
+              <label>Valor pago (R$)</label>
+              <div className="val-input-wrap">
+                <span className="val-prefix">R$</span>
+                <input
+                  type="text" inputMode="decimal"
+                  value={baixaValorDisplay}
+                  onChange={e => {
+                    const raw = e.target.value.replace(/[^\d,]/g, '')
+                    setBaixaValorDisplay(raw)
+                    setBaixaValor(parseBRL(raw))
+                  }}
+                  onBlur={() => setBaixaValorDisplay(fmtNum(baixaValor))}
+                />
+              </div>
+              {Math.abs(baixaValor - baixaView.conta.valor) >= 0.01 && (
+                <span style={{ fontSize: 12, color: 'var(--tx3)' }}>
+                  Valor do título: {fmtBRL(baixaView.conta.valor)} — diferença de {fmtBRL(baixaValor - baixaView.conta.valor)} (juros/desconto).
+                </span>
+              )}
             </div>
             {lancamentoDuplicado && (
               <p style={{ color: 'var(--warning)', marginTop: 8, fontSize: 13 }}>
@@ -887,6 +1039,18 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
             <div className="inp-group" style={{ marginTop: 12 }}>
               <label>Fim (opcional)</label>
               <input type="date" value={editRecFim} onChange={e => setEditRecFim(e.target.value)} />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Dia de vencimento (opcional)</label>
+              <input type="number" min="1" max="31" value={editRecDiaVencimento}
+                onChange={e => setEditRecDiaVencimento(e.target.value)} />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input id="edit-rec-valor-variavel" type="checkbox" checked={editRecValorVariavel}
+                onChange={e => setEditRecValorVariavel(e.target.checked)} />
+              <label htmlFor="edit-rec-valor-variavel" style={{ fontSize: 13, margin: 0 }}>
+                Valor variável — previsto = média das últimas 3 ocorrências pagas
+              </label>
             </div>
             <div className="inp-group" style={{ marginTop: 12 }}>
               <label>Conta bancária</label>

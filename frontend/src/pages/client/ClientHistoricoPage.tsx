@@ -1,10 +1,12 @@
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
-import { fmtBRL, fmtDate, monthLabel, addMonths } from '../../utils/format'
+import { fmtBRL, fmtDate, monthLabel, addMonths, todayISO } from '../../utils/format'
+import { listarContasBancarias } from '../../api/contasBancarias'
 import StatCard from '../../components/shared/StatCard'
 import Modal from '../../components/shared/Modal'
 import { ehOperacional } from '../../utils/lancamentos'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { ContaBancaria } from '../../types'
 
 interface Props { clienteIdOverride?: string }
 
@@ -12,12 +14,23 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, loading, excluir } = useRegistros(clienteId)
+  const [contas, setContas] = useState<ContaBancaria[]>([])
   const [openId, setOpenId] = useState<string | null>(null)
   const [delData, setDelData] = useState<string | null>(null)
+  const [delConta, setDelConta] = useState<string | undefined>(undefined)
   const [motivo, setMotivo] = useState('')
   const [erroDelete, setErroDelete] = useState('')
 
-  const mesAtualReal = new Date().toISOString().slice(0, 7)
+  useEffect(() => {
+    if (!clienteId) return
+    listarContasBancarias(clienteId).then(setContas).catch(console.error)
+  }, [clienteId])
+
+  function nomeConta(contaBancariaId?: string) {
+    return contas.find(c => c.id === contaBancariaId)?.nome
+  }
+
+  const mesAtualReal = todayISO().slice(0, 7)
   const [mesSelecionado, setMesSelecionado] = useState(mesAtualReal)
   const doMes = registros.filter(r => r.data.startsWith(mesSelecionado))
   // Transferências entre contas e rendimento de investimento não são receita/despesa.
@@ -29,7 +42,7 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
   async function handleDelete() {
     if (!delData) return
     setErroDelete('')
-    try { await excluir(delData, motivo); setDelData(null); setMotivo('') }
+    try { await excluir(delData, delConta, motivo); setDelData(null); setDelConta(undefined); setMotivo('') }
     catch (e: unknown) { setErroDelete(e instanceof Error ? e.message : String(e)) }
   }
 
@@ -91,7 +104,14 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
                 style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 1fr 90px 28px', alignItems: 'center', gap: 8, padding: '10px 14px', cursor: 'pointer', fontSize: 13 }}
                 onClick={() => setOpenId(isOpen ? null : r.id)}
               >
-                <span style={{ fontWeight: 600, color: 'var(--tx1)' }}>{fmtDate(r.data)}</span>
+                <span style={{ fontWeight: 600, color: 'var(--tx1)' }}>
+                  {fmtDate(r.data)}
+                  {nomeConta(r.contaBancariaId) && (
+                    <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--tx3)' }}>
+                      {nomeConta(r.contaBancariaId)}
+                    </span>
+                  )}
+                </span>
                 <span style={{ color: '#34c759' }}>↑ {fmtBRL(entTotal)}</span>
                 <span style={{ color: '#ff6b6b' }}>↓ {fmtBRL(saiTotal)}</span>
                 <span style={{ color: lucro >= 0 ? '#34c759' : '#ff3b30', fontWeight: 700 }}>
@@ -159,7 +179,7 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
                     <button
                       style={{ background: 'none', border: '1px solid var(--bd)', borderRadius: 6, color: '#ff6b6b', fontSize: 12, padding: '3px 10px', cursor: 'pointer' }}
-                      onClick={() => setDelData(r.data)}
+                      onClick={() => { setDelData(r.data); setDelConta(r.contaBancariaId) }}
                     >
                       🗑 Excluir registro
                     </button>
@@ -176,11 +196,11 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
 
       <Modal
         open={!!delData}
-        title={`Excluir registro de ${delData}?`}
-        onClose={() => setDelData(null)}
+        title={`Excluir registro de ${delData}${nomeConta(delConta) ? ` (${nomeConta(delConta)})` : ''}?`}
+        onClose={() => { setDelData(null); setDelConta(undefined) }}
         footer={
           <>
-            <button className="btn-cancel" onClick={() => setDelData(null)}>Cancelar</button>
+            <button className="btn-cancel" onClick={() => { setDelData(null); setDelConta(undefined) }}>Cancelar</button>
             <button className="btn-danger" onClick={handleDelete}>Excluir</button>
           </>
         }

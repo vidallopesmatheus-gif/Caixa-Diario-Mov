@@ -16,7 +16,7 @@ public class InsightService : IInsightService
         MetaAnual? meta)
     {
         var insights = new List<InsightDto>();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var anoAtual = hoje.Year;
         var mesAtual = hoje.Month;
         var diasDecorridos = Math.Max(1, hoje.Day);

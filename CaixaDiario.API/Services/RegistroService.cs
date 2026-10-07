@@ -63,14 +63,32 @@ public class RegistroService : IRegistroService
         foreach (var item in dto.ContasReceber.Concat(dto.ContasPagar))
             ValidarContaVinculada(contas, item.ContaBancariaId);
 
-        // Localiza o registro já existente pela conta EXATA informada (inclusive ausente) — nunca
-        // resolvendo pra uma "conta padrão" aqui. Um registro sem conta vinculada (ex.: ocorrência
-        // de recorrência materializada sem ContaBancariaId) é um registro DIFERENTE do registro da
-        // conta padrão naquele mesmo dia; resolver a conta antes de buscar fazia a edição de um
-        // mirar (e sobrescrever) o registro errado sempre que ContaBancariaId vinha null.
-        var existente = dto.ContaBancariaId.HasValue
-            ? await _registroRepository.ObterPorContaEDataAsync(dto.ContaBancariaId.Value, dto.Data)
-            : await _registroRepository.ObterPorClienteEDataSemContaAsync(dto.ClienteId, dto.Data);
+        // Id explícito é a forma mais segura de apontar pra UM registro específico — não depende de
+        // (ClienteId, Data, ContaBancariaId) baterem exatamente. Quando vem preenchido, é autoritativo:
+        // não cai pra busca por data/conta nem silenciosamente ignora um Id que não existe mais.
+        RegistroDiario? existente;
+        if (dto.Id.HasValue)
+        {
+            existente = await _registroRepository.ObterPorIdAsync(dto.Id.Value)
+                ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
+            if (existente.ClienteId != dto.ClienteId)
+                throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+            // A cascata de recálculo dos dias seguintes (RecalcularDiasSeguintesAsync) usa dto.Data —
+            // se divergisse da data real do registro encontrado, recalcularia a partir do dia errado.
+            if (existente.Data != dto.Data)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Data não corresponde ao registro informado.", "data");
+        }
+        else
+        {
+            // Localiza o registro já existente pela conta EXATA informada (inclusive ausente) — nunca
+            // resolvendo pra uma "conta padrão" aqui. Um registro sem conta vinculada (ex.: ocorrência
+            // de recorrência materializada sem ContaBancariaId) é um registro DIFERENTE do registro da
+            // conta padrão naquele mesmo dia; resolver a conta antes de buscar fazia a edição de um
+            // mirar (e sobrescrever) o registro errado sempre que ContaBancariaId vinha null.
+            existente = dto.ContaBancariaId.HasValue
+                ? await _registroRepository.ObterPorContaEDataAsync(dto.ContaBancariaId.Value, dto.Data)
+                : await _registroRepository.ObterPorClienteEDataSemContaAsync(dto.ClienteId, dto.Data);
+        }
 
         // Só resolve pra uma conta padrão quando precisamos de ALGUMA conta concreta: pra criar um
         // registro novo, ou pra atribuir aos itens de ContasReceber/ContasPagar que não trazem a
@@ -83,7 +101,7 @@ public class RegistroService : IRegistroService
         // (ver MaterializarMesAtualAsync). Resalvar esse registro — baixa, edição ou exclusão de
         // uma pendência — não é "lançar no futuro", é continuar algo que já existe; barrar isso
         // impedia até confirmar recebimento antecipado de uma conta com vencimento amanhã.
-        if (existente == null && dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
+        if (existente == null && dto.Data > DataLocalHelper.Hoje())
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
 
         var registrosCliente = (await _registroRepository.ListarPorClienteAsync(dto.ClienteId)) ?? new List<RegistroDiario>();
@@ -106,8 +124,8 @@ public class RegistroService : IRegistroService
             var contasPagarAntes = existente.ContasPagar;
 
             existente.Inicio = dto.Inicio;
-            existente.Entradas = dto.Entradas.Select(MapItemDto).ToList();
-            existente.Saidas = dto.Saidas.Select(MapSaidaDto).ToList();
+            existente.Entradas = DeduplicarPorId(dto.Entradas.Select(MapItemDto).ToList(), e => e.Id);
+            existente.Saidas = DeduplicarPorId(dto.Saidas.Select(MapSaidaDto).ToList(), s => s.Id);
             existente.ContasReceber = AplicarBaixaAutomatica(MesclarContas(contasReceberAntes, contasReceberEntrada), dto.Data);
             existente.ContasPagar = AplicarBaixaAutomatica(MesclarContas(contasPagarAntes, contasPagarEntrada), dto.Data);
             DesmarcarDuplicatas(existente.ContasReceber, referenciasReceber);
@@ -115,7 +133,7 @@ public class RegistroService : IRegistroService
 
             var ajuste = AplicarBaixaFinanceira(contasReceberAntes, existente.ContasReceber, dto.Data, isReceber: true)
                        + AplicarBaixaFinanceira(contasPagarAntes, existente.ContasPagar, dto.Data, isReceber: false);
-            existente.SaldoFinal = dto.SaldoFinal + ajuste;
+            existente.SaldoFinal = CalcularSaldoFinal(dto.Inicio, existente.Entradas, existente.Saidas, ajuste);
             existente.SalvoEm = DateTime.UtcNow;
             existente.AtualizadoEm = DateTime.UtcNow;
             existente.UsuarioAtualizacao = nomeUsuarioLogado;
@@ -134,6 +152,8 @@ public class RegistroService : IRegistroService
             await _auditService.LogAsync(existente.ClienteId, Guid.Empty, "RegistroDiario", "Edicao",
                 $"{existente.ClienteId}/{existente.Data}", dadosAntes, JsonSerializer.Serialize(resultDto));
 
+            await RecalcularDiasSeguintesAsync(_registroRepository, contaId, dto.Data, atualizado.SaldoFinal, registrosCliente);
+
             return (resultDto, false);
         }
 
@@ -145,6 +165,9 @@ public class RegistroService : IRegistroService
         var ajusteNovo = AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasReceberNovo, dto.Data, isReceber: true)
                        + AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasPagarNovo, dto.Data, isReceber: false);
 
+        var entradasNovo = DeduplicarPorId(dto.Entradas.Select(MapItemDto).ToList(), e => e.Id);
+        var saidasNovo = DeduplicarPorId(dto.Saidas.Select(MapSaidaDto).ToList(), s => s.Id);
+
         var novo = new RegistroDiario
         {
             Id = Guid.NewGuid(),
@@ -152,11 +175,11 @@ public class RegistroService : IRegistroService
             ContaBancariaId = contaId,
             Data = dto.Data,
             Inicio = dto.Inicio,
-            Entradas = dto.Entradas.Select(MapItemDto).ToList(),
-            Saidas = dto.Saidas.Select(MapSaidaDto).ToList(),
+            Entradas = entradasNovo,
+            Saidas = saidasNovo,
             ContasReceber = contasReceberNovo,
             ContasPagar = contasPagarNovo,
-            SaldoFinal = dto.SaldoFinal + ajusteNovo,
+            SaldoFinal = CalcularSaldoFinal(dto.Inicio, entradasNovo, saidasNovo, ajusteNovo),
             CriadoEm = DateTime.UtcNow,
             SalvoEm = DateTime.UtcNow,
             UsuarioAtualizacao = nomeUsuarioLogado
@@ -168,10 +191,49 @@ public class RegistroService : IRegistroService
         await _auditService.LogAsync(novo.ClienteId, Guid.Empty, "RegistroDiario", "Criacao",
             $"{novo.ClienteId}/{novo.Data}", null, JsonSerializer.Serialize(criadoDto));
 
+        await RecalcularDiasSeguintesAsync(_registroRepository, contaId, dto.Data, criado.SaldoFinal, registrosCliente);
+
         return (criadoDto, true);
     }
 
-    public async Task ExcluirAsync(Guid clienteId, DateOnly data, string motivo, Guid usuarioLogadoId, string perfil)
+    // Nunca confia no "SaldoFinal" que o cliente mandou (na prática o valor digitado em "Confirmar
+    // saldo", só pra conferência visual) — o saldo gravado é sempre a matemática real do dia, senão
+    // um valor digitado errado (de propósito ou não) corrompe o livro-caixa. Arredonda em decimal
+    // (nunca double) pra bater centavo a centavo com o que a tela mostra.
+    // internal: também usado por ContaProvisionadaService (Fase 0.4/0.5) — nunca duplicar essa
+    // conta em outro lugar.
+    internal static decimal CalcularSaldoFinal(decimal inicio, List<ItemFinanceiro> entradas, List<ItemFinanceiroSaida> saidas, decimal ajuste)
+    {
+        var calculado = inicio + entradas.Sum(e => e.Valor) - saidas.Sum(s => s.Valor);
+        return Math.Round(calculado, 2, MidpointRounding.AwayFromZero) + ajuste;
+    }
+
+    // Quando o SaldoFinal de um dia muda, todo dia seguinte da MESMA conta que já existia (ex.:
+    // ocorrências de recorrência materializadas com antecedência) ficou com um Inicio desatualizado.
+    // Propaga a diferença em cadeia — soma o mesmo delta no Inicio e no SaldoFinal de cada um, na
+    // ordem, preservando as entradas/saídas/baixas de cada dia (que não mudaram). Para na primeira
+    // divergência zerada: se aquele dia já está consistente, os de depois também estarão.
+    // internal static (recebe o repositório por parâmetro): também usado por ContaProvisionadaService.
+    internal static async Task RecalcularDiasSeguintesAsync(
+        IRegistroRepository registroRepository, Guid contaId, DateOnly data, decimal saldoFinalDoDia, List<RegistroDiario> registrosCliente)
+    {
+        var saldoCorrente = saldoFinalDoDia;
+        var seguintes = registrosCliente
+            .Where(r => r.ContaBancariaId == contaId && r.Data > data)
+            .OrderBy(r => r.Data);
+
+        foreach (var proximo in seguintes)
+        {
+            var delta = saldoCorrente - proximo.Inicio;
+            if (delta == 0m) break;
+            proximo.Inicio += delta;
+            proximo.SaldoFinal += delta;
+            saldoCorrente = proximo.SaldoFinal;
+            await registroRepository.AtualizarAsync(proximo);
+        }
+    }
+
+    public async Task ExcluirAsync(Guid clienteId, DateOnly data, Guid? contaBancariaId, string motivo, Guid usuarioLogadoId, string perfil)
     {
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
@@ -180,9 +242,15 @@ public class RegistroService : IRegistroService
             throw new ApiException(400, CodigoRetorno.MOTIVO_OBRIGATORIO, "Motivo de exclusão é obrigatório.", "motivo_exclusao");
 
         var contas = await _contaBancariaRepository.ListarPorClienteAsync(clienteId);
-        var contaId = ResolverContaPadrao(contas, null);
-        var registro = await _registroRepository.ObterPorContaEDataAsync(contaId, data)
-            ?? await _registroRepository.ObterPorClienteEDataAsync(clienteId, data)
+        ValidarContaVinculada(contas, contaBancariaId);
+
+        // Localiza pela conta EXATA informada (inclusive ausente) — nunca resolvendo pra uma "conta
+        // padrão". Com mais de uma conta tendo registro no mesmo dia, resolver pra uma conta padrão
+        // sempre apagava o registro dela (ou o primeiro encontrado), mesmo quando o usuário queria
+        // excluir o de outra conta.
+        var registro = (contaBancariaId.HasValue
+                ? await _registroRepository.ObterPorContaEDataAsync(contaBancariaId.Value, data)
+                : await _registroRepository.ObterPorClienteEDataSemContaAsync(clienteId, data))
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
 
         var dadosAntes = JsonSerializer.Serialize(MapToDto(registro));
@@ -259,19 +327,25 @@ public class RegistroService : IRegistroService
 
             if (nova.Pago && !pagaAntes)
             {
-                nova.DataBaixa = data;
+                // Respeita a data de pagamento explícita (MesclarContas já a carregou aqui) — só cai
+                // pra "data do save" quando o cliente não informou nenhuma.
+                nova.DataBaixa ??= data;
+                // ValorRealizado cobre juros/multa/desconto: o que de fato moveu pode ser diferente do
+                // Valor do título (que nunca muda — é a referência usada pra casar o item depois).
+                var valorEfetivo = nova.ValorRealizado ?? nova.Valor;
                 // Vinculada a um lançamento já existente: aquele dinheiro já está contado no saldo
                 // via o lançamento em si — aplicar o delta aqui duplicaria o valor.
                 if (!nova.LancamentoVinculadoId.HasValue)
-                    delta += sinal * nova.Valor;
+                    delta += sinal * valorEfetivo;
             }
             else if (!nova.Pago && pagaAntes)
             {
                 nova.DataBaixa = null;
                 // Só reverte o delta se a baixa anterior realmente o aplicou (não vinculada).
                 if (!antes[i].LancamentoVinculadoId.HasValue)
-                    delta -= sinal * nova.Valor;
+                    delta -= sinal * (antes[i].ValorRealizado ?? antes[i].Valor);
                 nova.LancamentoVinculadoId = null;
+                nova.ValorRealizado = null;
             }
             else if (nova.Pago && pagaAntes)
             {
@@ -280,6 +354,23 @@ public class RegistroService : IRegistroService
         }
 
         return delta;
+    }
+
+    // Protege contra o mesmo item sendo enviado duas vezes na mesma lista (ex.: um item já salvo
+    // sendo reconcatenado com a lista existente no frontend). Id == Guid.Empty nunca é deduplicado:
+    // lançamentos manuais antigos nunca tiveram id estável, então vários com Id vazio são itens
+    // distintos de verdade, não duplicatas.
+    private static List<T> DeduplicarPorId<T>(List<T> itens, Func<T, Guid> idDe)
+    {
+        var vistos = new HashSet<Guid>();
+        var resultado = new List<T>();
+        foreach (var item in itens)
+        {
+            var id = idDe(item);
+            if (id != Guid.Empty && !vistos.Add(id)) continue;
+            resultado.Add(item);
+        }
+        return resultado;
     }
 
     private static ItemFinanceiro MapItemDto(ItemFinanceiroDto d) =>
@@ -299,8 +390,11 @@ public class RegistroService : IRegistroService
     private static ContaProvisionada MapContaDto(ContaProvisionadaDto d, Guid? contaBancariaId = null) =>
         new()
         {
+            // Todo item novo (Id vazio) ganha um Id de verdade aqui — nunca mais precisa regravar
+            // o registro inteiro pra editar/excluir esse item especificamente (Fase 0.4).
+            Id = d.Id == Guid.Empty ? Guid.NewGuid() : d.Id,
             Descricao = d.Descricao, Valor = d.Valor, DataVencimento = d.DataVencimento, Pago = d.Pago, Categoria = d.Categoria,
-            RecorrenciaId = d.RecorrenciaId, DataBaixa = d.DataBaixa, ContaBancariaId = d.ContaBancariaId ?? contaBancariaId,
+            RecorrenciaId = d.RecorrenciaId, DataBaixa = d.DataBaixa, ValorRealizado = d.ValorRealizado, ContaBancariaId = d.ContaBancariaId ?? contaBancariaId,
             LancamentoVinculadoId = d.LancamentoVinculadoId,
         };
 
@@ -317,6 +411,7 @@ public class RegistroService : IRegistroService
             {
                 resultado.Add(new ContaProvisionada
                 {
+                    Id = entrada.Id,
                     Descricao = entrada.Descricao,
                     Valor = entrada.Valor,
                     DataVencimento = entrada.DataVencimento,
@@ -324,6 +419,7 @@ public class RegistroService : IRegistroService
                     Categoria = entrada.Categoria,
                     RecorrenciaId = entrada.RecorrenciaId,
                     DataBaixa = entrada.DataBaixa,
+                    ValorRealizado = entrada.ValorRealizado,
                     ContaBancariaId = entrada.ContaBancariaId,
                     LancamentoVinculadoId = entrada.LancamentoVinculadoId,
                 });
@@ -337,6 +433,7 @@ public class RegistroService : IRegistroService
             correspondencia.Categoria = entrada.Categoria;
             correspondencia.RecorrenciaId = entrada.RecorrenciaId;
             correspondencia.DataBaixa = correspondencia.DataBaixa ?? entrada.DataBaixa;
+            correspondencia.ValorRealizado = correspondencia.ValorRealizado ?? entrada.ValorRealizado;
             correspondencia.ContaBancariaId = entrada.ContaBancariaId;
             correspondencia.LancamentoVinculadoId = entrada.LancamentoVinculadoId ?? correspondencia.LancamentoVinculadoId;
             resultado.Add(correspondencia);
@@ -355,6 +452,7 @@ public class RegistroService : IRegistroService
             var duplicada = referencias.Any(referencia => EhMesmoItem(referencia, entrada));
             return new ContaProvisionada
             {
+                Id = entrada.Id,
                 Descricao = entrada.Descricao,
                 Valor = entrada.Valor,
                 DataVencimento = entrada.DataVencimento,
@@ -362,6 +460,7 @@ public class RegistroService : IRegistroService
                 Categoria = entrada.Categoria,
                 RecorrenciaId = entrada.RecorrenciaId,
                 DataBaixa = duplicada ? null : entrada.DataBaixa,
+                ValorRealizado = duplicada ? null : entrada.ValorRealizado,
                 ContaBancariaId = entrada.ContaBancariaId,
                 LancamentoVinculadoId = duplicada ? null : entrada.LancamentoVinculadoId,
             };
@@ -384,11 +483,16 @@ public class RegistroService : IRegistroService
         }
     }
 
+    // Prefere casar por Id quando os dois lados têm um de verdade — único jeito seguro de
+    // reconhecer o mesmo item quando valor/descrição mudam (ex.: baixa com desconto/juros, ou
+    // edição). Itens legados (Id vazio de qualquer um dos lados) caem no heurístico antigo.
     private static bool EhMesmoItem(ContaProvisionada a, ContaProvisionada b) =>
-        a.Descricao == b.Descricao &&
-        Math.Abs(a.Valor - b.Valor) < 0.01m &&
-        a.DataVencimento == b.DataVencimento &&
-        a.ContaBancariaId == b.ContaBancariaId;
+        a.Id != Guid.Empty && b.Id != Guid.Empty
+            ? a.Id == b.Id
+            : a.Descricao == b.Descricao &&
+              Math.Abs(a.Valor - b.Valor) < 0.01m &&
+              a.DataVencimento == b.DataVencimento &&
+              a.ContaBancariaId == b.ContaBancariaId;
 
     // Ocorrências de conta recorrente (RecorrenciaId preenchido) que estavam na lista antes do
     // merge e não estão mais depois — o cliente excluiu essa ocorrência específica.
@@ -419,8 +523,8 @@ public class RegistroService : IRegistroService
             TipoCusto = s.TipoCusto, TransferenciaId = s.TransferenciaId, FitId = s.FitId, PendenteCategorizacao = s.PendenteCategorizacao,
             ClassificadoPeloCliente = s.ClassificadoPeloCliente,
         }).ToList(),
-        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
-        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
+        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ValorRealizado = s.ValorRealizado, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
+        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ValorRealizado = s.ValorRealizado, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
         SaldoFinal = r.SaldoFinal,
         SalvoEm = r.SalvoEm
     };

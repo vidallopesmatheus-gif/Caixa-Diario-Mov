@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useUsuarios } from '../../hooks/useUsuarios'
 import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
-import { fmtBRL } from '../../utils/format'
+import { fmtBRL, todayISO } from '../../utils/format'
 import { ehOperacional } from '../../utils/lancamentos'
 import type { Usuario } from '../../types'
 import './Admin.css'
@@ -10,7 +10,7 @@ import './Admin.css'
 function ClientCard({ usuario }: { usuario: Usuario }) {
   const { registros } = useRegistros(usuario.id)
   const navigate = useNavigate()
-  const mesAtual = new Date().toISOString().slice(0, 7)
+  const mesAtual = todayISO().slice(0, 7)
   const doMes = registros.filter(r => r.data.startsWith(mesAtual))
   const ultimo = registros[0]
   // Transferências entre contas e rendimento de investimento não são receita/despesa.

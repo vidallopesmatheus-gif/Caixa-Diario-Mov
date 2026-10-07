@@ -44,9 +44,9 @@ public class RegistrosController : ControllerBase
     }
 
     [HttpDelete("{clienteId:guid}/{data}")]
-    public async Task<IActionResult> Excluir(Guid clienteId, DateOnly data, [FromBody] ExcluirRegistroDto dto)
+    public async Task<IActionResult> Excluir(Guid clienteId, DateOnly data, [FromQuery] Guid? contaBancariaId, [FromBody] ExcluirRegistroDto dto)
     {
-        await _registroService.ExcluirAsync(clienteId, data, dto.MotivoExclusao, ObterUsuarioId(), ObterPerfil());
+        await _registroService.ExcluirAsync(clienteId, data, contaBancariaId, dto.MotivoExclusao, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<object> { Dados = null });
     }
 }

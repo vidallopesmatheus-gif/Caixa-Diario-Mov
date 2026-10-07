@@ -17,6 +17,12 @@ public class ContaRecorrenteRepository : IContaRecorrenteRepository
             .OrderBy(c => c.CriadoEm)
             .ToListAsync();
 
+    public async Task<List<ContaRecorrente>> ListarTodasAsync() =>
+        await _context.ContasRecorrentes.ToListAsync();
+
+    public async Task<int> ContarPorContaBancariaAsync(Guid contaBancariaId) =>
+        await _context.ContasRecorrentes.CountAsync(c => c.ContaBancariaId == contaBancariaId);
+
     public async Task<ContaRecorrente?> ObterPorIdAsync(Guid clienteId, Guid id) =>
         await _context.ContasRecorrentes
             .FirstOrDefaultAsync(c => c.ClienteId == clienteId && c.Id == id);

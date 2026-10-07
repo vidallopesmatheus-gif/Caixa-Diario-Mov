@@ -15,4 +15,6 @@ public class ContaRecorrenteDto
     public bool Ativo { get; set; }
     public DateTime CriadoEm { get; set; }
     public Guid? ContaBancariaId { get; set; }
+    public bool ValorVariavel { get; set; }
+    public int? DiaVencimento { get; set; }
 }

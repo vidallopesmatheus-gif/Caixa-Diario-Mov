@@ -12,8 +12,11 @@ export function fmtDate(iso: string): string {
   return `${d}/${m}/${y}`
 }
 
+// toISOString() usa UTC: perto da meia-noite em São Paulo (UTC-3) ele já mostra o dia seguinte.
+// O negócio é sempre de clientes brasileiros — fixamos o fuso em vez de confiar no fuso do
+// navegador/servidor, que pode ser qualquer um.
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
 }
 
 export function addDays(iso: string, days: number): string {

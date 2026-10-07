@@ -4,6 +4,9 @@ namespace CaixaDiario.API.DTOs.Registros;
 
 public class CriarRegistroDto
 {
+    // Quando informado, localiza o registro direto por Id (autoritativo) em vez de por
+    // ClienteId+Data+ContaBancariaId — ver comentário em RegistroService.SalvarAsync.
+    public Guid? Id { get; set; }
     [Required] public Guid ClienteId { get; set; }
     public Guid? ContaBancariaId { get; set; }
     [Required] public DateOnly Data { get; set; }

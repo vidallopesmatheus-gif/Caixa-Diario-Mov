@@ -2,8 +2,14 @@ import { apiFetch } from './client'
 import type { ApiResponse, Registro, ItemFinanceiro, ItemFinanceiroSaida, ContaProvisionada } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const GUID_VAZIO = '00000000-0000-0000-0000-000000000000'
+
 function mapContaProvisionada(raw: any): ContaProvisionada {
+  // Itens legados (nunca resalvos desde a Fase 0.4) serializam Id como Guid zerado, não null —
+  // tratar como "sem id" é o que permite o frontend cair pro fluxo antigo pra esses itens.
+  const id = raw.Id ?? raw.id
   return {
+    id: id && id !== GUID_VAZIO ? id : undefined,
     descricao: raw.Descricao ?? raw.descricao ?? '',
     valor: raw.Valor ?? raw.valor ?? 0,
     dataVencimento: raw.DataVencimento ?? raw.dataVencimento,
@@ -11,6 +17,7 @@ function mapContaProvisionada(raw: any): ContaProvisionada {
     categoria: raw.Categoria ?? raw.categoria,
     recorrenciaId: raw.RecorrenciaId ?? raw.recorrenciaId,
     dataBaixa: raw.DataBaixa ?? raw.dataBaixa,
+    valorRealizado: raw.ValorRealizado ?? raw.valorRealizado ?? undefined,
     contaBancariaId: raw.ContaBancariaId ?? raw.contaBancariaId,
     lancamentoVinculadoId: raw.LancamentoVinculadoId ?? raw.lancamentoVinculadoId ?? undefined,
   }
@@ -107,8 +114,8 @@ export const salvarRegistro = async (dto: {
       FitId: s.fitId,
       PendenteCategorizacao: s.pendenteCategorizacao,
     })),
-    contasReceber: dto.contasAReceber.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ContaBancariaId: c.contaBancariaId, LancamentoVinculadoId: c.lancamentoVinculadoId })),
-    contasPagar: dto.contasAPagar.map(c => ({ Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ContaBancariaId: c.contaBancariaId, LancamentoVinculadoId: c.lancamentoVinculadoId })),
+    contasReceber: dto.contasAReceber.map(c => ({ Id: c.id, Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ValorRealizado: c.valorRealizado, ContaBancariaId: c.contaBancariaId, LancamentoVinculadoId: c.lancamentoVinculadoId })),
+    contasPagar: dto.contasAPagar.map(c => ({ Id: c.id, Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ValorRealizado: c.valorRealizado, ContaBancariaId: c.contaBancariaId, LancamentoVinculadoId: c.lancamentoVinculadoId })),
     saldoFinal: dto.saldoConfirmado,
   }
   const res = await apiFetch<ApiResponse<unknown>>('/api/registros', {
@@ -118,8 +125,10 @@ export const salvarRegistro = async (dto: {
   return { ...res, dados: res.dados ? mapRegistro(res.dados) : res.dados as Registro }
 }
 
-export const excluirRegistro = (clienteId: string, data: string, motivoExclusao: string) =>
-  apiFetch<ApiResponse<null>>(`/api/registros/${clienteId}/${data}`, {
+export const excluirRegistro = (clienteId: string, data: string, contaBancariaId: string | undefined, motivoExclusao: string) => {
+  const query = contaBancariaId ? `?contaBancariaId=${contaBancariaId}` : ''
+  return apiFetch<ApiResponse<null>>(`/api/registros/${clienteId}/${data}${query}`, {
     method: 'DELETE',
     body: JSON.stringify({ motivoExclusao }),
   })
+}

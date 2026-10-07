@@ -45,7 +45,9 @@
 .tab-btn.active { color: var(--tx); border-bottom-color: var(--accent); }
 .tab-btn:hover  { color: var(--btn-cancel-c); }
 
-.tab-content { padding: 24px; }
+/* padding-bottom extra: espaço pro botão flutuante do assistente (Chat.css, fixed bottom:24px,
+   altura 52px) nunca ficar em cima do fim do conteúdo (ex.: botão "Salvar" do Caixa). */
+.tab-content { padding: 24px 24px 90px; }
 
 .subtabs-bar {
   display: flex; gap: 4px; overflow-x: auto;
@@ -62,6 +64,6 @@
 
 @media (max-width: 600px) {
   .tabs-bar    { padding: 0 12px; }
-  .tab-content { padding: 14px; }
+  .tab-content { padding: 14px 14px 90px; }
   .topbar      { padding: 10px 14px; }
 }

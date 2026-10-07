@@ -11,6 +11,9 @@ public class RegistroRepository : IRegistroRepository
 
     public RegistroRepository(AppDbContext context) => _context = context;
 
+    public async Task<RegistroDiario?> ObterPorIdAsync(Guid id) =>
+        await _context.RegistrosDiarios.FirstOrDefaultAsync(r => r.Id == id && !r.Excluido);
+
     public async Task<RegistroDiario?> ObterPorContaEDataAsync(Guid contaBancariaId, DateOnly data) =>
         await _context.RegistrosDiarios
             .FirstOrDefaultAsync(r => r.ContaBancariaId == contaBancariaId && r.Data == data && !r.Excluido);
