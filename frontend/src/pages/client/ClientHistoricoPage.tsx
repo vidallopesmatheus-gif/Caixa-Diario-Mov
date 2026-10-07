@@ -36,7 +36,15 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
   // Transferências entre contas e rendimento de investimento não são receita/despesa.
   const totalEnt = doMes.reduce((s, r) => s + r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
   const totalSai = doMes.reduce((s, r) => s + r.saidas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
-  const ultimo = doMes[0]?.saldoConfirmado ?? 0
+  // Soma do ÚLTIMO saldo de CADA conta no mês — nunca o primeiro registro da lista (que pode ser
+  // de qualquer conta, em qualquer ordem, e não necessariamente o mais recente).
+  const ultimoPorConta = new Map<string, { data: string; saldo: number }>()
+  for (const r of doMes) {
+    const chave = r.contaBancariaId ?? ''
+    const atual = ultimoPorConta.get(chave)
+    if (!atual || r.data > atual.data) ultimoPorConta.set(chave, { data: r.data, saldo: r.saldoConfirmado })
+  }
+  const ultimo = [...ultimoPorConta.values()].reduce((s, x) => s + x.saldo, 0)
   const podeAvancar = mesSelecionado < mesAtualReal
 
   async function handleDelete() {

@@ -17,8 +17,13 @@ public class PrevistoRealizadoService : IPrevistoRealizadoService
     private const decimal LimiarVariacaoAlta = 0.10m;
 
     private readonly IRegistroRepository _registroRepo;
+    private readonly IContaRecorrenteRepository _contaRecorrenteRepo;
 
-    public PrevistoRealizadoService(IRegistroRepository registroRepo) => _registroRepo = registroRepo;
+    public PrevistoRealizadoService(IRegistroRepository registroRepo, IContaRecorrenteRepository contaRecorrenteRepo)
+    {
+        _registroRepo = registroRepo;
+        _contaRecorrenteRepo = contaRecorrenteRepo;
+    }
 
     public async Task<PrevistoRealizadoDto> ObterAsync(Guid clienteId, int meses, Guid usuarioLogadoId, string perfil)
     {
@@ -36,6 +41,13 @@ public class PrevistoRealizadoService : IPrevistoRealizadoService
         var ultimoMesExclusivo = mesAtual.AddMonths(1);
 
         var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
+        // Categoria do título (ContaProvisionada.Categoria) pode nunca ter sido preenchida — nesse
+        // caso cai pra categoria cadastrada na própria ContaRecorrente, nunca direto pra "Sem
+        // categoria" (ListarTodasAsync porque uma recorrência desativada ainda precisa aparecer
+        // aqui pros meses em que já tinha títulos materializados).
+        var categoriaPorRecorrencia = (await _contaRecorrenteRepo.ListarTodasAsync())
+            .Where(r => r.ClienteId == clienteId)
+            .ToDictionary(r => r.Id, r => r.Categoria);
 
         var itens = registros
             .SelectMany(r => r.ContasReceber.Select(c => (Item: c, Tipo: "Receber"))
@@ -44,12 +56,18 @@ public class PrevistoRealizadoService : IPrevistoRealizadoService
                 && x.Item.DataVencimento.Value >= primeiroMes && x.Item.DataVencimento.Value < ultimoMesExclusivo)
             .ToList();
 
-        var grupos = itens.GroupBy(x => (x.Tipo, Categoria: x.Item.Categoria ?? "Sem categoria"));
+        string CategoriaDoItem(ContaProvisionada item) =>
+            item.Categoria
+            ?? (categoriaPorRecorrencia.TryGetValue(item.RecorrenciaId!.Value, out var catRecorrencia) ? catRecorrencia : null)
+            ?? "Sem categoria";
+
+        var grupos = itens.GroupBy(x => (x.Tipo, Categoria: CategoriaDoItem(x.Item)));
 
         var linhas = new List<LinhaPrevistoRealizadoDto>();
         foreach (var grupo in grupos)
         {
             var linha = new LinhaPrevistoRealizadoDto { Categoria = grupo.Key.Categoria, Tipo = grupo.Key.Tipo };
+            var pontos = new List<PontoPrevistoRealizadoDto>();
 
             foreach (var mes in mesesJanela)
             {
@@ -59,7 +77,7 @@ public class PrevistoRealizadoService : IPrevistoRealizadoService
 
                 decimal? variacao = previsto != 0 ? (realizado - previsto) / previsto : null;
 
-                linha.Meses.Add(new PontoPrevistoRealizadoDto
+                pontos.Add(new PontoPrevistoRealizadoDto
                 {
                     Mes = $"{mes.Year:D4}-{mes.Month:D2}",
                     Previsto = previsto,
@@ -69,7 +87,10 @@ public class PrevistoRealizadoService : IPrevistoRealizadoService
                 });
             }
 
-            MarcarSubidasConsecutivas(linha.Meses);
+            // "3 meses seguidos" precisa da sequência COMPLETA (sem buracos) pra comparar meses de
+            // verdade consecutivos — só depois disso os meses sem previsto nem realizado são ocultados.
+            MarcarSubidasConsecutivas(pontos);
+            linha.Meses = pontos.Where(p => p.Previsto != 0 || p.Realizado != 0).ToList();
             linhas.Add(linha);
         }
 

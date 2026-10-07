@@ -212,6 +212,9 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           diaVencimento: recDiaVencimento ? Number(recDiaVencimento) : undefined,
         })
         setRecorrentes(prev => [...prev, nova])
+        // O backend materializa a 1ª ocorrência do mês atual ao listar registros (ver
+        // RegistroService.ListarPorClienteAsync) — sem recarregar aqui, ela só aparecia com F5.
+        await recarregar()
         setMsg('Conta recorrente adicionada!')
         setMsgOk(true)
       } else {
@@ -563,7 +566,16 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           {` · Conta: ${contaNome}`}
         </div>
       </div>
-      <div className={`conta-valor ${view.tipo}`}>{fmtBRL(view.conta.valor)}</div>
+      <div className={`conta-valor ${view.tipo}`}>
+        {view.conta.pago && view.conta.valorRealizado != null && Math.abs(view.conta.valorRealizado - view.conta.valor) >= 0.01 ? (
+          <>
+            <span style={{ textDecoration: 'line-through', opacity: 0.6, fontSize: '0.85em', marginRight: 6 }}>
+              {fmtBRL(view.conta.valor)}
+            </span>
+            {fmtBRL(view.conta.valorRealizado)}
+          </>
+        ) : fmtBRL(view.conta.valor)}
+      </div>
       <div className="conta-item-acoes">
         <button
           className="cb-btn-editar"
@@ -827,11 +839,11 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
               </select>
             </div>
             <div className="inp-group">
-              <label>Data de pagamento</label>
+              <label>{baixaView.tipo === 'receber' ? 'Data do recebimento' : 'Data do pagamento'}</label>
               <input type="date" value={baixaData} max={todayISO()} onChange={e => e.target.value && setBaixaData(e.target.value)} />
             </div>
             <div className="inp-group">
-              <label>Valor pago (R$)</label>
+              <label>{baixaView.tipo === 'receber' ? 'Valor recebido (R$)' : 'Valor pago (R$)'}</label>
               <div className="val-input-wrap">
                 <span className="val-prefix">R$</span>
                 <input
