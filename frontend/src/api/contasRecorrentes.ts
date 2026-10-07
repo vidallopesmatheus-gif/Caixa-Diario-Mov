@@ -16,7 +16,9 @@ function mapContaRecorrente(raw: any): ContaRecorrente {
     quantidadeParcelas: raw.quantidadeParcelas ?? undefined,
     ativo: raw.ativo,
     criadoEm: raw.criadoEm,
-    contaBancariaId: raw.contaBancariaId ?? undefined,
+    contaBancariaId: raw.contaBancariaId,
+    valorVariavel: raw.valorVariavel ?? false,
+    diaVencimento: raw.diaVencimento ?? undefined,
   }
 }
 
@@ -35,7 +37,9 @@ export async function criarContaRecorrente(dto: {
   dataFim?: string
   periodicidade: string
   quantidadeParcelas?: number
-  contaBancariaId?: string
+  contaBancariaId: string
+  valorVariavel?: boolean
+  diaVencimento?: number
 }): Promise<ContaRecorrente> {
   const res = await apiFetch<ApiResponse<unknown>>('/api/contas-recorrentes', {
     method: 'POST',
@@ -50,6 +54,8 @@ export async function criarContaRecorrente(dto: {
       periodicidade: dto.periodicidade,
       quantidadeParcelas: dto.quantidadeParcelas,
       contaBancariaId: dto.contaBancariaId,
+      valorVariavel: dto.valorVariavel ?? false,
+      diaVencimento: dto.diaVencimento,
     }),
   })
   return mapContaRecorrente(res.dados)
@@ -69,6 +75,8 @@ export async function atualizarContaRecorrente(clienteId: string, id: string, dt
   dataFim?: string
   periodicidade?: string
   contaBancariaId?: string
+  valorVariavel?: boolean
+  diaVencimento?: number
   aplicarAsPendentes?: boolean
 }): Promise<ContaRecorrente> {
   const res = await apiFetch<ApiResponse<unknown>>(`/api/contas-recorrentes/${clienteId}/${id}`, {
@@ -81,6 +89,8 @@ export async function atualizarContaRecorrente(clienteId: string, id: string, dt
       dataFim: dto.dataFim,
       periodicidade: dto.periodicidade,
       contaBancariaId: dto.contaBancariaId,
+      valorVariavel: dto.valorVariavel,
+      diaVencimento: dto.diaVencimento,
       aplicarAsPendentes: dto.aplicarAsPendentes ?? false,
     }),
   })

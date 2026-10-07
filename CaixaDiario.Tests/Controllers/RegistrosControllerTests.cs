@@ -39,7 +39,7 @@ public class RegistrosControllerTests
     {
         Id = Guid.NewGuid(),
         ClienteId = clienteId,
-        Data = DateOnly.FromDateTime(DateTime.UtcNow),
+        Data = DataLocalHelper.Hoje(),
         Inicio = 100m,
         Entradas = new(),
         Saidas = new(),
@@ -67,7 +67,7 @@ public class RegistrosControllerTests
     public async Task ObterPorData_RetornaOkComRegistro()
     {
         var clienteId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
         var dto = CriarRegistroDto(clienteId);
         _serviceMock.Setup(s => s.ObterPorDataAsync(clienteId, data, _usuarioId, "admin")).ReturnsAsync(dto);
 
@@ -106,11 +106,11 @@ public class RegistrosControllerTests
     public async Task Excluir_RetornaOk()
     {
         var clienteId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
         var excluirDto = new ExcluirRegistroDto { MotivoExclusao = "teste" };
-        _serviceMock.Setup(s => s.ExcluirAsync(clienteId, data, "teste", _usuarioId, "admin")).Returns(Task.CompletedTask);
+        _serviceMock.Setup(s => s.ExcluirAsync(clienteId, data, null, "teste", _usuarioId, "admin")).Returns(Task.CompletedTask);
 
-        var result = await _sut.Excluir(clienteId, data, excluirDto);
+        var result = await _sut.Excluir(clienteId, data, null, excluirDto);
 
         Assert.IsType<OkObjectResult>(result);
     }

@@ -12,8 +12,16 @@ public class ContaRecorrenteServiceTests
 {
     private readonly Mock<IContaRecorrenteRepository> _repoMock = new();
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
+    private readonly Mock<IContaBancariaRepository> _contaBancariaRepoMock = new();
     private readonly Mock<IAuditService> _auditMock = new();
-    private ContaRecorrenteService CriarSut() => new(_repoMock.Object, _registroRepoMock.Object, _auditMock.Object);
+    private ContaRecorrenteService CriarSut() =>
+        new(_repoMock.Object, _registroRepoMock.Object, _contaBancariaRepoMock.Object, _auditMock.Object);
+
+    // Cadastra uma conta bancária ativa pertencente ao cliente, pra ValidarContaVinculadaAsync
+    // não rejeitar o contaBancariaId usado no teste.
+    private void PermitirConta(Guid clienteId, Guid contaBancariaId) =>
+        _contaBancariaRepoMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { new() { Id = contaBancariaId, ClienteId = clienteId, Ativa = true } });
 
     public ContaRecorrenteServiceTests()
     {
@@ -57,6 +65,41 @@ public class ContaRecorrenteServiceTests
     }
 
     [Fact]
+    public async Task Criar_SemContaBancariaId_LancaDadosInvalidos()
+    {
+        var dto = new CriarContaRecorrenteDto
+        {
+            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 100m,
+            Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1),
+            // ContaBancariaId deliberadamente omitido (fica Guid.Empty).
+        };
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            CriarSut().CriarAsync(dto, dto.ClienteId, "cliente"));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task Criar_ComContaBancariaDeOutroCliente_LancaAcessoNegado()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaDeOutroCliente = Guid.NewGuid();
+        var dto = new CriarContaRecorrenteDto
+        {
+            ClienteId = clienteId, Descricao = "Teste", Valor = 100m,
+            Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1), ContaBancariaId = contaDeOutroCliente,
+        };
+        _contaBancariaRepoMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria>()); // conta não pertence a este cliente
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            CriarSut().CriarAsync(dto, clienteId, "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
+    }
+
+    [Fact]
     public async Task Criar_TipoInvalido_LancaDadosInvalidos()
     {
         var dto = new CriarContaRecorrenteDto
@@ -94,6 +137,7 @@ public class ContaRecorrenteServiceTests
             ClienteId = clienteId, Descricao = "Aluguel", Valor = 1000m,
             Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1), ContaBancariaId = contaBancariaId,
         };
+        PermitirConta(clienteId, contaBancariaId);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<ContaRecorrente>()))
             .ReturnsAsync((ContaRecorrente c) => c);
 
@@ -102,6 +146,72 @@ public class ContaRecorrenteServiceTests
         Assert.Equal("Aluguel", resultado.Descricao);
         Assert.True(resultado.Ativo);
         Assert.Equal(contaBancariaId, resultado.ContaBancariaId);
+    }
+
+    [Fact]
+    public async Task Criar_ComValorVariavelEDiaVencimento_PersisteOsDoisCampos()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaBancariaId = Guid.NewGuid();
+        var dto = new CriarContaRecorrenteDto
+        {
+            ClienteId = clienteId, Descricao = "Energia", Valor = 100m,
+            Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1), ContaBancariaId = contaBancariaId,
+            ValorVariavel = true, DiaVencimento = 15,
+        };
+        PermitirConta(clienteId, contaBancariaId);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<ContaRecorrente>())).ReturnsAsync((ContaRecorrente c) => c);
+
+        var resultado = await CriarSut().CriarAsync(dto, clienteId, "cliente");
+
+        Assert.True(resultado.ValorVariavel);
+        Assert.Equal(15, resultado.DiaVencimento);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(32)]
+    public async Task Criar_ComDiaVencimentoForaDoIntervalo_LancaDadosInvalidos(int diaInvalido)
+    {
+        var clienteId = Guid.NewGuid();
+        var contaBancariaId = Guid.NewGuid();
+        PermitirConta(clienteId, contaBancariaId);
+        var dto = new CriarContaRecorrenteDto
+        {
+            ClienteId = clienteId, Descricao = "Energia", Valor = 100m,
+            Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1), ContaBancariaId = contaBancariaId,
+            DiaVencimento = diaInvalido,
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => CriarSut().CriarAsync(dto, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task Atualizar_PropagaValorPrevistoRecalculadoQuandoValorVariavel_NasPendentes()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        conta.ValorVariavel = true;
+        _repoMock.Setup(r => r.ObterPorIdAsync(clienteId, conta.Id)).ReturnsAsync(conta);
+
+        var registro = CriarRegistro(clienteId, new DateOnly(2026, 9, 10));
+        var pendente = new ContaProvisionada { Descricao = "Aluguel", Valor = 1000m, DataVencimento = new DateOnly(2026, 9, 10), RecorrenciaId = conta.Id, Pago = false };
+        var paga1 = new ContaProvisionada { Descricao = "Aluguel", Valor = 1000m, ValorRealizado = 1200m, RecorrenciaId = conta.Id, Pago = true, DataBaixa = new DateOnly(2026, 7, 10) };
+        var paga2 = new ContaProvisionada { Descricao = "Aluguel", Valor = 1000m, ValorRealizado = 1400m, RecorrenciaId = conta.Id, Pago = true, DataBaixa = new DateOnly(2026, 8, 10) };
+        registro.ContasPagar.Add(pendente);
+        registro.ContasPagar.Add(paga1);
+        registro.ContasPagar.Add(paga2);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var dto = new AtualizarContaRecorrenteDto { AplicarAsPendentes = true };
+        await CriarSut().AtualizarAsync(clienteId, conta.Id, dto, clienteId, "cliente");
+
+        // Média de 1200 e 1400 = 1300 — nunca o Valor cadastrado (1000) nem só o último pago.
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(reg =>
+            reg.ContasPagar.Single(c => !c.Pago).Valor == 1300m)), Times.Once);
     }
 
     [Fact]
@@ -214,6 +324,7 @@ public class ContaRecorrenteServiceTests
         var conta = CriarConta(clienteId);
         var novaContaBancariaId = Guid.NewGuid();
         _repoMock.Setup(r => r.ObterPorIdAsync(clienteId, conta.Id)).ReturnsAsync(conta);
+        PermitirConta(clienteId, novaContaBancariaId);
 
         var dto = new AtualizarContaRecorrenteDto
         {
@@ -273,6 +384,7 @@ public class ContaRecorrenteServiceTests
         var conta = CriarConta(clienteId);
         var novaContaBancariaId = Guid.NewGuid();
         _repoMock.Setup(r => r.ObterPorIdAsync(clienteId, conta.Id)).ReturnsAsync(conta);
+        PermitirConta(clienteId, novaContaBancariaId);
 
         var registro = CriarRegistro(clienteId, new DateOnly(2026, 9, 10));
         var pendente = new ContaProvisionada { Descricao = "Aluguel", Valor = 1000m, DataVencimento = new DateOnly(2026, 9, 10), RecorrenciaId = conta.Id, Pago = false };

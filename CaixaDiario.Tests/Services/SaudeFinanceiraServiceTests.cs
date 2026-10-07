@@ -6,7 +6,7 @@ namespace CaixaDiario.Tests.Services;
 public class SaudeFinanceiraServiceTests
 {
     private readonly SaudeFinanceiraService _sut = new();
-    private static readonly DateOnly Hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+    private static readonly DateOnly Hoje = DataLocalHelper.Hoje();
 
     private static RegistroDiario CriarRegistro(DateOnly data, decimal entradas = 0m, decimal saidas = 0m) => new()
     {

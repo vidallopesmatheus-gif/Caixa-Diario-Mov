@@ -64,14 +64,14 @@ test('excluir chama excluirRegistro e recarrega', async () => {
   vi.mocked(api.excluirRegistro).mockResolvedValue({ dados: null, codigoRetorno: 'OK', mensagem: '' })
   const { result } = renderHook(() => useRegistros('c1'))
   await waitFor(() => expect(result.current.loading).toBe(false))
-  await result.current.excluir('2026-05-15', 'motivo teste')
-  expect(api.excluirRegistro).toHaveBeenCalledWith('c1', '2026-05-15', 'motivo teste')
+  await result.current.excluir('2026-05-15', 'conta1', 'motivo teste')
+  expect(api.excluirRegistro).toHaveBeenCalledWith('c1', '2026-05-15', 'conta1', 'motivo teste')
 })
 
 test('excluir não faz nada quando clienteId é null', async () => {
   vi.mocked(api.excluirRegistro).mockClear()
   const { result } = renderHook(() => useRegistros(null))
-  await result.current.excluir('2026-05-15', 'motivo')
+  await result.current.excluir('2026-05-15', undefined, 'motivo')
   expect(api.excluirRegistro).not.toHaveBeenCalled()
 })
 

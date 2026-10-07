@@ -37,7 +37,7 @@ public class RegistroServiceTests
         return new CriarRegistroDto
         {
             ClienteId = Guid.NewGuid(),
-            Data = data ?? DateOnly.FromDateTime(DateTime.UtcNow),
+            Data = data ?? DataLocalHelper.Hoje(),
             Inicio = 100m,
             Entradas = new List<ItemFinanceiroDto> { new() { Descricao = "Caixa", Valor = 500m } },
             Saidas = new List<ItemFinanceiroSaidaDto> { new() { Descricao = "Aluguel", Valor = 200m, Categoria = "Aluguel" } },
@@ -88,7 +88,7 @@ public class RegistroServiceTests
         // futura. Confirmar o recebimento hoje (antes do vencimento) reenvia esse mesmo Data e não
         // pode ser barrado como se fosse um lançamento novo de Caixa no futuro.
         var clienteId = Guid.NewGuid();
-        var dataFutura = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1);
+        var dataFutura = DataLocalHelper.Hoje().AddDays(1);
         var registroExistente = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = dataFutura,
@@ -117,11 +117,85 @@ public class RegistroServiceTests
         Assert.True(resultado.ContasReceber[0].Pago);
     }
 
+    // --- 0.3: upsert por Id explícito ---
+
+    [Fact]
+    public async Task SalvarAsync_ComIdExplicito_LocalizaRegistroPorIdEEdita()
+    {
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 6, 1);
+        var registroExistente = CriarRegistroComContas(clienteId, data);
+
+        _repoMock.Setup(r => r.ObterPorIdAsync(registroExistente.Id)).ReturnsAsync(registroExistente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = CriarDto(data);
+        dto.Id = registroExistente.Id;
+        dto.ClienteId = clienteId;
+
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.False(criado);
+        Assert.Equal(registroExistente.Id, resultado.Id);
+        // ObterPorContaEDataAsync/ObterPorClienteEDataSemContaAsync nunca deveriam ter sido
+        // chamados — a busca por Id é autoritativa, não cai pra busca por data/conta.
+        _repoMock.Verify(r => r.ObterPorContaEDataAsync(It.IsAny<Guid>(), It.IsAny<DateOnly>()), Times.Never);
+        _repoMock.Verify(r => r.ObterPorClienteEDataSemContaAsync(It.IsAny<Guid>(), It.IsAny<DateOnly>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ComIdDeOutroCliente_LancaAcessoNegado()
+    {
+        var registroDeOutroCliente = CriarRegistroComContas(Guid.NewGuid(), new DateOnly(2026, 6, 1));
+        _repoMock.Setup(r => r.ObterPorIdAsync(registroDeOutroCliente.Id)).ReturnsAsync(registroDeOutroCliente);
+
+        var dto = CriarDto(registroDeOutroCliente.Data);
+        dto.Id = registroDeOutroCliente.Id;
+        dto.ClienteId = Guid.NewGuid(); // cliente diferente do dono do registro
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ComIdQueNaoExiste_LancaRegistroNaoEncontrado()
+    {
+        var idInexistente = Guid.NewGuid();
+        _repoMock.Setup(r => r.ObterPorIdAsync(idInexistente)).ReturnsAsync((RegistroDiario?)null);
+
+        var dto = CriarDto();
+        dto.Id = idInexistente;
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+
+        Assert.Equal(404, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.REGISTRO_NAO_ENCONTRADO, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_ComIdEDataDivergente_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var registroExistente = CriarRegistroComContas(clienteId, new DateOnly(2026, 6, 1));
+        _repoMock.Setup(r => r.ObterPorIdAsync(registroExistente.Id)).ReturnsAsync(registroExistente);
+
+        var dto = CriarDto(new DateOnly(2026, 6, 2)); // data diferente da do registro encontrado
+        dto.Id = registroExistente.Id;
+        dto.ClienteId = clienteId;
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.SalvarAsync(dto, "admin"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
     [Fact]
     public async Task SalvarAsync_ContasComVencimentoNoDia_MarcaComoPagas()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registroExistente = CriarRegistroComContas(clienteId, hoje);
 
         _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje))
@@ -155,7 +229,7 @@ public class RegistroServiceTests
         // Reproduz o fluxo da tela de Contas: o front le a lista atual, remove o item que o
         // usuario quer excluir, e reenvia a lista resultante inteira.
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var registroExistente = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
@@ -243,7 +317,7 @@ public class RegistroServiceTests
         // avisar o RecorrenciaService pra essa ocorrência não ser recriada.
         var clienteId = Guid.NewGuid();
         var recorrenciaId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var vencimento = new DateOnly(2026, 9, 10);
         var registroExistente = new RegistroDiario
         {
@@ -276,7 +350,7 @@ public class RegistroServiceTests
         // Mesma conta recorrente, mas só editada (não excluída) — não é uma dispensa.
         var clienteId = Guid.NewGuid();
         var recorrenciaId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var vencimento = new DateOnly(2026, 9, 10);
         var registroExistente = new RegistroDiario
         {
@@ -314,7 +388,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_Novo_ChamaAuditCriacao()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
 
         _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
@@ -334,7 +408,7 @@ public class RegistroServiceTests
         // sobreviver a um resave normal da tela de Caixa sem perder o vínculo — senão o Estornar
         // não consegue mais achar a ponta certa pra remover (TransferenciaId some silenciosamente).
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var transferenciaId = Guid.NewGuid();
 
         _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
@@ -363,7 +437,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_ContaDuplicadaNaoAjustaSaldo()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var contaId = Guid.NewGuid();
         var registroExistente = new RegistroDiario
         {
@@ -400,6 +474,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Fornecedor X", Valor = 300m, DataVencimento = hoje, Pago = true, ContaBancariaId = contaId },
             },
+            Inicio = 1000m,
             SaldoFinal = 1000m,
         };
 
@@ -426,7 +501,7 @@ public class RegistroServiceTests
         var dto = new CriarRegistroDto
         {
             ClienteId = Guid.NewGuid(),
-            Data = DateOnly.FromDateTime(DateTime.UtcNow),
+            Data = DataLocalHelper.Hoje(),
             Entradas = new(),
             Saidas = new() { new ItemFinanceiroSaidaDto { Descricao = "Compra", Valor = 50m, Categoria = null! } },
             ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
@@ -485,10 +560,10 @@ public class RegistroServiceTests
     public async Task Excluir_SemMotivo_LancaMotivoObrigatorio()
     {
         var clienteId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.ExcluirAsync(clienteId, data, "", clienteId, "cliente"));
+            _sut.ExcluirAsync(clienteId, data, null, "", clienteId, "cliente"));
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.MOTIVO_OBRIGATORIO, ex.Codigo);
@@ -499,10 +574,10 @@ public class RegistroServiceTests
     {
         var clienteId = Guid.NewGuid();
         var usuarioLogadoId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.ExcluirAsync(clienteId, data, "motivo", usuarioLogadoId, "cliente"));
+            _sut.ExcluirAsync(clienteId, data, null, "motivo", usuarioLogadoId, "cliente"));
 
         Assert.Equal(403, ex.StatusCode);
         Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
@@ -530,7 +605,7 @@ public class RegistroServiceTests
             new()
             {
                 Id = Guid.NewGuid(), ClienteId = clienteId,
-                Data = DateOnly.FromDateTime(DateTime.UtcNow),
+                Data = DataLocalHelper.Hoje(),
                 Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
                 CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
             }
@@ -551,7 +626,7 @@ public class RegistroServiceTests
             new()
             {
                 Id = Guid.NewGuid(), ClienteId = clienteId,
-                Data = DateOnly.FromDateTime(DateTime.UtcNow),
+                Data = DataLocalHelper.Hoje(),
                 Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
                 CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
             }
@@ -567,7 +642,7 @@ public class RegistroServiceTests
     public async Task ObterPorData_Admin_RetornaRegistro()
     {
         var clienteId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
         var registro = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = data,
@@ -588,7 +663,7 @@ public class RegistroServiceTests
     public async Task ObterPorData_ClienteAcessandoProprioId_RetornaRegistro()
     {
         var clienteId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
         var registro = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = data,
@@ -607,7 +682,7 @@ public class RegistroServiceTests
     {
         var clienteId = Guid.NewGuid();
         var usuarioLogadoId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
             _sut.ObterPorDataAsync(clienteId, data, usuarioLogadoId, "cliente"));
@@ -620,7 +695,7 @@ public class RegistroServiceTests
     public async Task ObterPorData_RegistroNaoEncontrado_LancaRegistroNaoEncontrado()
     {
         var clienteId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync((RegistroDiario?)null);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
@@ -634,11 +709,11 @@ public class RegistroServiceTests
     public async Task Excluir_RegistroNaoEncontrado_LancaRegistroNaoEncontrado()
     {
         var clienteId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync((RegistroDiario?)null);
+        var data = DataLocalHelper.Hoje();
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, data)).ReturnsAsync((RegistroDiario?)null);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.ExcluirAsync(clienteId, data, "motivo", Guid.NewGuid(), "admin"));
+            _sut.ExcluirAsync(clienteId, data, null, "motivo", Guid.NewGuid(), "admin"));
 
         Assert.Equal(404, ex.StatusCode);
         Assert.Equal(CodigoRetorno.REGISTRO_NAO_ENCONTRADO, ex.Codigo);
@@ -648,19 +723,46 @@ public class RegistroServiceTests
     public async Task Excluir_Admin_MarcaComoExcluido()
     {
         var clienteId = Guid.NewGuid();
-        var data = DateOnly.FromDateTime(DateTime.UtcNow);
+        var data = DataLocalHelper.Hoje();
         var registro = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = data,
             Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
-        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync(registro);
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, data)).ReturnsAsync(registro);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
-        await _sut.ExcluirAsync(clienteId, data, "motivo teste", Guid.NewGuid(), "admin");
+        await _sut.ExcluirAsync(clienteId, data, null, "motivo teste", Guid.NewGuid(), "admin");
 
         _repoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(x => x.Excluido && x.MotivoExclusao == "motivo teste")), Times.Once);
+    }
+
+    [Fact]
+    public async Task Excluir_ComContaBancariaId_ExcluiSoORegistroDaquelaContaNuncaOutra()
+    {
+        // Duas contas têm registro no mesmo dia — excluir com contaBancariaId explícita nunca pode
+        // apagar (ou nem olhar para) o registro da outra conta, mesmo que ela seja a "padrão".
+        var clienteId = Guid.NewGuid();
+        var data = DataLocalHelper.Hoje();
+        var contaCaixa = new ContaBancaria { Id = Guid.NewGuid(), Tipo = "Caixa", Ativa = true };
+        var contaNubank = new ContaBancaria { Id = Guid.NewGuid(), Tipo = "ContaCorrente", Ativa = true };
+        var registroNubank = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = data, ContaBancariaId = contaNubank.Id,
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
+        };
+
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { contaCaixa, contaNubank });
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(contaNubank.Id, data)).ReturnsAsync(registroNubank);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        await _sut.ExcluirAsync(clienteId, data, contaNubank.Id, "motivo", Guid.NewGuid(), "admin");
+
+        _repoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(x => x.Id == registroNubank.Id && x.Excluido)), Times.Once);
+        _repoMock.Verify(r => r.ObterPorContaEDataAsync(contaCaixa.Id, It.IsAny<DateOnly>()), Times.Never);
     }
 
     // --- D7: baixa financeira ajusta o saldo automaticamente ---
@@ -670,7 +772,7 @@ public class RegistroServiceTests
         DateOnly? dataBaixaPagarExistente = null, DateOnly? dataBaixaReceberExistente = null)
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var existente = new RegistroDiario
         {
             Id = Guid.NewGuid(), ClienteId = clienteId, Data = hoje,
@@ -683,6 +785,10 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Fornecedor B", Valor = 200m, Pago = existentePagarPago, DataBaixa = dataBaixaPagarExistente },
             },
+            // Sem entradas/saídas no dia: o saldo final do dia é só o Inicio em si (mais o ajuste da
+            // baixa). O backend agora calcula SaldoFinal a partir de Inicio, nunca do valor que o
+            // dto manda — então o Inicio precisa refletir o saldo de antes da baixa deste teste.
+            Inicio = 1000m,
             SaldoFinal = 1000m,
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
@@ -700,7 +806,8 @@ public class RegistroServiceTests
                 new() { Descricao = "Fornecedor B", Valor = 200m, Pago = pagarPago,
                     DataBaixa = pagarPago == existentePagarPago ? dataBaixaPagarExistente : null },
             },
-            SaldoFinal = 1000m, // frontend reenvia o saldo inalterado
+            Inicio = 1000m,
+            SaldoFinal = 1000m, // ignorado pelo backend — mantido só por realismo do payload
         };
 
         _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
@@ -711,7 +818,7 @@ public class RegistroServiceTests
     [Fact]
     public async Task SalvarAsync_BaixarContaPagarPendente_ReduzSaldoESetaDataBaixa()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var (_, dto) = SetupBaixa(pagarPago: true, receberPago: false);
 
         var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
@@ -722,9 +829,67 @@ public class RegistroServiceTests
     }
 
     [Fact]
+    public async Task SalvarAsync_BaixaComDataEValorDiferentes_UsaValorRealizadoERespeitaDataBaixaExplicita()
+    {
+        // Pagou com desconto (180 em vez de 200) numa data diferente da data do save — o backend
+        // nunca pode sobrescrever a data escolhida nem usar o Valor original do título.
+        var hoje = DataLocalHelper.Hoje();
+        var dataPagamentoReal = hoje.AddDays(-3);
+        var (_, dto) = SetupBaixa(pagarPago: true, receberPago: false);
+        dto.ContasPagar[0].DataBaixa = dataPagamentoReal;
+        dto.ContasPagar[0].ValorRealizado = 180m;
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.Equal(820m, resultado.SaldoFinal); // 1000 - 180 (nunca 1000 - 200)
+        Assert.Equal(180m, resultado.ContasPagar[0].ValorRealizado);
+        Assert.Equal(dataPagamentoReal, resultado.ContasPagar[0].DataBaixa); // nunca "hoje"
+    }
+
+    [Fact]
+    public async Task SalvarAsync_EditaItemPorId_CasaMesmoComValorEDescricaoDiferentes()
+    {
+        // Fase 0.4: casar por Id tem que sobreviver a uma edição que muda valor E descrição ao
+        // mesmo tempo — o heurístico antigo (descrição+valor+vencimento+conta) jamais reconheceria
+        // isso como "o mesmo item" e criaria uma cópia em vez de atualizar.
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 6, 1);
+        var itemId = Guid.NewGuid();
+        var existente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = data,
+            Entradas = new(), Saidas = new(), ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Id = itemId, Descricao = "Fornecedor B", Valor = 200m, DataVencimento = data, Pago = false },
+            },
+            SaldoFinal = 1000m,
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, data)).ReturnsAsync(existente);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = CriarDto(data);
+        dto.ClienteId = clienteId;
+        dto.ContasPagar = new List<ContaProvisionadaDto>
+        {
+            new() { Id = itemId, Descricao = "Fornecedor B (renegociado)", Valor = 350m, DataVencimento = data, Pago = false },
+        };
+        dto.ContasReceber = new();
+
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "admin");
+
+        Assert.False(criado);
+        var item = Assert.Single(resultado.ContasPagar);
+        Assert.Equal(itemId, item.Id);
+        Assert.Equal("Fornecedor B (renegociado)", item.Descricao);
+        Assert.Equal(350m, item.Valor);
+    }
+
+    [Fact]
     public async Task SalvarAsync_BaixarContaReceberPendente_AumentaSaldoESetaDataBaixa()
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var (_, dto) = SetupBaixa(pagarPago: false, receberPago: true);
 
         var (resultado, _) = await _sut.SalvarAsync(dto, "admin");
@@ -768,7 +933,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_BaixarContaReceberVinculadaALancamentoExistente_NaoDuplicaOSaldo()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var lancamentoId = Guid.NewGuid();
         var existente = new RegistroDiario
         {
@@ -778,6 +943,8 @@ public class RegistroServiceTests
             Saidas = new(),
             ContasReceber = new List<ContaProvisionada> { new() { Descricao = "Venda A", Valor = 500m, Pago = false } },
             ContasPagar = new(),
+            // Inicio + entrada de 500 = 1500: o SaldoFinal do backend vem só daqui, nunca do dto.
+            Inicio = 1000m,
             SaldoFinal = 1500m,
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
         };
@@ -791,7 +958,8 @@ public class RegistroServiceTests
                 new() { Descricao = "Venda A", Valor = 500m, Pago = true, LancamentoVinculadoId = lancamentoId },
             },
             ContasPagar = new(),
-            SaldoFinal = 1500m, // frontend reenvia o saldo inalterado — a entrada já estava contada
+            Inicio = 1000m,
+            SaldoFinal = 1500m, // ignorado pelo backend — mantido só por realismo do payload
         };
         _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
@@ -808,7 +976,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_DesfazerBaixaVinculada_NaoAlteraSaldo()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var ontem = hoje.AddDays(-1);
         var lancamentoId = Guid.NewGuid();
         var existente = new RegistroDiario
@@ -821,6 +989,7 @@ public class RegistroServiceTests
                 new() { Descricao = "Venda A", Valor = 500m, Pago = true, DataBaixa = ontem, LancamentoVinculadoId = lancamentoId },
             },
             ContasPagar = new(),
+            Inicio = 1000m,
             SaldoFinal = 1500m,
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
         };
@@ -831,6 +1000,7 @@ public class RegistroServiceTests
             Saidas = new(),
             ContasReceber = new List<ContaProvisionadaDto> { new() { Descricao = "Venda A", Valor = 500m, Pago = false } },
             ContasPagar = new(),
+            Inicio = 1000m,
             SaldoFinal = 1500m,
         };
         _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync(existente);
@@ -850,7 +1020,7 @@ public class RegistroServiceTests
         var dto = new CriarRegistroDto
         {
             ClienteId = Guid.NewGuid(),
-            Data = DateOnly.FromDateTime(DateTime.UtcNow),
+            Data = DataLocalHelper.Hoje(),
             Inicio = 100m,
             Entradas = new List<ItemFinanceiroDto> { new() { Descricao = "Caixa", Valor = 500m } },
             Saidas = new(),
@@ -877,7 +1047,7 @@ public class RegistroServiceTests
     {
         // Gap 1: registro NOVO (existente=null) com ContaPagar já paga deve aplicar baixa (−valor, DataBaixa setada)
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
 
         _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
@@ -893,6 +1063,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Fornecedor X", Valor = 300m, Pago = true },
             },
+            Inicio = 1000m,
             SaldoFinal = 1000m,
         };
 
@@ -909,7 +1080,7 @@ public class RegistroServiceTests
     {
         // Gap 1 (opcional): registro NOVO com ContaReceber já paga deve aplicar baixa (+valor, DataBaixa setada)
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
 
         _repoMock.Setup(r => r.ObterPorClienteEDataSemContaAsync(clienteId, hoje)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
@@ -925,6 +1096,7 @@ public class RegistroServiceTests
                 new() { Descricao = "Venda Y", Valor = 400m, Pago = true },
             },
             ContasPagar = new(),
+            Inicio = 1000m,
             SaldoFinal = 1000m,
         };
 
@@ -941,7 +1113,7 @@ public class RegistroServiceTests
     {
         // Gap 2: após criado com conta paga (existente retorna registro com pago=true) não deve reajustar
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var dataBaixa = hoje.AddDays(-1);
 
         var existente = new RegistroDiario
@@ -953,6 +1125,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Fornecedor X", Valor = 300m, Pago = true, DataBaixa = dataBaixa },
             },
+            Inicio = 700m,
             SaldoFinal = 700m, // já com o ajuste da baixa anterior aplicado
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
@@ -972,6 +1145,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Fornecedor X", Valor = 300m, Pago = true, DataBaixa = dataBaixa },
             },
+            Inicio = 700m,
             SaldoFinal = 700m, // frontend reenvia saldo atual
         };
 
@@ -989,7 +1163,7 @@ public class RegistroServiceTests
         // Gap 3 (primeiro save): ContaPagar com DataVencimento == dto.Data e pago=false.
         // AplicarBaixaAutomatica marca pago=true; AplicarBaixaFinanceira deve detectar transição (antes=false) e ajustar uma vez.
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
 
         var existente = new RegistroDiario
         {
@@ -1000,6 +1174,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Boleto Z", Valor = 150m, DataVencimento = hoje, Pago = false },
             },
+            Inicio = 1000m,
             SaldoFinal = 1000m,
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
@@ -1018,6 +1193,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Boleto Z", Valor = 150m, DataVencimento = hoje, Pago = false },
             },
+            Inicio = 1000m,
             SaldoFinal = 1000m,
         };
 
@@ -1035,7 +1211,7 @@ public class RegistroServiceTests
         // Gap 3 (segundo save): existente já tem pago=true; dto reenvia pago=false mas auto-baixa marcará true.
         // Não deve reajustar o saldo porque a transição real já ocorreu no save anterior.
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
 
         var existente = new RegistroDiario
         {
@@ -1046,6 +1222,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Boleto Z", Valor = 150m, DataVencimento = hoje, Pago = true, DataBaixa = hoje },
             },
+            Inicio = 850m,
             SaldoFinal = 850m, // já com o ajuste aplicado
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
@@ -1065,6 +1242,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Boleto Z", Valor = 150m, DataVencimento = hoje, Pago = false },
             },
+            Inicio = 850m,
             SaldoFinal = 850m,
         };
 
@@ -1081,7 +1259,7 @@ public class RegistroServiceTests
         // Gap 4: existente tem 1 conta paga; dto tem 2 contas (primeira igual paga, segunda nova não paga).
         // A conta paga pré-existente NÃO é reajustada; a conta nova não paga não gera ajuste; sem erro de índice.
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var dataBaixa = hoje.AddDays(-2);
 
         var existente = new RegistroDiario
@@ -1093,6 +1271,7 @@ public class RegistroServiceTests
             {
                 new() { Descricao = "Conta Antiga", Valor = 100m, Pago = true, DataBaixa = dataBaixa },
             },
+            Inicio = 900m,
             SaldoFinal = 900m,
             CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow
         };
@@ -1112,6 +1291,7 @@ public class RegistroServiceTests
                 new() { Descricao = "Conta Antiga", Valor = 100m, Pago = true, DataBaixa = dataBaixa },
                 new() { Descricao = "Conta Nova", Valor = 50m, Pago = false },
             },
+            Inicio = 900m,
             SaldoFinal = 900m,
         };
 
@@ -1131,7 +1311,7 @@ public class RegistroServiceTests
         var dto = new CriarRegistroDto
         {
             ClienteId = Guid.NewGuid(),
-            Data = DateOnly.FromDateTime(DateTime.UtcNow),
+            Data = DataLocalHelper.Hoje(),
             Inicio = 0m,
             Entradas = new(),
             Saidas = new List<ItemFinanceiroSaidaDto>
@@ -1163,7 +1343,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_SemContaBancariaIdEClienteSemContaCaixa_UsaOutraContaAtivaComoFallback()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var c6Bank = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "C6 Bank", Tipo = "ContaCorrente", Ativa = true };
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaBancaria> { c6Bank });
@@ -1191,7 +1371,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_ClienteSemNenhumaContaBancaria_LancaDadosInvalidosSemMencionarCaixa()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaBancaria>());
 
@@ -1208,7 +1388,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_SemContaBancariaIdEClienteComContaCaixaEOutras_PrefereACaixa()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var contaCorrente = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Nubank", Tipo = "ContaCorrente", Ativa = true };
         var caixa = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Caixa", Tipo = "Caixa", Ativa = true };
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
@@ -1227,7 +1407,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_ContaBancariaIdExplicitoPertenceAoClienteEAtiva_UsaAConta()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var contaEscolhida = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "C6 Bank", Tipo = "ContaCorrente", Ativa = true };
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { contaEscolhida });
 
@@ -1251,7 +1431,7 @@ public class RegistroServiceTests
     {
         // Payload adulterado trocando a conta por uma que não pertence ao cliente da requisição.
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var contaDeOutroCliente = Guid.NewGuid();
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria>());
 
@@ -1272,7 +1452,7 @@ public class RegistroServiceTests
     public async Task SalvarAsync_ContaBancariaIdExplicitoInativa_LancaContaInativa()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var contaInativa = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Conta Encerrada", Tipo = "ContaCorrente", Ativa = false };
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { contaInativa });
 
@@ -1295,7 +1475,7 @@ public class RegistroServiceTests
         // conta diferente da vinculada ao título, ex. modal "Confirmar recebimento") não era validada
         // contra o cliente da requisição.
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var contaDoCliente = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Nubank", Tipo = "ContaCorrente", Ativa = true };
         var contaDeOutroCliente = Guid.NewGuid();
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { contaDoCliente });

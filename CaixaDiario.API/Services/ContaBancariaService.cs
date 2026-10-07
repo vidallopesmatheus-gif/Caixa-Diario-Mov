@@ -16,16 +16,19 @@ public class ContaBancariaService : IContaBancariaService
     private readonly IMetaRepository _metaRepo;
     private readonly ITransferenciaRepository _transferenciaRepo;
     private readonly ITransacaoImportadaRepository _transacaoImportadaRepo;
+    private readonly IContaRecorrenteRepository _contaRecorrenteRepo;
 
     public ContaBancariaService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, IMetaRepository metaRepo,
-        ITransferenciaRepository transferenciaRepo, ITransacaoImportadaRepository transacaoImportadaRepo)
+        ITransferenciaRepository transferenciaRepo, ITransacaoImportadaRepository transacaoImportadaRepo,
+        IContaRecorrenteRepository contaRecorrenteRepo)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _metaRepo = metaRepo;
         _transferenciaRepo = transferenciaRepo;
         _transacaoImportadaRepo = transacaoImportadaRepo;
+        _contaRecorrenteRepo = contaRecorrenteRepo;
     }
 
     public async Task<List<ContaBancariaDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -119,6 +122,7 @@ public class ContaBancariaService : IContaBancariaService
             Transferencias = transferencias,
             TransacoesImportadas = (await _transacaoImportadaRepo.ListarPorContaAsync(id)).Count,
             MetasVinculadas = (await _metaRepo.ListarPorClienteAsync(conta.ClienteId)).Count(m => m.ContaInvestimentoId == id),
+            ContasRecorrentes = await _contaRecorrenteRepo.ContarPorContaBancariaAsync(id),
         };
 
         if (resultado.TotalVinculos == 0)
@@ -170,15 +174,20 @@ public class ContaBancariaService : IContaBancariaService
                 }));
             }
 
-            foreach (var recebido in r.ContasReceber.Where(cp => cp.Pago && cp.DataBaixa == r.Data))
+            // Cada ContaProvisionada vive numa única lista (deste r) — não filtra por
+            // DataBaixa == r.Data: a data de pagamento pode legitimamente ser diferente do dia do
+            // registro/vencimento (ex.: pago com atraso), e sem essa linha a baixa desaparecia do
+            // extrato mesmo afetando o saldo.
+            foreach (var recebido in r.ContasReceber.Where(cp => cp.Pago))
             {
-                saldo += recebido.Valor;
+                var valorEfetivo = recebido.ValorRealizado ?? recebido.Valor;
+                saldo += valorEfetivo;
                 linhas.Add((r.Data, new LancamentoExtratoDto
                 {
-                    Data = r.Data.ToString("yyyy-MM-dd"),
+                    Data = (recebido.DataBaixa ?? r.Data).ToString("yyyy-MM-dd"),
                     Descricao = $"{recebido.Descricao} (recebimento)",
                     Categoria = recebido.Categoria,
-                    Valor = recebido.Valor,
+                    Valor = valorEfetivo,
                     SaldoAcumulado = saldo,
                 }));
             }
@@ -200,15 +209,16 @@ public class ContaBancariaService : IContaBancariaService
                 }));
             }
 
-            foreach (var pago in r.ContasPagar.Where(cp => cp.Pago && cp.DataBaixa == r.Data))
+            foreach (var pago in r.ContasPagar.Where(cp => cp.Pago))
             {
-                saldo -= pago.Valor;
+                var valorEfetivo = pago.ValorRealizado ?? pago.Valor;
+                saldo -= valorEfetivo;
                 linhas.Add((r.Data, new LancamentoExtratoDto
                 {
-                    Data = r.Data.ToString("yyyy-MM-dd"),
+                    Data = (pago.DataBaixa ?? r.Data).ToString("yyyy-MM-dd"),
                     Descricao = $"{pago.Descricao} (pagamento)",
                     Categoria = pago.Categoria,
-                    Valor = -pago.Valor,
+                    Valor = -valorEfetivo,
                     SaldoAcumulado = saldo,
                 }));
             }
@@ -258,7 +268,7 @@ public class ContaBancariaService : IContaBancariaService
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Rendimento só pode ser registrado em conta do tipo Investimento.");
         if (dto.Valor == 0)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Valor do rendimento não pode ser zero.");
-        if (dto.Data > DateOnly.FromDateTime(DateTime.UtcNow))
+        if (dto.Data > DataLocalHelper.Hoje())
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
 
         var (registro, novo) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, conta, dto.Data);
@@ -360,7 +370,7 @@ public class ContaBancariaService : IContaBancariaService
 
         var saldoAtual = regsOrdenados.FirstOrDefault()?.SaldoFinal ?? c.SaldoInicial;
 
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var regsDoMes = regsOrdenados.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month);
         // Transferências e rendimento não são receita/despesa — não entram nos cards de entradas/saídas do mês.
         var entradasMes = regsDoMes.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);

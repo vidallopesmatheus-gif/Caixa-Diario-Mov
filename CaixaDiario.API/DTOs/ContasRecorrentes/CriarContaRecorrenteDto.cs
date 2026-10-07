@@ -13,5 +13,7 @@ public class CriarContaRecorrenteDto
     public DateOnly? DataFim { get; set; }
     public string Periodicidade { get; set; } = "Mensal";
     public int? QuantidadeParcelas { get; set; }
-    public Guid? ContaBancariaId { get; set; }
+    [Required] public Guid ContaBancariaId { get; set; }
+    public bool ValorVariavel { get; set; }
+    public int? DiaVencimento { get; set; }
 }

@@ -18,6 +18,7 @@ public class ImportacaoServiceTests
     private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
     private readonly Mock<IRegraCategorizacaoRepository> _regraRepoMock = new();
     private readonly Mock<ITransferenciaService> _transferenciaServiceMock = new();
+    private readonly Mock<IConciliacaoService> _conciliacaoServiceMock = new();
     private readonly ImportacaoService _sut;
 
     public ImportacaoServiceTests()
@@ -37,8 +38,12 @@ public class ImportacaoServiceTests
         // Fallback padrão pro histórico de importação (dedup via FitId/ignoradas) — sem isso,
         // ObterIgnoradasAsync quebraria em todo teste que não mexe especificamente com exclusão.
         _importRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<TransacaoImportada>());
+        // Fallback padrão pro motor de sugestão de vínculo (Fase 1.2/1.7) — só o resumo final usa.
+        _conciliacaoServiceMock.Setup(s => s.ListarSugestoesAsync(
+            It.IsAny<Guid>(), It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>()))
+            .ReturnsAsync(new List<CaixaDiario.API.DTOs.Conciliacao.SugestaoVinculoDto>());
         _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object, _categoriaRepoMock.Object,
-            _regraRepoMock.Object, _transferenciaServiceMock.Object);
+            _regraRepoMock.Object, _transferenciaServiceMock.Object, _conciliacaoServiceMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid contaId, Guid clienteId, decimal saldoInicial = 0m) => new()
@@ -1193,5 +1198,266 @@ public class ImportacaoServiceTests
         Assert.Equal(0, resultado.TotalConciliadasTransferencia);
         Assert.Equal(0, resultado.TotalAmbiguasTransferencia);
         Assert.Equal(1, resultado.TotalImportadas);
+    }
+
+    // ── Fase 1.7: deduplicação contra lançamento manual / entre arquivos ────────────────────────
+
+    [Fact]
+    public async Task PreviewAsync_TransacaoParecidaComLancamentoManual_ApareceEmDuplicatasManuais()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var dataManual = new DateOnly(2026, 7, 10);
+        var itemManualId = Guid.NewGuid();
+        var registroManual = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataManual,
+            Entradas = new(),
+            Saidas = new() { new() { Id = itemManualId, Descricao = "Consulta medica", Valor = 150m, Categoria = "Saude" } },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = -150m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroManual });
+
+        var csv = "Data;Descricao;Valor\n11/07/2026;CONSULTA MEDICA LTDA;-150,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var preview = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        var dup = Assert.Single(preview.DuplicatasManuais);
+        Assert.Equal(itemManualId, dup.LancamentoManualId);
+        Assert.Equal("Consulta medica", dup.DescricaoManual);
+        Assert.Equal(dataManual.ToString("yyyy-MM-dd"), dup.DataManual);
+        Assert.Equal("CONSULTA MEDICA LTDA", dup.DescricaoBanco);
+        Assert.Empty(preview.DuplicatasEntreArquivos);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_CandidatoComHistoricoDeImportacaoAnterior_ApareceEmDuplicatasEntreArquivos()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var data = new DateOnly(2026, 7, 10);
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(),
+            Saidas = new() { new() { Id = Guid.NewGuid(), Descricao = "Fornecedor XYZ", Valor = 200m } },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = -200m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        // Esse item já veio de uma importação anterior (CSV sem FitId, igual a si mesmo) — não é
+        // genuinamente manual, então uma transação parecida de OUTRO arquivo não deve virar "Mesclar".
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>
+        {
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, Data = data, Valor = 200m,
+                Descricao = "Fornecedor XYZ", FitId = null, Tipo = "Saida", Status = "Confirmada", ImportadoEm = DateTime.UtcNow },
+        });
+
+        var csv = "Data;Descricao;Valor\n11/07/2026;FORNECEDOR XYZ SA;-200,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var preview = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Empty(preview.DuplicatasManuais);
+        var dup = Assert.Single(preview.DuplicatasEntreArquivos);
+        Assert.Equal("Fornecedor XYZ", dup.DescricaoJaImportada);
+        Assert.Equal("FORNECEDOR XYZ SA", dup.DescricaoBanco);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_DuplicataManualSemResolucao_MescladefaultMantemCategoriaEGravaFitIdDescricaoData()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+
+        var dataManual = new DateOnly(2026, 7, 10);
+        var itemManualId = Guid.NewGuid();
+        var registroManual = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataManual,
+            Entradas = new(),
+            Saidas = new() { new() { Id = itemManualId, Descricao = "Consulta medica", Valor = 150m, Categoria = "Saude", TipoCusto = "CustoVariavel" } },
+            ContasReceber = new(), ContasPagar = new(), Inicio = 0m, SaldoFinal = -150m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroManual });
+        var atualizados = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => atualizados.Add(r)).ReturnsAsync((RegistroDiario r) => r);
+
+        // Mesma data — merge não precisa mover entre dias.
+        var csv = "Data;Descricao;Valor\n10/07/2026;CONSULTA MEDICA LTDA;-150,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Equal(1, resultado.TotalMescladasComManual);
+        Assert.Equal(0, resultado.TotalImportadas);
+        var item = Assert.Single(registroManual.Saidas);
+        Assert.Equal(itemManualId, item.Id);
+        Assert.Equal("CONSULTA MEDICA LTDA", item.Descricao); // veio do banco
+        Assert.Equal("Saude", item.Categoria); // preservado do manual
+        Assert.Equal("CustoVariavel", item.TipoCusto); // preservado do manual
+        Assert.Equal(150m, item.Valor); // preservado do manual, não sobrescrito pelo banco
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_MesclaComDataDiferente_MoveItemERecalculaSaldoEmCascata()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 1000m));
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+
+        var itemManualId = Guid.NewGuid();
+        var dataManual = new DateOnly(2026, 7, 10);   // dia em que o usuário digitou manualmente
+        var dataBanco = new DateOnly(2026, 7, 12);    // dia em que o banco efetivamente compensou (±2 dias)
+
+        var registroManual = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataManual,
+            Entradas = new(), Saidas = new() { new() { Id = itemManualId, Descricao = "Aluguel", Valor = 100m, Categoria = "Aluguel" } },
+            ContasReceber = new(), ContasPagar = new(), Inicio = 1000m, SaldoFinal = 900m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        var registroSeguinte = new RegistroDiario
+        {
+            // Dia depois de dataBanco, já existia com Inicio/SaldoFinal calculados a partir do saldo
+            // (errado) de antes da mescla — tem que ser corrigido pela cascata, mesmo sem nenhum
+            // lançamento próprio.
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataBanco.AddDays(1),
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            Inicio = 900m, SaldoFinal = 900m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroManual, registroSeguinte });
+
+        RegistroDiario? criadoNoDiaDoBanco = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criadoNoDiaDoBanco = r).ReturnsAsync((RegistroDiario r) => r);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = $"Data;Descricao;Valor\n{dataBanco:dd/MM/yyyy};ALUGUEL IMOB;-100,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Equal(1, resultado.TotalMescladasComManual);
+        Assert.Equal(0, resultado.TotalImportadas);
+
+        Assert.Empty(registroManual.Saidas); // item saiu do dia manual
+        Assert.Equal(1000m, registroManual.SaldoFinal); // sem a saída, o dia volta a bater com o Inicio (1000+0-0)
+
+        Assert.NotNull(criadoNoDiaDoBanco);
+        var itemMovido = Assert.Single(criadoNoDiaDoBanco!.Saidas);
+        Assert.Equal(itemManualId, itemMovido.Id);
+        Assert.Equal(100m, itemMovido.Valor); // preservado do manual
+        Assert.Equal("Aluguel", itemMovido.Categoria); // preservado do manual
+        Assert.Equal("ALUGUEL IMOB", itemMovido.Descricao); // veio do banco
+        Assert.Equal(1000m, criadoNoDiaDoBanco.Inicio); // herdado do dia manual já corrigido
+        Assert.Equal(900m, criadoNoDiaDoBanco.SaldoFinal); // 1000 - 100
+
+        Assert.Equal(900m, registroSeguinte.Inicio); // cascata: sem lançamento próprio, só repete o saldo
+        Assert.Equal(900m, registroSeguinte.SaldoFinal);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ResolucaoImportarComoNovo_NaoTocaNoManualECriaLancamentoNovo()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+
+        var dataManual = new DateOnly(2026, 7, 10);
+        var itemManualId = Guid.NewGuid();
+        var registroManual = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataManual,
+            Entradas = new(), Saidas = new() { new() { Id = itemManualId, Descricao = "Consulta medica", Valor = 150m, Categoria = "Saude" } },
+            ContasReceber = new(), ContasPagar = new(), Inicio = 0m, SaldoFinal = -150m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroManual });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n10/07/2026;CONSULTA MEDICA LTDA;-150,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resolucoes = new List<ResolucaoDuplicataDto> { new() { TransacaoIndice = 0, Acao = "ImportarComoNovo" } };
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null, resolucoes);
+
+        Assert.Equal(0, resultado.TotalMescladasComManual);
+        Assert.Equal(1, resultado.TotalImportadas);
+        Assert.Equal(2, registroManual.Saidas.Count); // manual original intacto + o novo da importação
+        var manualIntacto = registroManual.Saidas.Single(s => s.Id == itemManualId);
+        Assert.Null(manualIntacto.FitId);
+        Assert.Equal("Consulta medica", manualIntacto.Descricao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_DuplicataEntreArquivos_SempreImportaESoSinaliza()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+
+        var data = new DateOnly(2026, 7, 10);
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(), Saidas = new() { new() { Id = Guid.NewGuid(), Descricao = "Fornecedor XYZ", Valor = 200m } },
+            ContasReceber = new(), ContasPagar = new(), Inicio = 0m, SaldoFinal = -200m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        RegistroDiario? criadoParaNovaTransacao = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criadoParaNovaTransacao = r).ReturnsAsync((RegistroDiario r) => r);
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<TransacaoImportada>
+        {
+            new() { Id = Guid.NewGuid(), ContaBancariaId = contaId, ClienteId = clienteId, Data = data, Valor = 200m,
+                Descricao = "Fornecedor XYZ", FitId = null, Tipo = "Saida", Status = "Confirmada", ImportadoEm = DateTime.UtcNow },
+        });
+
+        // Data diferente da do lançamento existente (±2 dias) — vira um RegistroDiario novo, não
+        // é mesclado nem some: só fica sinalizado para revisão.
+        var csv = "Data;Descricao;Valor\n11/07/2026;FORNECEDOR XYZ SA;-200,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Equal(0, resultado.TotalMescladasComManual);
+        Assert.Equal(1, resultado.TotalDuplicatasEntreArquivosSinalizadas);
+        Assert.Equal(1, resultado.TotalImportadas); // sempre importa, só sinaliza
+        Assert.Single(registro.Saidas); // o lançamento existente não foi tocado
+        Assert.NotNull(criadoParaNovaTransacao);
+        Assert.Equal("FORNECEDOR XYZ SA", Assert.Single(criadoParaNovaTransacao!.Saidas).Descricao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ResultadoTraz_TotalSugestoesVinculoDoMotorDeConciliacao()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+        _conciliacaoServiceMock.Setup(s => s.ListarSugestoesAsync(
+            clienteId, It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), clienteId, "cliente", contaId))
+            .ReturnsAsync(new List<CaixaDiario.API.DTOs.Conciliacao.SugestaoVinculoDto>
+            {
+                new() { ContaProvisionadaId = Guid.NewGuid() },
+                new() { ContaProvisionadaId = Guid.NewGuid() },
+            });
+
+        var csv = "Data;Descricao;Valor\n10/07/2026;Pagamento;-50,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Equal(2, resultado.TotalSugestoesVinculo);
     }
 }

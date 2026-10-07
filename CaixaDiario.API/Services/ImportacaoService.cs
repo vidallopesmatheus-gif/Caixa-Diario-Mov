@@ -17,6 +17,7 @@ public class ImportacaoService : IImportacaoService
     private readonly ICategoriaRepository _categoriaRepo;
     private readonly IRegraCategorizacaoRepository _regraRepo;
     private readonly ITransferenciaService _transferenciaService;
+    private readonly IConciliacaoService _conciliacaoService;
 
     public ImportacaoService(
         IContaBancariaRepository contaRepo,
@@ -24,7 +25,8 @@ public class ImportacaoService : IImportacaoService
         IRegistroRepository registroRepo,
         ICategoriaRepository categoriaRepo,
         IRegraCategorizacaoRepository regraRepo,
-        ITransferenciaService transferenciaService)
+        ITransferenciaService transferenciaService,
+        IConciliacaoService conciliacaoService)
     {
         _contaRepo = contaRepo;
         _importRepo = importRepo;
@@ -32,6 +34,7 @@ public class ImportacaoService : IImportacaoService
         _categoriaRepo = categoriaRepo;
         _regraRepo = regraRepo;
         _transferenciaService = transferenciaService;
+        _conciliacaoService = conciliacaoService;
     }
 
     // Representação unificada de uma linha do arquivo, independente do formato de origem.
@@ -56,32 +59,72 @@ public class ImportacaoService : IImportacaoService
         var registrosAtivos = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
-        var ignoradas = await ObterIgnoradasAsync(contaBancariaId);
+        var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
+        var ignoradas = historico.Where(t => t.Status == "Ignorada").ToList();
+        var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
         var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos, ignoradas);
         var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
-        var totalConciliar = ContarConciliaveis(novas, registrosAtivos);
+        var conciliaveis = IdentificarConciliaveis(novas, registrosAtivos);
+        var consumidoPelaHeuristica = ContarConsumidoPelaHeuristica(parseadas, jaImportadas);
+
+        var candidatosDuplicata = IdentificarCandidatosDuplicata(
+            novas.Where(t => !conciliaveis.Contains(t.Indice)).ToList(), registrosAtivos, chavesImportadasAntes, consumidoPelaHeuristica);
 
         return new PreviewImportacaoDto
         {
             TotalEncontradas = parseadas.Count,
             TotalJaImportadas = jaImportadas.Count,
             TotalNovas = novas.Count,
-            TotalConciliarAoImportar = totalConciliar,
+            TotalConciliarAoImportar = conciliaveis.Count,
             TotalEntradas = novas.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
             TotalSaidas = novas.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
             DataInicioArquivo = dataInicioArquivo.ToString("yyyy-MM-dd"),
             DataFimArquivo = dataFimArquivo.ToString("yyyy-MM-dd"),
+            DuplicatasManuais = MapearDuplicatasManuais(novas, candidatosDuplicata),
+            DuplicatasEntreArquivos = MapearDuplicatasEntreArquivos(novas, candidatosDuplicata),
         };
     }
 
+    private static List<DuplicataManualDto> MapearDuplicatasManuais(
+        List<TransacaoParseada> novas, Dictionary<int, (ItemSemFitId Candidato, bool VeioDeImportacaoAnterior)> candidatosDuplicata) =>
+        candidatosDuplicata.Where(kv => !kv.Value.VeioDeImportacaoAnterior)
+            .Select(kv =>
+            {
+                var t = novas.First(x => x.Indice == kv.Key);
+                return new DuplicataManualDto
+                {
+                    TransacaoIndice = kv.Key, DescricaoBanco = t.Descricao, DataBanco = t.Data.ToString("yyyy-MM-dd"),
+                    Valor = t.Valor, Tipo = t.Tipo, LancamentoManualId = kv.Value.Candidato.ItemId,
+                    DescricaoManual = kv.Value.Candidato.Descricao, DataManual = kv.Value.Candidato.Data.ToString("yyyy-MM-dd"),
+                };
+            })
+            .OrderBy(d => d.TransacaoIndice)
+            .ToList();
+
+    private static List<DuplicataEntreArquivosDto> MapearDuplicatasEntreArquivos(
+        List<TransacaoParseada> novas, Dictionary<int, (ItemSemFitId Candidato, bool VeioDeImportacaoAnterior)> candidatosDuplicata) =>
+        candidatosDuplicata.Where(kv => kv.Value.VeioDeImportacaoAnterior)
+            .Select(kv =>
+            {
+                var t = novas.First(x => x.Indice == kv.Key);
+                return new DuplicataEntreArquivosDto
+                {
+                    TransacaoIndice = kv.Key, DescricaoBanco = t.Descricao, DataBanco = t.Data.ToString("yyyy-MM-dd"),
+                    Valor = t.Valor, Tipo = t.Tipo,
+                    DescricaoJaImportada = kv.Value.Candidato.Descricao, DataJaImportada = kv.Value.Candidato.Data.ToString("yyyy-MM-dd"),
+                };
+            })
+            .OrderBy(d => d.TransacaoIndice)
+            .ToList();
+
     // Versão só-leitura de ColetarProvisorias+ReconciliarProvisoria, pro Preview não precisar
-    // persistir nada — conta quantas das "novas" vão casar com uma provisória 1:1 ao importar de
-    // verdade (mesma regra: só concilia quando há exatamente 1 candidata).
-    private static int ContarConciliaveis(List<TransacaoParseada> novas, List<RegistroDiario> registrosAtivos)
+    // persistir nada — identifica quais das "novas" vão casar com uma provisória 1:1 ao importar
+    // de verdade (mesma regra: só concilia quando há exatamente 1 candidata).
+    private static HashSet<int> IdentificarConciliaveis(List<TransacaoParseada> novas, List<RegistroDiario> registrosAtivos)
     {
         var pool = ColetarProvisorias(registrosAtivos);
-        var total = 0;
+        var indices = new HashSet<int>();
         foreach (var t in novas)
         {
             var candidatas = pool.Where(p => p.Tipo == t.Tipo
@@ -90,15 +133,151 @@ public class ImportacaoService : IImportacaoService
                 .ToList();
             if (candidatas.Count != 1) continue;
             pool.Remove(candidatas[0]);
-            total++;
+            indices.Add(t.Indice);
         }
-        return total;
+        return indices;
+    }
+
+    // ── Fase 1.7: duplicata contra lançamento manual / entre dois arquivos importados ───────────
+    // Candidato = item real (Entrada/Saída) sem FitId, na mesma conta, do mesmo sentido, valor
+    // ±R$0,01 e data ±2 dias de uma transação do arquivo. Dois cenários (distinguidos por já ter
+    // ou não uma linha correspondente no histórico de TransacaoImportada):
+    // - Sem histórico de importação => é genuinamente MANUAL => oferece Mesclar/Importar como novo.
+    // - Com histórico de importação (ex.: veio de um CSV/XLSX anterior, sem FitId) => é uma
+    //   provável duplicata ENTRE ARQUIVOS (ex.: CSV + OFX do mesmo banco) => só sinaliza, sempre importa.
+    private sealed record ItemSemFitId(RegistroDiario Registro, string Tipo, Guid ItemId, decimal Valor, string Descricao, DateOnly Data);
+
+    // "consumidoPelaHeuristica" são as instâncias que IdentificarJaImportadas já casou com outra
+    // transação do PRÓPRIO arquivo via multiset exato (ver ChaveOcorrencia) — sem isso, o excedente
+    // de duas transações idênticas no arquivo (uma já no razão, outra genuinamente nova) acharia a
+    // mesma instância do razão como "duplicata manual" da segunda, quando ela já foi "gasta" pela
+    // primeira. Descontar aqui é o que impede a mescla indevida.
+    private static List<ItemSemFitId> ColetarItensSemFitId(
+        List<RegistroDiario> registros, Dictionary<(DateOnly, string, decimal, string), int> consumidoPelaHeuristica)
+    {
+        var restante = new Dictionary<(DateOnly, string, decimal, string), int>(consumidoPelaHeuristica);
+        var lista = new List<ItemSemFitId>();
+        foreach (var r in registros)
+        {
+            foreach (var e in r.Entradas.Where(e => e.FitId == null && !e.Provisoria))
+            {
+                var chave = ChaveOcorrencia(r.Data, "Entrada", e.Valor, e.Descricao);
+                if (restante.TryGetValue(chave, out var qtd) && qtd > 0) { restante[chave] = qtd - 1; continue; }
+                lista.Add(new ItemSemFitId(r, "Entrada", e.Id, e.Valor, e.Descricao, r.Data));
+            }
+            foreach (var s in r.Saidas.Where(s => s.FitId == null && !s.Provisoria))
+            {
+                var chave = ChaveOcorrencia(r.Data, "Saida", s.Valor, s.Descricao);
+                if (restante.TryGetValue(chave, out var qtd) && qtd > 0) { restante[chave] = qtd - 1; continue; }
+                lista.Add(new ItemSemFitId(r, "Saida", s.Id, s.Valor, s.Descricao, r.Data));
+            }
+        }
+        return lista;
+    }
+
+    private static Dictionary<(DateOnly, string, decimal, string), int> ContarConsumidoPelaHeuristica(
+        List<TransacaoParseada> parseadas, HashSet<int> jaImportadas)
+    {
+        var mapa = new Dictionary<(DateOnly, string, decimal, string), int>();
+        foreach (var t in parseadas.Where(t => t.FitId == null && jaImportadas.Contains(t.Indice)))
+        {
+            var chave = ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao);
+            mapa[chave] = mapa.GetValueOrDefault(chave) + 1;
+        }
+        return mapa;
+    }
+
+    private static HashSet<(DateOnly, string, decimal, string)> ColetarChavesImportadas(List<TransacaoImportada> historico) =>
+        historico.Where(t => t.FitId == null)
+            .Select(t => ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao))
+            .ToHashSet();
+
+    // Pool em memória (igual ColetarProvisorias) — cada lançamento sem FitId só pode ser
+    // reivindicado por UMA transação do arquivo, a de melhor match (menor diferença de dias, depois
+    // de valor), pra não sugerir o mesmo manual pra duas linhas do arquivo.
+    private static Dictionary<int, (ItemSemFitId Candidato, bool VeioDeImportacaoAnterior)> IdentificarCandidatosDuplicata(
+        List<TransacaoParseada> transacoes, List<RegistroDiario> registros,
+        HashSet<(DateOnly, string, decimal, string)> chavesImportadasAntes,
+        Dictionary<(DateOnly, string, decimal, string), int> consumidoPelaHeuristica)
+    {
+        var disponiveis = ColetarItensSemFitId(registros, consumidoPelaHeuristica);
+        var resultado = new Dictionary<int, (ItemSemFitId, bool)>();
+
+        foreach (var t in transacoes.OrderBy(t => t.Indice))
+        {
+            var candidatas = disponiveis.Where(c => c.Tipo == t.Tipo
+                && Math.Abs(c.Valor - t.Valor) < 0.01m
+                && Math.Abs(c.Data.DayNumber - t.Data.DayNumber) <= 2)
+                .ToList();
+            if (candidatas.Count == 0) continue;
+
+            var melhor = candidatas
+                .OrderBy(c => Math.Abs(c.Data.DayNumber - t.Data.DayNumber))
+                .ThenBy(c => Math.Abs(c.Valor - t.Valor))
+                .First();
+
+            var veioDeImportacaoAnterior = chavesImportadasAntes.Contains(ChaveOcorrencia(melhor.Data, melhor.Tipo, melhor.Valor, melhor.Descricao));
+            resultado[t.Indice] = (melhor, veioDeImportacaoAnterior);
+            disponiveis.Remove(melhor);
+        }
+
+        return resultado;
+    }
+
+    // Move/atualiza o item manual em vez de criar um novo: mantém Categoria/TipoCusto/vínculos/
+    // Valor do manual, grava FitId/Descricao do banco. Quando a data muda, move o item entre os
+    // dois RegistroDiario (saldo é só recalculado no fim, de uma vez, por RecalcularSaldosDesde).
+    private static void AplicarMergeComManual(
+        RegistroDiario registroDestino, TransacaoParseada t, ItemSemFitId candidato, ref DateOnly? menorDataAfetadaPorMerge)
+    {
+        var moveu = candidato.Registro.Data != t.Data;
+
+        if (candidato.Tipo == "Entrada")
+        {
+            var item = candidato.Registro.Entradas.First(e => e.Id == candidato.ItemId);
+            item.FitId = t.FitId;
+            item.Descricao = t.Descricao;
+            if (moveu)
+            {
+                candidato.Registro.Entradas = candidato.Registro.Entradas.Where(e => e.Id != item.Id).ToList();
+                registroDestino.Entradas = new List<ItemFinanceiro>(registroDestino.Entradas) { item };
+            }
+            else
+            {
+                candidato.Registro.Entradas = new List<ItemFinanceiro>(candidato.Registro.Entradas);
+            }
+        }
+        else
+        {
+            var item = candidato.Registro.Saidas.First(s => s.Id == candidato.ItemId);
+            item.FitId = t.FitId;
+            item.Descricao = t.Descricao;
+            if (moveu)
+            {
+                candidato.Registro.Saidas = candidato.Registro.Saidas.Where(s => s.Id != item.Id).ToList();
+                registroDestino.Saidas = new List<ItemFinanceiroSaida>(registroDestino.Saidas) { item };
+            }
+            else
+            {
+                candidato.Registro.Saidas = new List<ItemFinanceiroSaida>(candidato.Registro.Saidas);
+            }
+        }
+
+        candidato.Registro.SalvoEm = DateTime.UtcNow;
+        registroDestino.SalvoEm = DateTime.UtcNow;
+
+        if (moveu)
+        {
+            var menor = candidato.Registro.Data < t.Data ? candidato.Registro.Data : t.Data;
+            if (!menorDataAfetadaPorMerge.HasValue || menor < menorDataAfetadaPorMerge.Value)
+                menorDataAfetadaPorMerge = menor;
+        }
     }
 
     // ── Importar (lança direto no RegistroDiario — afeta saldo na hora) ──────────
     public async Task<ResultadoImportacaoDto> ImportarArquivoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
-        DateOnly? dataInicio, DateOnly? dataFim)
+        DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null)
     {
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
         var parseadas = ParsearArquivoValidando(arquivo);
@@ -109,7 +288,9 @@ public class ImportacaoService : IImportacaoService
         var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
-        var ignoradas = await ObterIgnoradasAsync(contaBancariaId);
+        var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
+        var ignoradas = historico.Where(t => t.Status == "Ignorada").ToList();
+        var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
         var jaImportadas = IdentificarJaImportadas(parseadas, registros, ignoradas);
         var aImportar = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
@@ -117,6 +298,16 @@ public class ImportacaoService : IImportacaoService
         if (aImportar.Count == 0)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
                 "Nenhuma transação nova para importar no intervalo selecionado — todas já foram importadas antes.");
+
+        var conciliaveis = IdentificarConciliaveis(aImportar, registros);
+        var consumidoPelaHeuristica = ContarConsumidoPelaHeuristica(parseadas, jaImportadas);
+        var candidatosDuplicata = IdentificarCandidatosDuplicata(
+            aImportar.Where(t => !conciliaveis.Contains(t.Indice)).ToList(), registros, chavesImportadasAntes, consumidoPelaHeuristica);
+        var resolucoesPorIndice = (resolucoesDuplicatas ?? new List<ResolucaoDuplicataDto>())
+            .ToDictionary(r => r.TransacaoIndice, r => r.Acao);
+        DateOnly? menorDataAfetadaPorMerge = null;
+        var totalMescladasComManual = 0;
+        var totalDuplicatasEntreArquivosSinalizadas = 0;
 
         var registrosPorData = registros.ToDictionary(r => r.Data);
         var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
@@ -206,6 +397,31 @@ public class ImportacaoService : IImportacaoService
                     // Mais de uma candidata pro mesmo valor/sentido/janela — não decide sozinho
                     // (ex.: dois Pix iguais no mesmo dia). Importa normal, pendente de classificação.
                     ambiguasTransferencia++;
+                }
+
+                if (candidatosDuplicata.TryGetValue(t.Indice, out var duplicata))
+                {
+                    if (duplicata.VeioDeImportacaoAnterior)
+                    {
+                        // Provável duplicata entre dois arquivos (ex.: CSV + OFX do mesmo banco) —
+                        // não decide sozinho, só sinaliza; segue o fluxo normal abaixo e importa.
+                        totalDuplicatasEntreArquivosSinalizadas++;
+                    }
+                    else if (resolucoesPorIndice.GetValueOrDefault(t.Indice, "Mesclar") == "Mesclar")
+                    {
+                        // Duplicata de lançamento MANUAL — padrão é mesclar: mantém Categoria/
+                        // TipoCusto/vínculos/Valor do manual, só grava FitId/Descrição/Data do banco.
+                        AplicarMergeComManual(registro, t, duplicata.Candidato, ref menorDataAfetadaPorMerge);
+                        totalMescladasComManual++;
+                        auditoria.Add(new TransacaoImportada
+                        {
+                            Id = Guid.NewGuid(), ContaBancariaId = conta.Id, ClienteId = conta.ClienteId,
+                            Data = t.Data, Valor = t.Valor, Descricao = t.Descricao, FitId = t.FitId,
+                            Tipo = t.Tipo, Status = "Confirmada", ImportadoEm = DateTime.UtcNow,
+                        });
+                        continue;
+                    }
+                    // "ImportarComoNovo": segue o fluxo normal abaixo, cria um lançamento novo.
                 }
 
                 var regraCorrespondente = regrasPorTipo.TryGetValue(t.Tipo, out var regrasDoTipo)
@@ -315,6 +531,27 @@ public class ImportacaoService : IImportacaoService
         foreach (var r in registrosTocadosPorConciliacao)
             await _registroRepo.AtualizarAsync(r);
 
+        // Mesclas que MOVERAM um item manual pra outro dia: o dia de origem só foi tocado aqui, não
+        // pelo loop principal — recalcula saldo de toda a conta a partir do dia mais antigo afetado
+        // (origem ou destino) de uma vez, em vez de tentar propagar delta a delta (poderiam ter
+        // ocorrido duas mesclas tocando dias diferentes na mesma janela).
+        if (menorDataAfetadaPorMerge.HasValue)
+        {
+            var saldoCorrente = registros
+                .Where(r => r.Data < menorDataAfetadaPorMerge.Value)
+                .OrderByDescending(r => r.Data)
+                .Select(r => r.SaldoFinal)
+                .FirstOrDefault(conta.SaldoInicial);
+
+            foreach (var r in registros.Where(r => r.Data >= menorDataAfetadaPorMerge.Value).OrderBy(r => r.Data))
+            {
+                r.Inicio = saldoCorrente;
+                r.SaldoFinal = RegistroService.CalcularSaldoFinal(r.Inicio, r.Entradas, r.Saidas, 0m);
+                saldoCorrente = r.SaldoFinal;
+                await _registroRepo.AtualizarAsync(r);
+            }
+        }
+
         await _importRepo.AdicionarLoteAsync(auditoria);
 
         // Regras de Transferência — só agora, com todos os registros do lote já persistidos (o
@@ -342,15 +579,33 @@ public class ImportacaoService : IImportacaoService
             }
         }
 
+        // Fase 1.2/1.7: depois da deduplicação, roda o motor de sugestão de vínculo no intervalo do
+        // próprio arquivo — a tela resume "X contas previstas encontradas: confirmar todas / revisar".
+        var totalSugestoesVinculo = 0;
+        try
+        {
+            var dataMin = aImportar.Min(t => t.Data);
+            var dataMax = aImportar.Max(t => t.Data);
+            totalSugestoesVinculo = (await _conciliacaoService.ListarSugestoesAsync(
+                conta.ClienteId, dataMin, dataMax, usuarioLogadoId, perfil, contaBancariaId)).Count;
+        }
+        catch (ApiException)
+        {
+            // Nunca falha a importação (já persistida) por causa da sugestão — só não resume.
+        }
+
         return new ResultadoImportacaoDto
         {
-            TotalImportadas = aImportar.Count - conciliadasTransferencia,
+            TotalImportadas = aImportar.Count - conciliadasTransferencia - totalMescladasComManual,
             TotalPendentesCategorizacao = pendentes,
             TotalCategorizadasPorRegra = categorizadasPorRegra,
             TotalConciliadasTransferencia = conciliadasTransferencia,
             TotalAmbiguasTransferencia = ambiguasTransferencia,
             TotalEntradas = aImportar.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
             TotalSaidas = aImportar.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
+            TotalMescladasComManual = totalMescladasComManual,
+            TotalDuplicatasEntreArquivosSinalizadas = totalDuplicatasEntreArquivosSinalizadas,
+            TotalSugestoesVinculo = totalSugestoesVinculo,
         };
     }
 
@@ -532,9 +787,6 @@ public class ImportacaoService : IImportacaoService
         alvo.Status = "Ignorada";
         await _importRepo.AtualizarAsync(alvo);
     }
-
-    private async Task<List<TransacaoImportada>> ObterIgnoradasAsync(Guid contaBancariaId) =>
-        (await _importRepo.ListarPorContaAsync(contaBancariaId)).Where(t => t.Status == "Ignorada").ToList();
 
     // ── Conciliação com contrapartida provisória de Transferência (bug: Pix duplicado) ──────────
     // Ver TransferenciaService.ConverterLancamentoAsync (cria a provisória) e Models/ItemFinanceiro.

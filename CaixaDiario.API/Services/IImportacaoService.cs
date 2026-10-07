@@ -21,7 +21,7 @@ public interface IImportacaoService
     /// </summary>
     Task<ResultadoImportacaoDto> ImportarArquivoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
-        DateOnly? dataInicio, DateOnly? dataFim);
+        DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null);
 
     Task<List<PendenteCategorizacaoDto>> ListarPendentesCategorizacaoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil);

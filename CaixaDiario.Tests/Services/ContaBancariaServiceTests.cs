@@ -15,6 +15,7 @@ public class ContaBancariaServiceTests
     private readonly Mock<IMetaRepository> _metaRepoMock = new();
     private readonly Mock<ITransferenciaRepository> _transferenciaRepoMock = new();
     private readonly Mock<ITransacaoImportadaRepository> _transacaoImportadaRepoMock = new();
+    private readonly Mock<IContaRecorrenteRepository> _contaRecorrenteRepoMock = new();
     private readonly ContaBancariaService _sut;
 
     public ContaBancariaServiceTests()
@@ -25,9 +26,10 @@ public class ContaBancariaServiceTests
         _registroRepoMock.Setup(r => r.ContarTodosPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(0);
         _transferenciaRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Transferencia>());
         _transacaoImportadaRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<TransacaoImportada>());
+        _contaRecorrenteRepoMock.Setup(r => r.ContarPorContaBancariaAsync(It.IsAny<Guid>())).ReturnsAsync(0);
         _sut = new ContaBancariaService(
             _contaRepoMock.Object, _registroRepoMock.Object, _metaRepoMock.Object,
-            _transferenciaRepoMock.Object, _transacaoImportadaRepoMock.Object);
+            _transferenciaRepoMock.Object, _transacaoImportadaRepoMock.Object, _contaRecorrenteRepoMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid id, Guid clienteId, decimal saldoInicial = 1000m) => new()
@@ -498,6 +500,24 @@ public class ContaBancariaServiceTests
     }
 
     [Fact]
+    public async Task ExcluirOuInativarAsync_ComContaRecorrenteVinculada_ContaComoVinculo()
+    {
+        // Fase 0.2: ContaRecorrente.ContaBancariaId é obrigatória agora (FK Restrict) — sem essa
+        // contagem, a exclusão física ia bater na constraint do banco em vez de só inativar com
+        // uma mensagem clara.
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _contaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<ContaBancaria>())).ReturnsAsync((ContaBancaria c) => c);
+        _contaRecorrenteRepoMock.Setup(r => r.ContarPorContaBancariaAsync(conta.Id)).ReturnsAsync(1);
+
+        var resultado = await _sut.ExcluirOuInativarAsync(conta.Id, clienteId, "cliente");
+
+        Assert.False(resultado.Excluida);
+        Assert.Equal(1, resultado.ContasRecorrentes);
+    }
+
+    [Fact]
     public async Task ExcluirOuInativarAsync_ComContaInexistente_LancaNaoEncontrado()
     {
         var id = Guid.NewGuid();
@@ -670,7 +690,7 @@ public class ContaBancariaServiceTests
     {
         var clienteId = Guid.NewGuid();
         var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 0m);
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
 
         var registro = new RegistroDiario
         {

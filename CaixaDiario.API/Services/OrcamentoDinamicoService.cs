@@ -10,7 +10,7 @@ public class OrcamentoDinamicoService : IOrcamentoDinamicoService
         List<ContaRecorrente> recorrentes,
         List<MetaAnual> metas)
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var anoAtual = hoje.Year;
         var mesAtual = hoje.Month;
         var diasNoMes = DateTime.DaysInMonth(anoAtual, mesAtual);

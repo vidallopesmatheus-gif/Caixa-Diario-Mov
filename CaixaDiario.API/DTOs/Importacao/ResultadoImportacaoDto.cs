@@ -14,4 +14,13 @@ public class ResultadoImportacaoDto
     public int TotalAmbiguasTransferencia { get; set; }
     public decimal TotalEntradas { get; set; }
     public decimal TotalSaidas { get; set; }
+    // Fase 1.7: quantas transações do arquivo foram mescladas a um lançamento manual existente em
+    // vez de criar um novo (já estão incluídas em TotalImportadas, não somar de novo).
+    public int TotalMescladasComManual { get; set; }
+    // Prováveis duplicatas entre dois arquivos importados (ex.: CSV + OFX do mesmo banco) — foram
+    // importadas normalmente, só ficam sinalizadas para revisão manual.
+    public int TotalDuplicatasEntreArquivosSinalizadas { get; set; }
+    // Fase 1.2: quantas sugestões de vínculo (título pendente × lançamento real) o motor encontrou
+    // no intervalo deste arquivo, depois da deduplicação — a tela mostra "confirmar todas / revisar".
+    public int TotalSugestoesVinculo { get; set; }
 }

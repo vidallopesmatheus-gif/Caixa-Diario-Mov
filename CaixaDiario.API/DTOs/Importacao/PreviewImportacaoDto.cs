@@ -19,4 +19,11 @@ public class PreviewImportacaoDto
     // pré-preencher o seletor de intervalo no frontend.
     public string DataInicioArquivo { get; set; } = string.Empty;
     public string DataFimArquivo { get; set; } = string.Empty;
+
+    // Fase 1.7: únicas transações que o usuário efetivamente revisa linha a linha — o resto do
+    // arquivo continua "tudo ou nada". Cada uma aqui precisa de uma decisão Mesclar/ImportarComoNovo
+    // (padrão Mesclar) enviada de volta em ImportarArquivoAsync.
+    public List<DuplicataManualDto> DuplicatasManuais { get; set; } = new();
+    // Só informativo — sempre importa, mesmo sem decisão do usuário (ver ConciliacaoService).
+    public List<DuplicataEntreArquivosDto> DuplicatasEntreArquivos { get; set; } = new();
 }

@@ -10,7 +10,7 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
         List<RegistroDiario> registros,
         List<MetaAnual> metas)
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var anoAtual = hoje.Year;
         var mesAtual = hoje.Month;
         var reg = registros.Where(r => !r.Excluido).ToList();

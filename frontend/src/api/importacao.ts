@@ -1,5 +1,34 @@
 import { apiFetch } from './client'
-import type { ApiResponse, ResumoImportacao, ResultadoImportacao, PendenteCategorizacao } from '../types'
+import type {
+  ApiResponse, ResumoImportacao, ResultadoImportacao, PendenteCategorizacao, DuplicataManual, DuplicataEntreArquivos,
+} from '../types'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapDuplicataManual(raw: any): DuplicataManual {
+  return {
+    transacaoIndice: raw.transacaoIndice,
+    descricaoBanco: raw.descricaoBanco ?? '',
+    dataBanco: raw.dataBanco ?? '',
+    valor: raw.valor ?? 0,
+    tipo: raw.tipo,
+    lancamentoManualId: raw.lancamentoManualId,
+    descricaoManual: raw.descricaoManual ?? '',
+    dataManual: raw.dataManual ?? '',
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapDuplicataEntreArquivos(raw: any): DuplicataEntreArquivos {
+  return {
+    transacaoIndice: raw.transacaoIndice,
+    descricaoBanco: raw.descricaoBanco ?? '',
+    dataBanco: raw.dataBanco ?? '',
+    valor: raw.valor ?? 0,
+    tipo: raw.tipo,
+    descricaoJaImportada: raw.descricaoJaImportada ?? '',
+    dataJaImportada: raw.dataJaImportada ?? '',
+  }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapResumo(raw: any): ResumoImportacao {
@@ -11,6 +40,8 @@ function mapResumo(raw: any): ResumoImportacao {
     totalSaidas: raw.totalSaidas ?? 0,
     dataInicioArquivo: raw.dataInicioArquivo ?? '',
     dataFimArquivo: raw.dataFimArquivo ?? '',
+    duplicatasManuais: (raw.duplicatasManuais ?? []).map(mapDuplicataManual),
+    duplicatasEntreArquivos: (raw.duplicatasEntreArquivos ?? []).map(mapDuplicataEntreArquivos),
   }
 }
 
@@ -41,15 +72,24 @@ export const previewExtrato = async (
   return mapResumo(res.dados)
 }
 
+export interface ResolucaoDuplicata {
+  transacaoIndice: number
+  acao: 'Mesclar' | 'ImportarComoNovo'
+}
+
 export const importarExtrato = async (
   contaId: string,
   arquivo: File,
-  opcoes?: { dataInicio?: string; dataFim?: string },
+  opcoes?: { dataInicio?: string; dataFim?: string; resolucoesDuplicatas?: ResolucaoDuplicata[] },
 ): Promise<ResultadoImportacao> => {
   const form = new FormData()
   form.append('arquivo', arquivo)
   if (opcoes?.dataInicio) form.append('dataInicio', opcoes.dataInicio)
   if (opcoes?.dataFim) form.append('dataFim', opcoes.dataFim)
+  // Só precisa mandar as que o usuário trocou do padrão (Mesclar) — índice ausente já é Mesclar.
+  if (opcoes?.resolucoesDuplicatas?.length) {
+    form.append('resolucoesDuplicatasJson', JSON.stringify(opcoes.resolucoesDuplicatas))
+  }
 
   const res = await apiFetch<ApiResponse<unknown>>(
     `/api/contas-bancarias/${contaId}/importar-extrato`,
@@ -64,6 +104,9 @@ export const importarExtrato = async (
     totalAmbiguasTransferencia: Number(d.totalAmbiguasTransferencia ?? 0),
     totalEntradas: Number(d.totalEntradas ?? 0),
     totalSaidas: Number(d.totalSaidas ?? 0),
+    totalMescladasComManual: Number(d.totalMescladasComManual ?? 0),
+    totalDuplicatasEntreArquivosSinalizadas: Number(d.totalDuplicatasEntreArquivosSinalizadas ?? 0),
+    totalSugestoesVinculo: Number(d.totalSugestoesVinculo ?? 0),
   }
 }
 

@@ -10,6 +10,7 @@ public class ExclusaoContaBancariaResultDto
     public int Transferencias { get; set; }
     public int TransacoesImportadas { get; set; }
     public int MetasVinculadas { get; set; }
+    public int ContasRecorrentes { get; set; }
     public int TotalVinculos =>
-        DiasComLancamento + ContasProvisionadas + Transferencias + TransacoesImportadas + MetasVinculadas;
+        DiasComLancamento + ContasProvisionadas + Transferencias + TransacoesImportadas + MetasVinculadas + ContasRecorrentes;
 }

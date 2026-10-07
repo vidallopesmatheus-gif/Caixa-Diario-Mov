@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { todayISO } from '../../utils/format'
 import './ClientExportacao.css'
 
 interface Props { clienteIdOverride?: string }
@@ -8,9 +9,8 @@ export default function ClientExportacaoPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
 
-  const hoje = new Date()
-  const primeiroDia = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`
-  const ultimoDia = hoje.toISOString().slice(0, 10)
+  const ultimoDia = todayISO()
+  const primeiroDia = `${ultimoDia.slice(0, 7)}-01`
 
   const [de, setDe] = useState(primeiroDia)
   const [ate, setAte] = useState(ultimoDia)

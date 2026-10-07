@@ -10,7 +10,10 @@ import {
   desvincularMeta,
 } from '../../api/contasBancarias'
 import { previewExtrato, importarExtrato, categorizarPendentes, excluirLancamento } from '../../api/importacao'
+import type { ResolucaoDuplicata } from '../../api/importacao'
 import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
+import { listarSugestoesVinculo } from '../../api/conciliacao'
+import { atualizarContaProvisionada } from '../../api/contasProvisionadas'
 import { listarRegras, atualizarRegra } from '../../api/regras'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { listarMetas, salvarMeta } from '../../api/metas'
@@ -62,6 +65,10 @@ export default function ClientContaDetalhePage() {
   const [dataFimImport, setDataFimImport] = useState('')
   const [importando, setImportando] = useState(false)
   const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
+  // Fase 1.7: decisão por linha só para as duplicatas manuais — índice ausente = Mesclar (padrão).
+  const [resolucoesDuplicatas, setResolucoesDuplicatas] = useState<Record<number, 'Mesclar' | 'ImportarComoNovo'>>({})
+  const [confirmandoTodasSugestoes, setConfirmandoTodasSugestoes] = useState(false)
+  const [sugestoesConfirmadas, setSugestoesConfirmadas] = useState(false)
 
   // ── Investimento: rendimento e vínculo com meta ──────────────────────────
   const [modalRendimento, setModalRendimento] = useState(false)
@@ -141,6 +148,8 @@ export default function ClientContaDetalhePage() {
     setPreviewCarregando(true)
     setArquivoImportar(arquivo)
     setResultadoImportacao(null)
+    setResolucoesDuplicatas({})
+    setSugestoesConfirmadas(false)
     try {
       const resumo = await previewExtrato(contaId, arquivo)
       setDataInicioImport(resumo.dataInicioArquivo || todayISO())
@@ -160,6 +169,7 @@ export default function ClientContaDetalhePage() {
     if (!contaId || !arquivoImportar || !novoInicio || !novoFim) return
     setPreviewCarregando(true)
     try {
+      setResolucoesDuplicatas({})
       setResumoImportacao(await previewExtrato(contaId, arquivoImportar, { dataInicio: novoInicio, dataFim: novoFim }))
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao calcular resumo da importação.')
@@ -173,20 +183,49 @@ export default function ClientContaDetalhePage() {
     setImportando(true)
     setMsg('')
     try {
+      // Só manda as que o usuário trocou do padrão — índice ausente já é Mesclar no backend.
+      const resolucoes: ResolucaoDuplicata[] = Object.entries(resolucoesDuplicatas).map(([indice, acao]) => ({
+        transacaoIndice: Number(indice), acao,
+      }))
       const resultado = await importarExtrato(contaId, arquivoImportar, {
         dataInicio: dataInicioImport,
         dataFim: dataFimImport,
+        resolucoesDuplicatas: resolucoes,
       })
       setResultadoImportacao(resultado)
       setModalImportar(false)
       setArquivoImportar(null)
       setResumoImportacao(null)
+      setResolucoesDuplicatas({})
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao importar extrato.')
     } finally {
       setImportando(false)
+    }
+  }
+
+  // Fase 1.2/1.7: "confirmar todas" do resumo pós-importação — vincula de uma vez cada sugestão
+  // (título pendente × lançamento real) que o motor encontrou no intervalo do próprio arquivo.
+  async function handleConfirmarTodasSugestoes() {
+    if (!contaId || !clienteId) return
+    setConfirmandoTodasSugestoes(true)
+    setMsg('')
+    try {
+      const sugestoes = await listarSugestoesVinculo(clienteId, dataInicioImport || todayISO(), dataFimImport || todayISO(), contaId)
+      for (const s of sugestoes) {
+        await atualizarContaProvisionada(clienteId, s.contaProvisionadaId, {
+          pago: true, contaBancariaId: s.contaBancariaId, dataPagamento: s.lancamentoData, lancamentoVinculadoId: s.lancamentoId,
+        })
+      }
+      setSugestoesConfirmadas(true)
+      carregarConta()
+      carregarPendencias()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao confirmar as sugestões de vínculo.')
+    } finally {
+      setConfirmandoTodasSugestoes(false)
     }
   }
 
@@ -212,8 +251,24 @@ export default function ClientContaDetalhePage() {
     try {
       const resultado = await excluirLancamento(contaId, { id: lancamento.id, data: lancamento.data })
       if (resultado.tituloReaberto) setMsg(`Lançamento excluído. O título "${resultado.tituloReaberto}" voltou a ficar em aberto.`)
-      carregarConta()
-      carregarExtrato()
+      // Transferência tem contrapartida numa OUTRA conta, fora do alcance desta tela — só nesse
+      // caso um reload completo compensa; nos demais, ajustar a lista local evita recarregar tudo.
+      if (lancamento.categoria === 'Transferência') {
+        carregarConta()
+        carregarExtrato()
+      } else {
+        const idx = lancamentos.findIndex(l => l.id === lancamento.id && l.data === lancamento.data)
+        if (idx !== -1) {
+          const valorRemovido = lancamentos[idx].valor
+          // Cada linha anterior a esta na lista (mais recente, já que a ordenação é decrescente)
+          // teve seu saldo acumulado somado considerando esse valor — precisa descontar.
+          const restantes = lancamentos
+            .map((l, i) => i < idx ? { ...l, saldoAcumulado: l.saldoAcumulado - valorRemovido } : l)
+            .filter((_, i) => i !== idx)
+          setLancamentos(restantes)
+          setConta(prev => prev ? { ...prev, saldoAtual: restantes[0]?.saldoAcumulado ?? prev.saldoInicial } : prev)
+        }
+      }
       carregarPendencias()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao excluir lançamento.')
@@ -262,9 +317,11 @@ export default function ClientContaDetalhePage() {
         }
       }
 
+      // Trocar categoria não move dinheiro (saldo/saldoAcumulado ficam intactos) — só a linha
+      // em si precisa refletir a categoria nova, sem recarregar conta/extrato inteiros.
+      setLancamentos(prev => prev.map(l =>
+        (l.id === lancamentoParaEditar.id && l.data === lancamentoParaEditar.data) ? { ...l, categoria: categoriaEdicao } : l))
       setLancamentoParaEditar(null)
-      carregarConta()
-      carregarExtrato()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao editar categoria.')
     } finally {
@@ -477,6 +534,38 @@ export default function ClientContaDetalhePage() {
               )
             </>
           )}
+          {resultadoImportacao.totalMescladasComManual > 0 && (
+            <> — {resultadoImportacao.totalMescladasComManual} mesclada(s) com lançamento(s) manual(is) já existente(s)</>
+          )}
+          {resultadoImportacao.totalDuplicatasEntreArquivosSinalizadas > 0 && (
+            <> — {resultadoImportacao.totalDuplicatasEntreArquivosSinalizadas} sinalizada(s) como provável duplicata entre arquivos (confira)</>
+          )}
+        </div>
+      )}
+
+      {resultadoImportacao && resultadoImportacao.totalSugestoesVinculo > 0 && !sugestoesConfirmadas && (
+        <div className="cd-msg" style={{ marginTop: -8, marginBottom: 16 }}>
+          💡 {resultadoImportacao.totalSugestoesVinculo} conta(s) prevista(s) encontrada(s) no extrato importado.{' '}
+          <button
+            type="button"
+            onClick={handleConfirmarTodasSugestoes}
+            disabled={confirmandoTodasSugestoes}
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit', textDecoration: 'underline', marginRight: 10 }}
+          >
+            {confirmandoTodasSugestoes ? 'Confirmando...' : 'Confirmar todas'}
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/contas')}
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit', textDecoration: 'underline' }}
+          >
+            Revisar
+          </button>
+        </div>
+      )}
+      {sugestoesConfirmadas && (
+        <div className="cd-msg cd-msg-sucesso" style={{ marginTop: -8, marginBottom: 16 }}>
+          ✅ Sugestões de vínculo confirmadas.
         </div>
       )}
 
@@ -796,6 +885,41 @@ export default function ClientContaDetalhePage() {
               <p style={{ fontSize: 12 }}>Entram como <strong>pendentes de categorização</strong> — categorize depois na tela de categorização.</p>
             )}
           </div>
+        )}
+
+        {!previewCarregando && resumoImportacao && resumoImportacao.duplicatasManuais.length > 0 && (
+          <div style={{ margin: '12px 0', border: '1px solid var(--bd)', borderRadius: 8, padding: 10 }}>
+            <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              💡 {resumoImportacao.duplicatasManuais.length} já lançada(s) manualmente — o que fazer?
+            </p>
+            {resumoImportacao.duplicatasManuais.map(d => {
+              const acao = resolucoesDuplicatas[d.transacaoIndice] ?? 'Mesclar'
+              return (
+                <div key={d.transacaoIndice} style={{ fontSize: 12, marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--bd)' }}>
+                  <div style={{ color: 'var(--tx3)', marginBottom: 4 }}>
+                    Banco: <strong style={{ color: 'var(--tx1)' }}>{d.descricaoBanco}</strong> — {fmtBRL(d.valor)} em {fmtDate(d.dataBanco)}
+                    <br />Já lançado manualmente: <strong style={{ color: 'var(--tx1)' }}>{d.descricaoManual}</strong> em {fmtDate(d.dataManual)}
+                  </div>
+                  <label style={{ marginRight: 12 }}>
+                    <input type="radio" name={`dup-${d.transacaoIndice}`} checked={acao === 'Mesclar'}
+                      onChange={() => setResolucoesDuplicatas(prev => ({ ...prev, [d.transacaoIndice]: 'Mesclar' }))} />
+                    {' '}Mesclar (recomendado)
+                  </label>
+                  <label>
+                    <input type="radio" name={`dup-${d.transacaoIndice}`} checked={acao === 'ImportarComoNovo'}
+                      onChange={() => setResolucoesDuplicatas(prev => ({ ...prev, [d.transacaoIndice]: 'ImportarComoNovo' }))} />
+                    {' '}Importar como novo
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {!previewCarregando && resumoImportacao && resumoImportacao.duplicatasEntreArquivos.length > 0 && (
+          <p style={{ fontSize: 12, color: 'var(--tx3)', margin: '8px 0' }}>
+            ⚠️ {resumoImportacao.duplicatasEntreArquivos.length} transação(ões) parecem já ter vindo de outro arquivo importado antes — serão importadas, mas marcadas para você revisar depois.
+          </p>
         )}
       </Modal>
 

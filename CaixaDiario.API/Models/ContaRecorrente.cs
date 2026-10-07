@@ -17,10 +17,18 @@ public class ContaRecorrente
     public bool Ativo { get; set; } = true;
     public DateTime CriadoEm { get; set; }
     public DateTime? AtualizadoEm { get; set; }
-    // Opcional — sem ela, a conta bancária só é definida na hora da baixa (comportamento
-    // histórico). Quando definida, é propagada pras ocorrências materializadas.
-    public Guid? ContaBancariaId { get; set; }
+    // Obrigatória — toda ocorrência materializada é gravada no registro DAQUELA conta. (Até a
+    // Fase 0.2 era opcional; migration backfill atribuiu a conta padrão do cliente a quem não
+    // tinha.)
+    public Guid ContaBancariaId { get; set; }
+    // Fase 1.1: quando true, o valor previsto de cada ocorrência nova é a média do valor efetivo
+    // das últimas 3 ocorrências pagas (não o Valor cadastrado, que aqui só vale como fallback sem
+    // histórico) — ver RecorrenciaService.CalcularValorPrevisto.
+    public bool ValorVariavel { get; set; }
+    // Override explícito do dia de vencimento (1-31), independente de DataInicio (que é só quando
+    // a recorrência COMEÇOU). Null = comportamento histórico, deriva de DataInicio.Day.
+    public int? DiaVencimento { get; set; }
 
     public Usuario Cliente { get; set; } = null!;
-    public ContaBancaria? ContaBancaria { get; set; }
+    public ContaBancaria ContaBancaria { get; set; } = null!;
 }

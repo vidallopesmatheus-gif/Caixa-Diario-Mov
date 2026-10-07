@@ -29,9 +29,9 @@ export function useRegistros(clienteId: string | null) {
     return res.dados
   }
 
-  const excluir = async (data: string, motivo: string) => {
+  const excluir = async (data: string, contaBancariaId: string | undefined, motivo: string) => {
     if (!clienteId) return
-    await excluirRegistro(clienteId, data, motivo)
+    await excluirRegistro(clienteId, data, contaBancariaId, motivo)
     await carregar()
   }
 

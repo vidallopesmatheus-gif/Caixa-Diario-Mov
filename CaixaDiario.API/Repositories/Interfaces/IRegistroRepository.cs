@@ -4,6 +4,7 @@ namespace CaixaDiario.API.Repositories.Interfaces;
 
 public interface IRegistroRepository
 {
+    Task<RegistroDiario?> ObterPorIdAsync(Guid id);
     Task<RegistroDiario?> ObterPorContaEDataAsync(Guid contaBancariaId, DateOnly data);
     Task<RegistroDiario?> ObterPorClienteEDataAsync(Guid clienteId, DateOnly data);
     // Específico pra registros SEM conta vinculada (ContaBancariaId null) — diferente de

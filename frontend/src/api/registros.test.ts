@@ -34,7 +34,7 @@ test('salvarRegistro faz POST em /api/registros', async () => {
 
 test('excluirRegistro faz DELETE com motivoExclusao no body', async () => {
   mockOk({ dados: null })
-  await excluirRegistro('c1', '2026-05-15', 'erro de digitação')
+  await excluirRegistro('c1', '2026-05-15', undefined, 'erro de digitação')
   const call = vi.mocked(fetch).mock.calls[0][1] as RequestInit
   expect(call.method).toBe('DELETE')
   expect(JSON.parse(call.body as string)).toEqual({ motivoExclusao: 'erro de digitação' })

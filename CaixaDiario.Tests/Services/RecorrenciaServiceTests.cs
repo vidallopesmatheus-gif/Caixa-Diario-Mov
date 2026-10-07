@@ -21,9 +21,9 @@ public class RecorrenciaServiceTests
 
     // DataInicio ancorada em "hoje" para que a ocorrência mensal (D6) caia no dia de hoje,
     // alinhando-se aos cenários de materialização que operam sobre o registro de hoje.
-    private static ContaRecorrente CriarConta(Guid clienteId, string tipo = "Pagar", DateOnly? dataFim = null)
+    private static ContaRecorrente CriarConta(Guid clienteId, string tipo = "Pagar", DateOnly? dataFim = null, Guid? contaBancariaId = null)
     {
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         return new()
         {
             Id = Guid.NewGuid(),
@@ -35,6 +35,7 @@ public class RecorrenciaServiceTests
             DataFim = dataFim,
             Periodicidade = "Mensal",
             Ativo = true,
+            ContaBancariaId = contaBancariaId ?? Guid.NewGuid(),
             CriadoEm = DateTime.UtcNow,
         };
     }
@@ -186,7 +187,7 @@ public class RecorrenciaServiceTests
     {
         var clienteId = Guid.NewGuid();
         var conta = CriarConta(clienteId);
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
         var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
 
@@ -220,7 +221,7 @@ public class RecorrenciaServiceTests
     {
         var clienteId = Guid.NewGuid();
         var conta = CriarConta(clienteId, tipo: "Pagar");
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
         var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
 
@@ -228,6 +229,7 @@ public class RecorrenciaServiceTests
         {
             Id = Guid.NewGuid(),
             ClienteId = clienteId,
+            ContaBancariaId = conta.ContaBancariaId,
             Data = hoje,
             ContasPagar = new List<ContaProvisionada>(),
             ContasReceber = new List<ContaProvisionada>(),
@@ -252,6 +254,38 @@ public class RecorrenciaServiceTests
     }
 
     [Fact]
+    public async Task MaterializarMesAtual_DuasRecorrenciasDeContasDiferentesNoMesmoDia_NaoMisturaNoMesmoRegistro()
+    {
+        // Bug da Fase 0.2: a chave de find-or-create do registro era só o dia (ignorava a conta),
+        // então a segunda recorrência do dia acabava gravada no registro — e na conta — da primeira.
+        var clienteId = Guid.NewGuid();
+        var contaBancoA = Guid.NewGuid();
+        var contaBancoB = Guid.NewGuid();
+        var recorrenciaA = CriarConta(clienteId, tipo: "Pagar", contaBancariaId: contaBancoA);
+        var recorrenciaB = CriarConta(clienteId, tipo: "Pagar", contaBancariaId: contaBancoB);
+        var hoje = DataLocalHelper.Hoje();
+        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
+        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+
+        _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaRecorrente> { recorrenciaA, recorrenciaB });
+        _registroRepoMock.Setup(r => r.ListarPorPeriodoAsync(clienteId, primeiroDia, ultimoDia))
+            .ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<RegistroDiario>());
+
+        await _sut.MaterializarMesAtualAsync(clienteId);
+
+        // Dois registros NOVOS e DISTINTOS, um por conta — nunca as duas ocorrências no mesmo.
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.Is<RegistroDiario>(rd =>
+            rd.ContaBancariaId == contaBancoA &&
+            rd.ContasPagar.Count == 1 && rd.ContasPagar[0].RecorrenciaId == recorrenciaA.Id)), Times.Once);
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.Is<RegistroDiario>(rd =>
+            rd.ContaBancariaId == contaBancoB &&
+            rd.ContasPagar.Count == 1 && rd.ContasPagar[0].RecorrenciaId == recorrenciaB.Id)), Times.Once);
+    }
+
+    [Fact]
     public async Task MaterializarMesAtual_OcorrenciaDispensadaPeloCliente_NaoRecria()
     {
         // Reproduz o bug relatado: cliente exclui a ocorrência do dia (RegistroService grava a
@@ -260,7 +294,7 @@ public class RecorrenciaServiceTests
         // "ainda não foi gerada", recriando a ocorrência na hora.
         var clienteId = Guid.NewGuid();
         var conta = CriarConta(clienteId, tipo: "Pagar");
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
         var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
 
@@ -310,7 +344,7 @@ public class RecorrenciaServiceTests
     public async Task MaterializarMesAtual_ContaExpirada_NaoMaterializa()
     {
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
         var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
         var dataFimPassado = primeiroDia.AddDays(-1);  // expired before current month
@@ -333,7 +367,7 @@ public class RecorrenciaServiceTests
         // Conta semanal a partir do dia 1 do mês corrente: deve gerar uma provisão por
         // ocorrência semanal dentro do mês (em registros novos por dia).
         var clienteId = Guid.NewGuid();
-        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var hoje = DataLocalHelper.Hoje();
         var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
         var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
 
@@ -367,5 +401,130 @@ public class RecorrenciaServiceTests
         _registroRepoMock.Verify(r => r.AdicionarAsync(It.Is<RegistroDiario>(rd =>
             rd.ContasPagar.Count == 1 && rd.ContasPagar[0].RecorrenciaId == conta.Id)),
             Times.Exactly(ocorrenciasEsperadas));
+    }
+
+    // ---- Fase 1.1: DiaVencimento ----
+
+    [Fact]
+    public void OcorreEm_ComDiaVencimento_UsaOOverrideEmVezDoDiaDeInicio()
+    {
+        // DataInicio no dia 5, mas DiaVencimento diz que o vencimento real é todo dia 15.
+        var c = Conta(new DateOnly(2026, 1, 5));
+        c.DiaVencimento = 15;
+
+        Assert.False(RecorrenciaService.OcorreEm(c, new DateOnly(2026, 2, 5)));  // dia de início, não mais o vencimento
+        Assert.True(RecorrenciaService.OcorreEm(c, new DateOnly(2026, 2, 15))); // dia do override
+    }
+
+    [Fact]
+    public void OcorreEm_SemDiaVencimento_ContinuaUsandoDiaDeInicio()
+    {
+        // Nenhuma recorrência existente deve mudar de comportamento (DiaVencimento null).
+        var c = Conta(new DateOnly(2026, 1, 10));
+        Assert.True(RecorrenciaService.OcorreEm(c, new DateOnly(2026, 2, 10)));
+        Assert.False(RecorrenciaService.OcorreEm(c, new DateOnly(2026, 2, 15)));
+    }
+
+    [Fact]
+    public void ContarOcorrenciasAte_TrimestralComDiaVencimento_ContaCorretamenteNoDiaCerto()
+    {
+        var c = Conta(new DateOnly(2026, 1, 5), "Trimestral");
+        c.DiaVencimento = 20;
+
+        // Trimestral a partir de jan: ocorre em jan, abr, jul — sempre dia 20 (nunca dia 5).
+        Assert.Equal(1, RecorrenciaService.ContarOcorrenciasAte(c, new DateOnly(2026, 1, 20)));
+        Assert.Equal(2, RecorrenciaService.ContarOcorrenciasAte(c, new DateOnly(2026, 4, 20)));
+        // No dia 5 (antigo vencimento) não conta mais nenhuma ocorrência extra.
+        Assert.Equal(1, RecorrenciaService.ContarOcorrenciasAte(c, new DateOnly(2026, 4, 5)));
+    }
+
+    [Fact]
+    public void ContarOcorrenciasAte_ComDiaVencimentoQueNaoExisteNoMes_PulaOMesSemQuebrarContagem()
+    {
+        // DiaVencimento 31 — fevereiro não tem esse dia, mas março tem; a contagem não pode parar
+        // nem quebrar por causa do mês sem o dia.
+        var c = Conta(new DateOnly(2026, 1, 1));
+        c.DiaVencimento = 31;
+
+        Assert.Equal(1, RecorrenciaService.ContarOcorrenciasAte(c, new DateOnly(2026, 1, 31)));
+        Assert.Equal(1, RecorrenciaService.ContarOcorrenciasAte(c, new DateOnly(2026, 2, 28))); // fev sem dia 31
+        Assert.Equal(2, RecorrenciaService.ContarOcorrenciasAte(c, new DateOnly(2026, 3, 31)));
+    }
+
+    // ---- Fase 1.1: ValorVariavel / CalcularValorPrevisto ----
+
+    [Fact]
+    public void CalcularValorPrevisto_SemValorVariavel_RetornaOValorCadastrado()
+    {
+        var conta = new ContaRecorrente { Id = Guid.NewGuid(), Valor = 100m, ValorVariavel = false };
+        var resultado = RecorrenciaService.CalcularValorPrevisto(conta, new List<RegistroDiario>());
+        Assert.Equal(100m, resultado);
+    }
+
+    [Fact]
+    public void CalcularValorPrevisto_ValorVariavelSemHistorico_CaiNoValorCadastrado()
+    {
+        var conta = new ContaRecorrente { Id = Guid.NewGuid(), Valor = 100m, ValorVariavel = true };
+        var resultado = RecorrenciaService.CalcularValorPrevisto(conta, new List<RegistroDiario>());
+        Assert.Equal(100m, resultado);
+    }
+
+    [Fact]
+    public void CalcularValorPrevisto_ValorVariavelComHistorico_UsaMediaDasUltimas3PagasPorValorEfetivo()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = new ContaRecorrente { Id = Guid.NewGuid(), Valor = 100m, ValorVariavel = true };
+
+        // 4 ocorrências pagas; a mais antiga (50) não deve entrar na média das últimas 3.
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = new DateOnly(2026, 4, 10),
+            Entradas = new(), Saidas = new(), ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { RecorrenciaId = conta.Id, Valor = 100m, Pago = true, DataBaixa = new DateOnly(2026, 1, 10) },
+                // ValorRealizado (juros) prevalece sobre Valor quando preenchido.
+                new() { RecorrenciaId = conta.Id, Valor = 100m, ValorRealizado = 130m, Pago = true, DataBaixa = new DateOnly(2026, 2, 10) },
+                new() { RecorrenciaId = conta.Id, Valor = 110m, Pago = true, DataBaixa = new DateOnly(2026, 3, 10) },
+                new() { RecorrenciaId = conta.Id, Valor = 120m, Pago = true, DataBaixa = new DateOnly(2026, 4, 10) },
+            },
+        };
+
+        var resultado = RecorrenciaService.CalcularValorPrevisto(conta, new List<RegistroDiario> { registro });
+
+        // Média das 3 mais recentes por DataBaixa: 130 (fev) + 110 (mar) + 120 (abr) = 360 / 3 = 120.
+        Assert.Equal(120m, resultado);
+    }
+
+    [Fact]
+    public async Task MaterializarMesAtual_ContaValorVariavel_MaterializaComValorMedioNaoComValorCadastrado()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaBancariaId = Guid.NewGuid();
+        var hoje = DataLocalHelper.Hoje();
+        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
+        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+
+        var conta = new ContaRecorrente
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Descricao = "Energia", Valor = 100m,
+            Tipo = "Pagar", DataInicio = hoje, Periodicidade = "Mensal", Ativo = true,
+            ContaBancariaId = contaBancariaId, ValorVariavel = true, CriadoEm = DateTime.UtcNow,
+        };
+        var registroAntigo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaBancariaId, Data = hoje.AddMonths(-1),
+            Entradas = new(), Saidas = new(), ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada> { new() { RecorrenciaId = conta.Id, Valor = 100m, ValorRealizado = 150m, Pago = true, DataBaixa = hoje.AddMonths(-1) } },
+        };
+
+        _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaRecorrente> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorPeriodoAsync(clienteId, primeiroDia, ultimoDia)).ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registroAntigo });
+
+        await _sut.MaterializarMesAtualAsync(clienteId);
+
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.Is<RegistroDiario>(rd =>
+            rd.ContasPagar.Single().Valor == 150m)), Times.Once); // média de 1 ocorrência (150), nunca os 100 cadastrados
     }
 }

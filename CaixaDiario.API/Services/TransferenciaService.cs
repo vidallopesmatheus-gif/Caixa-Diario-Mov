@@ -213,9 +213,10 @@ public class TransferenciaService : ITransferenciaService
                 {
                     new()
                     {
-                        // Provisória: ainda não confirmada pelo extrato real da conta de destino —
-                        // descrição própria (não a do banco) pra não parecer um lançamento já conciliado.
-                        Id = Guid.NewGuid(), Descricao = $"Transferência de {conta.Nome}", Valor = valor,
+                        // Mesma descrição do lançamento original — Provisoria=true já sinaliza que é
+                        // provisório; trocar a descrição por um rótulo genérico só dificultava
+                        // reconhecer de qual movimentação essa contrapartida veio.
+                        Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
                         RegraCategorizacaoId = dto.RegraCategorizacaoId, Provisoria = true,
                     },
@@ -266,9 +267,9 @@ public class TransferenciaService : ITransferenciaService
                 {
                     new()
                     {
-                        // Provisória: ainda não confirmada pelo extrato real da conta de origem —
-                        // descrição própria (não a do banco) pra não parecer um lançamento já conciliado.
-                        Id = Guid.NewGuid(), Descricao = $"Transferência para {conta.Nome}", Valor = valor, Subcategoria = string.Empty,
+                        // Mesma descrição do lançamento original — ver comentário equivalente no
+                        // ramo de Saída acima.
+                        Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor, Subcategoria = string.Empty,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
                         RegraCategorizacaoId = dto.RegraCategorizacaoId, Provisoria = true,
                     },
