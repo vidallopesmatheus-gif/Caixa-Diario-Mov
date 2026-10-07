@@ -9,13 +9,15 @@ namespace CaixaDiario.Tests.Services;
 public class PrevistoRealizadoServiceTests
 {
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
+    private readonly Mock<IContaRecorrenteRepository> _contaRecorrenteRepoMock = new();
     private readonly PrevistoRealizadoService _sut;
     private static readonly DateOnly Hoje = DataLocalHelper.Hoje();
     private static readonly DateOnly MesAtual = new(Hoje.Year, Hoje.Month, 1);
 
     public PrevistoRealizadoServiceTests()
     {
-        _sut = new PrevistoRealizadoService(_registroRepoMock.Object);
+        _contaRecorrenteRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaRecorrente>());
+        _sut = new PrevistoRealizadoService(_registroRepoMock.Object, _contaRecorrenteRepoMock.Object);
     }
 
     private static RegistroDiario CriarRegistro(Guid clienteId) => new()
@@ -140,5 +142,66 @@ public class PrevistoRealizadoServiceTests
 
         Assert.NotNull(resultado);
         Assert.Empty(resultado.Linhas);
+    }
+
+    [Fact]
+    public async Task ObterAsync_MesSemPrevistoNemRealizado_NaoApareceNaLista()
+    {
+        var clienteId = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var registro = CriarRegistro(clienteId);
+        // Só um título, no mês mais recente — os outros 2 meses da janela não têm nada.
+        registro.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Aluguel", Valor = 100m, DataVencimento = MesAtual, Categoria = "Aluguel", RecorrenciaId = recorrenciaId,
+        });
+        ConfigurarRegistros(clienteId, new List<RegistroDiario> { registro });
+
+        var resultado = await _sut.ObterAsync(clienteId, 3, clienteId, "cliente");
+
+        var ponto = Assert.Single(Assert.Single(resultado.Linhas).Meses);
+        Assert.Equal($"{MesAtual.Year:D4}-{MesAtual.Month:D2}", ponto.Mes);
+    }
+
+    [Fact]
+    public async Task ObterAsync_TituloSemCategoriaPropria_UsaCategoriaDaContaRecorrente()
+    {
+        var clienteId = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var registro = CriarRegistro(clienteId);
+        registro.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Aluguel", Valor = 100m, DataVencimento = MesAtual, Categoria = null, RecorrenciaId = recorrenciaId,
+        });
+        ConfigurarRegistros(clienteId, new List<RegistroDiario> { registro });
+        _contaRecorrenteRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaRecorrente>
+        {
+            new() { Id = recorrenciaId, ClienteId = clienteId, Descricao = "Aluguel", Valor = 100m, Categoria = "Aluguel", ContaBancariaId = Guid.NewGuid(), CriadoEm = DateTime.UtcNow },
+        });
+
+        var resultado = await _sut.ObterAsync(clienteId, 1, clienteId, "cliente");
+
+        Assert.Equal("Aluguel", Assert.Single(resultado.Linhas).Categoria);
+    }
+
+    [Fact]
+    public async Task ObterAsync_SemCategoriaPropriaENaRecorrencia_CaiEmSemCategoria()
+    {
+        var clienteId = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var registro = CriarRegistro(clienteId);
+        registro.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Aluguel", Valor = 100m, DataVencimento = MesAtual, Categoria = null, RecorrenciaId = recorrenciaId,
+        });
+        ConfigurarRegistros(clienteId, new List<RegistroDiario> { registro });
+        _contaRecorrenteRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaRecorrente>
+        {
+            new() { Id = recorrenciaId, ClienteId = clienteId, Descricao = "Aluguel", Valor = 100m, Categoria = null, ContaBancariaId = Guid.NewGuid(), CriadoEm = DateTime.UtcNow },
+        });
+
+        var resultado = await _sut.ObterAsync(clienteId, 1, clienteId, "cliente");
+
+        Assert.Equal("Sem categoria", Assert.Single(resultado.Linhas).Categoria);
     }
 }

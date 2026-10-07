@@ -12,6 +12,11 @@ function mesLabel(mes: string): string {
   return `${MESES_ABREV[Number(m) - 1]}/${ano.slice(2)}`
 }
 
+function fmtPct(fracao: number): string {
+  const sinal = fracao >= 0 ? '+' : ''
+  return `${sinal}${(fracao * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+}
+
 function csvEscape(valor: string): string {
   return /[",;\n]/.test(valor) ? `"${valor.replace(/"/g, '""')}"` : valor
 }
@@ -113,7 +118,7 @@ export default function ClientPrevistoRealizadoPage() {
                   <td style={{ padding: '6px 10px', textAlign: 'right' }}>{fmtBRL(ponto.previsto)}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right' }}>{fmtBRL(ponto.realizado)}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', color: ponto.variacaoAlta ? '#ff6b6b' : 'inherit', fontWeight: ponto.variacaoAlta ? 600 : 400 }}>
-                    {ponto.variacaoPercentual != null ? `${ponto.variacaoPercentual >= 0 ? '+' : ''}${(ponto.variacaoPercentual * 100).toFixed(1)}%` : '—'}
+                    {ponto.variacaoPercentual != null ? fmtPct(ponto.variacaoPercentual) : '—'}
                     {ponto.subiuTresMesesSeguidos && <span title="Subiu 3 meses seguidos"> ⚠️↑</span>}
                   </td>
                 </tr>

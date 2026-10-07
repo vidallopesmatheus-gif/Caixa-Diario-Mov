@@ -13,9 +13,10 @@ import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
 
-// Cada linha carrega sua própria conta de destino — default é a última usada na sessão (ou o
-// Caixa). Quem só movimenta dinheiro numa conta só nunca vê esse campo (seletor só aparece com 2+
-// contas ativas), então não precisa tocar em nada.
+// Cada linha carrega sua própria conta de destino, explícita desde a criação — default é a conta
+// selecionada na tela no momento (nunca um "last used" global, que misturaria linhas de contas
+// diferentes se o usuário trocasse a conta de só uma linha). Quem só movimenta dinheiro numa conta
+// só nunca vê esse campo (seletor só aparece com 2+ contas ativas), então não precisa tocar em nada.
 // transferenciaContaId: preenchido quando a linha foi marcada como transferência (não uma
 // categoria de verdade) — guarda a conta contrapartida escolhida, pra criar o par vinculado
 // depois que a linha for salva (precisa existir de verdade antes de virar o outro lado do par).
@@ -50,7 +51,7 @@ function parseBRL(s: string): number {
 export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
-  const { registros, salvar, buscarPorData } = useRegistros(clienteId)
+  const { registros, loading, salvar, buscarPorData } = useRegistros(clienteId)
 
   const [data, setData] = useState(todayISO())
   const [inicio, setInicio] = useState(0)
@@ -72,8 +73,6 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [contaId, setContaId] = useState<string>('')
-  // Lembra a última conta usada na sessão — vira o default de cada linha nova.
-  const [ultimaContaUsada, setUltimaContaUsada] = useState<string>('')
 
   useEffect(() => {
     listarCategorias().then(setCategorias).catch(console.error)
@@ -88,7 +87,6 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         if (ativas.length > 0 && !contaId) {
           const caixa = ativas.find(c => c.tipo === 'Caixa') ?? ativas[0]
           setContaId(caixa.id)
-          setUltimaContaUsada(caixa.id)
         }
       })
       .catch(console.error)
@@ -106,8 +104,11 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [catOpen])
 
-  const totalEntradas = [...entradas, ...savedEntradas].reduce((s, x) => s + (Number(x.valor) || 0), 0)
-  const totalSaidas = [...saidas, ...savedSaidas].reduce((s, x) => s + (Number(x.valor) || 0), 0)
+  // Rascunhos que o usuário moveu pra outra conta (via o select por item) não entram no total do
+  // card — ele é só da conta exibida agora. savedEntradas/savedSaidas já são só dela (vêm de
+  // buscarPorData(data, contaId)).
+  const totalEntradas = [...entradas.filter(e => e.contaId === contaId), ...savedEntradas].reduce((s, x) => s + (Number(x.valor) || 0), 0)
+  const totalSaidas = [...saidas.filter(s => s.contaId === contaId), ...savedSaidas].reduce((s, x) => s + (Number(x.valor) || 0), 0)
   const calculado = inicio + totalEntradas - totalSaidas
   const dif = confirmado !== '' ? calculado - Number(confirmado) : null
 
@@ -121,18 +122,23 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setInicio(reg.saldoInicio)
         setSavedEntradas(reg.entradas.map(e => ({ ...e, contaId })))
         setSavedSaidas(reg.saidas.map(s => ({ ...s, contaId })))
-        setEntradas([novaEntrada(ultimaContaUsada || contaId)])
-        setSaidas([novaSaida(ultimaContaUsada || contaId)])
+        setEntradas([novaEntrada(contaId)])
+        setSaidas([novaSaida(contaId)])
         setEntradaDisplays([''])
         setSaidaDisplays([''])
         setConfirmado(String(reg.saldoConfirmado))
       } else {
-        const prev = registros.filter(r => r.contaBancariaId === contaId).find(r => r.data < data)
+        // Último registro ANTERIOR desta conta — ordenado por data, nunca o primeiro match
+        // encontrado (a ordem de `registros` não é garantida), senão o saldo inicial pode vir de
+        // um dia bem mais antigo em vez do dia imediatamente anterior.
+        const prev = registros
+          .filter(r => r.contaBancariaId === contaId && r.data < data)
+          .sort((a, b) => b.data.localeCompare(a.data))[0]
         setInicio(prev?.saldoConfirmado ?? 0)
         setSavedEntradas([])
         setSavedSaidas([])
-        setEntradas([novaEntrada(ultimaContaUsada || contaId)])
-        setSaidas([novaSaida(ultimaContaUsada || contaId)])
+        setEntradas([novaEntrada(contaId)])
+        setSaidas([novaSaida(contaId)])
         setEntradaDisplays([''])
         setSaidaDisplays([''])
         setConfirmado('')
@@ -148,7 +154,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSavedEntradas(prev => [...prev, item])
     setEntradas(prev => {
       const next = prev.filter((_, j) => j !== idx)
-      return next.length ? next : [novaEntrada(ultimaContaUsada)]
+      return next.length ? next : [novaEntrada(contaId)]
     })
     setEntradaDisplays(prev => {
       const next = prev.filter((_, j) => j !== idx)
@@ -163,7 +169,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSavedSaidas(prev => [...prev, item])
     setSaidas(prev => {
       const next = prev.filter((_, j) => j !== idx)
-      return next.length ? next : [novaSaida(ultimaContaUsada)]
+      return next.length ? next : [novaSaida(contaId)]
     })
     setSaidaDisplays(prev => {
       const next = prev.filter((_, j) => j !== idx)
@@ -184,8 +190,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       setInicio(reg.saldoInicio)
       setConfirmado(String(reg.saldoConfirmado))
     }
-    setEntradas([novaEntrada(ultimaContaUsada || contaId)])
-    setSaidas([novaSaida(ultimaContaUsada || contaId)])
+    setEntradas([novaEntrada(contaId)])
+    setSaidas([novaSaida(contaId)])
     setEntradaDisplays([''])
     setSaidaDisplays([''])
   }
@@ -214,9 +220,14 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         const entradasGrupo = gruposEntrada.get(grupoContaId) ?? []
         const saidasGrupo = gruposSaida.get(grupoContaId) ?? []
         const regExistente = await buscarPorData(data, grupoContaId)
+        // Saldo inicial do grupo vem do último registro ANTERIOR daquela conta específica —
+        // ordenado por data (nunca o primeiro match de `registros`, cuja ordem não é garantida),
+        // senão uma conta diferente da tela atual herda o saldo inicial errado.
         const inicioGrupo = regExistente
           ? regExistente.saldoInicio
-          : registros.filter(r => r.contaBancariaId === grupoContaId).find(r => r.data < data)?.saldoConfirmado ?? 0
+          : registros
+              .filter(r => r.contaBancariaId === grupoContaId && r.data < data)
+              .sort((a, b) => b.data.localeCompare(a.data))[0]?.saldoConfirmado ?? 0
         const totalEntradasGrupo = entradasGrupo.reduce((s, x) => s + (Number(x.valor) || 0), 0)
         const totalSaidasGrupo = saidasGrupo.reduce((s, x) => s + (Number(x.valor) || 0), 0)
         const calculadoGrupo = inicioGrupo + totalEntradasGrupo - totalSaidasGrupo
@@ -306,14 +317,13 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setEscolhendoContrapartida(false)
   }
 
+  // Troca a conta de UMA linha específica — nunca afeta as outras nem o default de linhas futuras.
   function updateEntradaConta(i: number, novaContaId: string) {
     setEntradas(prev => prev.map((x, j) => j === i ? { ...x, contaId: novaContaId } : x))
-    setUltimaContaUsada(novaContaId)
   }
 
   function updateSaidaConta(i: number, novaContaId: string) {
     setSaidas(prev => prev.map((x, j) => j === i ? { ...x, contaId: novaContaId } : x))
-    setUltimaContaUsada(novaContaId)
   }
 
   function abrirEscolhaDeContrapartida(tipo: 'entrada' | 'saida', idx: number) {
@@ -349,6 +359,25 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     return confirm('Você tem lançamentos não salvos nesta tela. Trocar de dia ou de conta agora vai descartá-los. Continuar?')
   }
 
+  if (loading) {
+    return (
+      <>
+        <div className="caixa-skeleton-stats">
+          <div className="caixa-skeleton-shimmer" />
+          <div className="caixa-skeleton-shimmer" />
+          <div className="caixa-skeleton-shimmer" />
+          <div className="caixa-skeleton-shimmer" />
+        </div>
+        <div className="form-card caixa-skeleton-form">
+          <div className="caixa-skeleton-shimmer" />
+          <div className="caixa-skeleton-shimmer" />
+          <div className="caixa-skeleton-shimmer" />
+          <div className="caixa-skeleton-shimmer" />
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       <DayNav
@@ -370,7 +399,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
           <span style={{ fontSize: 13, color: 'var(--tx3)' }}>Conta:</span>
           {contas.filter(c => c.ativa).map(c => (
             <button key={c.id} type="button"
-              onClick={() => { if (podeTrocarDeTelaAgora()) { setContaId(c.id); setUltimaContaUsada(c.id) } }}
+              onClick={() => { if (podeTrocarDeTelaAgora()) setContaId(c.id) }}
               style={{
                 padding: '5px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
                 border: '1px solid var(--bd)',
@@ -430,7 +459,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   <div className="cat-dropdown" ref={dropdownRef} style={{ position: 'absolute', top: 0 }}>
                     <div className="cat-items" style={{ padding: 6 }}>
                       <div style={{ fontSize: 11, color: 'var(--tx3)', padding: '2px 6px 6px', width: '100%' }}>De qual conta veio?</div>
-                      {contas.filter(c => c.ativa && c.id !== (e.contaId || ultimaContaUsada)).map(c => (
+                      {contas.filter(c => c.ativa && c.id !== (e.contaId || contaId)).map(c => (
                         <button key={c.id} className="cat-item" style={{ borderColor: '#007aff44' }}
                           onClick={() => marcarTransferencia('entrada', i, c.id)}>
                           {c.nome}
@@ -467,7 +496,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '-4px 0 8px 2px' }}>
                 <span style={{ fontSize: 11, color: 'var(--tx3)' }}>Conta:</span>
                 <select
-                  value={e.contaId || ultimaContaUsada}
+                  value={e.contaId || contaId}
                   onChange={ev => updateEntradaConta(i, ev.target.value)}
                   style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-input)', color: 'var(--tx1)' }}
                 >
@@ -478,7 +507,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
             </div>
           ))}
           <button className="btn-add-entrada" onClick={() => {
-            setEntradas(e => [...e, novaEntrada(ultimaContaUsada)])
+            setEntradas(e => [...e, novaEntrada(contaId)])
             setEntradaDisplays(d => [...d, ''])
           }}>＋ Adicionar Entrada</button>
         </div>
@@ -526,7 +555,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   <div className="cat-dropdown" ref={dropdownRef} style={{ position: 'absolute', top: 0 }}>
                     <div className="cat-items" style={{ padding: 6 }}>
                       <div style={{ fontSize: 11, color: 'var(--tx3)', padding: '2px 6px 6px', width: '100%' }}>Pra qual conta foi?</div>
-                      {contas.filter(c => c.ativa && c.id !== (s.contaId || ultimaContaUsada)).map(c => (
+                      {contas.filter(c => c.ativa && c.id !== (s.contaId || contaId)).map(c => (
                         <button key={c.id} className="cat-item" style={{ borderColor: '#ff6b6b44' }}
                           onClick={() => marcarTransferencia('saida', i, c.id)}>
                           {c.nome}
@@ -563,7 +592,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '-4px 0 8px 2px' }}>
                 <span style={{ fontSize: 11, color: 'var(--tx3)' }}>Conta:</span>
                 <select
-                  value={s.contaId || ultimaContaUsada}
+                  value={s.contaId || contaId}
                   onChange={ev => updateSaidaConta(i, ev.target.value)}
                   style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-input)', color: 'var(--tx1)' }}
                 >
@@ -574,7 +603,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
             </div>
           ))}
           <button className="btn-add-saida" onClick={() => {
-            setSaidas(s => [...s, novaSaida(ultimaContaUsada)])
+            setSaidas(s => [...s, novaSaida(contaId)])
             setSaidaDisplays(d => [...d, ''])
           }}>＋ Adicionar saída</button>
         </div>

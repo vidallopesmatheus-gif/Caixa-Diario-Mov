@@ -28,6 +28,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // registerType 'autoUpdate' só troca o SW quando uma aba reabre — skipWaiting+clientsClaim
+        // fazem o SW novo assumir na hora, mesmo em abas já abertas (sem precisar fechar tudo).
+        skipWaiting: true,
+        clientsClaim: true,
         // Precache todos os assets estáticos do build
         globPatterns: ['**/*.{js,css,html,svg,ico,woff,woff2}'],
         // SPA fallback para rotas do React Router (offline)

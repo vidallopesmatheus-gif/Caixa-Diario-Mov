@@ -132,6 +132,19 @@
 }
 .cat-item:hover { background: rgba(255,255,255,.06); }
 
+/* ── Skeleton de carregamento ── */
+.caixa-skeleton-shimmer {
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--bd) 25%, var(--bd-str, var(--bd)) 37%, var(--bd) 63%);
+  background-size: 400% 100%;
+  animation: caixa-skeleton-shimmer 1.4s ease infinite;
+}
+@keyframes caixa-skeleton-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+.caixa-skeleton-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+.caixa-skeleton-stats > div { height: 64px; }
+.caixa-skeleton-form > div { height: 18px; width: 40%; margin-bottom: 10px; }
+.caixa-skeleton-form > div + div { height: 44px; width: 100%; margin-bottom: 16px; }
+
 /* ── Responsividade básica ── */
 @media (max-width: 540px) {
   .lancamento-row, .lancamento-row.has-rm {
