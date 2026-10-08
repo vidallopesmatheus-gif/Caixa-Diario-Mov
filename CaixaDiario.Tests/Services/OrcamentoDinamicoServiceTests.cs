@@ -138,4 +138,27 @@ public class OrcamentoDinamicoServiceTests
         Assert.Equal(5000m, resultado.ReceitaEsperada);
         Assert.Equal(0m, resultado.GastoVariavelAtual);
     }
+
+    // Item 1.4: poucas contas formalmente cadastradas não pode subestimar os compromissos fixos
+    // quando o histórico real de despesas CustoFixo dos últimos 3 meses é bem maior.
+    [Fact]
+    public void Calcular_SemContasCadastradasMasComHistoricoDeDespesaFixa_UsaAMediaHistorica()
+    {
+        var registros = new List<RegistroDiario>();
+        foreach (var (mesesAtras, valor) in new[] { (1, 2800m), (2, 3200m), (3, 3000m) })
+        {
+            var reg = CriarRegistro(Hoje.AddMonths(-mesesAtras), entradas: 5000m);
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aluguel", Valor = valor, Categoria = "Aluguel", TipoCusto = "CustoFixo" });
+            registros.Add(reg);
+        }
+        // Mês atual: só uma única conta a pagar cadastrada de R$60 — bem menor que o histórico real.
+        var registroAtual = CriarRegistro(Hoje);
+        registroAtual.ContasPagar.Add(new ContaProvisionada { Descricao = "Internet", Valor = 60m, Pago = false, DataVencimento = Hoje });
+        registros.Add(registroAtual);
+
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), new List<MetaAnual>());
+
+        // Média de 2800/3200/3000 = 3000, bem maior que os R$60 cadastrados.
+        Assert.Equal(3000m, resultado.CompromissosFixos);
+    }
 }

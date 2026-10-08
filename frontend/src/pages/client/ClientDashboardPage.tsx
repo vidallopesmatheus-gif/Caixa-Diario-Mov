@@ -130,6 +130,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   // Objetivos financeiros (modo "metodo") — vários simultâneos, cada um com valor + data-alvo
   // próprios. objetivoSelecionadoId === null significa "formulário de objetivo novo".
   const [objetivos, setObjetivos] = useState<MetaAnual[]>([])
+  const [objetivosLoading, setObjetivosLoading] = useState(true)
   const [objetivoSelecionadoId, setObjetivoSelecionadoId] = useState<string | null>(null)
   const [editSonho, setEditSonho] = useState('')
   const [editValorSonho, setEditValorSonho] = useState('')
@@ -182,11 +183,15 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
   const carregarObjetivos = async (manterSelecao = true) => {
     if (!clienteId) return
-    const todas = await listarMetas(clienteId)
-    const metodo = todas.filter(m => m.modoMeta === 'metodo')
-    setObjetivos(metodo)
-    const selecionadaAindaExiste = manterSelecao && metodo.some(o => o.id === objetivoSelecionadoId)
-    if (!selecionadaAindaExiste) selecionarObjetivo(metodo[0] ?? null)
+    try {
+      const todas = await listarMetas(clienteId)
+      const metodo = todas.filter(m => m.modoMeta === 'metodo')
+      setObjetivos(metodo)
+      const selecionadaAindaExiste = manterSelecao && metodo.some(o => o.id === objetivoSelecionadoId)
+      if (!selecionadaAindaExiste) selecionarObjetivo(metodo[0] ?? null)
+    } finally {
+      setObjetivosLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -199,6 +204,17 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const doPeriodo = useMemo(() =>
     registrosFiltrados.filter(r => r.data >= de && r.data <= ate),
     [registrosFiltrados, de, ate]
+  )
+
+  // Item 2.9: "a receber/a pagar" no topo do Dashboard — mesmo total pendente (todas as datas,
+  // não só o período filtrado) que a tela de Contas mostra.
+  const totalAReceberPendente = useMemo(
+    () => registrosFiltrados.reduce((s, r) => s + r.contasAReceber.filter(c => !c.pago).reduce((a, c) => a + c.valor, 0), 0),
+    [registrosFiltrados]
+  )
+  const totalAPagarPendente = useMemo(
+    () => registrosFiltrados.reduce((s, r) => s + r.contasAPagar.filter(c => !c.pago).reduce((a, c) => a + c.valor, 0), 0),
+    [registrosFiltrados]
   )
 
   const composicaoDespesas = useMemo(() => {
@@ -245,51 +261,78 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       }))
   }, [registros])
 
-  const planejamento = useMemo(() => {
-    if (!meta) return []
+  interface PlanejamentoLinha {
+    mes: number; ano: number; label: string
+    targetReceita: number; targetLucro: number
+    receitaReal: number | null; lucroReal: number | null
+    isAtual: boolean
+  }
+  const [planejamento, setPlanejamento] = useState<PlanejamentoLinha[]>([])
+
+  // Fase 1.1: Receita Real/Lucro Real vêm do MESMO cálculo do DRE (obterDre), não de uma soma
+  // simplificada de entradas-saídas operacionais local — senão os dois números nunca bateriam
+  // (a soma local ignora Receita Financeira/Despesas Não Operacionais/Não Classificado/Atividades
+  // de Investimento e Financiamento, que o DRE já inclui no Resultado Líquido).
+  useEffect(() => {
+    if (!meta || !clienteId) { setPlanejamento([]); return }
+    let ignore = false
     const mesInicio = meta.mesInicio ?? 1
     const periodoMeses = meta.periodoMeses ?? 12
     const anoMeta = meta.ano
 
-    let remainingReceita = meta.metaReceita
-    let remainingLucro = meta.metaLucro
-
-    return Array.from({ length: periodoMeses }, (_, idx) => {
+    const meses = Array.from({ length: periodoMeses }, (_, idx) => {
       const mes = ((mesInicio - 1 + idx) % 12) + 1
       const ano = anoMeta + Math.floor((mesInicio - 1 + idx) / 12)
-      const remainingMonths = periodoMeses - idx
-
-      const prefixo = `${ano}-${String(mes).padStart(2, '0')}`
-      const doMes = registros.filter(r => r.data.startsWith(prefixo))
-      const receitaReal = doMes.reduce((s, r) => s + r.entradas.filter(ehOperacional).reduce((a, e) => a + e.valor, 0), 0)
-      const lucroReal = doMes.reduce((s, r) =>
-        s + r.entradas.filter(ehOperacional).reduce((a, e) => a + e.valor, 0) - r.saidas.filter(ehOperacional).reduce((a, e) => a + e.valor, 0), 0)
-
-      const isPassado = ano < anoAtual || (ano === anoAtual && mes < mesAtual)
-      const isAtual = ano === anoAtual && mes === mesAtual
-
-      // Meta distribuída em todos os meses do período, inclusive os que já passaram — sempre que a
-      // meta é editada, o restante é redistribuído a partir daqui pra frente, mas o mês em si
-      // sempre mostra a meta (não fica em branco só por ter sido editada depois daquele mês).
-      const targetReceita = remainingReceita / remainingMonths
-      const targetLucro = remainingLucro / remainingMonths
-
-      if (isPassado || isAtual) {
-        remainingReceita -= receitaReal
-        remainingLucro -= lucroReal
-      }
-
-      return {
-        mes, ano,
-        label: `${MONTHS[mes - 1]}/${ano}`,
-        targetReceita,
-        targetLucro,
-        receitaReal: (isPassado || isAtual) ? receitaReal : null,
-        lucroReal: (isPassado || isAtual) ? lucroReal : null,
-        isAtual,
-      }
+      return { idx, mes, ano }
     })
-  }, [meta, registros, anoAtual, mesAtual])
+
+    Promise.all(meses.map(({ mes, ano }) => {
+      const ultimoDia = new Date(ano, mes, 0).getDate()
+      const de = `${ano}-${String(mes).padStart(2, '0')}-01`
+      const ate = `${ano}-${String(mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`
+      return obterDre(clienteId, de, ate, contaFiltro ?? undefined).catch(() => null)
+    })).then(dres => {
+      if (ignore) return
+      let remainingReceita = meta.metaReceita
+      let remainingLucro = meta.metaLucro
+
+      const linhas = meses.map(({ idx, mes, ano }) => {
+        const remainingMonths = periodoMeses - idx
+        const dre = dres[idx]
+        const receitaReal = dre?.receitaBruta ?? 0
+        const lucroReal = dre?.resultadoLiquido ?? 0
+
+        const isPassado = ano < anoAtual || (ano === anoAtual && mes < mesAtual)
+        const isAtual = ano === anoAtual && mes === mesAtual
+
+        // Meta distribuída em todos os meses do período, inclusive os que já passaram — sempre que a
+        // meta é editada, o restante é redistribuído a partir daqui pra frente, mas o mês em si
+        // sempre mostra a meta (não fica em branco só por ter sido editada depois daquele mês).
+        const targetReceita = remainingReceita / remainingMonths
+        const targetLucro = remainingLucro / remainingMonths
+
+        if (isPassado || isAtual) {
+          // Nunca deixa a meta restante negativa — superar a meta num mês não pode fazer os
+          // meses seguintes exigirem uma receita/lucro negativo (item 1.2).
+          remainingReceita = Math.max(0, remainingReceita - receitaReal)
+          remainingLucro = Math.max(0, remainingLucro - lucroReal)
+        }
+
+        return {
+          mes, ano,
+          label: `${MONTHS[mes - 1]}/${ano}`,
+          targetReceita,
+          targetLucro,
+          receitaReal: (isPassado || isAtual) ? receitaReal : null,
+          lucroReal: (isPassado || isAtual) ? lucroReal : null,
+          isAtual,
+        }
+      })
+      setPlanejamento(linhas)
+    })
+
+    return () => { ignore = true }
+  }, [meta, clienteId, contaFiltro, anoAtual, mesAtual])
 
   const metaMesAtual = useMemo(() => {
     const linha = planejamento.find(p => p.isAtual)
@@ -518,7 +561,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   return (
     <>
       {/* ══ Camada 0: resumo de Metas & Investimentos ══ */}
-      {clienteId && <MetasResumoBlock clienteId={clienteId} />}
+      {/* Item 1.12: reaproveita o objetivos/objetivosLoading já carregados acima — antes o bloco
+          buscava a mesma lista de metas de novo, duplicando a chamada a /api/metas. */}
+      {clienteId && <MetasResumoBlock clienteId={clienteId} metas={objetivos} loading={objetivosLoading} />}
 
       {/* ══ Camada 1: status — saldo consolidado + seletor de período/conta ══ */}
       <ResumoStatusBar
@@ -543,6 +588,12 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           projecao={projecao}
         />
       )}
+
+      {/* Item 2.9: a receber/a pagar pendentes, ao lado do resumo de saldo. */}
+      <div className="stats-grid" style={{ marginBottom: 20 }}>
+        <StatCard label="📥 A Receber" value={fmtBRL(totalAReceberPendente)} className="val-green" />
+        <StatCard label="📤 A Pagar" value={fmtBRL(totalAPagarPendente)} className="val-red" />
+      </div>
 
       {/* ══ Camada 3: precisa de atenção — insights + vencimentos, priorizados, clicáveis ══ */}
       {clienteId && <AtencaoCard clienteId={clienteId} registros={registros} contasBancarias={contasBancarias} />}
@@ -590,30 +641,12 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               className={metricas.pontoDeEquilibrio.semaforo === 'verde' ? 'val-green' : metricas.pontoDeEquilibrio.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
             />
           )}
-          {metricas.valuation && (
-            <>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '8px 0' }}>
-                <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Múltiplo Valuation:</span>
-                {[3, 4, 5, 6].map(m => (
-                  <button key={m} type="button" onClick={() => setMultiploValuation(m)}
-                    style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--bd)', cursor: 'pointer',
-                      background: multiploValuation === m ? '#0a84ff' : 'var(--bg-card)', color: multiploValuation === m ? '#fff' : 'var(--tx1)' }}>
-                    {m}x
-                  </button>
-                ))}
-              </div>
-              <StatCard
-                label={`💎 Valuation ${metricas.valuation.semaforo === 'verde' ? '🟢' : metricas.valuation.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
-                value={fmtBRL(metricas.valuation.valor)}
-                className={metricas.valuation.semaforo === 'verde' ? 'val-green' : 'val-blue'}
-              />
-            </>
-          )}
           {metricas.runway && (
             <StatCard
               label={`⏳ Runway ${metricas.runway.semaforo === 'verde' ? '🟢' : metricas.runway.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
               value={`${metricas.runway.meses.toFixed(1)} meses`}
               className={metricas.runway.semaforo === 'verde' ? 'val-green' : metricas.runway.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
+              title={`Fórmula: saldo disponível (contas correntes + Caixa, sem investimentos) ÷ custo fixo médio mensal (média das saídas dos últimos 3 meses).${metricas.burnRate ? ` Custo fixo médio mensal: ${fmtBRL(metricas.burnRate)}.` : ''}`}
             />
           )}
           {metricas.liquidez && (
@@ -779,7 +812,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                   style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
               </div>
               <div className="meta-metodo-field">
-                <label className="meta-field-label">Taxa retorno (% a.a.) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>SELIC: {fmtPct(selic)}</span></label>
+                <label className="meta-field-label">Taxa retorno (% a.a.) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>SELIC: {fmtPct(selic, 2)}</span></label>
                 <input type="text" inputMode="decimal" value={editTaxaRetorno}
                   onChange={e => setEditTaxaRetorno(e.target.value)} placeholder={selic.toFixed(1)}
                   style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
@@ -1008,64 +1041,91 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         </div>
       )}
 
-      {projecaoSelic ? (
-        <div className="meta-card">
-          <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({fmtPct(selic, 2)} a.a.{selicDataReferencia ? ` · ref. ${selicDataReferencia}` : ''})</span></h3>
-          <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
-            Capital de {fmtBRL(capitalInvestido)} composto à SELIC, sem aportes adicionais. Projeção bruta, sem imposto de renda — simulação, não garantia.
-          </p>
-          {selicIndisponivel && (
-            <p style={{ fontSize: 11, color: '#ff9500', marginBottom: 12 }}>
-              ⚠️ Não foi possível obter a SELIC atual do Banco Central — exibindo taxa de referência ({fmtPct(selic, 1)} a.a.), não o valor real de hoje.
-            </p>
-          )}
-          <div className="stats-grid">
-            <StatCard label="📅 Em 10 anos" value={fmtBRL(projecaoSelic.dez)} className="val-blue" />
-            <StatCard label="📅 Em 20 anos" value={fmtBRL(projecaoSelic.vinte)} className="val-blue" />
-            <StatCard label="📅 Em 30 anos" value={fmtBRL(projecaoSelic.trinta)} className="val-blue" />
-          </div>
-        </div>
-      ) : (
-        <div className="meta-card">
-          <h3>💹 Projeção à SELIC</h3>
-          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
-            Cadastre uma conta de investimento para ver esta projeção.
-          </p>
-        </div>
-      )}
+      {/* Item 2.9: Valuation, FIRE e Projeção SELIC 30 anos saem do topo do Dashboard — ficam
+          numa seção recolhida (fechada por padrão), já que são simulações avançadas, não o
+          resumo do dia a dia que o topo do Dashboard deve priorizar. */}
+      <details className="meta-card dash-avancado">
+        <summary>⚙️ Avançado — Valuation, Projeção SELIC e FIRE</summary>
 
-      {fireNumber ? (
-        <div className="meta-card">
-          <h3>🔥 Indicador FIRE <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>(Financial Independence, Retire Early)</span></h3>
-          <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
-            Regra dos 4%: patrimônio necessário = despesas mensais × 12 ÷ 4%. Baseado no período selecionado.
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--tx3)', marginBottom: 6 }}>
-            <span>Despesa mensal estimada: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(fireNumber.despMensal)}</strong></span>
-            <span>Meta FIRE: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(fireNumber.fireTarget)}</strong></span>
+        {metricas?.valuation && (
+          <div className="dash-avancado-bloco">
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '8px 0' }}>
+              <span style={{ fontSize: 12, color: 'var(--tx3)' }}>Múltiplo Valuation:</span>
+              {[3, 4, 5, 6].map(m => (
+                <button key={m} type="button" onClick={() => setMultiploValuation(m)}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--bd)', cursor: 'pointer',
+                    background: multiploValuation === m ? '#0a84ff' : 'var(--bg-card)', color: multiploValuation === m ? '#fff' : 'var(--tx1)' }}>
+                  {m}x
+                </button>
+              ))}
+            </div>
+            <StatCard
+              label={`💎 Valuation ${metricas.valuation.semaforo === 'verde' ? '🟢' : metricas.valuation.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
+              value={fmtBRL(metricas.valuation.valor)}
+              className={metricas.valuation.semaforo === 'verde' ? 'val-green' : 'val-blue'}
+            />
           </div>
-          <div style={{ height: 14, background: 'var(--bd)', borderRadius: 8, overflow: 'hidden', marginBottom: 8 }}>
-            <div style={{ width: `${fireNumber.pct}%`, height: '100%', background: fireNumber.atingido ? '#34c759' : '#0a84ff', transition: 'width .3s' }} />
+        )}
+
+        {projecaoSelic ? (
+          <div className="dash-avancado-bloco">
+            <h3>💹 Projeção à SELIC <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>({fmtPct(selic, 2)} a.a.{selicDataReferencia ? ` · ref. ${selicDataReferencia}` : ''})</span></h3>
+            <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
+              Capital de {fmtBRL(capitalInvestido)} composto à SELIC, sem aportes adicionais. Projeção bruta, sem imposto de renda — simulação, não garantia.
+            </p>
+            {selicIndisponivel && (
+              <p style={{ fontSize: 11, color: '#ff9500', marginBottom: 12 }}>
+                ⚠️ Não foi possível obter a SELIC atual do Banco Central — exibindo taxa de referência ({fmtPct(selic, 2)} a.a.), não o valor real de hoje.
+              </p>
+            )}
+            <div className="stats-grid">
+              <StatCard label="📅 Em 10 anos" value={fmtBRL(projecaoSelic.dez)} className="val-blue" />
+              <StatCard label="📅 Em 20 anos" value={fmtBRL(projecaoSelic.vinte)} className="val-blue" />
+              <StatCard label="📅 Em 30 anos" value={fmtBRL(projecaoSelic.trinta)} className="val-blue" />
+            </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
-            <span style={{ color: 'var(--tx3)' }}>{fmtPct(fireNumber.pct)} da independência financeira</span>
-            <span style={{ color: fireNumber.atingido ? '#34c759' : '#ff9500' }}>
-              {fireNumber.atingido
-                ? '🎉 FIRE atingido!'
-                : `Faltam ${fmtBRL(fireNumber.fireTarget - capitalInvestido)}`}
-            </span>
+        ) : (
+          <div className="dash-avancado-bloco">
+            <h3>💹 Projeção à SELIC</h3>
+            <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+              Cadastre uma conta de investimento para ver esta projeção.
+            </p>
           </div>
-        </div>
-      ) : (
-        <div className="meta-card">
-          <h3>🔥 Indicador FIRE</h3>
-          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
-            {capitalInvestido <= 0
-              ? 'Cadastre uma conta de investimento para ver esta projeção.'
-              : 'Sem despesas no período selecionado para estimar a meta FIRE.'}
-          </p>
-        </div>
-      )}
+        )}
+
+        {fireNumber ? (
+          <div className="dash-avancado-bloco">
+            <h3>🔥 Indicador FIRE <span style={{ fontSize: 12, color: 'var(--tx3)', fontWeight: 400 }}>(Financial Independence, Retire Early)</span></h3>
+            <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 12 }}>
+              Regra dos 4%: patrimônio necessário = despesas mensais × 12 ÷ 4%. Baseado no período selecionado.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--tx3)', marginBottom: 6 }}>
+              <span>Despesa mensal estimada: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(fireNumber.despMensal)}</strong></span>
+              <span>Meta FIRE: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(fireNumber.fireTarget)}</strong></span>
+            </div>
+            <div style={{ height: 14, background: 'var(--bd)', borderRadius: 8, overflow: 'hidden', marginBottom: 8 }}>
+              <div style={{ width: `${fireNumber.pct}%`, height: '100%', background: fireNumber.atingido ? '#34c759' : '#0a84ff', transition: 'width .3s' }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
+              <span style={{ color: 'var(--tx3)' }}>{fmtPct(fireNumber.pct)} da independência financeira</span>
+              <span style={{ color: fireNumber.atingido ? '#34c759' : '#ff9500' }}>
+                {fireNumber.atingido
+                  ? '🎉 FIRE atingido!'
+                  : `Faltam ${fmtBRL(fireNumber.fireTarget - capitalInvestido)}`}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="dash-avancado-bloco">
+            <h3>🔥 Indicador FIRE</h3>
+            <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+              {capitalInvestido <= 0
+                ? 'Cadastre uma conta de investimento para ver esta projeção.'
+                : 'Sem despesas no período selecionado para estimar a meta FIRE.'}
+            </p>
+          </div>
+        )}
+      </details>
 
       {meta && planejamento.length > 0 && (
         <div className="meta-card">

@@ -1,12 +1,18 @@
-/* ── Layout de lançamento (descrição | valor | categoria | salvar | remover) ── */
+/* ── Layout de lançamento (descrição | valor | categoria | ações) ──────────────────────────── */
+/* Item 2.1: ações (🔁 transferência / ✔ confirmar / ✕ remover) viviam espremidas dentro da célula
+   de categoria — numa tela estreita o 🔁 vazava pra fora da célula e ficava em cima do ✔. Agora
+   "ações" é sua própria coluna de grid, nunca compartilhada com a categoria. */
 .lancamento-row {
   display: grid;
-  grid-template-columns: 1fr 140px minmax(100px,160px) 40px;
+  grid-template-columns: 1fr 140px minmax(100px,160px) auto;
+  grid-template-areas: "desc valor cat acoes";
   gap: 8px; margin-bottom: 8px; align-items: center;
 }
-.lancamento-row.has-rm {
-  grid-template-columns: 1fr 140px minmax(100px,160px) 40px 32px;
-}
+.lanc-desc { grid-area: desc; }
+.lanc-valor { grid-area: valor; }
+.lanc-cat { grid-area: cat; position: relative; }
+.lanc-acoes { grid-area: acoes; display: flex; align-items: center; gap: 6px; }
+
 .lancamento-desc {
   padding: 9px 12px; background: var(--bg-input);
   border: 1px solid var(--bd); border-radius: 8px;
@@ -45,22 +51,28 @@
 .cat-btn-saida.com-cat { background: var(--success-soft); border-color: var(--success); color: var(--success); }
 .cat-btn-saida:hover { filter: brightness(1.15); }
 
-/* ── Botão salvar item individual ── */
-.btn-item-save {
-  padding: 8px 0; border-radius: 8px; font-size: 12px; font-weight: 700;
-  cursor: pointer; white-space: nowrap; border: none; transition: opacity 0.15s;
-  text-align: center;
+/* ── Botões de ação da linha (🔁 transferência / ✔ confirmar / ✕ remover) ──────────────────── */
+/* Item 2.1: mesmo tamanho (36x36), ícone centralizado, lado a lado com 6px de gap — nunca mais
+   dividindo espaço com a categoria. */
+.lanc-icon-btn {
+  width: 36px; height: 36px; flex: 0 0 36px; border-radius: 8px; font-size: 15px; font-weight: 700;
+  cursor: pointer; border: 1px solid; transition: opacity 0.15s, filter 0.15s;
+  display: flex; align-items: center; justify-content: center;
 }
-.btn-item-save-entrada { background: var(--accent); color: #fff; }
+.lanc-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-item-save-entrada { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-item-save-entrada:hover:not(:disabled) { background: #5b21b6; }
-.btn-item-save-saida { background: var(--danger); color: #fff; }
+.btn-item-save-saida { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn-item-save-saida:hover:not(:disabled) { background: #991b1b; }
-.btn-item-save:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-transferencia { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.btn-transferencia:hover { background: rgba(124,58,237,.22); }
 
 /* ── Botão remover linha ── */
 .btn-rm {
   background: var(--rm-bg); border: 1px solid var(--rm-bd);
-  color: var(--danger); width: 32px; height: 36px; border-radius: 8px; font-size: 14px;
+  color: var(--danger);
 }
 .btn-rm:hover { background: rgba(220,38,38,.12); }
 
@@ -107,8 +119,14 @@
 .saved-badge {
   display: inline-flex; align-items: center; gap: 4px;
   background: var(--success-soft); border: 1px solid rgba(5,150,105,.3);
-  color: var(--success); border-radius: 12px; padding: 2px 8px; font-size: 11px; font-weight: 700;
+  color: var(--success); border-radius: 12px; padding: 2px 6px 2px 8px; font-size: 11px; font-weight: 700;
 }
+/* Item 2.4: editar/excluir um item já salvo direto no Caixa, sem precisar ir ao Banco. */
+.saved-badge-acao {
+  border: none; background: transparent; cursor: pointer; font-size: 11px;
+  padding: 1px 2px; border-radius: 4px; line-height: 1; opacity: .75;
+}
+.saved-badge-acao:hover { opacity: 1; background: rgba(255,255,255,.12); }
 
 /* ── Dropdown de categoria ── */
 .cat-dropdown {
@@ -145,12 +163,15 @@
 .caixa-skeleton-form > div { height: 18px; width: 40%; margin-bottom: 10px; }
 .caixa-skeleton-form > div + div { height: 44px; width: 100%; margin-bottom: 16px; }
 
-/* ── Responsividade básica ── */
+/* ── Responsividade mobile (item 2.1/2.2): [descrição] / [valor][categoria] / [🔁][✔][✕] ── */
 @media (max-width: 540px) {
-  .lancamento-row, .lancamento-row.has-rm {
+  .lancamento-row {
     grid-template-columns: 1fr 110px;
-    grid-template-rows: auto auto;
+    grid-template-areas:
+      "desc desc"
+      "valor cat"
+      "acoes acoes";
+    row-gap: 6px;
   }
-  .lancamento-row .cat-btn { grid-column: 1; }
-  .lancamento-row .btn-item-save { grid-column: 2; }
+  .lanc-acoes { justify-content: flex-start; }
 }

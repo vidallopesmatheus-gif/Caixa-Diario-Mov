@@ -236,6 +236,30 @@ export default function ClientExtratoRevisaoPage() {
     if (nova.ehSaida) setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
   }
 
+  // Item 3.5: confirma de um clique a sugestão de transferência entre contas próprias já achada
+  // pelo backend (ver ImportacaoService.PreencherSugestoesTransferenciaAsync) — vincula ao
+  // lançamento da outra conta em vez de criar um novo, igual ao fluxo manual com candidato achado.
+  const [confirmandoSugestaoId, setConfirmandoSugestaoId] = useState<string | null>(null)
+
+  async function confirmarTransferenciaSugerida(item: PendenteCategorizacao) {
+    if (!contaId || !item.sugestaoTransferenciaContaId) return
+    setConfirmandoSugestaoId(item.id)
+    setMsg('')
+    try {
+      await converterLancamentoEmTransferencia({
+        contaId, lancamentoId: item.id, data: item.data, tipo: item.tipo,
+        contaContrapartidaId: item.sugestaoTransferenciaContaId,
+        lancamentoContrapartidaId: item.sugestaoTransferenciaLancamentoId,
+        dataContrapartida: item.sugestaoTransferenciaData,
+      })
+      setPendentes(prev => prev.filter(p => p.id !== item.id))
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao confirmar transferência sugerida.')
+    } finally {
+      setConfirmandoSugestaoId(null)
+    }
+  }
+
   function abrirModalTransferencia(item: PendenteCategorizacao) {
     setItemParaTransferencia(item)
     setContaContrapartidaId('')
@@ -514,6 +538,8 @@ export default function ClientExtratoRevisaoPage() {
                     onMarcarTransferencia={() => abrirModalTransferencia(item)}
                     onCriarRegra={() => abrirModalRegra([item])}
                     onMarcarPagamentoFatura={item.tipo === 'Saida' && contasCartao.length > 0 ? () => abrirModalPagamentoFatura(item) : undefined}
+                    onConfirmarTransferenciaSugerida={() => confirmarTransferenciaSugerida(item)}
+                    confirmandoTransferenciaSugerida={confirmandoSugestaoId === item.id}
                   />
                 )
               }
@@ -568,6 +594,8 @@ export default function ClientExtratoRevisaoPage() {
                         onMarcarTransferencia={() => abrirModalTransferencia(item)}
                         onCriarRegra={() => abrirModalRegra([item])}
                         onMarcarPagamentoFatura={item.tipo === 'Saida' && contasCartao.length > 0 ? () => abrirModalPagamentoFatura(item) : undefined}
+                        onConfirmarTransferenciaSugerida={() => confirmarTransferenciaSugerida(item)}
+                        confirmandoTransferenciaSugerida={confirmandoSugestaoId === item.id}
                       />
                     ))}
                   </div>
@@ -878,12 +906,14 @@ interface ExtratoLinhaPendenteProps {
   onMarcarTransferencia: () => void
   onCriarRegra: () => void
   onMarcarPagamentoFatura?: () => void
+  onConfirmarTransferenciaSugerida: () => void
+  confirmandoTransferenciaSugerida: boolean
 }
 
 function ExtratoLinhaPendente({
   item, categoriasDisponiveis, selecionado, salvando,
   onToggleSelecionado, onCategorizar, onCategoriaCriada, onNavigate, registerInputRef, onMarcarTransferencia, onCriarRegra,
-  onMarcarPagamentoFatura,
+  onMarcarPagamentoFatura, onConfirmarTransferenciaSugerida, confirmandoTransferenciaSugerida,
 }: ExtratoLinhaPendenteProps) {
   return (
     <div className="er-item">
@@ -895,7 +925,12 @@ function ExtratoLinhaPendente({
       />
       <div className="er-item-data">{fmtData(item.data)}</div>
       <div className="er-item-info">
-        <div className="er-item-desc">{item.descricao}</div>
+        <div className="er-item-desc">
+          {item.descricao}
+          {item.categoriaSugerida && item.categoria && (
+            <span className="er-selo-sugestao" title={`Sugestão: ${item.categoria}`}>sugerida</span>
+          )}
+        </div>
       </div>
       <div className={`er-item-valor ${item.tipo === 'Entrada' ? 'val-green' : 'val-red'}`}>
         {item.tipo === 'Entrada' ? '+' : '-'}{fmtBRL(item.valor)}
@@ -903,13 +938,24 @@ function ExtratoLinhaPendente({
       <CategoriaCombobox
         ref={el => registerInputRef(item.id, el)}
         categorias={categoriasDisponiveis}
-        value=""
+        value={item.categoria ?? ''}
         onChange={onCategorizar}
         onCategoriaCriada={onCategoriaCriada}
         blocoPadraoNovaCategoria={item.tipo === 'Entrada' ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
         placeholder={salvando ? 'Salvando...' : 'Categoria'}
         onNavigate={dir => onNavigate(item.id, dir)}
       />
+      {item.sugestaoTransferenciaContaId && (
+        <button
+          type="button"
+          className="er-btn-toggle"
+          title={`Provável transferência para/de "${item.sugestaoTransferenciaContaNome}" — mesmo valor, data próxima`}
+          disabled={confirmandoTransferenciaSugerida}
+          onClick={onConfirmarTransferenciaSugerida}
+        >
+          🔁 {confirmandoTransferenciaSugerida ? 'Confirmando...' : `Confirmar transferência com ${item.sugestaoTransferenciaContaNome}`}
+        </button>
+      )}
       <button type="button" className="er-btn-toggle" title="Não é despesa — é uma transferência entre contas" onClick={onMarcarTransferencia}>
         🔁 Transferência
       </button>

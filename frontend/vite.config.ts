@@ -6,7 +6,10 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // Item 2.8: 'prompt' não troca o SW sozinho — avisa a tela (PwaUpdateBanner) e espera o
+      // usuário clicar em "Atualizar". Com 'autoUpdate' o SW novo só assumia quando a aba já
+      // aberta recarregava/navegava de novo, dando a impressão de que a versão só chegava na 2ª visita.
+      registerType: 'prompt',
       includeAssets: ['favicon.svg'],
       manifest: {
         name: 'Caixa Diário',
@@ -28,10 +31,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // registerType 'autoUpdate' só troca o SW quando uma aba reabre — skipWaiting+clientsClaim
-        // fazem o SW novo assumir na hora, mesmo em abas já abertas (sem precisar fechar tudo).
-        skipWaiting: true,
-        clientsClaim: true,
+        // Item 2.8: skipWaiting/clientsClaim NÃO entram aqui com registerType 'prompt' — eles
+        // fazem o SW novo assumir sozinho assim que instala, o que anula o banner (o update já
+        // teria acontecido antes do usuário clicar "Atualizar"). O updateServiceWorker() do
+        // PwaUpdateBanner manda o SKIP_WAITING explicitamente quando o usuário decide atualizar.
         // Precache todos os assets estáticos do build
         globPatterns: ['**/*.{js,css,html,svg,ico,woff,woff2}'],
         // SPA fallback para rotas do React Router (offline)

@@ -393,6 +393,13 @@ export default function ClientProjecaoPage() {
   )
 }
 
+function origemIcone(origem: string): string {
+  if (origem === 'Recorrente') return '↺'
+  if (origem === 'Atrasado') return '⚠️'
+  if (origem === 'Estimativa') return '≈'
+  return '📋'
+}
+
 interface DiaItemProps {
   dia: ProjecaoDia
   expanded: boolean
@@ -425,7 +432,7 @@ function DiaItem({ dia, expanded, onToggle }: DiaItemProps) {
         <div className="pj-dia-detalhe">
           {dia.entradas.map((e, i) => (
             <div key={i} className="pj-item pj-item-entrada">
-              <span className="pj-item-origem pj-origem-rec">{e.origem === 'Recorrente' ? '↺' : '📋'}</span>
+              <span className="pj-item-origem pj-origem-rec">{origemIcone(e.origem)}</span>
               <span className="pj-item-desc">{e.descricao}</span>
               {e.categoria && <span className="pj-item-cat">{e.categoria}</span>}
               <span className="pj-item-val val-green">+{fmtBRL(e.valor)}</span>
@@ -433,7 +440,7 @@ function DiaItem({ dia, expanded, onToggle }: DiaItemProps) {
           ))}
           {dia.saidas.map((s, i) => (
             <div key={i} className="pj-item pj-item-saida">
-              <span className="pj-item-origem pj-origem-rec">{s.origem === 'Recorrente' ? '↺' : '📋'}</span>
+              <span className="pj-item-origem pj-origem-rec">{origemIcone(s.origem)}</span>
               <span className="pj-item-desc">{s.descricao}</span>
               {s.categoria && <span className="pj-item-cat">{s.categoria}</span>}
               <span className="pj-item-val val-red">-{fmtBRL(s.valor)}</span>

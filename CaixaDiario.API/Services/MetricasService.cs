@@ -95,10 +95,13 @@ public class MetricasService : IMetricasService
             dto.Valuation = new ValuationDto { Valor = valuationValor, Semaforo = valuationSemaforo };
         }
 
-        // Runway
+        // Runway — item 1.5: custo fixo médio mensal (só TipoCusto == CustoFixo), nunca "toda saída
+        // operacional" (que incluía custo variável e inflava o burn) — mesma fórmula usada em
+        // Indicadores > Fôlego de Caixa (CalcularFolegoCaixa), pra Dashboard e Indicadores nunca
+        // mais mostrarem números diferentes pro mesmo conceito.
         var burnMedioMensal = ultimos3Meses
             .Where(m => m.Count > 0)
-            .Select(m => m.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor))
+            .Select(m => m.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == "CustoFixo").Sum(s => s.Valor))
             .DefaultIfEmpty(0)
             .Average();
         dto.BurnRate = burnMedioMensal > 0 ? Math.Round(burnMedioMensal, 2) : (decimal?)null;
@@ -505,7 +508,8 @@ public class MetricasService : IMetricasService
         return resultado;
     }
 
-    public IndicadoresDecisaoDto CalcularIndicadores(List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null)
+    public IndicadoresDecisaoDto CalcularIndicadores(
+        List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null, decimal saldoDisponivel = 0m)
     {
         var hoje = DataLocalHelper.Hoje();
         var doMesAtual = registros.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month).ToList();
@@ -594,7 +598,7 @@ public class MetricasService : IMetricasService
             })
             .ToList();
 
-        var folegoCaixa = CalcularFolegoCaixa(registros, custoFixoMensal);
+        var folegoCaixa = CalcularFolegoCaixa(saldoDisponivel, custoFixoMensal);
         var prazoRecebimento = CalcularPrazoRecebimento(registros);
 
         return new IndicadoresDecisaoDto
@@ -690,15 +694,12 @@ public class MetricasService : IMetricasService
     }
 
     // ── 2. Fôlego de Caixa ───────────────────────────────────────────────────
-    // Saldo consolidado (mesmo padrão de "todas as contas" do ProjecaoService: soma o SaldoFinal
-    // mais recente de cada conta) ÷ custo fixo médio dos meses com atividade nos últimos 6.
-    private static FolegoCaixaDto CalcularFolegoCaixa(List<RegistroDiario> registros, List<CustoFixoMensalDto> custoFixoMensal)
+    // Item 1.5: saldoDisponivel vem de fora (mesma fórmula do MetricasController.
+    // CalcularSaldoConsolidadoAsync usada no Runway do Dashboard — contas correntes + Caixa, sem
+    // investimento) pra Dashboard e Indicadores nunca mais mostrarem números diferentes pro mesmo
+    // conceito. ÷ custo fixo médio dos meses com atividade nos últimos 6.
+    private static FolegoCaixaDto CalcularFolegoCaixa(decimal saldoDisponivel, List<CustoFixoMensalDto> custoFixoMensal)
     {
-        var saldoDisponivel = registros
-            .Where(r => r.ContaBancariaId.HasValue)
-            .GroupBy(r => r.ContaBancariaId)
-            .Sum(g => g.OrderByDescending(r => r.Data).First().SaldoFinal);
-
         var mesesComCusto = custoFixoMensal.Where(m => m.Receita > 0 || m.CustoFixo > 0).ToList();
         if (mesesComCusto.Count == 0)
             return new FolegoCaixaDto

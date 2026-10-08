@@ -15,10 +15,16 @@ public class RegistroServiceTests
     private readonly Mock<IAuditService> _auditMock = new();
     private readonly Mock<IRecorrenciaService> _recorrenciaMock = new();
     private readonly Mock<IContaBancariaRepository> _contaBancariaMock = new();
+    private readonly Mock<IConciliacaoService> _conciliacaoMock = new();
     private readonly RegistroService _sut;
 
     public RegistroServiceTests()
     {
+        // Item 3.3: SalvarAsync chama o motor de vínculo depois de salvar — por padrão, sem
+        // sugestões, pra não afetar os testes que não são sobre isso especificamente.
+        _conciliacaoMock.Setup(c => c.ListarSugestoesAsync(
+            It.IsAny<Guid>(), It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>()))
+            .ReturnsAsync(new List<CaixaDiario.API.DTOs.Conciliacao.SugestaoVinculoDto>());
         _auditMock.Setup(a => a.LogAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(Task.CompletedTask);
@@ -29,7 +35,7 @@ public class RegistroServiceTests
         // específicos de resolução de conta (ver região "ResolverContaPadraoAsync") sobrescrevem isso.
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(It.IsAny<Guid>()))
             .ReturnsAsync(new List<ContaBancaria> { new() { Id = Guid.NewGuid(), Tipo = "Caixa", Ativa = true } });
-        _sut = new RegistroService(_repoMock.Object, _auditMock.Object, _recorrenciaMock.Object, _contaBancariaMock.Object);
+        _sut = new RegistroService(_repoMock.Object, _auditMock.Object, _recorrenciaMock.Object, _contaBancariaMock.Object, _conciliacaoMock.Object);
     }
 
     private static CriarRegistroDto CriarDto(DateOnly? data = null)
@@ -691,18 +697,50 @@ public class RegistroServiceTests
         Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
     }
 
+    // Fase 1.13: não ter lançado nada ainda numa data não é mais um erro — devolve um registro
+    // "vazio" (200), nunca 404. O frontend não deve mais precisar tratar 404 como controle de fluxo.
     [Fact]
-    public async Task ObterPorData_RegistroNaoEncontrado_LancaRegistroNaoEncontrado()
+    public async Task ObterPorData_RegistroNaoEncontrado_DevolveRegistroVazioComSaldoDaContaAnterior()
     {
         var clienteId = Guid.NewGuid();
+        var contaId = Guid.NewGuid();
         var data = DataLocalHelper.Hoje();
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { new() { Id = contaId, Tipo = "ContaCorrente", Ativa = true, SaldoInicial = 500m } });
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync((RegistroDiario?)null);
         _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync((RegistroDiario?)null);
+        var registroAnterior = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data.AddDays(-1),
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 777m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _repoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroAnterior });
 
-        var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.ObterPorDataAsync(clienteId, data, Guid.NewGuid(), "admin"));
+        var resultado = await _sut.ObterPorDataAsync(clienteId, data, clienteId, "cliente", contaId);
 
-        Assert.Equal(404, ex.StatusCode);
-        Assert.Equal(CodigoRetorno.REGISTRO_NAO_ENCONTRADO, ex.Codigo);
+        Assert.Equal(Guid.Empty, resultado.Id);
+        Assert.Equal(777m, resultado.Inicio);
+        Assert.Equal(777m, resultado.SaldoFinal);
+        Assert.Empty(resultado.Entradas);
+        Assert.Empty(resultado.Saidas);
+    }
+
+    [Fact]
+    public async Task ObterPorData_RegistroNaoEncontradoESemRegistroAnterior_UsaSaldoInicialDaConta()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaId = Guid.NewGuid();
+        var data = DataLocalHelper.Hoje();
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { new() { Id = contaId, Tipo = "ContaCorrente", Ativa = true, SaldoInicial = 100m } });
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+
+        var resultado = await _sut.ObterPorDataAsync(clienteId, data, clienteId, "cliente", contaId);
+
+        Assert.Equal(100m, resultado.Inicio);
     }
 
     [Fact]
@@ -1495,5 +1533,39 @@ public class RegistroServiceTests
         Assert.Equal(403, ex.StatusCode);
         Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
         _repoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    // Item 3.3: o motor de vínculo roda depois de salvar o Caixa, igual já roda depois de importar.
+    [Fact]
+    public async Task SalvarAsync_RegistroNovo_PreencheTotalSugestoesVinculoDoMotorDeConciliacao()
+    {
+        var dto = CriarDto();
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _conciliacaoMock.Setup(c => c.ListarSugestoesAsync(
+            dto.ClienteId, dto.Data, dto.Data, dto.ClienteId, "cliente", It.IsAny<Guid?>()))
+            .ReturnsAsync(new List<CaixaDiario.API.DTOs.Conciliacao.SugestaoVinculoDto>
+            {
+                new() { ContaProvisionadaId = Guid.NewGuid() },
+                new() { ContaProvisionadaId = Guid.NewGuid() },
+            });
+
+        var (resultado, _) = await _sut.SalvarAsync(dto, "cliente");
+
+        Assert.Equal(2, resultado.TotalSugestoesVinculo);
+    }
+
+    [Fact]
+    public async Task SalvarAsync_MotorDeConciliacaoFalha_NaoDerrubaOSalvamento()
+    {
+        var dto = CriarDto();
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _conciliacaoMock.Setup(c => c.ListarSugestoesAsync(
+            It.IsAny<Guid>(), It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>()))
+            .ThrowsAsync(new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "erro qualquer"));
+
+        var (resultado, criado) = await _sut.SalvarAsync(dto, "cliente");
+
+        Assert.True(criado);
+        Assert.Equal(0, resultado.TotalSugestoesVinculo);
     }
 }

@@ -6,10 +6,14 @@ using CaixaDiario.API.Repositories.Interfaces;
 
 namespace CaixaDiario.API.Services;
 
-// Fase 1.5: relatório "Previsto × Realizado" — só títulos ligados a uma recorrência (RecorrenciaId
-// != null) entram, porque só eles têm um "previsto" de verdade (o Valor materializado já é o valor
-// do extrato recalculado — ver RecorrenciaService.CalcularValorPrevisto / Fase 1.6). Títulos
-// avulsos (criados direto na tela, sem recorrência) não têm uma expectativa prévia pra comparar.
+// Fase 1.5: relatório "Previsto × Realizado" — por padrão só títulos ligados a uma recorrência
+// (RecorrenciaId != null) entram, porque só eles têm um "previsto" de verdade (o Valor materializado
+// já é o valor do extrato recalculado — ver RecorrenciaService.CalcularValorPrevisto / Fase 1.6).
+// Títulos avulsos (criados direto na tela, sem recorrência) normalmente não têm uma expectativa
+// prévia pra comparar — mas quando a baixa foi feita por VÍNCULO a um lançamento já existente
+// (LancamentoVinculadoId != null, Fase 0.2), o valor provisionado É uma expectativa real que foi
+// conferida contra o extrato, então entram também quando incluirAvulsosVinculados=true (Fase 1.10,
+// opcional porque mistura dois tipos de título diferentes na mesma linha).
 public class PrevistoRealizadoService : IPrevistoRealizadoService
 {
     private const int MesesMinimo = 1;
@@ -25,7 +29,8 @@ public class PrevistoRealizadoService : IPrevistoRealizadoService
         _contaRecorrenteRepo = contaRecorrenteRepo;
     }
 
-    public async Task<PrevistoRealizadoDto> ObterAsync(Guid clienteId, int meses, Guid usuarioLogadoId, string perfil)
+    public async Task<PrevistoRealizadoDto> ObterAsync(
+        Guid clienteId, int meses, Guid usuarioLogadoId, string perfil, bool incluirAvulsosVinculados = false)
     {
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
@@ -52,13 +57,15 @@ public class PrevistoRealizadoService : IPrevistoRealizadoService
         var itens = registros
             .SelectMany(r => r.ContasReceber.Select(c => (Item: c, Tipo: "Receber"))
                 .Concat(r.ContasPagar.Select(c => (Item: c, Tipo: "Pagar"))))
-            .Where(x => x.Item.RecorrenciaId.HasValue && x.Item.DataVencimento.HasValue
+            .Where(x => x.Item.DataVencimento.HasValue
                 && x.Item.DataVencimento.Value >= primeiroMes && x.Item.DataVencimento.Value < ultimoMesExclusivo)
+            .Where(x => x.Item.RecorrenciaId.HasValue
+                || (incluirAvulsosVinculados && x.Item.LancamentoVinculadoId.HasValue))
             .ToList();
 
         string CategoriaDoItem(ContaProvisionada item) =>
             item.Categoria
-            ?? (categoriaPorRecorrencia.TryGetValue(item.RecorrenciaId!.Value, out var catRecorrencia) ? catRecorrencia : null)
+            ?? (item.RecorrenciaId.HasValue && categoriaPorRecorrencia.TryGetValue(item.RecorrenciaId.Value, out var catRecorrencia) ? catRecorrencia : null)
             ?? "Sem categoria";
 
         var grupos = itens.GroupBy(x => (x.Tipo, Categoria: CategoriaDoItem(x.Item)));

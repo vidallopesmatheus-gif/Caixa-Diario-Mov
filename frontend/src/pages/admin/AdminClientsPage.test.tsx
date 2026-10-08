@@ -103,12 +103,15 @@ test('exibe erro quando criar falha', async () => {
   )
 })
 
-test('exibe formulário de edição ao selecionar cliente (sem campo Usuário)', () => {
+test('exibe formulário de edição ao selecionar cliente (usuário de login só leitura)', () => {
   mockHook()
   render(<MemoryRouter><AdminClientsPage /></MemoryRouter>)
   fireEvent.click(screen.getByText('Cliente Um'))
-  // no edit mode, Usuário field should not be present
-  expect(screen.queryByLabelText(/Usuário/)).not.toBeInTheDocument()
+  // Item 2.10: no modo edição o usuário de login aparece (só leitura), não fica escondido —
+  // antes não dava pra saber de quem era a senha sendo trocada.
+  const campoUsuario = screen.getByLabelText(/Usuário de login/) as HTMLInputElement
+  expect(campoUsuario).toBeInTheDocument()
+  expect(campoUsuario).toBeDisabled()
   expect(screen.getByLabelText(/Nome completo/)).toBeInTheDocument()
 })
 

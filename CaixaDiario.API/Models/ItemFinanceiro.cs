@@ -21,6 +21,10 @@ public class ItemFinanceiro
     // Verdadeiro para toda entrada importada (nunca tem sugestão automática de categoria —
     // só o usuário sabe distinguir receita real de transferência/resgate).
     public bool PendenteCategorizacao { get; set; }
+    // Item 3.4: Categoria já vem preenchida (histórico do cliente ou dicionário padrão), mas
+    // AINDA precisa de confirmação — diferente de uma regra do cliente, que confirma sozinha.
+    // Sempre false quando PendenteCategorizacao é false (nunca os dois juntos).
+    public bool CategoriaSugerida { get; set; }
     // Preenchido quando a categoria veio de uma RegraCategorizacao aplicada na importação —
     // corrigir manualmente NÃO limpa isso nem altera a regra (só marca a origem pra exibição).
     public Guid? RegraCategorizacaoId { get; set; }

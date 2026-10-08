@@ -25,4 +25,12 @@ public class ConciliacaoController : ControllerBase
         var resultado = await _service.ListarSugestoesAsync(clienteId, de, ate, ObterUsuarioId(), ObterPerfil(), contaBancariaId);
         return Ok(new ApiResponse<List<SugestaoVinculoDto>> { Dados = resultado });
     }
+
+    // Item 3.3: "Ignorar" uma sugestão grava a decisão — não volta a ser sugerida.
+    [HttpPost("{clienteId:guid}/sugestoes/ignorar")]
+    public async Task<IActionResult> Ignorar(Guid clienteId, [FromBody] IgnorarSugestaoDto dto)
+    {
+        await _service.IgnorarAsync(clienteId, dto.ContaProvisionadaId, dto.LancamentoId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
 }

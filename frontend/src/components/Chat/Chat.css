@@ -144,3 +144,19 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Item 2.2: no mobile, (1) o botão não pode ficar embaixo da barra de abas (agora fixa no
+   rodapé, ver Layout.css) e (2) o painel com width:360px + right:24px passava de 375px de tela
+   (384px), causando rolagem horizontal — vira quase full-width, ancorado dos dois lados. */
+@media (max-width: 600px) {
+  .chat-button {
+    bottom: calc(60px + env(safe-area-inset-bottom) + 16px);
+  }
+  .chat-panel {
+    bottom: calc(60px + env(safe-area-inset-bottom) + 76px);
+    left: 12px;
+    right: 12px;
+    width: auto;
+    height: min(500px, 70vh);
+  }
+}

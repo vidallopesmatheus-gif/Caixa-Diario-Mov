@@ -35,10 +35,17 @@ function ClientForm({ initial, onSave, onCancel }: {
       {erro && <div style={{ color: '#ff6b6b', marginBottom: 12, fontSize: 13 }}>{erro}</div>}
       <div className="inp-group"><label htmlFor="cf-nome">Nome completo *</label><input id="cf-nome" value={nomeCompleto} onChange={e => setNomeCompleto(e.target.value)} required /></div>
       <div className="inp-group"><label htmlFor="cf-estab">Estabelecimento</label><input id="cf-estab" value={nomeEstabelecimento} onChange={e => setNomeEstabelecimento(e.target.value)} /></div>
-      {!initial && <div className="inp-group"><label htmlFor="cf-usuario">Usuário *</label><input id="cf-usuario" value={nomeUsuario} onChange={e => setNomeUsuario(e.target.value)} required /></div>}
+      {!initial && <div className="inp-group"><label htmlFor="cf-usuario">Usuário *</label><input id="cf-usuario" value={nomeUsuario} onChange={e => setNomeUsuario(e.target.value)} autoComplete="off" required /></div>}
+      {/* Item 2.10: ao editar, mostra o usuário de login do cliente (antes ficava escondido,
+          dificultando saber pra quem a senha abaixo está sendo trocada) — só leitura, porque
+          handleAtualizar não suporta renomear o usuário de login. */}
+      {initial && <div className="inp-group"><label htmlFor="cf-usuario-ro">Usuário de login</label><input id="cf-usuario-ro" value={nomeUsuario} readOnly disabled /></div>}
       <div className="inp-group">
         <label htmlFor="cf-senha">Senha {initial ? '(deixe em branco para manter)' : '*'}</label>
-        <input id="cf-senha" type="password" value={senha} onChange={e => setSenha(e.target.value)} required={!initial} />
+        {/* Item 2.10: autoComplete="new-password" — sem isso o Chrome oferece/preenche a senha
+            SALVA do admin (que está logado nesta mesma origem), podendo sobrescrever a senha do
+            cliente com a do admin se ele não notar antes de salvar. */}
+        <input id="cf-senha" type="password" value={senha} onChange={e => setSenha(e.target.value)} autoComplete="new-password" required={!initial} />
       </div>
       <div className="modal-footer">
         <button type="button" className="btn-cancel" onClick={onCancel}>Cancelar</button>

@@ -46,7 +46,22 @@ public class OrcamentoDinamicoService : IOrcamentoDinamicoService
                 .Sum(r => r.Valor);
         }
 
-        var compromissosFixos = contasPagarMes + recorrenciasPagar;
+        // Item 1.4: só contas a pagar formalmente cadastradas subestimava muito os compromissos
+        // fixos reais (ex.: despesa recorrente que o cliente sempre lança manualmente, sem nunca
+        // ter cadastrado como ContaRecorrente). A média das despesas fixas (CustoFixo) dos últimos
+        // 3 meses captura esse padrão real — usa o maior dos dois, nunca soma (senão duplicaria a
+        // mesma despesa já contada nas contas cadastradas). Parcelas de cartão/financiamento
+        // (Fases 4/6, ainda não implementadas) entrarão aqui quando essas telas existirem.
+        var despesaFixaMeses = Enumerable.Range(1, 3)
+            .Select(i => hoje.AddMonths(-i))
+            .Select(m => registrosValidos
+                .Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
+                .SelectMany(r => r.Saidas).Where(s => s.TipoCusto == "CustoFixo").Sum(s => s.Valor))
+            .Where(v => v > 0)
+            .ToList();
+        var despesaFixaMedia = despesaFixaMeses.Count > 0 ? despesaFixaMeses.Average() : 0m;
+
+        var compromissosFixos = Math.Max(contasPagarMes + recorrenciasPagar, despesaFixaMedia);
 
         // Aporte necessário = soma de todas as metas ativas
         var aporteNecessario = metas

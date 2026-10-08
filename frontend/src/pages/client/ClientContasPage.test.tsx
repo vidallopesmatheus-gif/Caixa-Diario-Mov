@@ -5,7 +5,8 @@ import * as AuthContextModule from '../../contexts/AuthContext'
 import * as useRegistrosHook from '../../hooks/useRegistros'
 import * as contasRecorrentesApi from '../../api/contasRecorrentes'
 import * as contasBancariasApi from '../../api/contasBancarias'
-import type { Registro } from '../../types'
+import { addDays, todayISO } from '../../utils/format'
+import type { ContaBancaria, Registro } from '../../types'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
   const actual = await importOriginal<typeof AuthContextModule>()
@@ -91,4 +92,83 @@ test('exclui a conta certa quando dois registros compartilham a mesma data sem c
   // registros têm 1 item cada no índice 0, então aquela asserção sozinha não distingue A de B).
   expect(payload.saldoInicio).toBe(200)
   expect(payload.contasAReceber).toEqual([])
+})
+
+// ── Item 2.5 ──────────────────────────────────────────────────────────────────────────────────
+
+function criarConta(overrides: Partial<ContaBancaria> = {}): ContaBancaria {
+  return {
+    id: 'conta-1', clienteId: 'u1', nome: 'Caixa', tipo: 'Caixa',
+    saldoInicial: 0, saldoAtual: 0, entradasMes: 0, saidasMes: 0,
+    pendentesCategorizacao: 0, ativa: true, dataCriacao: '2026-01-01',
+    ...overrides,
+  }
+}
+
+test('conta a pagar vencida aparece destacada com "atrasada há X dias"', async () => {
+  const vencimento = addDays(todayISO(), -5)
+  const registro = criarRegistro({
+    contasAPagar: [{ descricao: 'Fornecedor atrasado', valor: 300, dataVencimento: vencimento, pago: false }],
+  })
+  mockHooks([registro])
+
+  render(<ClientContasPage />)
+
+  const linha = await screen.findByText('Fornecedor atrasado')
+  const item = linha.closest('.conta-item')!
+  expect(item).toHaveClass('vencida')
+  expect(item).toHaveTextContent('atrasada há 5 dias')
+})
+
+test('conta pendente com vencimento hoje não é marcada como atrasada', async () => {
+  const registro = criarRegistro({
+    contasAPagar: [{ descricao: 'Vence hoje', valor: 100, dataVencimento: todayISO(), pago: false }],
+  })
+  mockHooks([registro])
+
+  render(<ClientContasPage />)
+
+  const linha = await screen.findByText('Vence hoje')
+  expect(linha.closest('.conta-item')).not.toHaveClass('vencida')
+})
+
+test('mostra os totais pendentes a receber e a pagar no topo', async () => {
+  const registro = criarRegistro({
+    contasAReceber: [
+      { descricao: 'Cliente A', valor: 500, dataVencimento: todayISO(), pago: false },
+      { descricao: 'Cliente B', valor: 250, dataVencimento: todayISO(), pago: false },
+    ],
+    contasAPagar: [{ descricao: 'Fornecedor', valor: 300, dataVencimento: todayISO(), pago: false }],
+  })
+  mockHooks([registro])
+
+  render(<ClientContasPage />)
+
+  await screen.findByText('Cliente A')
+  const totalReceber = screen.getByText('A receber').closest('.contas-total-card')!
+  const totalPagar = screen.getByText('A pagar').closest('.contas-total-card')!
+  expect(totalReceber).toHaveTextContent('R$ 750,00') // 500 + 250
+  expect(totalPagar).toHaveTextContent('R$ 300,00')
+})
+
+test('filtro por conta esconde pendências de outras contas', async () => {
+  const contaA = criarConta({ id: 'conta-A', nome: 'Conta A' })
+  const contaB = criarConta({ id: 'conta-B', nome: 'Conta B' })
+  const registro = criarRegistro({
+    contasAPagar: [
+      { descricao: 'Da conta A', valor: 100, dataVencimento: todayISO(), pago: false, contaBancariaId: 'conta-A' },
+      { descricao: 'Da conta B', valor: 200, dataVencimento: todayISO(), pago: false, contaBancariaId: 'conta-B' },
+    ],
+  })
+  mockHooks([registro])
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaA, contaB])
+
+  render(<ClientContasPage />)
+  await screen.findByText('Da conta A')
+  expect(screen.getByText('Da conta B')).toBeInTheDocument()
+
+  fireEvent.change(screen.getByLabelText('Conta'), { target: { value: 'conta-A' } })
+
+  expect(screen.getByText('Da conta A')).toBeInTheDocument()
+  expect(screen.queryByText('Da conta B')).not.toBeInTheDocument()
 })

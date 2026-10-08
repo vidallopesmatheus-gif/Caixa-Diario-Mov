@@ -273,6 +273,39 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("contas_recorrentes", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.DuplicataDispensada", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<Guid>("LancamentoMaiorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lancamento_maior_id");
+
+                    b.Property<Guid>("LancamentoMenorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lancamento_menor_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LancamentoMenorId", "LancamentoMaiorId")
+                        .IsUnique();
+
+                    b.ToTable("duplicatas_dispensadas", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.Grupo", b =>
                 {
                     b.Property<Guid>("Id")
@@ -702,6 +735,39 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("regras_categorizacao", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.SugestaoVinculoIgnorada", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<Guid>("ContaProvisionadaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_provisionada_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<Guid>("LancamentoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lancamento_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContaProvisionadaId", "LancamentoId")
+                        .IsUnique();
+
+                    b.ToTable("sugestoes_vinculo_ignoradas", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.TransacaoImportada", b =>
                 {
                     b.Property<Guid>("Id")
@@ -759,6 +825,10 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnName("valor");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ContaBancariaId", "FitId")
+                        .IsUnique()
+                        .HasFilter("fit_id IS NOT NULL");
 
                     b.HasIndex("ContaBancariaId", "Status");
 

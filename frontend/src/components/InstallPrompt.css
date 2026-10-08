@@ -62,3 +62,12 @@
 }
 
 .install-dismiss:hover { color: var(--tx2, #aaa); }
+
+/* Item 2.2: a barra de abas agora é fixa no rodapé no mobile (Layout.css) — sem isso este banner
+   (também bottom:0) ficava em cima dela. */
+@media (max-width: 600px) {
+  .install-banner {
+    bottom: calc(60px + env(safe-area-inset-bottom));
+    padding-bottom: 12px;
+  }
+}

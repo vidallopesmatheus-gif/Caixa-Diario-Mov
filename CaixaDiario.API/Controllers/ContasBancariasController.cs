@@ -16,11 +16,14 @@ public class ContasBancariasController : ControllerBase
 {
     private readonly IContaBancariaService _service;
     private readonly IImportacaoService _importacaoService;
+    private readonly IDuplicataExtratoService _duplicataExtratoService;
 
-    public ContasBancariasController(IContaBancariaService service, IImportacaoService importacaoService)
+    public ContasBancariasController(
+        IContaBancariaService service, IImportacaoService importacaoService, IDuplicataExtratoService duplicataExtratoService)
     {
         _service = service;
         _importacaoService = importacaoService;
+        _duplicataExtratoService = duplicataExtratoService;
     }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
@@ -162,5 +165,21 @@ public class ContasBancariasController : ControllerBase
     {
         var resultado = await _importacaoService.ExcluirLancamentoAsync(contaId, ObterUsuarioId(), ObterPerfil(), dto);
         return Ok(new ApiResponse<ExcluirLancamentoResultDto> { Dados = resultado });
+    }
+
+    // Fase 0.5: "Revisar duplicatas" — só sugere pares, a exclusão usa o endpoint acima.
+    [HttpGet("{contaId:guid}/duplicatas")]
+    public async Task<IActionResult> ListarDuplicatas(Guid contaId)
+    {
+        var resultado = await _duplicataExtratoService.ListarProvaveisAsync(contaId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<List<DuplicataProvavelDto>> { Dados = resultado });
+    }
+
+    // Item 3.2: "Manter os dois" — grava a decisão pra esse par não ser sugerido de novo.
+    [HttpPost("{contaId:guid}/duplicatas/manter")]
+    public async Task<IActionResult> ManterDuplicata(Guid contaId, [FromBody] ManterDuplicataDto dto)
+    {
+        await _duplicataExtratoService.ManterOsDoisAsync(contaId, dto.LancamentoAId, dto.LancamentoBId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<object> { Dados = null });
     }
 }

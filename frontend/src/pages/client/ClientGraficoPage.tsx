@@ -118,7 +118,11 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   }
 
   const historicoSuficiente = indicadores.mesesComAtividade >= 3
-  const receitaSerie = ultimos12.map(e => e.receita)
+  // Item 1.8: igual ao Bloco 6 (custoFixoSerieAtiva) — um mês sem nenhum lançamento ainda (não
+  // "faturamento zero" de verdade) entrava na série como um mergulho a zero, distorcendo a
+  // tendência e fazendo o gráfico parecer "pular"/despencar num mês em que só faltava lançar.
+  const ultimos12Ativos = ultimos12.filter(e => e.receita > 0 || e.custos > 0)
+  const receitaSerie = ultimos12Ativos.map(e => e.receita)
   const primeiroAtivo = receitaSerie.findIndex(v => v > 0)
   const serieParaRegressao = primeiroAtivo >= 0 ? receitaSerie.slice(primeiroAtivo) : []
   const tendenciaValores = regressaoLinear(serieParaRegressao)
@@ -129,7 +133,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const limiarSlope = mediaReceitaSerie * 0.02
   const direcao = slope > limiarSlope ? 'alta' : slope < -limiarSlope ? 'queda' : 'estável'
 
-  const dadosGraficoReceita = ultimos12.map((e, i) => ({
+  const dadosGraficoReceita = ultimos12Ativos.map((e, i) => ({
     mes: mesLabel(e.mes),
     receita: e.receita,
     tendencia: primeiroAtivo >= 0 && i >= primeiroAtivo ? tendenciaValores[i - primeiroAtivo] : undefined,

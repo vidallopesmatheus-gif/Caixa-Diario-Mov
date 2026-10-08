@@ -3,6 +3,20 @@
 .dash-period input[type=date] { padding: 7px 10px; background: var(--bg-card); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 13px; }
 .meta-card { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
 .meta-card h3 { font-size: 14px; color: var(--tx3); font-weight: 700; margin-bottom: 14px; }
+
+/* Item 2.9: seção "Avançado" recolhida (Valuation, Projeção SELIC, FIRE) — fechada por padrão,
+   não compete por atenção com o resumo do dia a dia no topo do Dashboard. */
+.dash-avancado > summary {
+  cursor: pointer; font-size: 14px; color: var(--tx3); font-weight: 700;
+  list-style: none; display: flex; align-items: center; gap: 6px;
+}
+.dash-avancado > summary::-webkit-details-marker { display: none; }
+.dash-avancado > summary::before { content: '▸'; display: inline-block; transition: transform .15s; }
+.dash-avancado[open] > summary::before { transform: rotate(90deg); }
+.dash-avancado[open] > summary { margin-bottom: 14px; }
+.dash-avancado-bloco { margin-top: 18px; }
+.dash-avancado-bloco:first-of-type { margin-top: 4px; }
+.dash-avancado-bloco h3 { font-size: 14px; color: var(--tx3); font-weight: 700; margin-bottom: 14px; }
 .meta-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
 .meta-row label { font-size: 13px; color: var(--tx3); min-width: 130px; }
 .meta-row input { flex: 1; min-width: 120px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 14px; }

@@ -119,6 +119,38 @@
   color: var(--tx1, var(--tx));
 }
 
+.portal-selo-sugestao {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  background: rgba(79,156,255,.15);
+  color: var(--accent, #4f9cff);
+  vertical-align: middle;
+}
+
+.portal-btn-usar-sugestao {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--accent, #4f9cff);
+  background: transparent;
+  color: var(--accent, #4f9cff);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-btn-usar-sugestao:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
 .portal-cat-select {
   width: 100%;
   padding: 10px 12px;

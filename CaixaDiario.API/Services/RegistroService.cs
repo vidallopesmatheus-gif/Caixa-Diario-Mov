@@ -13,17 +13,20 @@ public class RegistroService : IRegistroService
     private readonly IAuditService _auditService;
     private readonly IRecorrenciaService _recorrenciaService;
     private readonly IContaBancariaRepository _contaBancariaRepository;
+    private readonly IConciliacaoService _conciliacaoService;
 
     public RegistroService(
         IRegistroRepository registroRepository,
         IAuditService auditService,
         IRecorrenciaService recorrenciaService,
-        IContaBancariaRepository contaBancariaRepository)
+        IContaBancariaRepository contaBancariaRepository,
+        IConciliacaoService conciliacaoService)
     {
         _registroRepository = registroRepository;
         _auditService = auditService;
         _recorrenciaService = recorrenciaService;
         _contaBancariaRepository = contaBancariaRepository;
+        _conciliacaoService = conciliacaoService;
     }
 
     public async Task<List<RegistroDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -44,10 +47,26 @@ public class RegistroService : IRegistroService
         var contas = await _contaBancariaRepository.ListarPorClienteAsync(clienteId);
         var contaId = ResolverContaPadrao(contas, contaBancariaId);
         var registro = await _registroRepository.ObterPorContaEDataAsync(contaId, data)
-            ?? await _registroRepository.ObterPorClienteEDataAsync(clienteId, data)
-            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
+            ?? await _registroRepository.ObterPorClienteEDataAsync(clienteId, data);
 
-        return MapToDto(registro);
+        if (registro != null) return MapToDto(registro);
+
+        // Fase 1.13: não ter lançado nada ainda num dia não é um erro — devolve um registro
+        // "vazio" (200), com o saldo inicial já calculado a partir do último registro anterior
+        // desta mesma conta (ou o SaldoInicial da conta, se não houver nenhum). Isso tira do
+        // frontend a obrigação de tratar 404 como "controle de fluxo normal".
+        var anterior = (await _registroRepository.ListarPorContaAsync(contaId))
+            .Where(r => !r.Excluido && r.Data < data)
+            .OrderByDescending(r => r.Data)
+            .FirstOrDefault();
+        var saldoBase = anterior?.SaldoFinal ?? contas.FirstOrDefault(c => c.Id == contaId)?.SaldoInicial ?? 0m;
+
+        return new RegistroDto
+        {
+            Id = Guid.Empty, ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Inicio = saldoBase, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = saldoBase, SalvoEm = DateTime.MinValue,
+        };
     }
 
     public async Task<(RegistroDto dto, bool criado)> SalvarAsync(CriarRegistroDto dto, string nomeUsuarioLogado)
@@ -153,6 +172,7 @@ public class RegistroService : IRegistroService
                 $"{existente.ClienteId}/{existente.Data}", dadosAntes, JsonSerializer.Serialize(resultDto));
 
             await RecalcularDiasSeguintesAsync(_registroRepository, contaId, dto.Data, atualizado.SaldoFinal, registrosCliente);
+            resultDto.TotalSugestoesVinculo = await CalcularTotalSugestoesVinculoAsync(existente.ClienteId, dto.Data, contaId);
 
             return (resultDto, false);
         }
@@ -192,8 +212,27 @@ public class RegistroService : IRegistroService
             $"{novo.ClienteId}/{novo.Data}", null, JsonSerializer.Serialize(criadoDto));
 
         await RecalcularDiasSeguintesAsync(_registroRepository, contaId, dto.Data, criado.SaldoFinal, registrosCliente);
+        criadoDto.TotalSugestoesVinculo = await CalcularTotalSugestoesVinculoAsync(novo.ClienteId, dto.Data, contaId);
 
         return (criadoDto, true);
+    }
+
+    // Item 3.3: o motor de vínculo roda depois de salvar o Caixa (igual já rodava depois de
+    // importar) — a tela avisa "X contas previstas encontradas" sem o usuário precisar ir a
+    // Contas só pra descobrir que o pagamento que ele acabou de lançar já tinha um título pendente
+    // esperando. Nunca falha o salvamento (já persistido) por causa disso — só não avisa.
+    private async Task<int> CalcularTotalSugestoesVinculoAsync(Guid clienteId, DateOnly data, Guid contaBancariaId)
+    {
+        try
+        {
+            var sugestoes = await _conciliacaoService.ListarSugestoesAsync(
+                clienteId, data, data, clienteId, "cliente", contaBancariaId);
+            return sugestoes.Count;
+        }
+        catch (ApiException)
+        {
+            return 0;
+        }
     }
 
     // Nunca confia no "SaldoFinal" que o cliente mandou (na prática o valor digitado em "Confirmar

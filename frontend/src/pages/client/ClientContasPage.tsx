@@ -7,7 +7,7 @@ import {
 } from '../../api/contasRecorrentes'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { criarContaProvisionada, atualizarContaProvisionada, excluirContaProvisionada } from '../../api/contasProvisionadas'
-import { listarSugestoesVinculo, type SugestaoVinculo } from '../../api/conciliacao'
+import { listarSugestoesVinculo, ignorarSugestaoVinculo, type SugestaoVinculo } from '../../api/conciliacao'
 import Modal from '../../components/shared/Modal'
 import type { ContaProvisionada, ContaRecorrente, ContaBancaria } from '../../types'
 import './ClientContas.css'
@@ -140,8 +140,12 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     // cache, igual ao plano da Fase 1.2.
   }, [clienteId, registros])
 
+  // Item 3.3: chave é o PAR título×lançamento (não só o título) — igual ao que o backend persiste,
+  // já que um título pode (em tese) receber mais de uma sugestão em buscas diferentes.
+  const chaveSugestao = (s: SugestaoVinculo) => `${s.contaProvisionadaId}::${s.lancamentoId}`
+
   const sugestoesVisiveis = useMemo(
-    () => sugestoes.filter(s => !sugestoesIgnoradas.has(s.contaProvisionadaId)),
+    () => sugestoes.filter(s => !sugestoesIgnoradas.has(chaveSugestao(s))),
     [sugestoes, sugestoesIgnoradas],
   )
 
@@ -163,8 +167,11 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     }
   }
 
-  function ignorarSugestao(contaProvisionadaId: string) {
-    setSugestoesIgnoradas(prev => new Set(prev).add(contaProvisionadaId))
+  // Item 3.3: persiste a decisão no backend — sem isso, a mesma sugestão reaparecia em toda nova
+  // busca (a tela re-busca a cada import/baixa). Some da tela já (Set local) sem esperar a rede.
+  function ignorarSugestao(s: SugestaoVinculo) {
+    setSugestoesIgnoradas(prev => new Set(prev).add(chaveSugestao(s)))
+    if (clienteId) ignorarSugestaoVinculo(clienteId, s.contaProvisionadaId, s.lancamentoId).catch(console.error)
   }
 
   useEffect(() => {
@@ -175,10 +182,18 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     }
   }, [contasBancarias, contaSelecionadaId])
 
+  // Item 2.5: depois de adicionar, o formulário volta ao padrão da TELA (tipo "Receber" e a
+  // conta padrão, normalmente o Caixa) — antes ficava com o último tipo/conta escolhidos, o que
+  // já causou lançamento na conta errada quando o usuário esquecia de trocar de volta.
   function resetForm() {
     setDesc(''); setValorDisplay(''); setValor(0); setVenc(todayISO())
     setRecInicio(todayISO()); setRecFim(''); setRecPeriodicidade('Mensal'); setRecParcelas('')
     setRecValorVariavel(false); setRecDiaVencimento('')
+    setTipo('receber')
+    if (contasBancarias.length > 0) {
+      const caixa = contasBancarias.find(c => c.tipo === 'Caixa' || c.nome.toLowerCase() === 'caixa') ?? contasBancarias[0]
+      setContaSelecionadaId(caixa.id)
+    }
   }
 
   function encontrarDuplicata(conta: ContaProvisionada, registroData: string) {
@@ -265,24 +280,46 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     })
   }, [registros])
 
-  const pendentesReceber = todasContas.filter(c => c.tipo === 'receber' && !c.conta.pago)
-  const recebidasList = todasContas.filter(c => c.tipo === 'receber' && c.conta.pago)
-  const pendentesPagar = todasContas.filter(c => c.tipo === 'pagar' && !c.conta.pago)
-  const pagasList = todasContas.filter(c => c.tipo === 'pagar' && c.conta.pago)
+  // Item 2.5: filtro por período (vencimento, ou data de lançamento quando não tem vencimento) e
+  // por conta bancária — '' em cada um significa "sem filtro" (mostra tudo).
+  const [filtroContaId, setFiltroContaId] = useState('')
+  const [filtroDe, setFiltroDe] = useState('')
+  const [filtroAte, setFiltroAte] = useState('')
+
+  const contasFiltradas = useMemo(() => todasContas.filter(view => {
+    if (filtroContaId && view.conta.contaBancariaId !== filtroContaId) return false
+    const dataRef = view.conta.dataVencimento ?? view.registroData
+    if (filtroDe && dataRef < filtroDe) return false
+    if (filtroAte && dataRef > filtroAte) return false
+    return true
+  }), [todasContas, filtroContaId, filtroDe, filtroAte])
+
+  const pendentesReceber = contasFiltradas.filter(c => c.tipo === 'receber' && !c.conta.pago)
+  const recebidasList = contasFiltradas.filter(c => c.tipo === 'receber' && c.conta.pago)
+  const pendentesPagar = contasFiltradas.filter(c => c.tipo === 'pagar' && !c.conta.pago)
+  const pagasList = contasFiltradas.filter(c => c.tipo === 'pagar' && c.conta.pago)
+  const totalPendenteReceber = pendentesReceber.reduce((s, v) => s + v.conta.valor, 0)
+  const totalPendentePagar = pendentesPagar.reduce((s, v) => s + v.conta.valor, 0)
   const contaSelecionada = contasBancarias.find(c => c.id === contaSelecionadaId)
 
   function origemRegistro(view: ContaView) {
     return registros.find(r => r.id === view.registroId)
   }
 
+  // Fallback só pra itens legados sem Id (nunca resalvos desde a Fase 0.4) — todo item novo usa
+  // os endpoints dedicados (criar/atualizar/excluirContaProvisionada) acima, sem passar por aqui.
   async function persistirListas(view: ContaView, transformar: (contas: ContaProvisionada[]) => ContaProvisionada[]) {
     if (!clienteId) return
     const reg = origemRegistro(view)
     // Nunca falha em silêncio: sem isso, a tela mostrava "sucesso" mesmo quando o registro de
     // origem não era encontrado (ex.: excluído em outra aba) e nada era salvo de verdade.
     if (!reg) throw new Error('Não foi possível localizar o registro original desta conta — atualize a página e tente de novo.')
+    // Registro "sem conta" (legado): nunca reenviar contaBancariaId undefined/null — cai pro
+    // default da tela em vez de perpetuar um registro sem conta vinculada.
+    const contaBancariaId = reg.contaBancariaId ?? contaSelecionadaId
+    if (!contaBancariaId) throw new Error('Cadastre uma conta bancária em Configurações antes de continuar.')
     await salvar({
-      clienteId, contaBancariaId: reg.contaBancariaId, data: reg.data, saldoInicio: reg.saldoInicio,
+      clienteId, contaBancariaId, data: reg.data, saldoInicio: reg.saldoInicio,
       entradas: reg.entradas, saidas: reg.saidas,
       contasAReceber: view.tipo === 'receber' ? transformar(reg.contasAReceber) : reg.contasAReceber,
       contasAPagar: view.tipo === 'pagar' ? transformar(reg.contasAPagar) : reg.contasAPagar,
@@ -547,8 +584,15 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     // nunca aparecem sem conta nenhuma.
     const contaNome = contasBancarias.find(c => c.id === view.conta.contaBancariaId)?.nome ?? contaCaixaPadrao?.nome ?? 'Conta padrão'
 
+    // Item 2.5: vencida = pendente com vencimento antes de hoje. diasAtraso sempre >= 1 aqui
+    // (vencimento hoje ainda não está atrasado).
+    const diasAtraso = !view.conta.pago && view.conta.dataVencimento && view.conta.dataVencimento < todayISO()
+      ? Math.round((new Date(todayISO() + 'T12:00:00').getTime() - new Date(view.conta.dataVencimento + 'T12:00:00').getTime()) / 86400000)
+      : 0
+    const vencida = diasAtraso > 0
+
     return (
-    <div key={`${view.registroId}-${view.tipo}-${view.index}`} className={`conta-item ${view.conta.pago ? 'pago' : ''}`}>
+    <div key={`${view.registroId}-${view.tipo}-${view.index}`} className={`conta-item ${view.conta.pago ? 'pago' : ''} ${vencida ? 'vencida' : ''}`}>
       <button
         onClick={() => view.conta.pago ? abrirEstorno(view, false) : togglePago(view)}
         style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
@@ -564,6 +608,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           Lançado em {fmtDate(view.registroData)}
           {view.conta.dataVencimento ? ` · Vence: ${fmtDate(view.conta.dataVencimento)}` : ''}
           {` · Conta: ${contaNome}`}
+          {vencida && <span className="conta-atrasada"> · atrasada há {diasAtraso} dia{diasAtraso > 1 ? 's' : ''}</span>}
         </div>
       </div>
       <div className={`conta-valor ${view.tipo}`}>
@@ -712,7 +757,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
                   value={recDiaVencimento} onChange={e => setRecDiaVencimento(e.target.value)} className="rec-field-input" />
               </div>
               <div style={{ flex: 2, display: 'flex', alignItems: 'center', gap: 6, paddingTop: 18 }}>
-                <input id="rec-valor-variavel" type="checkbox" checked={recValorVariavel}
+                <input id="rec-valor-variavel" type="checkbox" className="rec-field-checkbox" checked={recValorVariavel}
                   onChange={e => setRecValorVariavel(e.target.checked)} />
                 <label htmlFor="rec-valor-variavel" style={{ fontSize: 13, color: 'var(--tx2)' }}>
                   Valor variável — previsto = média das últimas 3 ocorrências pagas
@@ -747,7 +792,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
                   {vinculandoSugestaoId === s.contaProvisionadaId ? 'Vinculando...' : '🔗 Vincular'}
                 </button>
                 <button className="btn-cancel" disabled={vinculandoSugestaoId === s.contaProvisionadaId}
-                  onClick={() => ignorarSugestao(s.contaProvisionadaId)}>
+                  onClick={() => ignorarSugestao(s)}>
                   Ignorar
                 </button>
               </div>
@@ -755,6 +800,42 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           ))}
         </div>
       )}
+
+      {/* Item 2.5: totais pendentes no topo + filtro por período/conta — afeta as listas abaixo. */}
+      <div className="contas-totais">
+        <div className="contas-total-card receber">
+          <span className="contas-total-label">A receber</span>
+          <span className="contas-total-valor">{fmtBRL(totalPendenteReceber)}</span>
+        </div>
+        <div className="contas-total-card pagar">
+          <span className="contas-total-label">A pagar</span>
+          <span className="contas-total-valor">{fmtBRL(totalPendentePagar)}</span>
+        </div>
+      </div>
+
+      <div className="contas-filtros">
+        <div className="conta-field" style={{ flex: '0 1 160px' }}>
+          <label className="conta-field-label" htmlFor="filtro-conta">Conta</label>
+          <select id="filtro-conta" value={filtroContaId} onChange={e => setFiltroContaId(e.target.value)}>
+            <option value="">Todas</option>
+            {contasBancarias.filter(c => c.ativa).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+          </select>
+        </div>
+        <div className="conta-field" style={{ flex: '0 1 150px' }}>
+          <label className="conta-field-label" htmlFor="filtro-de">De</label>
+          <input id="filtro-de" type="date" value={filtroDe} onChange={e => setFiltroDe(e.target.value)} />
+        </div>
+        <div className="conta-field" style={{ flex: '0 1 150px' }}>
+          <label className="conta-field-label" htmlFor="filtro-ate">Até</label>
+          <input id="filtro-ate" type="date" value={filtroAte} onChange={e => setFiltroAte(e.target.value)} />
+        </div>
+        {(filtroContaId || filtroDe || filtroAte) && (
+          <button type="button" className="btn-cancel" style={{ alignSelf: 'flex-end' }}
+            onClick={() => { setFiltroContaId(''); setFiltroDe(''); setFiltroAte('') }}>
+            Limpar filtros
+          </button>
+        )}
+      </div>
 
       <div className="contas-section">
         <h3>📥 A Receber ({pendentesReceber.length})</h3>
@@ -1058,7 +1139,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
                 onChange={e => setEditRecDiaVencimento(e.target.value)} />
             </div>
             <div className="inp-group" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input id="edit-rec-valor-variavel" type="checkbox" checked={editRecValorVariavel}
+              <input id="edit-rec-valor-variavel" type="checkbox" className="rec-field-checkbox" checked={editRecValorVariavel}
                 onChange={e => setEditRecValorVariavel(e.target.checked)} />
               <label htmlFor="edit-rec-valor-variavel" style={{ fontSize: 13, margin: 0 }}>
                 Valor variável — previsto = média das últimas 3 ocorrências pagas

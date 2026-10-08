@@ -3,6 +3,7 @@ using CaixaDiario.API.Controllers;
 using CaixaDiario.API.DTOs.Auth;
 using CaixaDiario.API.Responses;
 using CaixaDiario.API.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 
@@ -47,5 +48,15 @@ public class AuthControllerTests
 
         await Assert.ThrowsAsync<CaixaDiario.API.Exceptions.ApiException>(
             () => _sut.Login(new LoginRequestDto { NomeUsuario = "x", Senha = "y" }));
+    }
+
+    // Item 2.10: login precisa continuar público mesmo que uma fallback policy de autorização
+    // global seja adicionada depois, e mesmo com um token antigo/inválido de outra sessão no
+    // header — [AllowAnonymous] garante isso explicitamente, não só "não ter [Authorize]".
+    [Fact]
+    public void Login_TemAllowAnonymous()
+    {
+        var metodo = typeof(AuthController).GetMethod(nameof(AuthController.Login))!;
+        Assert.True(metodo.IsDefined(typeof(AllowAnonymousAttribute), inherit: false));
     }
 }

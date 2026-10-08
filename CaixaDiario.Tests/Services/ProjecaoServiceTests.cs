@@ -206,6 +206,105 @@ public class ProjecaoServiceTests
         Assert.All(resultado.Dias, d => Assert.Equal(0m, d.TotalSaidas));
     }
 
+    [Fact]
+    public void Calcular_ComContaPagarAtrasada_EntraNoPrimeiroDiaDaProjecao()
+    {
+        var contaA = Guid.NewGuid();
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-10), 1000m);
+        registro.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Fornecedor atrasado", Valor = 300m, Pago = false, DataVencimento = Hoje.AddDays(-5),
+        });
+
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null);
+
+        var primeiroDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(1));
+        var item = Assert.Single(primeiroDia.Saidas);
+        Assert.Equal("Atrasado", item.Origem);
+        Assert.Equal(300m, primeiroDia.TotalSaidas);
+        Assert.Equal(700m, primeiroDia.SaldoFim);
+    }
+
+    [Fact]
+    public void Calcular_ComContaReceberAtrasada_EntraNoPrimeiroDiaDaProjecao()
+    {
+        var contaA = Guid.NewGuid();
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-10), 1000m);
+        registro.ContasReceber.Add(new ContaProvisionada
+        {
+            Descricao = "Cliente atrasado", Valor = 150m, Pago = false, DataVencimento = Hoje.AddDays(-1),
+        });
+
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null);
+
+        var primeiroDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(1));
+        var item = Assert.Single(primeiroDia.Entradas);
+        Assert.Equal("Atrasado", item.Origem);
+        Assert.Equal(150m, primeiroDia.TotalEntradas);
+    }
+
+    [Fact]
+    public void Calcular_ComContaPaga_NaoEntraComoAtrasada()
+    {
+        var contaA = Guid.NewGuid();
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-10), 1000m);
+        registro.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Já paga", Valor = 300m, Pago = true, DataVencimento = Hoje.AddDays(-5),
+        });
+
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null);
+
+        var primeiroDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(1));
+        Assert.Empty(primeiroDia.Saidas);
+    }
+
+    [Fact]
+    public void Calcular_ComDespesaFixaHistoricaSemRecorrenciaCadastrada_AdicionaEstimativaNoUltimoDia()
+    {
+        var contaA = Guid.NewGuid();
+        var historico = new List<RegistroDiario>();
+        for (int i = 1; i <= 3; i++)
+        {
+            var reg = CriarRegistro(contaA, Hoje.AddMonths(-i), 1000m);
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aluguel manual", Valor = 400m, TipoCusto = "CustoFixo" });
+            historico.Add(reg);
+        }
+
+        var resultado = _sut.Calcular(historico, new List<ContaRecorrente>(), 30, null);
+
+        var ultimoDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(30));
+        var item = Assert.Single(ultimoDia.Saidas);
+        Assert.Equal("Estimativa", item.Origem);
+        Assert.Equal(400m, item.Valor);
+    }
+
+    [Fact]
+    public void Calcular_ComDespesaFixaJaCobertaPelaRecorrencia_NaoDuplicaEstimativa()
+    {
+        var contaA = Guid.NewGuid();
+        var recorrencia = new ContaRecorrente
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Descricao = "Aluguel", Valor = 400m,
+            Tipo = "Pagar", Ativo = true, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(-40), CriadoEm = DateTime.UtcNow,
+        };
+
+        var historico = new List<RegistroDiario>();
+        for (int i = 1; i <= 3; i++)
+        {
+            var reg = CriarRegistro(contaA, Hoje.AddMonths(-i), 1000m);
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aluguel manual", Valor = 400m, TipoCusto = "CustoFixo" });
+            historico.Add(reg);
+        }
+
+        var resultado = _sut.Calcular(historico, new List<ContaRecorrente> { recorrencia }, 30, null);
+
+        // A recorrência "Aluguel" já cobre os 400 de despesa fixa histórica — nada extra deve
+        // ser adicionado (senão contaria a mesma despesa duas vezes).
+        var ultimoDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(30));
+        Assert.DoesNotContain(ultimoDia.Saidas, s => s.Origem == "Estimativa");
+    }
+
     // ── CalcularTrajetoria: histórico realizado + projeção na mesma linha do tempo ──────────────
 
     [Fact]

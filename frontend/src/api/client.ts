@@ -19,15 +19,20 @@ export async function apiFetch<T>(
   const token = localStorage.getItem('token')
   // Não forçar Content-Type quando o body for FormData (o browser define com boundary)
   const isFormData = options.body instanceof FormData
+  // Item 2.10: /api/auth/* (login) é anônimo — nunca deve levar um token antigo/de outro usuário
+  // no header, e um 401 aqui é SEMPRE "usuário ou senha incorretos" (erro de negócio vindo do
+  // próprio corpo da resposta), nunca "sessão expirada". Tratar os dois igual apagava o token
+  // certo e mostrava "Sessão expirada" bem na tela de login, escondendo a mensagem real da API.
+  const isAuthRoute = path.startsWith('/api/auth/')
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token && !isAuthRoute ? { Authorization: `Bearer ${token}` } : {}),
     },
   })
-  if (res.status === 401) {
+  if (res.status === 401 && !isAuthRoute) {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     window.location.href = '/login'

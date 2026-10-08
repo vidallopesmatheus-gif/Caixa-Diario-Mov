@@ -53,6 +53,60 @@ public class PrevistoRealizadoServiceTests
     }
 
     [Fact]
+    public async Task ObterAsync_TituloAvulsoPagoPorVinculo_NaoEntraPorPadrao()
+    {
+        var clienteId = Guid.NewGuid();
+        var registro = CriarRegistro(clienteId);
+        registro.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Avulso vinculado", Valor = 100m, ValorRealizado = 100m, Pago = true,
+            DataVencimento = MesAtual, Categoria = "Diversos", LancamentoVinculadoId = Guid.NewGuid(),
+        });
+        ConfigurarRegistros(clienteId, new List<RegistroDiario> { registro });
+
+        var resultado = await _sut.ObterAsync(clienteId, 3, clienteId, "cliente");
+
+        Assert.Empty(resultado.Linhas);
+    }
+
+    [Fact]
+    public async Task ObterAsync_TituloAvulsoPagoPorVinculo_EntraQuandoIncluirAvulsosVinculados()
+    {
+        var clienteId = Guid.NewGuid();
+        var registro = CriarRegistro(clienteId);
+        registro.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Avulso vinculado", Valor = 100m, ValorRealizado = 100m, Pago = true,
+            DataVencimento = MesAtual, Categoria = "Diversos", LancamentoVinculadoId = Guid.NewGuid(),
+        });
+        ConfigurarRegistros(clienteId, new List<RegistroDiario> { registro });
+
+        var resultado = await _sut.ObterAsync(clienteId, 3, clienteId, "cliente", incluirAvulsosVinculados: true);
+
+        var linha = Assert.Single(resultado.Linhas);
+        Assert.Equal("Diversos", linha.Categoria);
+        var ponto = Assert.Single(linha.Meses);
+        Assert.Equal(100m, ponto.Previsto);
+        Assert.Equal(100m, ponto.Realizado);
+    }
+
+    [Fact]
+    public async Task ObterAsync_TituloAvulsoSemVinculo_NaoEntraMesmoComIncluirAvulsosVinculados()
+    {
+        var clienteId = Guid.NewGuid();
+        var registro = CriarRegistro(clienteId);
+        registro.ContasPagar.Add(new ContaProvisionada
+        {
+            Descricao = "Avulso solto", Valor = 100m, DataVencimento = MesAtual, Categoria = "Diversos",
+        });
+        ConfigurarRegistros(clienteId, new List<RegistroDiario> { registro });
+
+        var resultado = await _sut.ObterAsync(clienteId, 3, clienteId, "cliente", incluirAvulsosVinculados: true);
+
+        Assert.Empty(resultado.Linhas);
+    }
+
+    [Fact]
     public async Task ObterAsync_TituloRecorrentePagoComValorRealizadoDiferente_UsaValorRealizadoComoRealizado()
     {
         var clienteId = Guid.NewGuid();

@@ -145,6 +145,9 @@ export interface Registro {
   saldoConfirmado: number
   saldoCalculado: number
   criadoEm: string
+  // Item 3.3: só preenchido na resposta de salvar — sugestões de vínculo que o motor de
+  // conciliação encontrou pra esse dia/conta logo depois do save.
+  totalSugestoesVinculo?: number
 }
 
 export interface ContaRecorrente {
@@ -258,8 +261,8 @@ export interface DuplicataManual {
   dataManual: string
 }
 
-/** Fase 1.7: provável duplicata entre dois arquivos importados (ex.: CSV + OFX do mesmo banco) —
- * só informativo, sempre importa mesmo sem decisão do usuário. */
+/** Fase 1.7/3.1: provável duplicata entre dois arquivos importados (ex.: CSV + OFX do mesmo
+ * banco) — por padrão NÃO é importada; o usuário decide por linha (ver ResolucaoDuplicata). */
 export interface DuplicataEntreArquivos {
   transacaoIndice: number
   descricaoBanco: string
@@ -295,6 +298,7 @@ export interface ResultadoImportacao {
   totalSaidas: number
   totalMescladasComManual: number
   totalDuplicatasEntreArquivosSinalizadas: number
+  totalDuplicatasEntreArquivosIgnoradas: number
   totalSugestoesVinculo: number
 }
 
@@ -305,6 +309,16 @@ export interface PendenteCategorizacao {
   descricao: string
   valor: number
   tipo: 'Entrada' | 'Saida'
+  // Item 3.4: histórico do cliente (≥2x) ou dicionário padrão já sugeriram uma categoria — ainda
+  // precisa de confirmação (diferente de uma regra do cliente, que confirma sozinha e nunca aparece aqui).
+  categoria?: string
+  categoriaSugerida?: boolean
+  // Item 3.5: achou um único lançamento de sentido oposto, valor/data compatíveis, em outra conta
+  // ativa do mesmo cliente — provável transferência entre contas próprias.
+  sugestaoTransferenciaContaId?: string
+  sugestaoTransferenciaContaNome?: string
+  sugestaoTransferenciaLancamentoId?: string
+  sugestaoTransferenciaData?: string
 }
 
 /** Regra de categorização automática aplicada na importação de extrato. */

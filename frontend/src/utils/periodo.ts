@@ -48,12 +48,17 @@ export function calcularJanelaPeriodo(
       const de = primeiroDiaMes(hoje)
       const ate = ultimoDiaMes(hoje)
       const mesAnteriorRef = addDays(de, -1) // último dia do mês anterior
-      return {
-        de, ate,
-        deAnterior: primeiroDiaMes(mesAnteriorRef),
-        ateAnterior: ultimoDiaMes(mesAnteriorRef),
-        label: 'mês atual',
-      }
+      const deAnterior = primeiroDiaMes(mesAnteriorRef)
+      const ateAnteriorCompleto = ultimoDiaMes(mesAnteriorRef)
+
+      // Item 1.7: com o mês em andamento, "até hoje" acumula só os primeiros N dias — comparar
+      // isso com o mês anterior INTEIRO (fechado) sempre mostra uma queda artificial, mesmo num
+      // mês bom. Compara com os mesmos N dias do mês anterior (truncando se ele tiver menos dias).
+      const diaAtual = Number(hoje.slice(8, 10))
+      const ateAnteriorMesmosDias = addDays(deAnterior, diaAtual - 1)
+      const ateAnterior = ateAnteriorMesmosDias < ateAnteriorCompleto ? ateAnteriorMesmosDias : ateAnteriorCompleto
+
+      return { de, ate, deAnterior, ateAnterior, label: 'mês atual' }
     }
 
     case 'personalizado': {

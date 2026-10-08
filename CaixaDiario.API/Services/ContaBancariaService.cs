@@ -149,8 +149,14 @@ public class ContaBancariaService : IContaBancariaService
             .OrderBy(r => r.Data)
             .ToList();
 
-        var linhas = new List<(DateOnly Data, LancamentoExtratoDto Dto)>();
+        // Item 2.7: Sequencia é a ordem real de processamento (cronológica) — necessária porque
+        // OrderByDescending(Data) por si só é estável e preserva a ordem ORIGINAL (ascendente)
+        // entre linhas do MESMO dia. Sem Sequencia, um dia com 2+ lançamentos mostrava no topo a
+        // linha mais ANTIGA daquele dia (com um SaldoAcumulado intermediário), não a mais recente
+        // — que é a única que corresponde ao saldo atual de verdade da conta.
+        var linhas = new List<(DateOnly Data, int Sequencia, LancamentoExtratoDto Dto)>();
         decimal saldo = conta.SaldoInicial;
+        var sequencia = 0;
 
         foreach (var r in registros)
         {
@@ -160,7 +166,7 @@ public class ContaBancariaService : IContaBancariaService
             foreach (var entrada in r.Entradas)
             {
                 saldo += entrada.Valor;
-                linhas.Add((r.Data, new LancamentoExtratoDto
+                linhas.Add((r.Data, sequencia++, new LancamentoExtratoDto
                 {
                     Id = entrada.Id == Guid.Empty ? null : entrada.Id,
                     Data = r.Data.ToString("yyyy-MM-dd"),
@@ -178,11 +184,15 @@ public class ContaBancariaService : IContaBancariaService
             // DataBaixa == r.Data: a data de pagamento pode legitimamente ser diferente do dia do
             // registro/vencimento (ex.: pago com atraso), e sem essa linha a baixa desaparecia do
             // extrato mesmo afetando o saldo.
-            foreach (var recebido in r.ContasReceber.Where(cp => cp.Pago))
+            // LancamentoVinculadoId preenchido (baixa criou um lançamento novo OU vinculou a um já
+            // existente — Fase 0.5) significa que esse dinheiro JÁ está contado via o próprio
+            // Entrada/Saída, nos loops abaixo — somar aqui também duplicava a linha e o saldo
+            // acumulado do dia. Só sintetiza essa linha pra baixas antigas sem lançamento real.
+            foreach (var recebido in r.ContasReceber.Where(cp => cp.Pago && !cp.LancamentoVinculadoId.HasValue))
             {
                 var valorEfetivo = recebido.ValorRealizado ?? recebido.Valor;
                 saldo += valorEfetivo;
-                linhas.Add((r.Data, new LancamentoExtratoDto
+                linhas.Add((r.Data, sequencia++, new LancamentoExtratoDto
                 {
                     Data = (recebido.DataBaixa ?? r.Data).ToString("yyyy-MM-dd"),
                     Descricao = $"{recebido.Descricao} (recebimento)",
@@ -195,7 +205,7 @@ public class ContaBancariaService : IContaBancariaService
             foreach (var saida in r.Saidas)
             {
                 saldo -= saida.Valor;
-                linhas.Add((r.Data, new LancamentoExtratoDto
+                linhas.Add((r.Data, sequencia++, new LancamentoExtratoDto
                 {
                     Id = saida.Id == Guid.Empty ? null : saida.Id,
                     Data = r.Data.ToString("yyyy-MM-dd"),
@@ -209,11 +219,11 @@ public class ContaBancariaService : IContaBancariaService
                 }));
             }
 
-            foreach (var pago in r.ContasPagar.Where(cp => cp.Pago))
+            foreach (var pago in r.ContasPagar.Where(cp => cp.Pago && !cp.LancamentoVinculadoId.HasValue))
             {
                 var valorEfetivo = pago.ValorRealizado ?? pago.Valor;
                 saldo -= valorEfetivo;
-                linhas.Add((r.Data, new LancamentoExtratoDto
+                linhas.Add((r.Data, sequencia++, new LancamentoExtratoDto
                 {
                     Data = (pago.DataBaixa ?? r.Data).ToString("yyyy-MM-dd"),
                     Descricao = $"{pago.Descricao} (pagamento)",
@@ -224,12 +234,13 @@ public class ContaBancariaService : IContaBancariaService
             }
         }
 
-        IEnumerable<(DateOnly Data, LancamentoExtratoDto Dto)> filtradas = linhas;
+        IEnumerable<(DateOnly Data, int Sequencia, LancamentoExtratoDto Dto)> filtradas = linhas;
         if (de.HasValue) filtradas = filtradas.Where(l => l.Data >= de.Value);
         if (ate.HasValue) filtradas = filtradas.Where(l => l.Data <= ate.Value);
 
         return filtradas
             .OrderByDescending(l => l.Data)
+            .ThenByDescending(l => l.Sequencia)
             .Select(l => l.Dto)
             .ToList();
     }

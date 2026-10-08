@@ -7,11 +7,17 @@ import { fmtBRL, todayISO, addDays } from '../../utils/format'
 import { listarCategorias } from '../../api/categorias'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
+import { excluirLancamento } from '../../api/importacao'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, ContaBancaria, CategoriaAdmin } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
+
+// Fase 1.13: GET registro-por-data agora sempre devolve 200 — sem lançamento ainda vem com esse
+// Id vazio em vez de 404. Precisa continuar tratado como "dia em branco" (ex.: campo "Confirmar
+// saldo" começa vazio, não com o saldo calculado já preenchido).
+const GUID_VAZIO = '00000000-0000-0000-0000-000000000000'
 
 // Cada linha carrega sua própria conta de destino, explícita desde a criação — default é a conta
 // selecionada na tela no momento (nunca um "last used" global, que misturaria linhas de contas
@@ -51,7 +57,7 @@ function parseBRL(s: string): number {
 export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
-  const { registros, loading, salvar, buscarPorData } = useRegistros(clienteId)
+  const { loading, salvar, buscarPorData } = useRegistros(clienteId)
 
   const [data, setData] = useState(todayISO())
   const [inicio, setInicio] = useState(0)
@@ -73,6 +79,25 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [contaId, setContaId] = useState<string>('')
+  const entradaDescRefs = useRef<(HTMLInputElement | null)[]>([])
+  const saidaDescRefs = useRef<(HTMLInputElement | null)[]>([])
+
+  // Item 2.3: skeleton deve cobrir TODO o carregamento inicial (lista de registros + contas + o
+  // registro do dia), não só o primeiro — senão a tela real aparece de passagem com "R$ 0,00" e
+  // sem o seletor de conta enquanto esses outros fetches ainda estão em voo. Só vale pra PRIMEIRA
+  // carga: trocar de dia/conta depois não deve esconder a tela inteira de novo.
+  const [contasLoading, setContasLoading] = useState(true)
+  const [carregandoInicial, setCarregandoInicial] = useState(true)
+  const primeiraCargaFeita = useRef(false)
+
+  // Sem clienteId não há nada pra carregar (ex.: usuário/auth ainda não resolvido) — não trava no
+  // skeleton pra sempre esperando um fetch que nunca vai disparar.
+  useEffect(() => {
+    if (!clienteId) {
+      setContasLoading(false)
+      setCarregandoInicial(false)
+    }
+  }, [clienteId])
 
   useEffect(() => {
     listarCategorias().then(setCategorias).catch(console.error)
@@ -87,9 +112,23 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         if (ativas.length > 0 && !contaId) {
           const caixa = ativas.find(c => c.tipo === 'Caixa') ?? ativas[0]
           setContaId(caixa.id)
+        } else if (ativas.length === 0 && !primeiraCargaFeita.current) {
+          // Cliente sem nenhuma conta ativa — não há registro-por-data a esperar, encerra a carga.
+          primeiraCargaFeita.current = true
+          setCarregandoInicial(false)
         }
       })
-      .catch(console.error)
+      .catch(e => {
+        console.error(e)
+        // Falhou a busca de contas — não há mais nada que destrave o carregamento inicial (o
+        // efeito do dia depende de contaId, que nunca vai ser preenchido). Encerra aqui mesmo,
+        // pra não deixar a tela presa no skeleton pra sempre.
+        if (!primeiraCargaFeita.current) {
+          primeiraCargaFeita.current = true
+          setCarregandoInicial(false)
+        }
+      })
+      .finally(() => setContasLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clienteId])
 
@@ -115,10 +154,16 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   useEffect(() => {
     if (!clienteId || !contaId) return
     let ignore = false
+    // Item 2.4: limpa os selos JÁ, antes do fetch assíncrono — senão os selos da conta/dia
+    // anterior continuam visíveis (e contando no total) durante a troca.
+    setSavedEntradas([])
+    setSavedSaidas([])
     const load = async () => {
       const reg = await buscarPorData(data, contaId)
       if (ignore) return
-      if (reg) {
+      // reg.id vazio = Fase 1.13: backend já devolve o saldo inicial calculado (último registro
+      // real anterior desta conta, ou SaldoInicial da conta), só não é um registro persistido.
+      if (reg && reg.id !== GUID_VAZIO) {
         setInicio(reg.saldoInicio)
         setSavedEntradas(reg.entradas.map(e => ({ ...e, contaId })))
         setSavedSaidas(reg.saidas.map(s => ({ ...s, contaId })))
@@ -128,13 +173,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setSaidaDisplays([''])
         setConfirmado(String(reg.saldoConfirmado))
       } else {
-        // Último registro ANTERIOR desta conta — ordenado por data, nunca o primeiro match
-        // encontrado (a ordem de `registros` não é garantida), senão o saldo inicial pode vir de
-        // um dia bem mais antigo em vez do dia imediatamente anterior.
-        const prev = registros
-          .filter(r => r.contaBancariaId === contaId && r.data < data)
-          .sort((a, b) => b.data.localeCompare(a.data))[0]
-        setInicio(prev?.saldoConfirmado ?? 0)
+        setInicio(reg?.saldoInicio ?? 0)
         setSavedEntradas([])
         setSavedSaidas([])
         setEntradas([novaEntrada(contaId)])
@@ -143,10 +182,14 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setSaidaDisplays([''])
         setConfirmado('')
       }
+      if (!primeiraCargaFeita.current) {
+        primeiraCargaFeita.current = true
+        setCarregandoInicial(false)
+      }
     }
     load()
     return () => { ignore = true }
-  }, [data, clienteId, contaId, registros, buscarPorData])
+  }, [data, clienteId, contaId, buscarPorData])
 
   function handleSaveEntrada(idx: number) {
     const item = entradas[idx]
@@ -178,18 +221,90 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setMsg('')
   }
 
+  // Item 2.4: Enter em qualquer campo da linha confirma o lançamento e já foca a descrição da
+  // próxima linha (que pode ser uma linha já existente que subiu de posição, ou a linha em branco
+  // nova criada automaticamente quando essa era a última). setTimeout(0) espera o React aplicar o
+  // filter/novaEntrada antes de focar — focar no mesmo tick ainda pegaria o input antigo.
+  function handleEnterNaLinha(tipo: 'entrada' | 'saida', idx: number, ev: React.KeyboardEvent) {
+    if (ev.key !== 'Enter') return
+    ev.preventDefault()
+    if (tipo === 'entrada') handleSaveEntrada(idx)
+    else handleSaveSaida(idx)
+    setTimeout(() => {
+      const refs = tipo === 'entrada' ? entradaDescRefs.current : saidaDescRefs.current
+      refs[idx]?.focus()
+    }, 0)
+  }
+
+  // Item 2.4: "editar" um item já salvo (persistido no servidor) devolve ele pra lista de
+  // rascunhos editáveis, no topo — exatamente a mesma linha de edição que todo lançamento novo
+  // usa. Só vira persistência de verdade no próximo "Salvar e sincronizar" (mesma regra de
+  // qualquer rascunho desta tela); o id original é preservado, então o reenvio substitui o item
+  // antigo em vez de duplicar.
+  function editarEntradaSalva(idx: number) {
+    const item = savedEntradas[idx]
+    // entradaDisplays é paralelo a entradas por posição — filtra os dois JUNTOS (pelo mesmo
+    // índice) pra não desalinhar qual display pertence a qual rascunho.
+    const rascunhos = entradas
+      .map((e, j) => ({ e, display: entradaDisplays[j] ?? '' }))
+      .filter(({ e }) => e.descricao || e.valor)
+    setSavedEntradas(prev => prev.filter((_, j) => j !== idx))
+    setEntradas([item, ...rascunhos.map(r => r.e)])
+    setEntradaDisplays([fmtNum(item.valor), ...rascunhos.map(r => r.display)])
+    setTimeout(() => entradaDescRefs.current[0]?.focus(), 0)
+  }
+
+  function editarSaidaSalva(idx: number) {
+    const item = savedSaidas[idx]
+    const rascunhos = saidas
+      .map((s, j) => ({ s, display: saidaDisplays[j] ?? '' }))
+      .filter(({ s }) => s.descricao || s.valor)
+    setSavedSaidas(prev => prev.filter((_, j) => j !== idx))
+    setSaidas([item, ...rascunhos.map(r => r.s)])
+    setSaidaDisplays([fmtNum(item.valor), ...rascunhos.map(r => r.display)])
+    setTimeout(() => saidaDescRefs.current[0]?.focus(), 0)
+  }
+
+  // Item 2.4: "excluir" um item já salvo chama o mesmo endpoint usado no Banco (reaproveita a
+  // limpeza de vínculos/transferências que ele já faz), não um filtro só local — senão o item
+  // continuaria existindo no servidor até o próximo "Salvar e sincronizar".
+  async function excluirEntradaSalva(idx: number) {
+    const item = savedEntradas[idx]
+    if (!item.id) return
+    if (!confirm(`Excluir "${item.descricao || 'Entrada'}" (${fmtBRL(item.valor)})? Essa ação não pode ser desfeita.`)) return
+    try {
+      await excluirLancamento(contaId, { id: item.id, data })
+      setSavedEntradas(prev => prev.filter((_, j) => j !== idx))
+    } catch (e: unknown) {
+      setSaveSuccess(false)
+      setMsg(e instanceof Error ? e.message : 'Erro ao excluir lançamento.')
+    }
+  }
+
+  async function excluirSaidaSalva(idx: number) {
+    const item = savedSaidas[idx]
+    if (!item.id) return
+    if (!confirm(`Excluir "${item.descricao || 'Saída'}" (${fmtBRL(item.valor)})? Essa ação não pode ser desfeita.`)) return
+    try {
+      await excluirLancamento(contaId, { id: item.id, data })
+      setSavedSaidas(prev => prev.filter((_, j) => j !== idx))
+    } catch (e: unknown) {
+      setSaveSuccess(false)
+      setMsg(e instanceof Error ? e.message : 'Erro ao excluir lançamento.')
+    }
+  }
+
   // Mesma lógica de carregamento do efeito de troca de dia/conta — chamada aqui pra garantir que,
   // depois de salvar, a tela reflita exatamente o que ficou gravado no servidor (nunca os arrays
   // locais, que já foram enviados e não devem ser reenviados numa próxima sincronização).
   async function recarregarRegistroAtual() {
     if (!clienteId || !contaId) return
     const reg = await buscarPorData(data, contaId)
-    setSavedEntradas(reg ? reg.entradas.map(e => ({ ...e, contaId })) : [])
-    setSavedSaidas(reg ? reg.saidas.map(s => ({ ...s, contaId })) : [])
-    if (reg) {
-      setInicio(reg.saldoInicio)
-      setConfirmado(String(reg.saldoConfirmado))
-    }
+    const existe = reg && reg.id !== GUID_VAZIO
+    setSavedEntradas(existe ? reg!.entradas.map(e => ({ ...e, contaId })) : [])
+    setSavedSaidas(existe ? reg!.saidas.map(s => ({ ...s, contaId })) : [])
+    setInicio(reg?.saldoInicio ?? 0)
+    setConfirmado(existe ? String(reg!.saldoConfirmado) : '')
     setEntradas([novaEntrada(contaId)])
     setSaidas([novaSaida(contaId)])
     setEntradaDisplays([''])
@@ -216,18 +331,19 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       const contasEnvolvidas = new Set([...gruposEntrada.keys(), ...gruposSaida.keys()])
       if (contasEnvolvidas.size === 0) contasEnvolvidas.add(contaId)
 
+      // Item 3.3: o motor de vínculo roda depois de salvar — soma as sugestões encontradas em
+      // cada conta/dia afetado pra avisar o usuário de uma vez, sem precisar ir a Contas conferir.
+      let totalSugestoesVinculo = 0
+
       for (const grupoContaId of contasEnvolvidas) {
         const entradasGrupo = gruposEntrada.get(grupoContaId) ?? []
         const saidasGrupo = gruposSaida.get(grupoContaId) ?? []
-        const regExistente = await buscarPorData(data, grupoContaId)
-        // Saldo inicial do grupo vem do último registro ANTERIOR daquela conta específica —
-        // ordenado por data (nunca o primeiro match de `registros`, cuja ordem não é garantida),
-        // senão uma conta diferente da tela atual herda o saldo inicial errado.
-        const inicioGrupo = regExistente
-          ? regExistente.saldoInicio
-          : registros
-              .filter(r => r.contaBancariaId === grupoContaId && r.data < data)
-              .sort((a, b) => b.data.localeCompare(a.data))[0]?.saldoConfirmado ?? 0
+        const regBuscado = await buscarPorData(data, grupoContaId)
+        // Fase 1.13: o backend sempre devolve 200 agora — Id vazio significa que esse dia ainda
+        // não tem registro persistido (não é "sem resposta"). saldoInicio já vem corretamente
+        // calculado (último registro real anterior desta conta) nos dois casos.
+        const regExistente = regBuscado && regBuscado.id !== GUID_VAZIO ? regBuscado : null
+        const inicioGrupo = regBuscado?.saldoInicio ?? 0
         const totalEntradasGrupo = entradasGrupo.reduce((s, x) => s + (Number(x.valor) || 0), 0)
         const totalSaidasGrupo = saidasGrupo.reduce((s, x) => s + (Number(x.valor) || 0), 0)
         const calculadoGrupo = inicioGrupo + totalEntradasGrupo - totalSaidasGrupo
@@ -235,7 +351,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
           ? Number(confirmado)
           : regExistente?.saldoConfirmado ?? calculadoGrupo
 
-        await salvar({
+        const salvo = await salvar({
           clienteId, contaBancariaId: grupoContaId, data, saldoInicio: inicioGrupo,
           entradas: [...(regExistente?.entradas ?? []), ...entradasGrupo],
           saidas: [...(regExistente?.saidas ?? []), ...saidasGrupo],
@@ -243,6 +359,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
           contasAPagar: regExistente?.contasAPagar ?? [],
           saldoConfirmado: saldoConfirmadoGrupo,
         })
+        totalSugestoesVinculo += salvo?.totalSugestoesVinculo ?? 0
 
         // Linhas marcadas como transferência: só dá pra criar o par vinculado depois que a linha
         // existe de verdade (salva acima). Sequencial, não Promise.all — evita duas chamadas
@@ -263,7 +380,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
 
       await recarregarRegistroAtual()
       setSaveSuccess(true)
-      setMsg('Salvo com sucesso!')
+      setMsg(totalSugestoesVinculo > 0
+        ? `Salvo com sucesso! 💡 ${totalSugestoesVinculo} conta(s) prevista(s) encontrada(s) no extrato — reveja em Contas.`
+        : 'Salvo com sucesso!')
     } catch (e: unknown) {
       setSaveSuccess(false)
       setMsg(e instanceof Error ? e.message : String(e))
@@ -359,7 +478,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     return confirm('Você tem lançamentos não salvos nesta tela. Trocar de dia ou de conta agora vai descartá-los. Continuar?')
   }
 
-  if (loading) {
+  if (loading || contasLoading || carregandoInicial) {
     return (
       <>
         <div className="caixa-skeleton-stats">
@@ -420,24 +539,33 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         </div>
 
         <div className="inp-group">
-          <label>💵 Entradas do dia (dinheiro)</label>
+          <label>💵 Entradas do dia</label>
           {savedEntradas.length > 0 && (
             <div className="saved-summary">
               {savedEntradas.map((e, i) => (
-                <span key={i} className="saved-badge">✔ {e.descricao || 'Entrada'} · {fmtBRL(e.valor)}</span>
+                <span key={i} className="saved-badge">
+                  ✔ {e.descricao || 'Entrada'} · {fmtBRL(e.valor)}
+                  <button type="button" className="saved-badge-acao" title="Editar" aria-label={`Editar ${e.descricao || 'entrada'}`}
+                    onClick={() => editarEntradaSalva(i)}>✏️</button>
+                  <button type="button" className="saved-badge-acao" title="Excluir" aria-label={`Excluir ${e.descricao || 'entrada'}`}
+                    onClick={() => excluirEntradaSalva(i)}>🗑️</button>
+                </span>
               ))}
             </div>
           )}
           {entradas.map((e, i) => (
             <div key={i}>
-            <div className="lancamento-row has-rm">
-              <input className="lancamento-desc" placeholder="Descrição" value={e.descricao}
+            <div className="lancamento-row">
+              <input className="lancamento-desc lanc-desc" placeholder="Descrição" value={e.descricao}
+                ref={el => { entradaDescRefs.current[i] = el }}
+                onKeyDown={ev => handleEnterNaLinha('entrada', i, ev)}
                 onChange={ev => updateEntrada(i, 'descricao', ev.target.value)} />
-              <div className="val-input-wrap">
+              <div className="val-input-wrap lanc-valor">
                 <span className="val-prefix">R$</span>
                 <input
                   type="text" inputMode="decimal" placeholder="0,00"
                   value={entradaDisplays[i] ?? ''}
+                  onKeyDown={ev => handleEnterNaLinha('entrada', i, ev)}
                   onChange={ev => {
                     const raw = ev.target.value.replace(/[^\d,]/g, '')
                     setEntradaDisplays(prev => prev.map((v, j) => j === i ? raw : v))
@@ -449,9 +577,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   }}
                 />
               </div>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, minWidth: 170 }}>
+              <div className="lanc-cat">
                 {e.transferenciaContaId ? (
-                  <button type="button" className="cat-btn cat-btn-entrada" style={{ flex: 1 }}
+                  <button type="button" className="cat-btn cat-btn-entrada" style={{ width: '100%' }}
                     onClick={() => updateEntrada(i, 'categoria', '')}>
                     🔁 {contas.find(c => c.id === e.transferenciaContaId)?.nome ?? 'Transferência'} ✕
                   </button>
@@ -469,28 +597,32 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <CategoriaCombobox
-                      categorias={categoriasEntradaPermitidas()}
-                      value={e.categoria ?? ''}
-                      onChange={nome => updateEntrada(i, 'categoria', nome)}
-                      onCategoriaCriada={handleCategoriaCriada}
-                      blocoPadraoNovaCategoria="RECEITAS OPERACIONAIS"
-                      placeholder="Categoria"
-                    />
-                    {contas.filter(c => c.ativa).length > 1 && (
-                      <button type="button" className="cat-btn cat-btn-entrada" title="É uma transferência"
-                        onClick={() => abrirEscolhaDeContrapartida('entrada', i)}>🔁</button>
-                    )}
-                  </>
+                  <CategoriaCombobox
+                    categorias={categoriasEntradaPermitidas()}
+                    value={e.categoria ?? ''}
+                    onChange={nome => updateEntrada(i, 'categoria', nome)}
+                    onCategoriaCriada={handleCategoriaCriada}
+                    blocoPadraoNovaCategoria="RECEITAS OPERACIONAIS"
+                    placeholder="Categoria"
+                  />
                 )}
               </div>
-              <button className="btn-item-save btn-item-save-entrada"
-                disabled={!e.descricao && !e.valor} onClick={() => handleSaveEntrada(i)}>✔</button>
-              <button className="btn-rm" onClick={() => {
-                setEntradas(prev => prev.filter((_, j) => j !== i))
-                setEntradaDisplays(prev => prev.filter((_, j) => j !== i))
-              }}>✕</button>
+              <div className="lanc-acoes">
+                {!e.transferenciaContaId && !(catOpen?.tipo === 'entrada' && catOpen.idx === i && escolhendoContrapartida)
+                  && contas.filter(c => c.ativa).length > 1 && (
+                  <button type="button" className="lanc-icon-btn btn-transferencia"
+                    title="Marcar como transferência" aria-label="Marcar como transferência"
+                    onClick={() => abrirEscolhaDeContrapartida('entrada', i)}>🔁</button>
+                )}
+                <button type="button" className="lanc-icon-btn btn-item-save-entrada"
+                  title="Confirmar lançamento" aria-label="Confirmar lançamento"
+                  disabled={!e.descricao && !e.valor} onClick={() => handleSaveEntrada(i)}>✔</button>
+                <button type="button" className="lanc-icon-btn btn-rm" title="Remover" aria-label="Remover lançamento"
+                  onClick={() => {
+                    setEntradas(prev => prev.filter((_, j) => j !== i))
+                    setEntradaDisplays(prev => prev.filter((_, j) => j !== i))
+                  }}>✕</button>
+              </div>
             </div>
             {contas.filter(c => c.ativa).length > 1 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '-4px 0 8px 2px' }}>
@@ -520,20 +652,27 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                 <span key={i} className="saved-badge"
                   style={{ background: 'rgba(255,59,48,.1)', borderColor: 'rgba(255,59,48,.3)', color: '#ff6b6b' }}>
                   ✔ {s.descricao || 'Saída'} · {fmtBRL(s.valor)}
+                  <button type="button" className="saved-badge-acao" title="Editar" aria-label={`Editar ${s.descricao || 'saída'}`}
+                    onClick={() => editarSaidaSalva(i)}>✏️</button>
+                  <button type="button" className="saved-badge-acao" title="Excluir" aria-label={`Excluir ${s.descricao || 'saída'}`}
+                    onClick={() => excluirSaidaSalva(i)}>🗑️</button>
                 </span>
               ))}
             </div>
           )}
           {saidas.map((s, i) => (
             <div key={i}>
-            <div className="lancamento-row has-rm">
-              <input className="lancamento-desc" placeholder="Descrição" value={s.descricao}
+            <div className="lancamento-row">
+              <input className="lancamento-desc lanc-desc" placeholder="Descrição" value={s.descricao}
+                ref={el => { saidaDescRefs.current[i] = el }}
+                onKeyDown={ev => handleEnterNaLinha('saida', i, ev)}
                 onChange={ev => updateSaida(i, 'descricao', ev.target.value)} />
-              <div className="val-input-wrap">
+              <div className="val-input-wrap lanc-valor">
                 <span className="val-prefix">R$</span>
                 <input
                   type="text" inputMode="decimal" placeholder="0,00"
                   value={saidaDisplays[i] ?? ''}
+                  onKeyDown={ev => handleEnterNaLinha('saida', i, ev)}
                   onChange={ev => {
                     const raw = ev.target.value.replace(/[^\d,]/g, '')
                     setSaidaDisplays(prev => prev.map((v, j) => j === i ? raw : v))
@@ -545,9 +684,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   }}
                 />
               </div>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, minWidth: 170 }}>
+              <div className="lanc-cat">
                 {s.transferenciaContaId ? (
-                  <button type="button" className="cat-btn cat-btn-saida com-cat" style={{ flex: 1 }}
+                  <button type="button" className="cat-btn cat-btn-saida com-cat" style={{ width: '100%' }}
                     onClick={() => updateSaida(i, 'categoria', '')}>
                     🔁 {contas.find(c => c.id === s.transferenciaContaId)?.nome ?? 'Transferência'} ✕
                   </button>
@@ -565,28 +704,32 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <CategoriaCombobox
-                      categorias={categorias.saidas}
-                      value={s.categoria}
-                      onChange={nome => updateSaida(i, 'categoria', nome)}
-                      onCategoriaCriada={handleCategoriaCriada}
-                      blocoPadraoNovaCategoria="DESPESAS OPERACIONAIS"
-                      placeholder="Categoria"
-                    />
-                    {contas.filter(c => c.ativa).length > 1 && (
-                      <button type="button" className="cat-btn cat-btn-saida sem-cat" title="É uma transferência"
-                        onClick={() => abrirEscolhaDeContrapartida('saida', i)}>🔁</button>
-                    )}
-                  </>
+                  <CategoriaCombobox
+                    categorias={categorias.saidas}
+                    value={s.categoria}
+                    onChange={nome => updateSaida(i, 'categoria', nome)}
+                    onCategoriaCriada={handleCategoriaCriada}
+                    blocoPadraoNovaCategoria="DESPESAS OPERACIONAIS"
+                    placeholder="Categoria"
+                  />
                 )}
               </div>
-              <button className="btn-item-save btn-item-save-saida"
-                disabled={!s.descricao && !s.valor} onClick={() => handleSaveSaida(i)}>✔</button>
-              <button className="btn-rm" onClick={() => {
-                setSaidas(prev => prev.filter((_, j) => j !== i))
-                setSaidaDisplays(prev => prev.filter((_, j) => j !== i))
-              }}>✕</button>
+              <div className="lanc-acoes">
+                {!s.transferenciaContaId && !(catOpen?.tipo === 'saida' && catOpen.idx === i && escolhendoContrapartida)
+                  && contas.filter(c => c.ativa).length > 1 && (
+                  <button type="button" className="lanc-icon-btn btn-transferencia"
+                    title="Marcar como transferência" aria-label="Marcar como transferência"
+                    onClick={() => abrirEscolhaDeContrapartida('saida', i)}>🔁</button>
+                )}
+                <button type="button" className="lanc-icon-btn btn-item-save-saida"
+                  title="Confirmar lançamento" aria-label="Confirmar lançamento"
+                  disabled={!s.descricao && !s.valor} onClick={() => handleSaveSaida(i)}>✔</button>
+                <button type="button" className="lanc-icon-btn btn-rm" title="Remover" aria-label="Remover lançamento"
+                  onClick={() => {
+                    setSaidas(prev => prev.filter((_, j) => j !== i))
+                    setSaidaDisplays(prev => prev.filter((_, j) => j !== i))
+                  }}>✕</button>
+              </div>
             </div>
             {contas.filter(c => c.ativa).length > 1 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '-4px 0 8px 2px' }}>
@@ -616,7 +759,11 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className="saldo-calc-lbl">Confirmar saldo (R$)</div>
-          <input type="number" value={confirmado} onChange={e => setConfirmado(e.target.value)} placeholder="0,00" step="0.01"
+          {/* Item 2.4: placeholder é o saldo calculado de verdade, nunca um "0,00" hardcoded que
+              não reflete nada — fmtNum não serve aqui pq esconde zero como "", e um saldo
+              zerado de verdade também precisa aparecer no placeholder. */}
+          <input type="number" value={confirmado} onChange={e => setConfirmado(e.target.value)}
+            placeholder={calculado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} step="0.01"
             style={{ width: 140, padding: '8px 12px', background: '#111', border: '2px solid #34c759', borderRadius: 8, color: '#fff', fontSize: 17, fontWeight: 700, textAlign: 'right' }} />
         </div>
       </div>

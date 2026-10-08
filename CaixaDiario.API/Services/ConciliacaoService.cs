@@ -18,8 +18,13 @@ public class ConciliacaoService : IConciliacaoService
     private const int ScoreMinimo = 50;
 
     private readonly IRegistroRepository _registroRepo;
+    private readonly ISugestaoVinculoIgnoradaRepository _ignoradaRepo;
 
-    public ConciliacaoService(IRegistroRepository registroRepo) => _registroRepo = registroRepo;
+    public ConciliacaoService(IRegistroRepository registroRepo, ISugestaoVinculoIgnoradaRepository ignoradaRepo)
+    {
+        _registroRepo = registroRepo;
+        _ignoradaRepo = ignoradaRepo;
+    }
 
     public async Task<List<SugestaoVinculoDto>> ListarSugestoesAsync(
         Guid clienteId, DateOnly de, DateOnly ate, Guid usuarioLogadoId, string perfil, Guid? contaBancariaId = null)
@@ -84,7 +89,30 @@ public class ConciliacaoService : IConciliacaoService
             });
         }
 
+        // Item 3.3: remove pares que o usuário já revisou e decidiu "Ignorar" — senão a mesma
+        // sugestão reaparece em toda nova busca (o motor recalcula do zero a cada chamada).
+        var ignoradas = (await _ignoradaRepo.ListarPorClienteAsync(clienteId))
+            .Select(i => (i.ContaProvisionadaId, i.LancamentoId))
+            .ToHashSet();
+        resultado = resultado.Where(r => !ignoradas.Contains((r.ContaProvisionadaId, r.LancamentoId))).ToList();
+
         return resultado.OrderByDescending(r => r.Score).ThenBy(r => r.DataVencimento).ToList();
+    }
+
+    public async Task IgnorarAsync(Guid clienteId, Guid contaProvisionadaId, Guid lancamentoId, Guid usuarioLogadoId, string perfil)
+    {
+        if (perfil == "cliente" && usuarioLogadoId != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+
+        var jaExiste = (await _ignoradaRepo.ListarPorClienteAsync(clienteId))
+            .Any(i => i.ContaProvisionadaId == contaProvisionadaId && i.LancamentoId == lancamentoId);
+        if (jaExiste) return;
+
+        await _ignoradaRepo.AdicionarAsync(new SugestaoVinculoIgnorada
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId,
+            ContaProvisionadaId = contaProvisionadaId, LancamentoId = lancamentoId, CriadoEm = DateTime.UtcNow,
+        });
     }
 
     private static int CalcularScore(ContaProvisionadaPendente pendente, Candidato candidato)

@@ -17,9 +17,12 @@ public class ResultadoImportacaoDto
     // Fase 1.7: quantas transações do arquivo foram mescladas a um lançamento manual existente em
     // vez de criar um novo (já estão incluídas em TotalImportadas, não somar de novo).
     public int TotalMescladasComManual { get; set; }
-    // Prováveis duplicatas entre dois arquivos importados (ex.: CSV + OFX do mesmo banco) — foram
-    // importadas normalmente, só ficam sinalizadas para revisão manual.
+    // Prováveis duplicatas entre dois arquivos importados (ex.: CSV + OFX do mesmo banco)
+    // sinalizadas na revisão — Item 3.1: por padrão NÃO são importadas (diferente da duplicata
+    // manual, que por padrão mescla); TotalDuplicatasEntreArquivosIgnoradas é o subconjunto que
+    // de fato ficou de fora (as que o usuário resolveu como "Importar" entram em TotalImportadas).
     public int TotalDuplicatasEntreArquivosSinalizadas { get; set; }
+    public int TotalDuplicatasEntreArquivosIgnoradas { get; set; }
     // Fase 1.2: quantas sugestões de vínculo (título pendente × lançamento real) o motor encontrou
     // no intervalo deste arquivo, depois da deduplicação — a tela mostra "confirmar todas / revisar".
     public int TotalSugestoesVinculo { get; set; }

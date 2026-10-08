@@ -172,6 +172,52 @@ public class ContaProvisionadaServiceTests
         _contaBancariaRepoMock.Verify(r => r.ObterPorIdAsync(It.IsAny<Guid>()), Times.Never);
     }
 
+    // Item 2.5: baixa por vínculo (ex.: aceitar sugestão de conciliação) normalmente não manda
+    // ValorRealizado explícito — sem buscar o valor real do lançamento vinculado, a tela nunca
+    // mostrava o previsto riscado quando o valor de fato pago/recebido era diferente do provisionado.
+    [Fact]
+    public async Task AtualizarAsync_BaixaVinculadaALancamentoComValorDiferente_PreencheValorRealizadoComOValorReal()
+    {
+        var clienteId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var lancamentoExistenteId = Guid.NewGuid();
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = new DateOnly(2026, 10, 10),
+            Entradas = new(), ContasReceber = new(),
+            Saidas = new List<ItemFinanceiroSaida> { new() { Id = lancamentoExistenteId, Descricao = "Fornecedor", Valor = 185m } },
+            ContasPagar = new List<ContaProvisionada> { new() { Id = itemId, Descricao = "Fornecedor", Valor = 200m, Pago = false } },
+        };
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var resultado = await _sut.AtualizarAsync(clienteId, itemId,
+            new AtualizarContaProvisionadaDto { Pago = true, LancamentoVinculadoId = lancamentoExistenteId }, clienteId, "cliente");
+
+        Assert.Equal(185m, resultado.ValorRealizado);
+    }
+
+    [Fact]
+    public async Task AtualizarAsync_BaixaVinculadaComValorRealizadoExplicito_NaoSobrescreveComOValorDoLancamento()
+    {
+        var clienteId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var lancamentoExistenteId = Guid.NewGuid();
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = new DateOnly(2026, 10, 10),
+            Entradas = new(), ContasReceber = new(),
+            Saidas = new List<ItemFinanceiroSaida> { new() { Id = lancamentoExistenteId, Descricao = "Fornecedor", Valor = 185m } },
+            ContasPagar = new List<ContaProvisionada> { new() { Id = itemId, Descricao = "Fornecedor", Valor = 200m, Pago = false } },
+        };
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var resultado = await _sut.AtualizarAsync(clienteId, itemId,
+            new AtualizarContaProvisionadaDto { Pago = true, LancamentoVinculadoId = lancamentoExistenteId, ValorRealizado = 190m },
+            clienteId, "cliente");
+
+        Assert.Equal(190m, resultado.ValorRealizado);
+    }
+
     [Fact]
     public async Task AtualizarAsync_EstornoDeLancamentoCriadoPelaBaixa_RemoveOLancamentoEAjustaSaldo()
     {
