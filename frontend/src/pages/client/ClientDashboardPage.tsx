@@ -344,6 +344,16 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     return { alvo, real, pct, faltante, atingida: real >= alvo }
   }, [planejamento])
 
+  // Item A2 (pendências 1-2-3): reaproveita o DRE atual/anterior já buscado pra comparação dos
+  // gauges — não faz nenhuma chamada nova ao backend, só deriva o card de Lucro Líquido.
+  const lucroComparativo = useMemo(() => {
+    if (!dreAtual || !dreAnterior) return null
+    const atual = dreAtual.resultado
+    const anterior = dreAnterior.resultado
+    const variacao = anterior !== 0 ? ((atual - anterior) / Math.abs(anterior)) * 100 : null
+    return { atual, anterior, variacao }
+  }, [dreAtual, dreAnterior])
+
   // Meses entre hoje e a data planejada — substitui o antigo "prazo em anos" digitado pelo
   // usuário; vem de uma data real agora, então funciona também para objetivos de curto prazo
   // (poucos meses), que um número inteiro de anos não conseguia representar com precisão.
@@ -612,6 +622,16 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
       {metricas && (
         <div className="stats-grid" style={{ marginTop: 16 }}>
+          {lucroComparativo && (
+            <StatCard
+              label="🧮 Lucro Líquido"
+              value={fmtBRL(lucroComparativo.atual)}
+              className={lucroComparativo.atual >= 0 ? 'val-green' : 'val-red'}
+              sub={lucroComparativo.variacao === null
+                ? `Período anterior: ${fmtBRL(lucroComparativo.anterior)}`
+                : `${lucroComparativo.variacao >= 0 ? '▲' : '▼'} ${fmtPct(Math.abs(lucroComparativo.variacao))} vs. período anterior`}
+            />
+          )}
           {metricas.ebitda && (
             <StatCard
               label={`📊 EBITDA ${metricas.ebitda.semaforo === 'verde' ? '🟢' : metricas.ebitda.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
