@@ -20,9 +20,10 @@ public class RelatoriosController : ControllerBase
     private string ObterPerfil() => User.FindFirst("perfil")!.Value;
 
     [HttpGet("{clienteId:guid}/previsto-realizado")]
-    public async Task<IActionResult> ObterPrevistoRealizado(Guid clienteId, [FromQuery] int meses = 6)
+    public async Task<IActionResult> ObterPrevistoRealizado(
+        Guid clienteId, [FromQuery] int meses = 6, [FromQuery] bool incluirAvulsosVinculados = false)
     {
-        var resultado = await _service.ObterAsync(clienteId, meses, ObterUsuarioId(), ObterPerfil());
+        var resultado = await _service.ObterAsync(clienteId, meses, ObterUsuarioId(), ObterPerfil(), incluirAvulsosVinculados);
         return Ok(new ApiResponse<PrevistoRealizadoDto> { Dados = resultado });
     }
 }

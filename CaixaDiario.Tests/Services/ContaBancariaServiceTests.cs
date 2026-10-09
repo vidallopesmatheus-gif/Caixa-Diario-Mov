@@ -94,16 +94,123 @@ public class ContaBancariaServiceTests
         var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
 
         Assert.Equal(3, extrato.Count);
-        // Mais recente primeiro: recebimento (dia2), saída (dia2), entrada (dia1)
-        Assert.Equal(150m, extrato[0].Valor);
-        Assert.Contains("(recebimento)", extrato[0].Descricao);
-        Assert.Equal(1350m, extrato[0].SaldoAcumulado);
+        // Item 2.7: dentro do MESMO dia, a linha do topo é a ÚLTIMA processada (saída), não a
+        // primeira (recebimento) — é ela que bate com o SaldoFinal (1050) armazenado pro dia2;
+        // o recebimento tem um saldo intermediário (1350) que nunca é "o saldo atual da conta".
+        Assert.Equal(-300m, extrato[0].Valor);
+        Assert.Equal(1050m, extrato[0].SaldoAcumulado);
 
-        Assert.Equal(-300m, extrato[1].Valor);
-        Assert.Equal(1050m, extrato[1].SaldoAcumulado);
+        Assert.Equal(150m, extrato[1].Valor);
+        Assert.Contains("(recebimento)", extrato[1].Descricao);
+        Assert.Equal(1350m, extrato[1].SaldoAcumulado);
 
         Assert.Equal(200m, extrato[2].Valor);
         Assert.Equal(1200m, extrato[2].SaldoAcumulado);
+    }
+
+    // Item 2.7 — critério de aceite: a linha do topo do extrato é sempre o saldo atual de
+    // verdade da conta, mesmo quando o dia mais recente tem várias linhas (entradas E saídas).
+    [Fact]
+    public async Task ObterExtratoAsync_DiaComVariasLinhas_LinhaDoTopoTemOSaldoAtualDaConta()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(contaId, clienteId);
+        var dia = new DateOnly(2026, 7, 10);
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dia,
+            Inicio = 1000m,
+            Entradas = new List<ItemFinanceiro>
+            {
+                new() { Descricao = "Venda 1", Valor = 200m, Categoria = "Vendas" },
+                new() { Descricao = "Venda 2", Valor = 100m, Categoria = "Vendas" },
+            },
+            Saidas = new List<ItemFinanceiroSaida> { new() { Descricao = "Fornecedor", Valor = 50m, Categoria = "Insumos" } },
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 1250m, // 1000 + 200 + 100 - 50
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
+
+        var saldoAtual = ContaBancariaService.ObterSaldoAtual(conta, new List<RegistroDiario> { registro });
+        Assert.Equal(1250m, saldoAtual);
+        Assert.Equal(saldoAtual, extrato[0].SaldoAcumulado);
+        Assert.Equal("Fornecedor", extrato[0].Descricao); // última linha processada no dia
+    }
+
+    // Fase 0.2: baixa vinculada a um lançamento já existente (ou que a própria baixa criou, Fase
+    // 0.5) não pode sintetizar uma 2ª linha "(pagamento)/(recebimento)" — aquele dinheiro já está
+    // contado pelo lançamento real, que já aparece no extrato via Entradas/Saidas.
+    [Fact]
+    public async Task ObterExtratoAsync_ContaPagaVinculadaALancamentoExistente_NaoSintetizaLinhaDuplicada()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(contaId, clienteId);
+        var dia = new DateOnly(2026, 7, 1);
+        var lancamentoId = Guid.NewGuid();
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dia,
+            Inicio = 1000m, Entradas = new(),
+            Saidas = new List<ItemFinanceiroSaida> { new() { Id = lancamentoId, Descricao = "Pix CLARO", Valor = 35.69m, Categoria = "Energia/Água/Internet" } },
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Telefone", Valor = 30m, Pago = true, DataBaixa = dia, ContaBancariaId = contaId, LancamentoVinculadoId = lancamentoId },
+            },
+            SaldoFinal = 964.31m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
+
+        var linha = Assert.Single(extrato);
+        Assert.Equal("Pix CLARO", linha.Descricao);
+        Assert.Equal(-35.69m, linha.Valor);
+        Assert.Equal(964.31m, linha.SaldoAcumulado);
+    }
+
+    // Fase 0.6: SaldoAtual (cartão/card no Banco) tem que ser sempre igual à última linha do
+    // extrato — inclusive quando há baixa vinculada (0.2), que não pode fazer os dois divergirem.
+    [Fact]
+    public async Task ObterPorIdAsync_SaldoAtual_IgualAUltimaLinhaDoExtrato()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(contaId, clienteId);
+        var dia = new DateOnly(2026, 7, 1);
+        var lancamentoId = Guid.NewGuid();
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dia,
+            Inicio = 1000m, Entradas = new(),
+            Saidas = new List<ItemFinanceiroSaida> { new() { Id = lancamentoId, Descricao = "Pix CLARO", Valor = 35.69m, Categoria = "Energia/Água/Internet" } },
+            ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Descricao = "Telefone", Valor = 30m, Pago = true, DataBaixa = dia, ContaBancariaId = contaId, LancamentoVinculadoId = lancamentoId },
+            },
+            SaldoFinal = 964.31m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var contaDto = await _sut.ObterPorIdAsync(contaId, clienteId, "cliente");
+        var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
+
+        Assert.Equal(extrato.OrderByDescending(l => l.Data).First().SaldoAcumulado, contaDto.SaldoAtual);
     }
 
     [Fact]

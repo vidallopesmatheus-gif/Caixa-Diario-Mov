@@ -24,6 +24,8 @@ public class AppDbContext : DbContext
     public DbSet<LinkConciliacao> LinksConciliacao { get; set; }
     public DbSet<PagamentoFatura> PagamentosFatura { get; set; }
     public DbSet<OcorrenciaRecorrenteDispensada> OcorrenciasRecorrentesDispensadas { get; set; }
+    public DbSet<DuplicataDispensada> DuplicatasDispensadas { get; set; }
+    public DbSet<SugestaoVinculoIgnorada> SugestoesVinculoIgnoradas { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -166,6 +168,32 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => new { e.RecorrenciaId, e.DataVencimento }).IsUnique();
         });
 
+        modelBuilder.Entity<DuplicataDispensada>(entity =>
+        {
+            entity.ToTable("duplicatas_dispensadas");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+            entity.Property(e => e.LancamentoMenorId).HasColumnName("lancamento_menor_id");
+            entity.Property(e => e.LancamentoMaiorId).HasColumnName("lancamento_maior_id");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            // Mesmo par (já normalizado menor/maior) só pode ser dispensado uma vez.
+            entity.HasIndex(e => new { e.LancamentoMenorId, e.LancamentoMaiorId }).IsUnique();
+        });
+
+        modelBuilder.Entity<SugestaoVinculoIgnorada>(entity =>
+        {
+            entity.ToTable("sugestoes_vinculo_ignoradas");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaProvisionadaId).HasColumnName("conta_provisionada_id");
+            entity.Property(e => e.LancamentoId).HasColumnName("lancamento_id");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            // Mesmo par título×lançamento só pode ser ignorado uma vez.
+            entity.HasIndex(e => new { e.ContaProvisionadaId, e.LancamentoId }).IsUnique();
+        });
+
         modelBuilder.Entity<ContaBancaria>(entity =>
         {
             entity.ToTable("contas_bancarias");
@@ -210,6 +238,11 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.ContaBancariaId, e.Status });
+            // Item 3.1: rede de segurança no banco contra duas linhas com o mesmo FitId na mesma
+            // conta — a aplicação já evita isso (IdentificarJaImportadas), mas um índice único
+            // garante mesmo se um bug de app logic deixar passar. Filtrado: FitId é nulo pra
+            // CSV/XLSX, e vários nulos têm que poder coexistir.
+            entity.HasIndex(e => new { e.ContaBancariaId, e.FitId }).IsUnique().HasFilter("fit_id IS NOT NULL");
         });
 
         modelBuilder.Entity<AuditLog>(entity =>

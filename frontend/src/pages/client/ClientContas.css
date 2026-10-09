@@ -1,7 +1,33 @@
+/* Item 2.5: totais pendentes + filtros no topo da tela ── */
+.contas-totais { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.contas-total-card {
+  flex: 1; min-width: 140px; background: var(--bg-card); border: 1px solid var(--bd);
+  border-radius: 10px; padding: 12px 16px; display: flex; flex-direction: column; gap: 4px;
+}
+.contas-total-card.receber { border-left: 3px solid var(--success); }
+.contas-total-card.pagar { border-left: 3px solid var(--danger); }
+.contas-total-label { font-size: 12px; color: var(--tx3); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+.contas-total-valor { font-size: 20px; font-weight: 800; }
+.contas-total-card.receber .contas-total-valor { color: var(--success); }
+.contas-total-card.pagar .contas-total-valor { color: var(--danger); }
+
+.contas-filtros {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+  margin-bottom: 16px; padding: 10px 12px; background: var(--bg-card);
+  border: 1px solid var(--bd); border-radius: 10px;
+}
+.contas-filtros select, .contas-filtros input[type="date"] {
+  width: 100%; height: 36px; padding: 6px 10px; background: var(--bg); border: 1px solid var(--bd);
+  border-radius: 8px; color: var(--tx1); font-size: 13px; box-sizing: border-box;
+}
+
 .contas-section { margin-bottom: 24px; }
 .contas-section h3 { font-size: 14px; font-weight: 700; color: var(--tx3); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .05em; }
 .conta-item { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
 .conta-item.pago { opacity: 0.5; }
+/* Item 2.5: conta pendente vencida (vencimento antes de hoje) — borda e detalhe em vermelho. */
+.conta-item.vencida { border-color: var(--danger); background: rgba(255, 59, 48, .06); }
+.conta-atrasada { color: var(--danger); font-weight: 700; }
 .conta-check { width: 20px; height: 20px; cursor: pointer; accent-color: var(--success); flex-shrink: 0; }
 .conta-info { flex: 1; }
 .conta-desc { font-size: 14px; font-weight: 600; }
@@ -13,7 +39,13 @@
 .add-conta-form { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
 .add-conta-form h4 { font-size: 13px; font-weight: 700; color: var(--tx3); margin-bottom: 12px; }
 .conta-form-row { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.conta-form-row input, .conta-form-row select { flex: 1; min-width: 120px; box-sizing: border-box; height: 38px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 14px; }
+/* Item 2.6: exclui checkbox/radio dessa regra — ela virava um quadrado de 120px (flex:1 +
+   min-width:120px + fundo colorido) aplicada num <input type="checkbox"> sem estilo próprio. */
+.conta-form-row input:not([type="checkbox"]):not([type="radio"]), .conta-form-row select {
+  flex: 1; min-width: 120px; box-sizing: border-box; height: 38px; padding: 8px 12px;
+  background: var(--bg); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx1); font-size: 14px;
+}
+.rec-field-checkbox { width: 18px; height: 18px; flex: 0 0 18px; cursor: pointer; accent-color: var(--accent); }
 .conta-field { display: flex; flex-direction: column; }
 .conta-field-label { display: block; font-size: 11px; color: var(--tx3); margin-bottom: 4px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .conta-field-hint { margin-top: 4px; font-size: 12px; color: var(--tx3); }
@@ -71,4 +103,13 @@
 .rec-field-input {
   width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--bd);
   border-radius: 8px; color: var(--tx1); font-size: 13px; box-sizing: border-box;
+}
+
+/* Item 2.2: .conta-item em linha única (status + info + valor + ações, todos flex-shrink:0 ou
+   sem wrap) passava de 375px de largura — vira coluna, com as ações (Editar/Excluir) na sua
+   própria linha em baixo, sem nenhuma rolagem horizontal. */
+@media (max-width: 480px) {
+  .conta-item { flex-direction: column; align-items: stretch; gap: 8px; }
+  .conta-valor { align-self: flex-start; }
+  .conta-item-acoes { width: 100%; justify-content: flex-end; }
 }

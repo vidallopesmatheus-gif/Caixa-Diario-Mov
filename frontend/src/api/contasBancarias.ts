@@ -126,6 +126,39 @@ export const obterExtratoConta = async (
   return (res.dados ?? []).map(mapLancamento)
 }
 
+export interface DuplicataProvavel {
+  tipo: 'Entrada' | 'Saida'
+  score: number
+  lancamentoAId: string
+  descricaoA: string
+  dataA: string
+  valorA: number
+  lancamentoBId: string
+  descricaoB: string
+  dataB: string
+  valorB: number
+}
+
+// Fase 0.5: "Revisar duplicatas" — só sugere pares (mesma conta/sentido/valor, data ±2 dias,
+// descrição parecida); excluir um dos dois usa excluirLancamento (api/importacao.ts) de sempre.
+export const listarDuplicatas = async (contaId: string): Promise<DuplicataProvavel[]> => {
+  const res = await apiFetch<ApiResponse<unknown[]>>(`/api/contas-bancarias/${contaId}/duplicatas`)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (res.dados ?? []).map((raw: any) => ({
+    tipo: raw.tipo, score: raw.score ?? 0,
+    lancamentoAId: raw.lancamentoAId, descricaoA: raw.descricaoA ?? '', dataA: raw.dataA ?? '', valorA: raw.valorA ?? 0,
+    lancamentoBId: raw.lancamentoBId, descricaoB: raw.descricaoB ?? '', dataB: raw.dataB ?? '', valorB: raw.valorB ?? 0,
+  }))
+}
+
+// Item 3.2: "Manter os dois" — grava a decisão pra esse par não ser sugerido de novo.
+export const manterDuplicata = async (contaId: string, lancamentoAId: string, lancamentoBId: string): Promise<void> => {
+  await apiFetch<ApiResponse<null>>(
+    `/api/contas-bancarias/${contaId}/duplicatas/manter`,
+    { method: 'POST', body: JSON.stringify({ lancamentoAId, lancamentoBId }) },
+  )
+}
+
 export const obterPendenciasConta = async (contaId: string): Promise<PendenciasConta> => {
   const res = await apiFetch<ApiResponse<{ recebiveis: unknown[]; pagamentos: unknown[] }>>(
     `/api/contas-bancarias/${contaId}/pendencias`,

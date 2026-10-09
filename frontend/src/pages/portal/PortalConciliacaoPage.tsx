@@ -244,7 +244,17 @@ function PortalLinhaPendente({
           {item.tipo === 'Entrada' ? '+' : '-'}{fmtBRL(item.valor)}
         </span>
       </div>
-      <div className="portal-item-desc">{item.descricao}</div>
+      <div className="portal-item-desc">
+        {item.descricao}
+        {item.categoriaSugerida && item.categoria && (
+          <span className="portal-selo-sugestao" title={`Sugestão: ${item.categoria}`}>sugerida</span>
+        )}
+      </div>
+      {item.categoriaSugerida && item.categoria && (
+        <button type="button" className="portal-btn-usar-sugestao" disabled={salvando} onClick={() => onCategorizar(item.categoria!)}>
+          Usar sugestão: {item.categoria}
+        </button>
+      )}
       <PortalCategoriaSelect
         categorias={categorias}
         placeholder={salvando ? 'Salvando...' : 'O que foi isso?'}

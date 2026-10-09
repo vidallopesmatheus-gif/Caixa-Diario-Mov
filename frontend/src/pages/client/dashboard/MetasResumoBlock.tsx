@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react'
-import { listarMetas } from '../../../api/metas'
 import { fmtBRL, fmtPct } from '../../../utils/format'
 import { calcularRitmoMeta } from '../../../utils/metaRitmo'
 import type { MetaAnual } from '../../../types'
 
-interface Props { clienteId: string }
+// Item 1.12: metas/loading vêm do Dashboard (que já busca a lista pra outros fins — objetivos),
+// em vez de este bloco buscar a mesma lista de novo por conta própria.
+interface Props { clienteId: string; metas: MetaAnual[]; loading: boolean }
 
 function chaveStorage(clienteId: string) {
   return `caixaDiario:dashboardMetaSelecionada:${clienteId}`
@@ -20,16 +21,8 @@ function fmtDataAlvo(d: Date | null): string {
 }
 
 /** Camada 0 do Dashboard: resumo da meta selecionada (ou convite pra criar a primeira). Só exibe e navega. */
-export default function MetasResumoBlock({ clienteId }: Props) {
-  const [metas, setMetas] = useState<MetaAnual[]>([])
-  const [loading, setLoading] = useState(true)
+export default function MetasResumoBlock({ clienteId, metas, loading }: Props) {
   const [selecionadaId, setSelecionadaId] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!clienteId) return
-    setLoading(true)
-    listarMetas(clienteId).then(setMetas).catch(() => setMetas([])).finally(() => setLoading(false))
-  }, [clienteId])
 
   // Elegíveis: metas com um "sonho" de investimento configurado (método com valor-alvo).
   // Uma meta "simples" (só receita/lucro do ano) não tem valor-alvo/acumulado pra mostrar aqui.

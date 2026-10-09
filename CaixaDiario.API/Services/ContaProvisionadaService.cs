@@ -76,7 +76,7 @@ public class ContaProvisionadaService : IContaProvisionadaService
         }
 
         if (dto.Pago == true && !pagoAntes)
-            await BaixarAsync(clienteId, item, ehReceber, dto);
+            await BaixarAsync(clienteId, registros, item, ehReceber, dto);
         else if (dto.Pago == false && pagoAntes)
             await EstornarAsync(clienteId, registro, item, ehReceber);
 
@@ -108,7 +108,7 @@ public class ContaProvisionadaService : IContaProvisionadaService
 
     // Sempre resulta num lançamento real: cria uma Entrada/Saída na conta+data do pagamento, ou
     // vincula a uma já existente (nunca os dois — ver dto.LancamentoVinculadoId).
-    private async Task BaixarAsync(Guid clienteId, ContaProvisionada item, bool ehReceber, AtualizarContaProvisionadaDto dto)
+    private async Task BaixarAsync(Guid clienteId, List<RegistroDiario> registros, ContaProvisionada item, bool ehReceber, AtualizarContaProvisionadaDto dto)
     {
         var dataPagamento = dto.DataPagamento ?? DataLocalHelper.Hoje();
         var valorEfetivo = dto.ValorRealizado ?? item.Valor;
@@ -123,6 +123,12 @@ public class ContaProvisionadaService : IContaProvisionadaService
             // nunca pode apagar esse lançamento (não foi esta baixa que o criou).
             item.LancamentoVinculadoId = dto.LancamentoVinculadoId;
             item.LancamentoCriadoPelaBaixa = false;
+            // Item 2.5: quem chama vincular (ex.: aceitar uma sugestão de conciliação) normalmente
+            // não manda ValorRealizado — sem buscar o valor real do lançamento vinculado aqui,
+            // ValorRealizado ficava sempre null nesse caminho, e a tela nunca mostrava o previsto
+            // riscado quando o valor de fato pago/recebido era diferente do provisionado.
+            if (!dto.ValorRealizado.HasValue)
+                item.ValorRealizado = BuscarValorDoLancamento(registros, dto.LancamentoVinculadoId.Value, ehReceber);
             return;
         }
 
@@ -190,6 +196,24 @@ public class ContaProvisionadaService : IContaProvisionadaService
         item.ValorRealizado = null;
         item.LancamentoVinculadoId = null;
         item.LancamentoCriadoPelaBaixa = false;
+    }
+
+    private static decimal? BuscarValorDoLancamento(List<RegistroDiario> registros, Guid lancamentoId, bool ehReceber)
+    {
+        foreach (var r in registros)
+        {
+            if (ehReceber)
+            {
+                var e = r.Entradas.FirstOrDefault(x => x.Id == lancamentoId);
+                if (e != null) return e.Valor;
+            }
+            else
+            {
+                var s = r.Saidas.FirstOrDefault(x => x.Id == lancamentoId);
+                if (s != null) return s.Valor;
+            }
+        }
+        return null;
     }
 
     private static (RegistroDiario registro, ContaProvisionada item, bool ehReceber)? LocalizarItem(List<RegistroDiario> registros, Guid id)

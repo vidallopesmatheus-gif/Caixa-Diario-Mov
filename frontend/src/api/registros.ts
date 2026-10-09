@@ -69,6 +69,7 @@ function mapRegistro(raw: any): Registro {
     saldoConfirmado: raw.saldoFinal ?? 0,
     saldoCalculado: raw.saldoCalculado ?? 0,
     criadoEm: raw.salvoEm ?? '',
+    totalSugestoesVinculo: raw.totalSugestoesVinculo ?? 0,
   }
 }
 

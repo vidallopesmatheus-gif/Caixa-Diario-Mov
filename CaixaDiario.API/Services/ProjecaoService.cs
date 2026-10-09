@@ -48,9 +48,21 @@ public class ProjecaoService : IProjecaoService
             .Where(c => !c.Pago && c.DataVencimento.HasValue && c.DataVencimento.Value > hoje)
             .ToList();
 
+        // Item 1.6: contas vencidas e ainda não pagas ("atrasadas") estavam fora da projeção —
+        // só entrava quem tinha vencimento FUTURO, então um cliente com contas em atraso via o
+        // saldo projetado sempre subir, como se aquela dívida já não existisse. Entram todas de
+        // uma vez no primeiro dia da projeção (presume-se que serão quitadas em breve).
+        var (receberAtrasados, pagarAtrasados) = ObterAtrasados(registrosFiltrados, hoje);
+
         // Recorrências ativas (não filtradas por conta — ContaRecorrente é nível de cliente)
         var recorrentesReceber = recorrentes.Where(r => r.Tipo == "Receber" && r.Ativo).ToList();
         var recorrentesPagar  = recorrentes.Where(r => r.Tipo == "Pagar"   && r.Ativo).ToList();
+
+        // Item 1.6: despesas fixas reais que o cliente nunca cadastrou como ContaRecorrente (ex.:
+        // ele sempre lança manualmente) também faziam a projeção parecer sempre subir. Mesma
+        // lógica de OrcamentoDinamicoService (1.4): usa a DIFERENÇA entre a média histórica e o
+        // que as recorrências já cobrem, nunca a soma (senão duplicaria a mesma despesa).
+        var despesaFixaNaoCadastrada = CalcularDespesaFixaNaoCadastrada(registros, recorrentesPagar, hoje);
 
         // Dedup: recorrências que já estão materializadas como ContaProvisionada não devem ser
         // contadas duas vezes. Identifica pares (RecorrenciaId, DataVencimento) já provisionados.
@@ -71,6 +83,24 @@ public class ProjecaoService : IProjecaoService
 
             var entradas = new List<ProjecaoItemDto>();
             var saidas   = new List<ProjecaoItemDto>();
+
+            // Atrasados: concentrados no 1º dia da projeção (ver comentário acima).
+            if (d == 1)
+            {
+                foreach (var c in receberAtrasados)
+                    entradas.Add(new ProjecaoItemDto { Descricao = c.Descricao, Valor = c.Valor, Categoria = c.Categoria, Origem = "Atrasado" });
+                foreach (var c in pagarAtrasados)
+                    saidas.Add(new ProjecaoItemDto { Descricao = c.Descricao, Valor = c.Valor, Categoria = c.Categoria, Origem = "Atrasado" });
+            }
+
+            // Despesa fixa média não cadastrada: um lançamento estimado por bloco de 30 dias.
+            if (despesaFixaNaoCadastrada > 0 && d % 30 == 0)
+                saidas.Add(new ProjecaoItemDto
+                {
+                    Descricao = "Despesas fixas médias (não cadastradas)",
+                    Valor     = despesaFixaNaoCadastrada,
+                    Origem    = "Estimativa",
+                });
 
             // Provisionados manuais para este dia
             foreach (var c in receberPendentes.Where(c => c.DataVencimento == dia))
@@ -240,6 +270,11 @@ public class ProjecaoService : IProjecaoService
             .Select(c => (c.RecorrenciaId!.Value, c.DataVencimento!.Value))
             .ToHashSet();
 
+        // Item 1.6: mesma correção de Calcular — atrasados e despesa fixa não cadastrada, senão a
+        // trajetória projetada também parece sempre subir.
+        var (receberAtrasados, pagarAtrasados) = ObterAtrasados(registrosFiltrados, hoje);
+        var despesaFixaNaoCadastrada = CalcularDespesaFixaNaoCadastrada(registros, recorrentesPagar, hoje);
+
         var projetado = new List<TrajetoriaPontoDto>();
         var saldoCorrendo = saldoAtual;
         var diasTotais = hoje.AddMonths(mesesFuturo).DayNumber - hoje.DayNumber;
@@ -253,6 +288,15 @@ public class ProjecaoService : IProjecaoService
             var totalSaidas = pagarPendentes.Where(c => c.DataVencimento == dia).Sum(c => c.Valor)
                 + recorrentesPagar.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia)))
                     .Sum(r => RecorrenciaService.CalcularValorPrevisto(r, registros));
+
+            if (d == 1)
+            {
+                totalEntradas += receberAtrasados.Sum(c => c.Valor);
+                totalSaidas   += pagarAtrasados.Sum(c => c.Valor);
+            }
+            if (d % 30 == 0)
+                totalSaidas += despesaFixaNaoCadastrada;
+
             saldoCorrendo += totalEntradas - totalSaidas;
 
             var marco = hoje.AddMonths(proximoMarco);
@@ -276,4 +320,46 @@ public class ProjecaoService : IProjecaoService
 
     private static DateOnly UltimoDiaDoMes(DateOnly qualquerDiaDoMes) =>
         new(qualquerDiaDoMes.Year, qualquerDiaDoMes.Month, DateTime.DaysInMonth(qualquerDiaDoMes.Year, qualquerDiaDoMes.Month));
+
+    // Item 1.6: contas (manuais) com vencimento <= hoje e ainda não pagas.
+    private static (List<ContaProvisionada> Receber, List<ContaProvisionada> Pagar) ObterAtrasados(
+        List<RegistroDiario> registrosFiltrados, DateOnly hoje)
+    {
+        var receberAtrasados = registrosFiltrados
+            .SelectMany(r => r.ContasReceber)
+            .Where(c => !c.Pago && c.DataVencimento.HasValue && c.DataVencimento.Value <= hoje)
+            .ToList();
+        var pagarAtrasados = registrosFiltrados
+            .SelectMany(r => r.ContasPagar)
+            .Where(c => !c.Pago && c.DataVencimento.HasValue && c.DataVencimento.Value <= hoje)
+            .ToList();
+        return (receberAtrasados, pagarAtrasados);
+    }
+
+    // Item 1.6: mesma fórmula de OrcamentoDinamicoService (1.4) — média de CustoFixo dos últimos
+    // 3 meses menos o que as recorrências "Pagar" já cobrem num período de 30 dias. Nunca negativo
+    // (Math.Max): se as recorrências já cobrem tudo (ou mais), não há nada "não cadastrado".
+    private static decimal CalcularDespesaFixaNaoCadastrada(
+        List<RegistroDiario> registros, List<ContaRecorrente> recorrentesPagar, DateOnly hoje)
+    {
+        var despesaFixaMeses = Enumerable.Range(1, 3)
+            .Select(i => hoje.AddMonths(-i))
+            .Select(m => registros
+                .Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
+                .SelectMany(r => r.Saidas).Where(s => s.TipoCusto == "CustoFixo").Sum(s => s.Valor))
+            .Where(v => v > 0)
+            .ToList();
+        var despesaFixaMedia = despesaFixaMeses.Count > 0 ? despesaFixaMeses.Average() : 0m;
+
+        decimal recorrentesPagarEm30Dias = 0m;
+        for (int d = 1; d <= 30; d++)
+        {
+            var dia = hoje.AddDays(d);
+            recorrentesPagarEm30Dias += recorrentesPagar
+                .Where(r => RecorrenciaService.OcorreEm(r, dia))
+                .Sum(r => RecorrenciaService.CalcularValorPrevisto(r, registros));
+        }
+
+        return Math.Max(0m, despesaFixaMedia - recorrentesPagarEm30Dias);
+    }
 }

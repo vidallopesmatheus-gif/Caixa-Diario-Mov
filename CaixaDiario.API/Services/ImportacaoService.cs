@@ -308,12 +308,14 @@ public class ImportacaoService : IImportacaoService
         DateOnly? menorDataAfetadaPorMerge = null;
         var totalMescladasComManual = 0;
         var totalDuplicatasEntreArquivosSinalizadas = 0;
+        var totalDuplicatasEntreArquivosIgnoradas = 0;
 
         var registrosPorData = registros.ToDictionary(r => r.Data);
         var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
         var regrasPorTipo = (await _regraRepo.ListarAtivasPorContaAsync(contaBancariaId))
             .GroupBy(r => r.Tipo)
             .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Ordem).ToList());
+        var historicoCategorias = ConstruirHistoricoCategorias(registros);
         var auditoria = new List<TransacaoImportada>();
         // (data, itemId) dos itens que uma regra de Transferência casou — convertidos só depois que
         // TODOS os registros do lote já foram salvos (ConverterLancamentoAsync precisa achar o
@@ -403,9 +405,15 @@ public class ImportacaoService : IImportacaoService
                 {
                     if (duplicata.VeioDeImportacaoAnterior)
                     {
-                        // Provável duplicata entre dois arquivos (ex.: CSV + OFX do mesmo banco) —
-                        // não decide sozinho, só sinaliza; segue o fluxo normal abaixo e importa.
+                        // Item 3.1: provável duplicata entre dois arquivos (ex.: CSV + OFX do mesmo
+                        // banco) — por padrão NÃO importa (diferente da duplicata manual, que por
+                        // padrão mescla); só entra se o usuário resolveu explicitamente "Importar".
                         totalDuplicatasEntreArquivosSinalizadas++;
+                        if (resolucoesPorIndice.GetValueOrDefault(t.Indice, "Ignorar") != "Importar")
+                        {
+                            totalDuplicatasEntreArquivosIgnoradas++;
+                            continue;
+                        }
                     }
                     else if (resolucoesPorIndice.GetValueOrDefault(t.Indice, "Mesclar") == "Mesclar")
                     {
@@ -431,14 +439,41 @@ public class ImportacaoService : IImportacaoService
 
                 if (t.Tipo == "Entrada")
                 {
-                    // Entrada não tem sugestão por palavra-chave (venda, serviço, transferência
-                    // recebida e resgate de investimento têm o mesmo verbo "recebido"/"pix" no
-                    // extrato — só o usuário sabe distinguir, ou uma regra que ele mesmo criou).
-                    // Regra de Transferência entra pendente por ora — a conversão de verdade só
-                    // acontece depois que este registro for salvo (precisa de um Id persistido).
+                    // Item 3.4: prioridade regra do cliente (confirma sozinha) → histórico do cliente
+                    // ≥2x com a mesma categoria → dicionário padrão — as duas últimas só SUGEREM
+                    // (CategoriaSugerida=true, ainda pendente de confirmação). Regra de Transferência
+                    // entra pendente por ora — a conversão de verdade só acontece depois que este
+                    // registro for salvo (precisa de um Id persistido).
                     var categorizadaPorRegra = regraCorrespondente is { AcaoTipo: "Categoria" };
-                    var pendenteEntrada = !categorizadaPorRegra;
-                    if (categorizadaPorRegra) categorizadasPorRegra++; else pendentes++;
+                    string? categoriaEntrada = null;
+                    var sugeridaEntrada = false;
+                    bool pendenteEntrada;
+
+                    if (categorizadaPorRegra)
+                    {
+                        categoriaEntrada = regraCorrespondente!.Categoria;
+                        pendenteEntrada = false;
+                        categorizadasPorRegra++;
+                    }
+                    else if (historicoCategorias.TryGetValue(("Entrada", NormalizarDescricao(t.Descricao)), out var catHistEntrada))
+                    {
+                        categoriaEntrada = catHistEntrada;
+                        sugeridaEntrada = true;
+                        pendenteEntrada = true;
+                        pendentes++;
+                    }
+                    else if (SugerirCategoriaPorPalavraChave(t.Descricao) is { } catDicEntrada)
+                    {
+                        categoriaEntrada = catDicEntrada;
+                        sugeridaEntrada = true;
+                        pendenteEntrada = true;
+                        pendentes++;
+                    }
+                    else
+                    {
+                        pendenteEntrada = true;
+                        pendentes++;
+                    }
 
                     registro.Entradas.Add(new ItemFinanceiro
                     {
@@ -446,22 +481,22 @@ public class ImportacaoService : IImportacaoService
                         Descricao = t.Descricao,
                         Valor = t.Valor,
                         FitId = t.FitId,
-                        Categoria = categorizadaPorRegra ? regraCorrespondente!.Categoria : null,
-                        TipoCusto = categorizadaPorRegra && regraCorrespondente!.Categoria != null
-                            && categoriasPorNome.TryGetValue(regraCorrespondente.Categoria, out var tcEntrada) ? tcEntrada : null,
+                        Categoria = categoriaEntrada,
+                        TipoCusto = categoriaEntrada != null
+                            && categoriasPorNome.TryGetValue(categoriaEntrada, out var tcEntrada) ? tcEntrada : null,
                         RegraCategorizacaoId = categorizadaPorRegra ? regraCorrespondente!.Id : null,
                         PendenteCategorizacao = pendenteEntrada,
+                        CategoriaSugerida = sugeridaEntrada,
                     });
                     registro.SaldoFinal += t.Valor;
                 }
                 else
                 {
-                    string categoriaFinal; string? tipoCustoFinal; bool pendente; Guid? regraIdAplicada = null;
+                    string categoriaFinal; string? tipoCustoFinal; bool pendente; var sugerida = false; Guid? regraIdAplicada = null;
 
                     if (regraCorrespondente is { AcaoTipo: "Categoria" })
                     {
                         categoriaFinal = regraCorrespondente.Categoria ?? string.Empty;
-                        tipoCustoFinal = regraCorrespondente.Categoria != null && categoriasPorNome.TryGetValue(regraCorrespondente.Categoria, out var tcRegra) ? tcRegra : null;
                         pendente = false;
                         regraIdAplicada = regraCorrespondente.Id;
                         categorizadasPorRegra++;
@@ -471,21 +506,29 @@ public class ImportacaoService : IImportacaoService
                         // Fica pendente por ora — a conversão de verdade (Fase 2) só acontece depois
                         // que este registro estiver salvo, e é ela quem marca Categoria/PendenteCategorizacao.
                         categoriaFinal = string.Empty;
-                        tipoCustoFinal = null;
+                        pendente = true;
+                        pendentes++;
+                    }
+                    else if (historicoCategorias.TryGetValue(("Saida", NormalizarDescricao(t.Descricao)), out var catHistSaida))
+                    {
+                        categoriaFinal = catHistSaida;
+                        sugerida = true;
                         pendente = true;
                         pendentes++;
                     }
                     else
                     {
-                        var categoriaSugerida = SugerirCategoria(t.Tipo, t.Descricao);
-                        categoriaFinal = categoriaSugerida ?? string.Empty;
-                        pendente = categoriaSugerida == null;
-                        if (pendente) pendentes++;
-                        // A sugestão por palavra-chave devolve um nome de categoria já cadastrado no
-                        // Plano de Contas — sem resolver o TipoCusto aqui, o lançamento nunca entraria
-                        // como custo fixo/variável no DRE mesmo tendo uma categoria "certa" atribuída.
-                        tipoCustoFinal = categoriaSugerida != null && categoriasPorNome.TryGetValue(categoriaSugerida, out var tc) ? tc : null;
+                        var categoriaDicionario = SugerirCategoriaPorPalavraChave(t.Descricao);
+                        categoriaFinal = categoriaDicionario ?? string.Empty;
+                        sugerida = categoriaDicionario != null;
+                        pendente = true;
+                        pendentes++;
                     }
+
+                    // A sugestão/regra devolve um nome de categoria já cadastrado no Plano de Contas —
+                    // sem resolver o TipoCusto aqui, o lançamento nunca entraria como custo fixo/
+                    // variável no DRE mesmo tendo uma categoria "certa" atribuída.
+                    tipoCustoFinal = !string.IsNullOrEmpty(categoriaFinal) && categoriasPorNome.TryGetValue(categoriaFinal, out var tc) ? tc : null;
 
                     registro.Saidas.Add(new ItemFinanceiroSaida
                     {
@@ -498,6 +541,7 @@ public class ImportacaoService : IImportacaoService
                         FitId = t.FitId,
                         RegraCategorizacaoId = regraIdAplicada,
                         PendenteCategorizacao = pendente,
+                        CategoriaSugerida = sugerida,
                     });
                     registro.SaldoFinal -= t.Valor;
                 }
@@ -596,7 +640,7 @@ public class ImportacaoService : IImportacaoService
 
         return new ResultadoImportacaoDto
         {
-            TotalImportadas = aImportar.Count - conciliadasTransferencia - totalMescladasComManual,
+            TotalImportadas = aImportar.Count - conciliadasTransferencia - totalMescladasComManual - totalDuplicatasEntreArquivosIgnoradas,
             TotalPendentesCategorizacao = pendentes,
             TotalCategorizadasPorRegra = categorizadasPorRegra,
             TotalConciliadasTransferencia = conciliadasTransferencia,
@@ -605,6 +649,7 @@ public class ImportacaoService : IImportacaoService
             TotalSaidas = aImportar.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
             TotalMescladasComManual = totalMescladasComManual,
             TotalDuplicatasEntreArquivosSinalizadas = totalDuplicatasEntreArquivosSinalizadas,
+            TotalDuplicatasEntreArquivosIgnoradas = totalDuplicatasEntreArquivosIgnoradas,
             TotalSugestoesVinculo = totalSugestoesVinculo,
         };
     }
@@ -613,10 +658,10 @@ public class ImportacaoService : IImportacaoService
     public async Task<List<PendenteCategorizacaoDto>> ListarPendentesCategorizacaoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil)
     {
-        await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
         var registros = await _registroRepo.ListarPorContaAsync(contaBancariaId);
 
-        return registros
+        var pendentes = registros
             .Where(r => !r.Excluido)
             .OrderBy(r => r.Data)
             .SelectMany(r => r.Entradas
@@ -628,6 +673,8 @@ public class ImportacaoService : IImportacaoService
                     Descricao = e.Descricao,
                     Valor = e.Valor,
                     Tipo = "Entrada",
+                    Categoria = e.Categoria,
+                    CategoriaSugerida = e.CategoriaSugerida,
                 })
                 .Concat(r.Saidas
                     .Where(s => s.PendenteCategorizacao)
@@ -638,8 +685,62 @@ public class ImportacaoService : IImportacaoService
                         Descricao = s.Descricao,
                         Valor = s.Valor,
                         Tipo = "Saida",
+                        Categoria = string.IsNullOrEmpty(s.Categoria) ? null : s.Categoria,
+                        CategoriaSugerida = s.CategoriaSugerida,
                     })))
             .ToList();
+
+        await PreencherSugestoesTransferenciaAsync(conta.ClienteId, contaBancariaId, pendentes);
+        return pendentes;
+    }
+
+    // Item 3.5: pra cada pendente, procura nas OUTRAS contas ativas do mesmo cliente um único
+    // lançamento de sentido oposto com valor/data compatíveis — sugestão de transferência entre
+    // contas próprias. Nunca cria nem converte nada; só preenche os campos de sugestão do DTO.
+    private async Task PreencherSugestoesTransferenciaAsync(
+        Guid clienteId, Guid contaBancariaId, List<PendenteCategorizacaoDto> pendentes)
+    {
+        if (pendentes.Count == 0) return;
+
+        var outrasContas = ((await _contaRepo.ListarPorClienteAsync(clienteId)) ?? new List<ContaBancaria>())
+            .Where(c => c.Ativa && c.Id != contaBancariaId)
+            .ToDictionary(c => c.Id, c => c.Nome);
+        if (outrasContas.Count == 0) return;
+
+        var itensOutrasContas = ((await _registroRepo.ListarPorClienteAsync(clienteId)) ?? new List<RegistroDiario>())
+            .Where(r => !r.Excluido && r.ContaBancariaId.HasValue && outrasContas.ContainsKey(r.ContaBancariaId.Value))
+            .SelectMany(AchatarLancamentos)
+            .ToList();
+        if (itensOutrasContas.Count == 0) return;
+
+        foreach (var p in pendentes)
+        {
+            var candidato = EncontrarCandidatoTransferencia(p.Tipo, p.Valor, DateOnly.Parse(p.Data), itensOutrasContas);
+            if (candidato == null) continue;
+
+            p.SugestaoTransferenciaContaId = candidato.ContaBancariaId;
+            p.SugestaoTransferenciaContaNome = outrasContas[candidato.ContaBancariaId];
+            p.SugestaoTransferenciaLancamentoId = candidato.Id;
+            p.SugestaoTransferenciaData = candidato.Data.ToString("yyyy-MM-dd");
+        }
+    }
+
+    private sealed record ItemLancamentoPlano(Guid Id, Guid ContaBancariaId, DateOnly Data, string Tipo, decimal Valor, Guid? TransferenciaId);
+
+    private static IEnumerable<ItemLancamentoPlano> AchatarLancamentos(RegistroDiario r) =>
+        r.Entradas.Select(e => new ItemLancamentoPlano(e.Id, r.ContaBancariaId!.Value, r.Data, "Entrada", e.Valor, e.TransferenciaId))
+            .Concat(r.Saidas.Select(s => new ItemLancamentoPlano(s.Id, r.ContaBancariaId!.Value, r.Data, "Saida", s.Valor, s.TransferenciaId)));
+
+    private static ItemLancamentoPlano? EncontrarCandidatoTransferencia(
+        string tipoOrigem, decimal valor, DateOnly data, List<ItemLancamentoPlano> itensOutrasContas)
+    {
+        var tipoOposto = tipoOrigem == "Entrada" ? "Saida" : "Entrada";
+        var candidatos = itensOutrasContas
+            .Where(i => i.Tipo == tipoOposto && i.TransferenciaId == null
+                && Math.Abs(i.Valor - valor) <= 0.01m
+                && Math.Abs(i.Data.DayNumber - data.DayNumber) <= 1)
+            .ToList();
+        return candidatos.Count == 1 ? candidatos[0] : null;
     }
 
     public async Task AtualizarCategoriasAsync(
@@ -673,6 +774,7 @@ public class ImportacaoService : IImportacaoService
                     if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCustoSaida))
                         saida.TipoCusto = tipoCustoSaida;
                     saida.PendenteCategorizacao = false;
+                    saida.CategoriaSugerida = false;
                     continue;
                 }
 
@@ -682,6 +784,7 @@ public class ImportacaoService : IImportacaoService
                 if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCustoEntrada))
                     entrada.TipoCusto = tipoCustoEntrada;
                 entrada.PendenteCategorizacao = false;
+                entrada.CategoriaSugerida = false;
             }
 
             // Reatribui as listas — Entradas/Saidas são jsonb sem value comparer configurado, então
@@ -836,15 +939,43 @@ public class ImportacaoService : IImportacaoService
         return dias;
     }
 
-    // ── Sugestão de categoria por palavra-chave ────────────────────────────────
+    // ── Sugestão de categoria por palavra-chave (item 3.4) ──────────────────────
     // Dicionário simples e estático (palavra-chave → categoria já existente em /api/categorias).
-    // Só sugere para Saídas: o usuário confirma/troca depois se quiser.
+    // Ordem importa: a primeira palavra que casar decide — por isso marcas específicas (Claro,
+    // Netflix...) vêm ANTES das palavras genéricas (ex.: "internet") que também apareceriam na
+    // mesma descrição. Desde o item 3.4, isso NUNCA confirma a categoria sozinho — vira uma
+    // sugestão (CategoriaSugerida=true, ainda PendenteCategorizacao=true) que o usuário confirma;
+    // só uma regra que o próprio cliente criou confirma automaticamente.
     private static readonly (string Palavra, string Categoria)[] SugestoesPorPalavraChave =
     {
+        ("uber", "Frete e entrega"),
+        ("99app", "Frete e entrega"),
+        ("99 tecnologia", "Frete e entrega"),
+        ("nupay uber", "Frete e entrega"),
+        ("ifood", "Refeição"),
+        ("ifd", "Refeição"),
+        ("restaurante", "Refeição"),
+        ("padaria", "Refeição"),
+        ("lanchonete", "Refeição"),
+        ("netflix", "Telefone e Internet"),
+        ("spotify", "Telefone e Internet"),
+        ("claro", "Telefone e Internet"),
+        ("vivo", "Telefone e Internet"),
+        ("tim ", "Telefone e Internet"),
+        ("rendimento", "Rendimentos"),
+        ("aplicação rdb", "Transferência"),
+        ("aplicacao rdb", "Transferência"),
+        ("aplicação cdb", "Transferência"),
+        ("aplicacao cdb", "Transferência"),
+        ("resgate rdb", "Transferência"),
+        ("resgate cdb", "Transferência"),
         ("posto", "Manutenção"),
         ("combust", "Manutenção"),
         ("gasolina", "Manutenção"),
         ("etanol", "Manutenção"),
+        ("assai", "Insumos/Mercadoria"),
+        ("covabra", "Insumos/Mercadoria"),
+        ("savegnago", "Insumos/Mercadoria"),
         ("mercado", "Insumos/Mercadoria"),
         ("supermercado", "Insumos/Mercadoria"),
         ("atacad", "Insumos/Mercadoria"),
@@ -871,9 +1002,9 @@ public class ImportacaoService : IImportacaoService
         ("escritorio", "Material de Escritório"),
     };
 
-    private static string? SugerirCategoria(string tipo, string descricao)
+    private static string? SugerirCategoriaPorPalavraChave(string descricao)
     {
-        if (tipo != "Saida" || string.IsNullOrWhiteSpace(descricao))
+        if (string.IsNullOrWhiteSpace(descricao))
             return null;
 
         var descNormalizada = descricao.ToLowerInvariant();
@@ -882,6 +1013,32 @@ public class ImportacaoService : IImportacaoService
                 return categoria;
 
         return null;
+    }
+
+    // Item 3.4: descrição normalizada (mesma função usada no resto da dedup) já categorizada pelo
+    // cliente (PendenteCategorizacao=false) pelo menos 2 vezes com a MESMA categoria — sinal mais
+    // forte que uma palavra-chave genérica do dicionário, mas ainda uma sugestão, não confirma só.
+    private static Dictionary<(string Tipo, string Descricao), string> ConstruirHistoricoCategorias(List<RegistroDiario> registros)
+    {
+        var contagem = new Dictionary<(string Tipo, string Descricao, string Categoria), int>();
+        foreach (var r in registros)
+        {
+            foreach (var e in r.Entradas.Where(e => !e.PendenteCategorizacao && !string.IsNullOrWhiteSpace(e.Categoria)))
+            {
+                var chave = ("Entrada", NormalizarDescricao(e.Descricao), e.Categoria!);
+                contagem[chave] = contagem.GetValueOrDefault(chave) + 1;
+            }
+            foreach (var s in r.Saidas.Where(s => !s.PendenteCategorizacao && !string.IsNullOrWhiteSpace(s.Categoria)))
+            {
+                var chave = ("Saida", NormalizarDescricao(s.Descricao), s.Categoria);
+                contagem[chave] = contagem.GetValueOrDefault(chave) + 1;
+            }
+        }
+
+        return contagem
+            .Where(kv => kv.Value >= 2)
+            .GroupBy(kv => (kv.Key.Tipo, kv.Key.Descricao))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(kv => kv.Value).First().Key.Categoria);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

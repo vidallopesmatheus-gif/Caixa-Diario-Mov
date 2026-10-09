@@ -8,8 +8,11 @@ import {
   registrarRendimento,
   vincularMeta,
   desvincularMeta,
+  listarDuplicatas,
+  manterDuplicata,
 } from '../../api/contasBancarias'
 import { previewExtrato, importarExtrato, categorizarPendentes, excluirLancamento } from '../../api/importacao'
+import type { DuplicataProvavel } from '../../api/contasBancarias'
 import type { ResolucaoDuplicata } from '../../api/importacao'
 import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
 import { listarSugestoesVinculo } from '../../api/conciliacao'
@@ -65,10 +68,17 @@ export default function ClientContaDetalhePage() {
   const [dataFimImport, setDataFimImport] = useState('')
   const [importando, setImportando] = useState(false)
   const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
-  // Fase 1.7: decisão por linha só para as duplicatas manuais — índice ausente = Mesclar (padrão).
-  const [resolucoesDuplicatas, setResolucoesDuplicatas] = useState<Record<number, 'Mesclar' | 'ImportarComoNovo'>>({})
+  // Fase 1.7: decisão por linha pra duplicata manual (índice ausente = Mesclar, padrão).
+  // Fase 3.1: mesmo mapa pra duplicata entre arquivos (índice ausente = Ignorar, padrão).
+  const [resolucoesDuplicatas, setResolucoesDuplicatas] = useState<Record<number, 'Mesclar' | 'ImportarComoNovo' | 'Ignorar' | 'Importar'>>({})
   const [confirmandoTodasSugestoes, setConfirmandoTodasSugestoes] = useState(false)
   const [sugestoesConfirmadas, setSugestoesConfirmadas] = useState(false)
+
+  // ── Fase 0.5: "Revisar duplicatas" — mesma conta/sentido/valor importados duas vezes ─────────
+  const [modalDuplicatas, setModalDuplicatas] = useState(false)
+  const [duplicatas, setDuplicatas] = useState<DuplicataProvavel[]>([])
+  const [carregandoDuplicatas, setCarregandoDuplicatas] = useState(false)
+  const [excluindoDuplicataId, setExcluindoDuplicataId] = useState<string | null>(null)
 
   // ── Investimento: rendimento e vínculo com meta ──────────────────────────
   const [modalRendimento, setModalRendimento] = useState(false)
@@ -206,6 +216,10 @@ export default function ClientContaDetalhePage() {
     }
   }
 
+  // Item 3.3: limiar de confiança pra "Confirmar todas" vincular sem revisão manual — abaixo
+  // disso, fica pra revisão individual (tela de Contas já mostra Vincular/Ignorar por sugestão).
+  const CONFIANCA_MINIMA_CONFIRMAR_TODAS = 80
+
   // Fase 1.2/1.7: "confirmar todas" do resumo pós-importação — vincula de uma vez cada sugestão
   // (título pendente × lançamento real) que o motor encontrou no intervalo do próprio arquivo.
   async function handleConfirmarTodasSugestoes() {
@@ -214,11 +228,16 @@ export default function ClientContaDetalhePage() {
     setMsg('')
     try {
       const sugestoes = await listarSugestoesVinculo(clienteId, dataInicioImport || todayISO(), dataFimImport || todayISO(), contaId)
-      for (const s of sugestoes) {
+      const altaConfianca = sugestoes.filter(s => s.score >= CONFIANCA_MINIMA_CONFIRMAR_TODAS)
+      for (const s of altaConfianca) {
         await atualizarContaProvisionada(clienteId, s.contaProvisionadaId, {
           pago: true, contaBancariaId: s.contaBancariaId, dataPagamento: s.lancamentoData, lancamentoVinculadoId: s.lancamentoId,
         })
       }
+      const restantes = sugestoes.length - altaConfianca.length
+      setMsg(restantes > 0
+        ? `${altaConfianca.length} vínculo(s) confirmado(s). ${restantes} com confiança abaixo de ${CONFIANCA_MINIMA_CONFIRMAR_TODAS}% — revise manualmente em Contas.`
+        : '')
       setSugestoesConfirmadas(true)
       carregarConta()
       carregarPendencias()
@@ -238,6 +257,57 @@ export default function ClientContaDetalhePage() {
       carregarExtrato()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao desfazer classificação.')
+    }
+  }
+
+  async function abrirRevisarDuplicatas() {
+    if (!contaId) return
+    setModalDuplicatas(true)
+    setCarregandoDuplicatas(true)
+    try {
+      setDuplicatas(await listarDuplicatas(contaId))
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao buscar duplicatas.')
+    } finally {
+      setCarregandoDuplicatas(false)
+    }
+  }
+
+  // Item 3.2: "Manter os dois" — grava a decisão no backend; o par não reaparece mais mesmo
+  // depois de recarregar a tela.
+  async function manterOsDoisDaDuplicata(dup: DuplicataProvavel) {
+    if (!contaId) return
+    setExcluindoDuplicataId(dup.lancamentoAId)
+    setMsg('')
+    try {
+      await manterDuplicata(contaId, dup.lancamentoAId, dup.lancamentoBId)
+      setDuplicatas(prev => prev.filter(d => d !== dup))
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao gravar a decisão.')
+    } finally {
+      setExcluindoDuplicataId(null)
+    }
+  }
+
+  // Full reload (não só a lista local): a duplicata pode estar em qualquer data do histórico,
+  // fora do intervalo que o extrato visível na tela está mostrando agora.
+  async function excluirLadoDaDuplicata(dup: DuplicataProvavel, lado: 'A' | 'B') {
+    if (!contaId) return
+    const id = lado === 'A' ? dup.lancamentoAId : dup.lancamentoBId
+    const data = lado === 'A' ? dup.dataA : dup.dataB
+    const descricao = lado === 'A' ? dup.descricaoA : dup.descricaoB
+    if (!confirm(`Excluir "${descricao}"? Essa ação não pode ser desfeita.`)) return
+    setExcluindoDuplicataId(id)
+    setMsg('')
+    try {
+      await excluirLancamento(contaId, { id, data })
+      setDuplicatas(prev => prev.filter(d => d !== dup))
+      carregarConta()
+      carregarExtrato()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao excluir lançamento.')
+    } finally {
+      setExcluindoDuplicataId(null)
     }
   }
 
@@ -503,6 +573,9 @@ export default function ClientContaDetalhePage() {
         <button className="cd-btn-importar" onClick={() => fileInputRef.current?.click()} disabled={previewCarregando}>
           {previewCarregando ? 'Lendo arquivo...' : '⬆️ Importar extrato'}
         </button>
+        <button className="cd-btn-importar" onClick={abrirRevisarDuplicatas}>
+          🔍 Revisar duplicatas
+        </button>
         {conta.tipo === 'Investimento' && (
           <button className="cd-btn-importar" onClick={abrirModalRendimento}>
             📈 Registrar rendimento
@@ -537,8 +610,11 @@ export default function ClientContaDetalhePage() {
           {resultadoImportacao.totalMescladasComManual > 0 && (
             <> — {resultadoImportacao.totalMescladasComManual} mesclada(s) com lançamento(s) manual(is) já existente(s)</>
           )}
-          {resultadoImportacao.totalDuplicatasEntreArquivosSinalizadas > 0 && (
-            <> — {resultadoImportacao.totalDuplicatasEntreArquivosSinalizadas} sinalizada(s) como provável duplicata entre arquivos (confira)</>
+          {resultadoImportacao.totalDuplicatasEntreArquivosIgnoradas > 0 && (
+            <> — {resultadoImportacao.totalDuplicatasEntreArquivosIgnoradas} duplicata(s) entre arquivos ignorada(s)</>
+          )}
+          {resultadoImportacao.totalDuplicatasEntreArquivosSinalizadas > resultadoImportacao.totalDuplicatasEntreArquivosIgnoradas && (
+            <> — {resultadoImportacao.totalDuplicatasEntreArquivosSinalizadas - resultadoImportacao.totalDuplicatasEntreArquivosIgnoradas} provável(eis) duplicata(s) entre arquivos importada(s) mesmo assim</>
           )}
         </div>
       )}
@@ -663,6 +739,7 @@ export default function ClientContaDetalhePage() {
                     {l.id && l.categoria !== 'Transferência' && (
                       <button
                         type="button"
+                        aria-label={`Marcar "${l.descricao}" como transferência`}
                         onClick={() => abrirModalTransferencia(l)}
                         title="Não é receita nem despesa — é uma transferência entre contas"
                         style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
@@ -683,6 +760,7 @@ export default function ClientContaDetalhePage() {
                     {l.id && !l.pendenteCategorizacao && l.categoria !== 'Transferência' && (
                       <button
                         type="button"
+                        aria-label={`Editar categoria de "${l.descricao}"`}
                         onClick={() => abrirModalEditarCategoria(l)}
                         title="Trocar a categoria deste lançamento"
                         style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
@@ -802,6 +880,50 @@ export default function ClientContaDetalhePage() {
       </Modal>
 
       <Modal
+        open={modalDuplicatas}
+        title="🔍 Revisar duplicatas"
+        onClose={() => setModalDuplicatas(false)}
+      >
+        {carregandoDuplicatas ? (
+          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>Procurando prováveis duplicatas...</p>
+        ) : duplicatas.length === 0 ? (
+          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>Nenhuma provável duplicata encontrada nesta conta.</p>
+        ) : (
+          duplicatas.map(dup => (
+            <div key={`${dup.lancamentoAId}-${dup.lancamentoBId}`} style={{ border: '1px solid var(--bd)', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: 'var(--tx3)', marginBottom: 6 }}>{dup.tipo} · {dup.score}% parecido</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                <div style={{ flex: 1, fontSize: 13 }}>
+                  <div>{dup.descricaoA}</div>
+                  <div style={{ color: 'var(--tx3)' }}>{fmtBRL(dup.valorA)} · {fmtDate(dup.dataA)}</div>
+                  <button className="btn-cancel" style={{ marginTop: 6, width: '100%' }}
+                    disabled={excluindoDuplicataId !== null}
+                    onClick={() => excluirLadoDaDuplicata(dup, 'A')}>
+                    {excluindoDuplicataId === dup.lancamentoAId ? 'Excluindo...' : 'Excluir este'}
+                  </button>
+                </div>
+                <div style={{ flex: 1, fontSize: 13 }}>
+                  <div>{dup.descricaoB}</div>
+                  <div style={{ color: 'var(--tx3)' }}>{fmtBRL(dup.valorB)} · {fmtDate(dup.dataB)}</div>
+                  <button className="btn-cancel" style={{ marginTop: 6, width: '100%' }}
+                    disabled={excluindoDuplicataId !== null}
+                    onClick={() => excluirLadoDaDuplicata(dup, 'B')}>
+                    {excluindoDuplicataId === dup.lancamentoBId ? 'Excluindo...' : 'Excluir este'}
+                  </button>
+                </div>
+              </div>
+              {/* Item 3.2: não são duplicatas de verdade — grava a decisão pra não aparecer de novo. */}
+              <button className="cb-btn-editar" style={{ marginTop: 8, width: '100%' }}
+                disabled={excluindoDuplicataId !== null}
+                onClick={() => manterOsDoisDaDuplicata(dup)}>
+                {excluindoDuplicataId === dup.lancamentoAId ? 'Salvando...' : 'Manter os dois'}
+              </button>
+            </div>
+          ))
+        )}
+      </Modal>
+
+      <Modal
         open={modalVincular}
         title="🎯 Vincular meta"
         onClose={() => setModalVincular(false)}
@@ -916,10 +1038,30 @@ export default function ClientContaDetalhePage() {
           </div>
         )}
 
+        {/* Item 3.1: por padrão NÃO importa (desmarcado) — o usuário decide por linha se quer
+            importar mesmo assim (ex.: era só parecido, não é de fato a mesma transação). */}
         {!previewCarregando && resumoImportacao && resumoImportacao.duplicatasEntreArquivos.length > 0 && (
-          <p style={{ fontSize: 12, color: 'var(--tx3)', margin: '8px 0' }}>
-            ⚠️ {resumoImportacao.duplicatasEntreArquivos.length} transação(ões) parecem já ter vindo de outro arquivo importado antes — serão importadas, mas marcadas para você revisar depois.
-          </p>
+          <div style={{ margin: '12px 0', border: '1px solid var(--bd)', borderRadius: 8, padding: 10 }}>
+            <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              ⚠️ {resumoImportacao.duplicatasEntreArquivos.length} provável(eis) duplicata(s) entre arquivos — não serão importadas, a menos que você marque abaixo.
+            </p>
+            {resumoImportacao.duplicatasEntreArquivos.map(d => {
+              const importar = resolucoesDuplicatas[d.transacaoIndice] === 'Importar'
+              return (
+                <div key={d.transacaoIndice} style={{ fontSize: 12, marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--bd)' }}>
+                  <div style={{ color: 'var(--tx3)', marginBottom: 4 }}>
+                    Banco: <strong style={{ color: 'var(--tx1)' }}>{d.descricaoBanco}</strong> — {fmtBRL(d.valor)} em {fmtDate(d.dataBanco)}
+                    <br />Já importada antes: <strong style={{ color: 'var(--tx1)' }}>{d.descricaoJaImportada}</strong> em {fmtDate(d.dataJaImportada)}
+                  </div>
+                  <label>
+                    <input type="checkbox" checked={importar}
+                      onChange={e => setResolucoesDuplicatas(prev => ({ ...prev, [d.transacaoIndice]: e.target.checked ? 'Importar' : 'Ignorar' }))} />
+                    {' '}Importar mesmo assim
+                  </label>
+                </div>
+              )
+            })}
+          </div>
         )}
       </Modal>
 

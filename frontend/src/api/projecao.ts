@@ -5,7 +5,7 @@ export interface ProjecaoItem {
   descricao: string
   valor: number
   categoria?: string
-  origem: 'Provisionado' | 'Recorrente'
+  origem: 'Provisionado' | 'Recorrente' | 'Atrasado' | 'Estimativa'
 }
 
 export interface ProjecaoDia {

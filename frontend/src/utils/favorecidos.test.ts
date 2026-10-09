@@ -48,3 +48,28 @@ test('ordena por total decrescente e respeita o limite', () => {
 test('lista vazia retorna ranking vazio', () => {
   expect(calcularRankingFavorecidos([], 'Entrada')).toEqual([])
 })
+
+test('unifica o mesmo favorecido quando o identificador numérico muda de posição na descrição', () => {
+  const itens = [
+    { data: '2026-09-05', descricao: '53.430.745 POLLY SILVA', valor: 300 },
+    { data: '2026-09-10', descricao: 'POLLY SILVA (53.430.745)', valor: 200 },
+  ]
+
+  const ranking = calcularRankingFavorecidos(itens, 'Entrada')
+
+  expect(ranking).toHaveLength(1)
+  expect(ranking[0].total).toBe(500)
+  expect(ranking[0].ocorrencias).toBe(2)
+  expect(ranking[0].rotulo).toBe('POLLY SILVA')
+})
+
+test('não unifica favorecidos diferentes mesmo sem prefixo comum', () => {
+  const itens = [
+    { data: '2026-09-05', descricao: '53.430.745 POLLY SILVA', valor: 300 },
+    { data: '2026-09-10', descricao: 'RAFAEL ABRAAO (11.222.333)', valor: 200 },
+  ]
+
+  const ranking = calcularRankingFavorecidos(itens, 'Entrada')
+
+  expect(ranking).toHaveLength(2)
+})

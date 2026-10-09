@@ -83,6 +83,7 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
               className="cb-conta-clicavel"
               role="button"
               tabIndex={0}
+              aria-label={`Abrir conta ${c.nome}`}
               onClick={() => navigate(`/banco/${c.id}`)}
               onKeyDown={e => { if (e.key === 'Enter') navigate(`/banco/${c.id}`) }}
             >

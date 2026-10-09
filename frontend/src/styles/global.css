@@ -101,7 +101,9 @@ button { font-family: inherit; cursor: pointer; }
 /* ── Input group ── */
 .inp-group             { margin-bottom: 14px; }
 .inp-group label       { display: block; font-size: 13px; color: var(--tx2); margin-bottom: 5px; font-weight: 500; }
-.inp-group input       { width: 100%; padding: 10px 13px; background: var(--bg-input); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx); font-size: 15px; }
+/* Item 2.6: exclui checkbox/radio — essa regra vira um quadrado grande (width:100% + fundo +
+   borda) quando aplicada a um <input type="checkbox"> sem estilo próprio. */
+.inp-group input:not([type="checkbox"]):not([type="radio"]) { width: 100%; padding: 10px 13px; background: var(--bg-input); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx); font-size: 15px; }
 .inp-group input:focus { outline: none; border-color: var(--accent); }
 .inp-group select      { width: 100%; box-sizing: border-box; padding: 10px 13px; background: var(--bg-input); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx); font-size: 15px; }
 .inp-group select:focus { outline: none; border-color: var(--accent); }

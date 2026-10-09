@@ -9,11 +9,13 @@ namespace CaixaDiario.Tests.Services;
 public class ConciliacaoServiceTests
 {
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
+    private readonly Mock<ISugestaoVinculoIgnoradaRepository> _ignoradaRepoMock = new();
     private readonly ConciliacaoService _sut;
 
     public ConciliacaoServiceTests()
     {
-        _sut = new ConciliacaoService(_registroRepoMock.Object);
+        _ignoradaRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<SugestaoVinculoIgnorada>());
+        _sut = new ConciliacaoService(_registroRepoMock.Object, _ignoradaRepoMock.Object);
     }
 
     private static RegistroDiario CriarRegistro(Guid clienteId, Guid contaId, DateOnly data) => new()
@@ -252,5 +254,83 @@ public class ConciliacaoServiceTests
         var resultado = await _sut.ListarSugestoesAsync(clienteId, data.AddDays(-1), data.AddDays(1), clienteId, "cliente");
 
         Assert.Empty(resultado);
+    }
+
+    // ── Item 3.3: "Ignorar" persistido ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ListarSugestoesAsync_ParJaIgnorado_NaoApareceMais()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaId = Guid.NewGuid();
+        var vencimento = new DateOnly(2026, 10, 10);
+
+        var registroTitulo = CriarRegistro(clienteId, contaId, vencimento.AddDays(-5));
+        var tituloId = Guid.NewGuid();
+        registroTitulo.ContasPagar.Add(new ContaProvisionada
+        {
+            Id = tituloId, Descricao = "ENERGISA DISTRIBUIDORA", Valor = 250m,
+            DataVencimento = vencimento, Pago = false, Categoria = "Utilidades", ContaBancariaId = contaId,
+        });
+
+        var registroLancamento = CriarRegistro(clienteId, contaId, vencimento);
+        var lancamentoId = Guid.NewGuid();
+        registroLancamento.Saidas.Add(new ItemFinanceiroSaida
+        {
+            Id = lancamentoId, Descricao = "ENERGISA DISTRIBUIDORA LTDA", Valor = 250m, Categoria = "Utilidades",
+        });
+
+        ConfigurarRegistros(clienteId, new List<RegistroDiario> { registroTitulo, registroLancamento });
+        _ignoradaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<SugestaoVinculoIgnorada>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaProvisionadaId = tituloId, LancamentoId = lancamentoId, CriadoEm = DateTime.UtcNow },
+        });
+
+        var resultado = await _sut.ListarSugestoesAsync(clienteId, vencimento.AddDays(-5), vencimento.AddDays(5), clienteId, "cliente");
+
+        Assert.Empty(resultado);
+    }
+
+    [Fact]
+    public async Task IgnorarAsync_GravaADecisao()
+    {
+        var clienteId = Guid.NewGuid();
+        SugestaoVinculoIgnorada? gravado = null;
+        _ignoradaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<SugestaoVinculoIgnorada>()))
+            .Callback<SugestaoVinculoIgnorada>(i => gravado = i).Returns(Task.CompletedTask);
+        var tituloId = Guid.NewGuid();
+        var lancamentoId = Guid.NewGuid();
+
+        await _sut.IgnorarAsync(clienteId, tituloId, lancamentoId, clienteId, "cliente");
+
+        Assert.NotNull(gravado);
+        Assert.Equal(clienteId, gravado!.ClienteId);
+        Assert.Equal(tituloId, gravado.ContaProvisionadaId);
+        Assert.Equal(lancamentoId, gravado.LancamentoId);
+    }
+
+    [Fact]
+    public async Task IgnorarAsync_JaIgnorado_NaoGravaDeNovo()
+    {
+        var clienteId = Guid.NewGuid();
+        var tituloId = Guid.NewGuid();
+        var lancamentoId = Guid.NewGuid();
+        _ignoradaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<SugestaoVinculoIgnorada>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaProvisionadaId = tituloId, LancamentoId = lancamentoId, CriadoEm = DateTime.UtcNow },
+        });
+
+        await _sut.IgnorarAsync(clienteId, tituloId, lancamentoId, clienteId, "cliente");
+
+        _ignoradaRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<SugestaoVinculoIgnorada>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IgnorarAsync_ClienteTentandoIgnorarDeOutroCliente_LancaAcessoNegado()
+    {
+        var clienteId = Guid.NewGuid();
+        var ex = await Assert.ThrowsAsync<ApiException>(
+            () => _sut.IgnorarAsync(clienteId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "cliente"));
+        Assert.Equal(403, ex.StatusCode);
     }
 }

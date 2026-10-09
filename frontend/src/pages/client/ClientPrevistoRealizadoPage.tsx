@@ -49,6 +49,7 @@ export default function ClientPrevistoRealizadoPage() {
   const clienteId = user?.usuarioId ?? ''
 
   const [meses, setMeses] = useState<3 | 6 | 12>(6)
+  const [incluirAvulsosVinculados, setIncluirAvulsosVinculados] = useState(false)
   const [dados, setDados] = useState<PrevistoRealizado | null>(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState('')
@@ -57,13 +58,13 @@ export default function ClientPrevistoRealizadoPage() {
     if (!clienteId) return
     setLoading(true); setErro('')
     try {
-      setDados(await obterPrevistoRealizado(clienteId, meses))
+      setDados(await obterPrevistoRealizado(clienteId, meses, incluirAvulsosVinculados))
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Erro ao carregar relatório.')
     } finally {
       setLoading(false)
     }
-  }, [clienteId, meses])
+  }, [clienteId, meses, incluirAvulsosVinculados])
 
   useEffect(() => { carregar() }, [carregar])
 
@@ -84,6 +85,14 @@ export default function ClientPrevistoRealizadoPage() {
             </button>
           ))}
         </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--tx2)', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={incluirAvulsosVinculados}
+            onChange={e => setIncluirAvulsosVinculados(e.target.checked)}
+          />
+          Incluir contas avulsas pagas por vínculo
+        </label>
         <button className="btn-cancel" disabled={!dados || dados.linhas.length === 0} onClick={() => dados && exportarCsv(dados)}>
           📋 Exportar CSV
         </button>

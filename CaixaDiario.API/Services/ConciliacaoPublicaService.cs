@@ -97,6 +97,7 @@ public class ConciliacaoPublicaService : IConciliacaoPublicaService
                     if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCustoSaida))
                         saida.TipoCusto = tipoCustoSaida;
                     saida.PendenteCategorizacao = false;
+                    saida.CategoriaSugerida = false;
                     saida.ClassificadoPeloCliente = true;
                     totalClassificados++;
                     continue;
@@ -108,6 +109,7 @@ public class ConciliacaoPublicaService : IConciliacaoPublicaService
                 if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCustoEntrada))
                     entrada.TipoCusto = tipoCustoEntrada;
                 entrada.PendenteCategorizacao = false;
+                entrada.CategoriaSugerida = false;
                 entrada.ClassificadoPeloCliente = true;
                 totalClassificados++;
             }
@@ -175,10 +177,10 @@ public class ConciliacaoPublicaService : IConciliacaoPublicaService
     private static IEnumerable<PendenteCategorizacaoDto> PendentesDoRegistro(RegistroDiario r) =>
         r.Entradas
             .Where(e => e.PendenteCategorizacao)
-            .Select(e => new PendenteCategorizacaoDto { Id = e.Id, Data = r.Data.ToString("yyyy-MM-dd"), Descricao = e.Descricao, Valor = e.Valor, Tipo = "Entrada" })
+            .Select(e => new PendenteCategorizacaoDto { Id = e.Id, Data = r.Data.ToString("yyyy-MM-dd"), Descricao = e.Descricao, Valor = e.Valor, Tipo = "Entrada", Categoria = e.Categoria, CategoriaSugerida = e.CategoriaSugerida })
             .Concat(r.Saidas
                 .Where(s => s.PendenteCategorizacao)
-                .Select(s => new PendenteCategorizacaoDto { Id = s.Id, Data = r.Data.ToString("yyyy-MM-dd"), Descricao = s.Descricao, Valor = s.Valor, Tipo = "Saida" }));
+                .Select(s => new PendenteCategorizacaoDto { Id = s.Id, Data = r.Data.ToString("yyyy-MM-dd"), Descricao = s.Descricao, Valor = s.Valor, Tipo = "Saida", Categoria = string.IsNullOrEmpty(s.Categoria) ? null : s.Categoria, CategoriaSugerida = s.CategoriaSugerida }));
 
     private async Task<LinkConciliacao> ObterLinkValidoAsync(string token)
     {

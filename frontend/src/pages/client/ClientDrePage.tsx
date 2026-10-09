@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { obterDre } from '../../api/metricas'
 import { listarContasBancarias } from '../../api/contasBancarias'
@@ -93,13 +93,31 @@ interface Drill {
   categoriaNome: string
 }
 
-type LinhaTipo = 'bloco' | 'subtotal'
+type LinhaTipo = 'bloco' | 'subtotal' | 'vertical'
+type VerticalKey = 'receitaFinanceira' | 'despesasNaoOperacionais' | 'naoClassificado'
 interface LinhaDre {
   key: string
   tipo: LinhaTipo
   label: string
   bloco?: Bloco
+  verticalKey?: VerticalKey
   final?: boolean
+}
+
+// Receita Financeira/Despesas Não Operacionais/Não Classificado entram aqui, na mesma ordem da
+// fórmula do backend (resultadoOperacional + receitaFinanceira - despesasNaoOperacionais -
+// naoClassificado + atividadesInvestimento + atividadesFinanciamento) — sem elas a soma das
+// linhas visíveis não batia com o Resultado Líquido (item 1.1). "Não Classificado" nunca é
+// omitido mesmo zerado, pro usuário ver de cara que não há lançamento sem categoria no período.
+const VERTICAL_COR: Record<VerticalKey, string> = {
+  receitaFinanceira: '#63e6be',
+  despesasNaoOperacionais: '#ff6b6b',
+  naoClassificado: '#ffd43b',
+}
+const VERTICAL_PREFIXO: Record<VerticalKey, string> = {
+  receitaFinanceira: '(+) ',
+  despesasNaoOperacionais: '(-) ',
+  naoClassificado: '(-) ',
 }
 
 const LINHAS: LinhaDre[] = [
@@ -109,6 +127,9 @@ const LINHAS: LinhaDre[] = [
   { key: 'margemContribuicao', tipo: 'subtotal', label: 'Margem de Contribuição' },
   { key: 'DESPESAS OPERACIONAIS', tipo: 'bloco', label: 'Despesas Operacionais', bloco: 'DESPESAS OPERACIONAIS' },
   { key: 'resultadoOperacional', tipo: 'subtotal', label: 'Resultado Operacional' },
+  { key: 'receitaFinanceira', tipo: 'vertical', label: 'Receita Financeira', verticalKey: 'receitaFinanceira' },
+  { key: 'despesasNaoOperacionais', tipo: 'vertical', label: 'Despesas Não Operacionais', verticalKey: 'despesasNaoOperacionais' },
+  { key: 'naoClassificado', tipo: 'vertical', label: 'Não Classificados', verticalKey: 'naoClassificado' },
   { key: 'ATIVIDADES DE INVESTIMENTO', tipo: 'bloco', label: 'Atividades de Investimento', bloco: 'ATIVIDADES DE INVESTIMENTO' },
   { key: 'ATIVIDADES DE FINANCIAMENTO', tipo: 'bloco', label: 'Atividades de Financiamento', bloco: 'ATIVIDADES DE FINANCIAMENTO' },
   { key: 'resultadoLiquido', tipo: 'subtotal', label: 'Resultado Líquido', final: true },
@@ -147,6 +168,33 @@ export default function ClientDrePage() {
       .then(cs => setContas(cs.filter(c => c.ativa)))
       .catch(() => {})
   }, [clienteId])
+
+  // Item 1.11: a tela abre no mês atual por padrão — se ele ainda não tem nenhum lançamento
+  // (comum logo no início do mês), mostrar um DRE zerado não ajuda ninguém. Pula direto pro
+  // último mês que de fato tem movimento. Roda só uma vez, e só se o usuário ainda não tiver
+  // navegado pra outro período enquanto os registros carregavam.
+  const ajusteInicialRef = useRef(false)
+  useEffect(() => {
+    if (ajusteInicialRef.current) return
+    if (registros.length === 0) return
+    ajusteInicialRef.current = true
+
+    const anoHoje = hoje.getFullYear()
+    const mesHoje = hoje.getMonth() + 1
+    if (ano !== anoHoje || mes !== mesHoje) return
+
+    const temAtividadeNoMesAtual = registros.some(r => {
+      const [a, m] = r.data.split('-').map(Number)
+      return a === anoHoje && m === mesHoje
+    })
+    if (temAtividadeNoMesAtual) return
+
+    const maisRecente = registros.reduce((max, r) => (r.data > max ? r.data : max), registros[0].data)
+    const [a, m] = maisRecente.split('-').map(Number)
+    setAno(a)
+    setMes(m)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registros])
 
   const periodos = useMemo<Periodo[]>(() => {
     const qtd = comparar ? qtdPeriodos : 1
@@ -346,6 +394,75 @@ export default function ClientDrePage() {
                         <span className="dre-cmp-cel-pct">{fmtPctOuTraco(v.percentual)}</span>
                       </span>
                     ))
+                  )}
+                </div>
+              )
+            }
+
+            if (linha.tipo === 'vertical') {
+              const vKey = linha.verticalKey!
+              const cor = VERTICAL_COR[vKey]
+              const linhasPorPeriodo = periodosComDre.map(p => p.dre[vKey])
+              const principal = linhasPorPeriodo[0]
+              const chaveExpand = `vertical::${vKey}`
+              const expandido = gruposExpandidos.has(chaveExpand)
+              const vazio = linhasPorPeriodo.every(l => l.categorias.length === 0)
+
+              return (
+                <div key={linha.key} className="dre-bloco-wrap">
+                  <div
+                    className={`dre-linha dre-linha-bloco${modoComparativo ? ' dre-linha-cmp' : ''}${vazio ? ' dre-linha-vazia' : ''}`}
+                    style={{
+                      borderLeft: `4px solid ${cor}`,
+                      ...(modoComparativo ? { gridTemplateColumns: `minmax(200px,1.6fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` } : {}),
+                    }}
+                    onClick={vazio ? undefined : () => toggleGrupo(chaveExpand)}
+                    role={vazio ? undefined : 'button'}
+                  >
+                    <span className="dre-linha-label">
+                      {!vazio && <span className="dre-expand">{expandido ? '▾' : '▸'}</span>}
+                      <span className="dre-bloco-nome" style={{ color: cor }}>{VERTICAL_PREFIXO[vKey]}{linha.label.toUpperCase()}</span>
+                    </span>
+                    {!modoComparativo ? (
+                      <>
+                        <span className="dre-linha-valor">{fmtBRL(principal.total)}</span>
+                        <span className="dre-linha-pct">{fmtPctOuTraco(principal.percentual)}</span>
+                      </>
+                    ) : (
+                      linhasPorPeriodo.map((l, i) => (
+                        <span key={periodosComDre[i].periodo.chave} className="dre-cmp-cel">
+                          <span className="dre-cmp-cel-valor">{fmtBRL(l.total)}</span>
+                          <span className="dre-cmp-cel-pct">{fmtPctOuTraco(l.percentual)}</span>
+                        </span>
+                      ))
+                    )}
+                  </div>
+
+                  {expandido && !vazio && (
+                    <div className="dre-expand-bloco">
+                      {linhasPorPeriodo.map((l, pIdx) => (
+                        <div key={periodosComDre[pIdx].periodo.chave} className="dre-expand-periodo">
+                          {modoComparativo && <div className="dre-expand-periodo-label">{periodosComDre[pIdx].periodo.label}</div>}
+                          {l.categorias.length === 0 ? (
+                            <div className="dre-vazio-inline">Nenhum lançamento nesta linha.</div>
+                          ) : (
+                            <div className="dre-cat-lista">
+                              {l.categorias.map(cat => (
+                                <button
+                                  key={cat.nome}
+                                  className={`dre-cat-btn${cat.nome === 'Não Classificado' ? ' dre-cat-btn-alerta' : ''}`}
+                                  onClick={() => abrirLancamentos(periodosComDre[pIdx].periodo, cat.nome)}
+                                >
+                                  <span className="dre-cat-nome">{cat.nome}</span>
+                                  <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
+                                  <span className="dre-cat-pct">{fmtPctOuTraco(cat.percentual)}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               )

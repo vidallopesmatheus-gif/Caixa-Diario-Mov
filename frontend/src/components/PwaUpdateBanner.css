@@ -1,0 +1,49 @@
+.pwa-update-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  background: var(--accent, #863bff);
+  z-index: 2000;
+  font-size: 14px;
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, .4);
+  animation: pwa-slide-down 0.25s ease;
+}
+
+@keyframes pwa-slide-down {
+  from { transform: translateY(-100%); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+
+.pwa-update-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.pwa-update-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pwa-update-btn {
+  background: #fff;
+  color: var(--accent, #863bff);
+  border: none;
+  border-radius: 8px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity .15s;
+}
+
+.pwa-update-btn:hover { opacity: .85; }

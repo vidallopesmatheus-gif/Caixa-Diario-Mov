@@ -91,6 +91,8 @@ builder.Services.AddScoped<IContaRecorrenteRepository, ContaRecorrenteRepository
 builder.Services.AddScoped<IMigracaoRecorrenciasService, MigracaoRecorrenciasService>();
 builder.Services.AddScoped<IContaProvisionadaService, ContaProvisionadaService>();
 builder.Services.AddScoped<IOcorrenciaRecorrenteDispensadaRepository, OcorrenciaRecorrenteDispensadaRepository>();
+builder.Services.AddScoped<IDuplicataDispensadaRepository, DuplicataDispensadaRepository>();
+builder.Services.AddScoped<ISugestaoVinculoIgnoradaRepository, SugestaoVinculoIgnoradaRepository>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IRecorrenciaService, RecorrenciaService>();
 builder.Services.AddScoped<IContaRecorrenteService, ContaRecorrenteService>();
@@ -116,6 +118,7 @@ builder.Services.AddScoped<IPagamentoFaturaRepository, PagamentoFaturaRepository
 builder.Services.AddScoped<IFaturaCartaoService, FaturaCartaoService>();
 builder.Services.AddScoped<IConciliacaoService, ConciliacaoService>();
 builder.Services.AddScoped<IPrevistoRealizadoService, PrevistoRealizadoService>();
+builder.Services.AddScoped<IDuplicataExtratoService, DuplicataExtratoService>();
 
 // Chat IA
 var groqApiKey = builder.Configuration["Groq:ApiKey"]

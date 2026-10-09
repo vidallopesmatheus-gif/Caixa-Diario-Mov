@@ -15,6 +15,7 @@ import RelatoriosPage from './pages/client/RelatoriosPage'
 import ConfiguracoesPage from './pages/client/ConfiguracoesPage'
 import Layout from './components/Layout/Layout'
 import InstallPrompt from './components/InstallPrompt'
+import PwaUpdateBanner from './components/PwaUpdateBanner'
 import PortalConciliacaoPage from './pages/portal/PortalConciliacaoPage'
 
 /** Redireciona uma rota antiga com :contaId para o novo path equivalente sob /banco. */
@@ -90,6 +91,7 @@ export default function App() {
           </Routes>
         </BrowserRouter>
       </AuthProvider>
+      <PwaUpdateBanner />
       <InstallPrompt />
     </>
   )

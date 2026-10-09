@@ -426,11 +426,11 @@ public class MetricasServiceTests
             registros.Add(reg);
         }
 
-        var resultado = _sut.CalcularIndicadores(registros).FolegoCaixa;
+        var resultado = _sut.CalcularIndicadores(registros, saldoDisponivel: 5000m).FolegoCaixa;
 
         Assert.True(resultado.Disponivel);
         Assert.Equal(1000m, resultado.CustoFixoMedioMensal);
-        Assert.Equal(5000m, resultado.SaldoDisponivel); // registro mais recente (mês atual) da conta
+        Assert.Equal(5000m, resultado.SaldoDisponivel); // mesmo saldo consolidado passado pelo controller (1.5)
         Assert.Equal(5.0m, resultado.Meses);
         Assert.Equal("confortavel", resultado.Faixa);
     }
@@ -446,7 +446,7 @@ public class MetricasServiceTests
             saldoFinal: 500m);
         reg.ContaBancariaId = contaId;
 
-        var resultado = _sut.CalcularIndicadores(new() { reg }).FolegoCaixa;
+        var resultado = _sut.CalcularIndicadores(new() { reg }, saldoDisponivel: 500m).FolegoCaixa;
 
         Assert.True(resultado.Disponivel);
         Assert.Equal(0.5m, resultado.Meses);

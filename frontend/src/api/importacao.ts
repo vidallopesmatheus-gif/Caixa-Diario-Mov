@@ -53,6 +53,12 @@ function mapPendente(raw: any): PendenteCategorizacao {
     descricao: raw.descricao ?? '',
     valor: raw.valor ?? 0,
     tipo: raw.tipo,
+    categoria: raw.categoria ?? undefined,
+    categoriaSugerida: raw.categoriaSugerida ?? false,
+    sugestaoTransferenciaContaId: raw.sugestaoTransferenciaContaId ?? undefined,
+    sugestaoTransferenciaContaNome: raw.sugestaoTransferenciaContaNome ?? undefined,
+    sugestaoTransferenciaLancamentoId: raw.sugestaoTransferenciaLancamentoId ?? undefined,
+    sugestaoTransferenciaData: raw.sugestaoTransferenciaData ?? undefined,
   }
 }
 
@@ -74,7 +80,9 @@ export const previewExtrato = async (
 
 export interface ResolucaoDuplicata {
   transacaoIndice: number
-  acao: 'Mesclar' | 'ImportarComoNovo'
+  // DuplicataManual: 'Mesclar' (padrão) | 'ImportarComoNovo'.
+  // DuplicataEntreArquivos (item 3.1): 'Ignorar' (padrão) | 'Importar'.
+  acao: 'Mesclar' | 'ImportarComoNovo' | 'Ignorar' | 'Importar'
 }
 
 export const importarExtrato = async (
@@ -106,6 +114,7 @@ export const importarExtrato = async (
     totalSaidas: Number(d.totalSaidas ?? 0),
     totalMescladasComManual: Number(d.totalMescladasComManual ?? 0),
     totalDuplicatasEntreArquivosSinalizadas: Number(d.totalDuplicatasEntreArquivosSinalizadas ?? 0),
+    totalDuplicatasEntreArquivosIgnoradas: Number(d.totalDuplicatasEntreArquivosIgnoradas ?? 0),
     totalSugestoesVinculo: Number(d.totalSugestoesVinculo ?? 0),
   }
 }

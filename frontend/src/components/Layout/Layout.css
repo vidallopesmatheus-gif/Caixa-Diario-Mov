@@ -41,9 +41,11 @@
   padding: 12px 20px; background: none; border: none;
   color: var(--tx3); font-size: 14px; font-weight: 600;
   cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
+  display: flex; align-items: center; gap: 6px; text-decoration: none;
 }
 .tab-btn.active { color: var(--tx); border-bottom-color: var(--accent); }
 .tab-btn:hover  { color: var(--btn-cancel-c); }
+.tab-btn-icone { font-size: 15px; }
 
 /* padding-bottom extra: espaço pro botão flutuante do assistente (Chat.css, fixed bottom:24px,
    altura 52px) nunca ficar em cima do fim do conteúdo (ex.: botão "Salvar" do Caixa). */
@@ -62,8 +64,28 @@
 .subtab-btn.active { color: var(--tx); border-bottom-color: var(--accent); }
 .subtab-btn:hover   { color: var(--btn-cancel-c); }
 
+/* Item 2.2: no mobile, as abas somem depois de "Contas" no scroll horizontal — sem indicação de
+   que há mais abas, o usuário simplesmente não as encontra. Virou uma barra fixa no rodapé, com
+   ícone+rótulo compactos, pra caber todas as 7 abas do cliente visíveis de uma vez (sem scroll). */
 @media (max-width: 600px) {
-  .tabs-bar    { padding: 0 12px; }
-  .tab-content { padding: 14px 14px 90px; }
+  .tabs-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+    padding: 4px env(safe-area-inset-right) calc(4px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
+    border-bottom: none; border-top: 1px solid var(--bd-sub);
+    overflow-x: visible;
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, .3);
+  }
+  .tab-btn {
+    flex: 1 1 0; min-width: 0; flex-direction: column; gap: 2px;
+    padding: 6px 2px; border-bottom: none; border-radius: 8px;
+  }
+  .tab-btn.active { background: var(--accent-soft, rgba(124,58,237,.12)); }
+  .tab-btn-icone { font-size: 18px; }
+  .tab-btn-label {
+    font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+
+  /* Conteúdo precisa de espaço pra barra inferior de abas (~58px) + o botão do assistente. */
+  .tab-content { padding: 14px 14px 140px; }
   .topbar      { padding: 10px 14px; }
 }

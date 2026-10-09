@@ -76,3 +76,23 @@ test('retorna JSON parseado quando resposta ok', async () => {
   const result = await apiFetch<{ dados: number[] }>('/api/test')
   expect(result.dados).toEqual([1, 2, 3])
 })
+
+// Item 2.10: /api/auth/* (login) é anônimo — nunca leva um token de outra sessão, e um 401 aqui
+// é erro de credenciais (vem com mensagem própria no corpo), nunca "sessão expirada".
+test('não inclui Authorization em /api/auth/* mesmo com token no localStorage', async () => {
+  localStorage.setItem('token', 'token-de-outra-sessao')
+  mockFetch(200, { dados: null })
+  await apiFetch('/api/auth/login')
+  const call = vi.mocked(fetch).mock.calls[0][1] as RequestInit
+  expect((call.headers as Record<string, string>).Authorization).toBeUndefined()
+})
+
+test('401 em /api/auth/* não apaga o localStorage nem redireciona — lança o erro da API', async () => {
+  localStorage.setItem('token', 'token-de-outra-sessao')
+  localStorage.setItem('user', '{}')
+  mockFetch(401, { mensagem: 'Usuário ou senha incorretos.' })
+  await expect(apiFetch('/api/auth/login')).rejects.toThrow('Usuário ou senha incorretos.')
+  expect(localStorage.getItem('token')).toBe('token-de-outra-sessao')
+  expect(localStorage.getItem('user')).toBe('{}')
+  expect(window.location.href).toBe('')
+})

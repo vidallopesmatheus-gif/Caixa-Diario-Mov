@@ -26,3 +26,13 @@ export async function listarSugestoesVinculo(
   const res = await apiFetch<ApiResponse<SugestaoVinculo[]>>(`/api/conciliacao/${clienteId}/sugestoes?${params}`)
   return res.dados ?? []
 }
+
+// Item 3.3: "Ignorar" grava a decisão — esse par título×lançamento não é sugerido de novo.
+export async function ignorarSugestaoVinculo(
+  clienteId: string, contaProvisionadaId: string, lancamentoId: string,
+): Promise<void> {
+  await apiFetch<ApiResponse<null>>(
+    `/api/conciliacao/${clienteId}/sugestoes/ignorar`,
+    { method: 'POST', body: JSON.stringify({ contaProvisionadaId, lancamentoId }) },
+  )
+}
