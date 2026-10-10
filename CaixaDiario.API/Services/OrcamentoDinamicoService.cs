@@ -63,9 +63,11 @@ public class OrcamentoDinamicoService : IOrcamentoDinamicoService
 
         var compromissosFixos = Math.Max(contasPagarMes + recorrenciasPagar, despesaFixaMedia);
 
-        // Aporte necessário = soma de todas as metas ativas
+        // Aporte necessário = soma de todas as metas ativas — metas já conquistadas (Fase 5) não
+        // precisam mais de aporte nenhum, saem daqui e do "Ritmo da Meta".
         var aporteNecessario = metas
-            .Where(m => m.ModoMeta == "metodo" && m.ValorSonho > 0 && m.PrazoAnos > 0 && m.TaxaRetorno > 0)
+            .Where(m => m.ModoMeta == "metodo" && m.ValorSonho > 0 && m.PrazoAnos > 0 && m.TaxaRetorno > 0
+                && m.Status != "Conquistada")
             .Sum(m => CalcularAporteMensal(m));
 
         var saldoLivre = receitaEsperada - compromissosFixos - aporteNecessario;

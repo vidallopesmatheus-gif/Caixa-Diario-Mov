@@ -5,8 +5,8 @@ function baseMeta(overrides: Partial<MetaAnual> = {}): MetaAnual {
   return {
     id: '1', clienteId: 'c1', ano: 2026,
     metaReceita: 0, metaLucro: 0, mesInicio: 1, periodoMeses: 12,
-    salvoEm: '2026-01-01T00:00:00.000Z',
-    modoMeta: 'metodo',
+    salvoEm: '2026-01-01T00:00:00.000Z', criadoEm: '2026-01-01T00:00:00.000Z',
+    modoMeta: 'metodo', status: 'EmAndamento',
     valorSonho: 10000, prazoAnos: 0, taxaRetorno: 12, totalInvestido: 0,
     ...overrides,
   }

@@ -123,6 +123,35 @@ public class ContaProvisionadaServiceTests
             reg.Saidas.Single().Valor == 30m && reg.SaldoFinal == 70m)), Times.Once); // 100 - 30
     }
 
+    // Fase 6: parcela de financiamento nunca baixa pelo fluxo genérico (que só sabe criar 1
+    // lançamento — a parcela precisa desdobrar em juros/amortização/encargos).
+    [Fact]
+    public async Task AtualizarAsync_BaixaDeParcelaDeFinanciamento_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaPagamento = CriarConta(clienteId, saldoInicial: 100m);
+        var itemId = Guid.NewGuid();
+        var dataVencimento = new DateOnly(2026, 10, 10);
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaPagamento.Id, Data = dataVencimento,
+            Entradas = new(), Saidas = new(), ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Id = itemId, Descricao = "Parcela 1/42", Valor = 1000m, DataVencimento = dataVencimento,
+                    Pago = false, ContaBancariaId = contaPagamento.Id, OrigemFinanciamentoId = Guid.NewGuid() },
+            },
+        };
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AtualizarAsync(clienteId, itemId,
+            new AtualizarContaProvisionadaDto { Pago = true, DataPagamento = dataVencimento }, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
     [Fact]
     public async Task AtualizarAsync_BaixaComValorRealizadoDiferente_UsaOValorRealNoLancamento()
     {
@@ -311,5 +340,24 @@ public class ContaProvisionadaServiceTests
         await _sut.ExcluirAsync(clienteId, itemId, clienteId, "cliente");
 
         _registroRepoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(reg => reg.ContasPagar.Count == 0)), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExcluirAsync_ParcelaDeFinanciamento_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = new DateOnly(2026, 10, 10),
+            Entradas = new(), Saidas = new(), ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada> { new() { Id = itemId, Descricao = "x", Valor = 10m, Pago = false, OrigemFinanciamentoId = Guid.NewGuid() } },
+        };
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirAsync(clienteId, itemId, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
     }
 }

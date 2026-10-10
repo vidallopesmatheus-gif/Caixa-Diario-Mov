@@ -5,7 +5,7 @@ import AdminOverviewPage from './pages/admin/AdminOverviewPage'
 import AdminClientsPage from './pages/admin/AdminClientsPage'
 import AdminCaixaPage from './pages/admin/AdminCaixaPage'
 import ClientCaixaPage from './pages/client/ClientCaixaPage'
-import ClientContasPage from './pages/client/ClientContasPage'
+import ContasPage from './pages/client/ContasPage'
 import ClientDashboardPage from './pages/client/ClientDashboardPage'
 import ClientBancoPage from './pages/client/ClientBancoPage'
 import ClientContaDetalhePage from './pages/client/ClientContaDetalhePage'
@@ -47,7 +47,7 @@ function ProtectedRoutes() {
       <Routes>
         <Route path="/dashboard"  element={<ClientDashboardPage />} />
         <Route path="/caixa"      element={<ClientCaixaPage />} />
-        <Route path="/contas"     element={<ClientContasPage />} />
+        <Route path="/contas/*"   element={<ContasPage />} />
 
         {/* Banco: operação (extrato, importação) — cadastro fica em Configurações */}
         <Route path="/banco" element={<ClientBancoPage />} />

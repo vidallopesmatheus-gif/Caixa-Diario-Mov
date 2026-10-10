@@ -38,4 +38,11 @@ public class ItemFinanceiroSaida
     public Guid? ParcelamentoId { get; set; }
     public int? NumeroParcela { get; set; }
     public int? TotalParcelas { get; set; }
+    // Fase 5: preenchido quando esta saída foi criada por "🏆 Conquistei" (à vista ou cartão) —
+    // "Desfazer conquista" usa isso pra achar e remover, nunca uma lista de Ids guardada na Meta.
+    public Guid? OrigemMetaId { get; set; }
+    // Fase 6: preenchido quando esta saída foi criada pela baixa de uma parcela de financiamento
+    // (juros, amortização ou encargos) — estorno usa isso pra achar e remover os até 3 lançamentos
+    // de uma mesma parcela, sem precisar vasculhar pelos Ids individuais guardados em ContaProvisionada.
+    public Guid? OrigemFinanciamentoId { get; set; }
 }

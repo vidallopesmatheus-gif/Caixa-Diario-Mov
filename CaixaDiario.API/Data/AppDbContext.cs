@@ -26,6 +26,7 @@ public class AppDbContext : DbContext
     public DbSet<OcorrenciaRecorrenteDispensada> OcorrenciasRecorrentesDispensadas { get; set; }
     public DbSet<DuplicataDispensada> DuplicatasDispensadas { get; set; }
     public DbSet<SugestaoVinculoIgnorada> SugestoesVinculoIgnoradas { get; set; }
+    public DbSet<Financiamento> Financiamentos { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +109,20 @@ public class AppDbContext : DbContext
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
             entity.Property(e => e.DataAlvo).HasColumnName("data_alvo");
 
+            // Fase 5: "🏆 Conquistei" — metas existentes recebem "EmAndamento" via default da coluna
+            // (migration), nunca null (filtros de "metas ativas" sempre podem comparar == status).
+            entity.Property(e => e.Status).HasColumnName("status").HasDefaultValue("EmAndamento");
+            entity.Property(e => e.DataConquista).HasColumnName("data_conquista");
+            entity.Property(e => e.ValorPago).HasColumnName("valor_pago").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.FormaPagamento).HasColumnName("forma_pagamento");
+            entity.Property(e => e.Parcelas).HasColumnName("parcelas");
+            entity.Property(e => e.DataPrimeiraParcela).HasColumnName("data_primeira_parcela");
+            entity.Property(e => e.ContaPagamentoId).HasColumnName("conta_pagamento_id");
+            entity.Property(e => e.Categoria).HasColumnName("categoria");
+            entity.Property(e => e.Observacao).HasColumnName("observacao");
+            entity.Property(e => e.TransferenciaResgateId).HasColumnName("transferencia_resgate_id");
+            entity.Property(e => e.FinanciamentoId).HasColumnName("financiamento_id");
+
             entity.HasOne(e => e.Cliente)
                 .WithMany(u => u.MetasAnuais)
                 .HasForeignKey(e => e.ClienteId);
@@ -115,6 +130,11 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.ContaInvestimento)
                 .WithMany()
                 .HasForeignKey(e => e.ContaInvestimentoId)
+                .IsRequired(false);
+
+            entity.HasOne(e => e.ContaPagamento)
+                .WithMany()
+                .HasForeignKey(e => e.ContaPagamentoId)
                 .IsRequired(false);
 
             // Só o modo "simples" (Meta de Faturamento Mensal) é 1-por-ano-civil; o modo "metodo"
@@ -153,6 +173,41 @@ public class AppDbContext : DbContext
                 .IsRequired()
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.ClienteId, e.Ativo });
+        });
+
+        modelBuilder.Entity<Financiamento>(entity =>
+        {
+            entity.ToTable("financiamentos");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.Descricao).HasColumnName("descricao").IsRequired();
+            entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired().HasDefaultValue("Financiamento");
+            entity.Property(e => e.ValorBem).HasColumnName("valor_bem").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ValorEntrada).HasColumnName("valor_entrada").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ValorFinanciado).HasColumnName("valor_financiado").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.NumeroParcelas).HasColumnName("numero_parcelas");
+            entity.Property(e => e.ValorParcela).HasColumnName("valor_parcela").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxaJurosMensal).HasColumnName("taxa_juros_mensal").HasColumnType("decimal(10,8)");
+            entity.Property(e => e.Sistema).HasColumnName("sistema").IsRequired().HasDefaultValue("Price");
+            entity.Property(e => e.DataPrimeiraParcela).HasColumnName("data_primeira_parcela");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+            entity.Property(e => e.BemVinculado).HasColumnName("bem_vinculado");
+            entity.Property(e => e.Status).HasColumnName("status").IsRequired().HasDefaultValue("Ativo");
+            entity.Property(e => e.OrigemMetaId).HasColumnName("origem_meta_id");
+            entity.Property(e => e.ValorAdiantado).HasColumnName("valor_adiantado").HasColumnType("decimal(18,2)").HasDefaultValue(0m);
+            entity.Property(e => e.EconomiaJurosAcumulada).HasColumnName("economia_juros_acumulada").HasColumnType("decimal(18,2)").HasDefaultValue(0m);
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
+
+            entity.HasOne(e => e.Cliente)
+                .WithMany()
+                .HasForeignKey(e => e.ClienteId);
+            entity.HasOne(e => e.ContaBancaria)
+                .WithMany()
+                .HasForeignKey(e => e.ContaBancariaId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.ClienteId, e.Status });
         });
 
         modelBuilder.Entity<OcorrenciaRecorrenteDispensada>(entity =>

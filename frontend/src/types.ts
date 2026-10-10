@@ -176,6 +176,53 @@ export interface ContaRecorrente {
   diaVencimento?: number
 }
 
+/** Fase 6: financiamento/empréstimo/consórcio/parcelamento. Estatísticas vêm sempre calculadas
+ * ao vivo pelo backend a partir das parcelas — nunca duplicadas aqui. */
+export interface Financiamento {
+  id: string
+  descricao: string
+  tipo: 'Financiamento' | 'Emprestimo' | 'Consorcio' | 'Parcelamento'
+  valorBem: number
+  valorEntrada: number
+  valorFinanciado: number
+  numeroParcelas: number
+  valorParcela?: number
+  taxaJurosMensal?: number
+  sistema: 'Price' | 'SAC' | 'SemJuros'
+  dataPrimeiraParcela: string
+  contaBancariaId: string
+  contaBancariaNome: string
+  bemVinculado?: string
+  status: 'Ativo' | 'Quitado'
+  saldoDevedor: number
+  totalParcelasAtual: number
+  parcelasPagas: number
+  percentualParcelasPagas: number
+  percentualDividaQuitada: number
+  jurosPagos: number
+  jurosAPagar: number
+  jurosTotais: number
+  proximaParcelaValor?: number
+  proximaParcelaVencimento?: string
+  dataPrevistaQuitacao?: string
+  valorAdiantado: number
+  economiaJurosAcumulada: number
+}
+
+export interface ParcelaFinanciamento {
+  id: string
+  numero: number
+  vencimento: string
+  valor: number
+  juros: number
+  amortizacao: number
+  encargos: number
+  saldoDevedor: number
+  pago: boolean
+  dataBaixa?: string
+  atrasada: boolean
+}
+
 export interface CategoriaItem {
   nome: string
   tipoCusto: TipoCusto
@@ -220,6 +267,7 @@ export interface MetaAnual {
   mesInicio: number
   periodoMeses: number
   salvoEm: string
+  criadoEm: string
   sonho?: string
   modoMeta: 'simples' | 'metodo'
   valorSonho: number
@@ -231,6 +279,19 @@ export interface MetaAnual {
   contaInvestimentoId?: string
   /** Data real escolhida pra atingir o objetivo (modo "metodo") — "YYYY-MM-DD". */
   dataAlvo?: string
+
+  // Fase 5: "🏆 Conquistei"
+  status: 'EmAndamento' | 'Conquistada' | 'Cancelada'
+  dataConquista?: string
+  valorPago?: number
+  formaPagamento?: 'AVista' | 'Cartao' | 'Boleto' | 'Financiado'
+  parcelas?: number
+  dataPrimeiraParcela?: string
+  contaPagamentoId?: string
+  categoria?: string
+  observacao?: string
+  transferenciaResgateId?: string
+  financiamentoId?: string
 }
 
 export interface LoginResponse {

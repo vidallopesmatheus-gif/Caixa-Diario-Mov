@@ -6,7 +6,9 @@ import StatCard from '../../components/shared/StatCard'
 import { fmtBRL, fmtPct, todayISO } from '../../utils/format'
 import { calcularJanelaPeriodo } from '../../utils/periodo'
 import type { PeriodoOpcao } from '../../utils/periodo'
-import { obterMeta, salvarMeta, listarMetas, excluirMeta } from '../../api/metas'
+import { obterMeta, salvarMeta, listarMetas, excluirMeta, desfazerConquistaMeta } from '../../api/metas'
+import ConquistarMetaModal from './dashboard/ConquistarMetaModal'
+import { calcularRitmoMeta } from '../../utils/metaRitmo'
 import { obterSelicAtual } from '../../api/selic'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { obterDre } from '../../api/metricas'
@@ -19,6 +21,7 @@ import ResumoStatusBar from './dashboard/ResumoStatusBar'
 import ResumoMetricCards from './dashboard/ResumoMetricCards'
 import AtencaoCard from './dashboard/AtencaoCard'
 import SaudeNegocioBlock from './dashboard/SaudeNegocioBlock'
+import DividasCard from './dashboard/DividasCard'
 import AtividadeRecente from './dashboard/AtividadeRecente'
 import type { ContaBancaria } from '../../types'
 import type { MetaAnual } from '../../types'
@@ -140,6 +143,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [editMargemPJ, setEditMargemPJ] = useState('')
   const [editIconeSonho, setEditIconeSonho] = useState('')
   const [savingObjetivo, setSavingObjetivo] = useState(false)
+  // Fase 5: "🏆 Conquistei" — meta sendo conquistada agora (abre o modal) e feedback de
+  // "Desfazer conquista" (lista o que foi removido/mantido, pro usuário conferir).
+  const [conquistandoMeta, setConquistandoMeta] = useState<MetaAnual | null>(null)
+  const [desfazendoConquistaId, setDesfazendoConquistaId] = useState<string | null>(null)
+  const [desfazerMsg, setDesfazerMsg] = useState('')
   const [objetivoMsg, setObjetivoMsg] = useState('')
   const [selic, setSelic] = useState(10.5)
   const [selicIndisponivel, setSelicIndisponivel] = useState(false)
@@ -200,6 +208,32 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   }, [clienteId])
 
   const objetivoSelecionado = objetivos.find(o => o.id === objetivoSelecionadoId) ?? null
+
+  // Item 5.2: destaca o botão "Conquistei" quando a meta já chegou a 100% do ritmo planejado.
+  const ritmoObjetivoSelecionado = objetivoSelecionado && objetivoSelecionado.valorSonho > 0
+    ? calcularRitmoMeta(objetivoSelecionado) : null
+  const objetivosConquistados = useMemo(
+    () => objetivos.filter(o => o.status === 'Conquistada').sort((a, b) => (b.dataConquista ?? '').localeCompare(a.dataConquista ?? '')),
+    [objetivos]
+  )
+
+  async function handleDesfazerConquista(meta: MetaAnual) {
+    if (!confirm(`Desfazer a conquista de "${meta.sonho || 'Objetivo'}"? Itens já pagos/vinculados ao extrato são mantidos.`)) return
+    setDesfazendoConquistaId(meta.id)
+    setDesfazerMsg('')
+    try {
+      const resultado = await desfazerConquistaMeta(meta.id)
+      await carregarObjetivos(true)
+      const partes: string[] = []
+      if (resultado.removidos.length > 0) partes.push(`${resultado.removidos.length} item(ns) removido(s)`)
+      if (resultado.mantidos.length > 0) partes.push(`${resultado.mantidos.length} já pago(s)/vinculado(s) mantido(s): ${resultado.mantidos.join(', ')}`)
+      setDesfazerMsg(partes.length > 0 ? partes.join(' · ') : 'Conquista desfeita.')
+    } catch (e: unknown) {
+      setDesfazerMsg(e instanceof Error ? e.message : 'Erro ao desfazer a conquista.')
+    } finally {
+      setDesfazendoConquistaId(null)
+    }
+  }
 
   const doPeriodo = useMemo(() =>
     registrosFiltrados.filter(r => r.data >= de && r.data <= ate),
@@ -613,6 +647,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         <SaudeNegocioBlock clienteId={clienteId} margem={dreLoading ? undefined : (dreAtual?.margem ?? null)} janela={janela} />
       )}
 
+      {/* Fase 6H: resumo de financiamentos/empréstimos/consórcios — some quando não há contrato ativo. */}
+      {clienteId && <DividasCard clienteId={clienteId} />}
+
       {/* ══ Camada 5: atividade recente ══ */}
       <AtividadeRecente registros={registros} contasBancarias={contasBancarias} />
 
@@ -963,6 +1000,20 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               🗑 Excluir
             </button>
           )}
+          {objetivoSelecionado && objetivoSelecionado.status === 'EmAndamento' && (
+            <button
+              type="button"
+              onClick={() => setConquistandoMeta(objetivoSelecionado)}
+              style={{
+                padding: '8px 16px', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer', border: 'none',
+                background: (ritmoObjetivoSelecionado?.percentual ?? 0) >= 100 ? 'var(--accent)' : 'var(--bg-card)',
+                color: (ritmoObjetivoSelecionado?.percentual ?? 0) >= 100 ? '#fff' : 'var(--tx1)',
+                boxShadow: (ritmoObjetivoSelecionado?.percentual ?? 0) >= 100 ? '0 0 0 2px var(--accent), 0 2px 10px rgba(10,132,255,.35)' : 'none',
+              }}
+            >
+              🏆 Conquistei
+            </button>
+          )}
           {objetivoMsg && <span style={{ fontSize: 13, color: objetivoMsg === 'Objetivo salvo!' ? '#34c759' : '#ff6b6b' }}>{objetivoMsg}</span>}
         </div>
         {objetivoSelecionado?.salvoEm && (
@@ -971,6 +1022,60 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           </div>
         )}
       </div>
+
+      {objetivosConquistados.length > 0 && (
+        <div className="meta-card">
+          <h3>🏆 Conquistadas ({objetivosConquistados.length})</h3>
+          {desfazerMsg && <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 10 }}>{desfazerMsg}</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {objetivosConquistados.map(m => {
+              const diferenca = (m.valorPago ?? 0) - m.valorSonho
+              const mesesAteConquistar = m.dataConquista && m.criadoEm
+                ? Math.max(0, Math.round((new Date(m.dataConquista).getTime() - new Date(m.criadoEm).getTime()) / (1000 * 60 * 60 * 24 * 30)))
+                : null
+              return (
+                <div key={m.id} style={{ padding: 12, borderRadius: 10, background: 'var(--bg-input)', border: '1px solid var(--bd)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+                    <strong>{m.iconeSonho ? `${m.iconeSonho} ` : '🏆 '}{m.sonho || 'Objetivo'}</strong>
+                    <span style={{ fontSize: 12, color: 'var(--tx3)' }}>
+                      {m.dataConquista ? new Date(m.dataConquista + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : ''}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--tx2)', marginTop: 6 }}>
+                    Planejado: {fmtBRL(m.valorSonho)} · Pago: {fmtBRL(m.valorPago ?? 0)}
+                    {' · '}
+                    <span style={{ color: diferenca <= 0 ? '#34c759' : '#ff9500' }}>
+                      {diferenca <= 0 ? `economia de ${fmtBRL(Math.abs(diferenca))}` : `${fmtBRL(diferenca)} a mais`}
+                    </span>
+                    {mesesAteConquistar !== null && <> · {mesesAteConquistar} mês(es) até conquistar</>}
+                    {m.formaPagamento && <> · {m.formaPagamento}</>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDesfazerConquista(m)}
+                    disabled={desfazendoConquistaId === m.id}
+                    style={{ marginTop: 8, fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-card)', color: 'var(--tx2)', cursor: 'pointer' }}
+                  >
+                    {desfazendoConquistaId === m.id ? 'Desfazendo...' : '↩️ Desfazer conquista'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {conquistandoMeta && (
+        <ConquistarMetaModal
+          meta={conquistandoMeta}
+          contasBancarias={contasBancarias}
+          onClose={() => setConquistandoMeta(null)}
+          onConquistada={async () => {
+            setConquistandoMeta(null)
+            await carregarObjetivos(true)
+          }}
+        />
+      )}
 
       <div className="meta-card">
         <h3>📈 Meta de Faturamento Mensal {anoAtual}</h3>
