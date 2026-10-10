@@ -10,6 +10,7 @@ public class MetaAnualDto
     public int MesInicio { get; set; }
     public int PeriodoMeses { get; set; }
     public DateTime SalvoEm { get; set; }
+    public DateTime CriadoEm { get; set; }
     public string? Sonho { get; set; }
     public string ModoMeta { get; set; } = "simples";
     public decimal ValorSonho { get; set; }
@@ -20,4 +21,17 @@ public class MetaAnualDto
     public string? IconeSonho { get; set; }
     public Guid? ContaInvestimentoId { get; set; }
     public DateOnly? DataAlvo { get; set; }
+
+    // Fase 5: "🏆 Conquistei"
+    public string Status { get; set; } = "EmAndamento";
+    public DateOnly? DataConquista { get; set; }
+    public decimal? ValorPago { get; set; }
+    public string? FormaPagamento { get; set; }
+    public int? Parcelas { get; set; }
+    public DateOnly? DataPrimeiraParcela { get; set; }
+    public Guid? ContaPagamentoId { get; set; }
+    public string? Categoria { get; set; }
+    public string? Observacao { get; set; }
+    public Guid? TransferenciaResgateId { get; set; }
+    public Guid? FinanciamentoId { get; set; }
 }

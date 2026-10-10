@@ -45,4 +45,18 @@ public class MetasController : ControllerBase
         await _metaService.ExcluirMetaAsync(id, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<object> { Dados = null });
     }
+
+    [HttpPost("{id:guid}/conquistar")]
+    public async Task<IActionResult> Conquistar(Guid id, [FromBody] ConquistarMetaDto dto)
+    {
+        var resultado = await _metaService.ConquistarAsync(id, ObterUsuarioId(), ObterPerfil(), dto);
+        return Ok(new ApiResponse<MetaAnualDto> { Dados = resultado });
+    }
+
+    [HttpPost("{id:guid}/desfazer-conquista")]
+    public async Task<IActionResult> DesfazerConquista(Guid id)
+    {
+        var resultado = await _metaService.DesfazerConquistaAsync(id, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<DesfazerConquistaResultDto> { Dados = resultado });
+    }
 }

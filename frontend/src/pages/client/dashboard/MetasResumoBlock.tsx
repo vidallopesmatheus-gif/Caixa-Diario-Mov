@@ -27,7 +27,7 @@ export default function MetasResumoBlock({ clienteId, metas, loading }: Props) {
   // Elegíveis: metas com um "sonho" de investimento configurado (método com valor-alvo).
   // Uma meta "simples" (só receita/lucro do ano) não tem valor-alvo/acumulado pra mostrar aqui.
   const elegiveis = useMemo(
-    () => metas.filter(m => m.modoMeta === 'metodo' && m.valorSonho > 0).sort((a, b) => b.ano - a.ano),
+    () => metas.filter(m => m.modoMeta === 'metodo' && m.valorSonho > 0 && m.status !== 'Conquistada').sort((a, b) => b.ano - a.ano),
     [metas]
   )
   const chaveElegiveis = elegiveis.map(m => m.id).join(',')

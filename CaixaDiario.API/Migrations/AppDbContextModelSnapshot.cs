@@ -306,6 +306,114 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("duplicatas_dispensadas", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.Financiamento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("AtualizadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("atualizado_em");
+
+                    b.Property<string>("BemVinculado")
+                        .HasColumnType("text")
+                        .HasColumnName("bem_vinculado");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<Guid>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateOnly>("DataPrimeiraParcela")
+                        .HasColumnType("date")
+                        .HasColumnName("data_primeira_parcela");
+
+                    b.Property<string>("Descricao")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("descricao");
+
+                    b.Property<decimal>("EconomiaJurosAcumulada")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18,2)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("economia_juros_acumulada");
+
+                    b.Property<int>("NumeroParcelas")
+                        .HasColumnType("integer")
+                        .HasColumnName("numero_parcelas");
+
+                    b.Property<Guid?>("OrigemMetaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("origem_meta_id");
+
+                    b.Property<string>("Sistema")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Price")
+                        .HasColumnName("sistema");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Ativo")
+                        .HasColumnName("status");
+
+                    b.Property<decimal?>("TaxaJurosMensal")
+                        .HasColumnType("decimal(10,8)")
+                        .HasColumnName("taxa_juros_mensal");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Financiamento")
+                        .HasColumnName("tipo");
+
+                    b.Property<decimal>("ValorAdiantado")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18,2)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("valor_adiantado");
+
+                    b.Property<decimal>("ValorBem")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor_bem");
+
+                    b.Property<decimal>("ValorEntrada")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor_entrada");
+
+                    b.Property<decimal>("ValorFinanciado")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor_financiado");
+
+                    b.Property<decimal?>("ValorParcela")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor_parcela");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContaBancariaId");
+
+                    b.HasIndex("ClienteId", "Status");
+
+                    b.ToTable("financiamentos", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.Grupo", b =>
                 {
                     b.Property<Guid>("Id")
@@ -416,6 +524,10 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("atualizado_em");
 
+                    b.Property<string>("Categoria")
+                        .HasColumnType("text")
+                        .HasColumnName("categoria");
+
                     b.Property<Guid>("ClienteId")
                         .HasColumnType("uuid")
                         .HasColumnName("cliente_id");
@@ -424,6 +536,10 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("conta_investimento_id");
 
+                    b.Property<Guid?>("ContaPagamentoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_pagamento_id");
+
                     b.Property<DateTime>("CriadoEm")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("criado_em");
@@ -431,6 +547,22 @@ namespace CaixaDiario.API.Migrations
                     b.Property<DateOnly?>("DataAlvo")
                         .HasColumnType("date")
                         .HasColumnName("data_alvo");
+
+                    b.Property<DateOnly?>("DataConquista")
+                        .HasColumnType("date")
+                        .HasColumnName("data_conquista");
+
+                    b.Property<DateOnly?>("DataPrimeiraParcela")
+                        .HasColumnType("date")
+                        .HasColumnName("data_primeira_parcela");
+
+                    b.Property<Guid?>("FinanciamentoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("financiamento_id");
+
+                    b.Property<string>("FormaPagamento")
+                        .HasColumnType("text")
+                        .HasColumnName("forma_pagamento");
 
                     b.Property<string>("IconeSonho")
                         .HasColumnType("text");
@@ -453,6 +585,14 @@ namespace CaixaDiario.API.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Observacao")
+                        .HasColumnType("text")
+                        .HasColumnName("observacao");
+
+                    b.Property<int?>("Parcelas")
+                        .HasColumnType("integer")
+                        .HasColumnName("parcelas");
+
                     b.Property<int>("PeriodoMeses")
                         .HasColumnType("integer");
 
@@ -462,11 +602,26 @@ namespace CaixaDiario.API.Migrations
                     b.Property<string>("Sonho")
                         .HasColumnType("text");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("EmAndamento")
+                        .HasColumnName("status");
+
                     b.Property<decimal>("TaxaRetorno")
                         .HasColumnType("numeric");
 
                     b.Property<decimal>("TotalInvestido")
                         .HasColumnType("numeric");
+
+                    b.Property<Guid?>("TransferenciaResgateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("transferencia_resgate_id");
+
+                    b.Property<decimal?>("ValorPago")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor_pago");
 
                     b.Property<decimal>("ValorSonho")
                         .HasColumnType("numeric");
@@ -474,6 +629,8 @@ namespace CaixaDiario.API.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ContaInvestimentoId");
+
+                    b.HasIndex("ContaPagamentoId");
 
                     b.HasIndex("ClienteId", "Ano")
                         .IsUnique()
@@ -981,6 +1138,25 @@ namespace CaixaDiario.API.Migrations
                     b.Navigation("ContaBancaria");
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.Financiamento", b =>
+                {
+                    b.HasOne("CaixaDiario.API.Models.Usuario", "Cliente")
+                        .WithMany()
+                        .HasForeignKey("ClienteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaBancaria")
+                        .WithMany()
+                        .HasForeignKey("ContaBancariaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Cliente");
+
+                    b.Navigation("ContaBancaria");
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.LinkConciliacao", b =>
                 {
                     b.HasOne("CaixaDiario.API.Models.Usuario", "Cliente")
@@ -1004,9 +1180,15 @@ namespace CaixaDiario.API.Migrations
                         .WithMany()
                         .HasForeignKey("ContaInvestimentoId");
 
+                    b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaPagamento")
+                        .WithMany()
+                        .HasForeignKey("ContaPagamentoId");
+
                     b.Navigation("Cliente");
 
                     b.Navigation("ContaInvestimento");
+
+                    b.Navigation("ContaPagamento");
                 });
 
             modelBuilder.Entity("CaixaDiario.API.Models.PagamentoFatura", b =>

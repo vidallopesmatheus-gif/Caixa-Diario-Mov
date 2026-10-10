@@ -22,7 +22,7 @@ public class ContaProvisionadaService : IContaProvisionadaService
         _contaBancariaRepo = contaBancariaRepo;
     }
 
-    public async Task<ContaProvisionadaDto> CriarAsync(CriarContaProvisionadaDto dto, Guid usuarioLogadoId, string perfil)
+    public async Task<ContaProvisionadaDto> CriarAsync(CriarContaProvisionadaDto dto, Guid usuarioLogadoId, string perfil, Guid? origemMetaId = null)
     {
         if (perfil == "cliente" && usuarioLogadoId != dto.ClienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
@@ -42,6 +42,7 @@ public class ContaProvisionadaService : IContaProvisionadaService
             Categoria = dto.Categoria,
             ContaBancariaId = dto.ContaBancariaId,
             Pago = false,
+            OrigemMetaId = origemMetaId,
         };
 
         if (dto.Tipo == "Receber")
@@ -76,7 +77,15 @@ public class ContaProvisionadaService : IContaProvisionadaService
         }
 
         if (dto.Pago == true && !pagoAntes)
+        {
+            // Fase 6: parcela de financiamento baixa em até 3 lançamentos (juros/amortização/
+            // encargos) — BaixarAsync só sabe criar 1. Forçar pela tela de Financiamentos evita
+            // que a baixa genérica desmonte a decomposição planejada da parcela.
+            if (item.OrigemFinanciamentoId.HasValue)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                    "Esta parcela é de um financiamento — baixe ela pela tela de Financiamentos.", "pago");
             await BaixarAsync(clienteId, registros, item, ehReceber, dto);
+        }
         else if (dto.Pago == false && pagoAntes)
             await EstornarAsync(clienteId, registro, item, ehReceber);
 
@@ -99,6 +108,12 @@ public class ContaProvisionadaService : IContaProvisionadaService
 
         if (item.Pago)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Estorne a baixa antes de excluir este título.");
+        // Fase 6: parcela de financiamento só existe atrelada ao contrato — excluir isoladamente
+        // desmontaria a tabela de amortização. Excluir o contrato inteiro é feito pela tela de
+        // Financiamentos (e só quando nenhuma parcela foi paga, igual aqui).
+        if (item.OrigemFinanciamentoId.HasValue)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                "Esta parcela é de um financiamento — exclua o contrato inteiro pela tela de Financiamentos.");
 
         if (ehReceber) registro.ContasReceber = registro.ContasReceber.Where(c => c.Id != id).ToList();
         else registro.ContasPagar = registro.ContasPagar.Where(c => c.Id != id).ToList();

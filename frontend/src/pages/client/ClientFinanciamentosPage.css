@@ -1,0 +1,62 @@
+.financiamentos-page { display: flex; flex-direction: column; gap: 16px; }
+
+.financiamentos-header { display: flex; justify-content: flex-end; }
+
+.financiamentos-vazio { color: var(--muted); text-align: center; padding: 40px 0; }
+
+.financiamentos-msg { background: var(--tag-out); color: var(--danger); padding: 10px 14px; border-radius: 8px; font-size: 14px; }
+
+.financiamentos-lista { display: flex; flex-direction: column; gap: 14px; }
+
+.financiamento-card {
+  background: var(--bg-card); border: 1px solid var(--bd); border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.financiamento-card.quitado { opacity: .75; }
+
+.financiamento-card-topo { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.financiamento-tipo { color: var(--muted); font-size: 13px; }
+.financiamento-badge-quitado {
+  margin-left: 8px; background: var(--success); color: #fff; font-size: 11px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px;
+}
+.financiamento-card-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.financiamento-barras { display: flex; flex-direction: column; gap: 8px; }
+.financiamento-barra-linha { display: grid; grid-template-columns: 110px 1fr 90px; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.financiamento-barra { height: 8px; background: var(--bd); border-radius: 6px; overflow: hidden; }
+.financiamento-barra-fill { height: 100%; background: var(--accent); transition: width .3s; }
+.financiamento-barra-fill.alt { background: var(--success); }
+
+.financiamento-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.financiamento-stats > div { display: flex; flex-direction: column; gap: 2px; }
+.financiamento-stats span { font-size: 12px; color: var(--muted); }
+.financiamento-stats strong { font-size: 14px; }
+
+.financiamento-tabela { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+.financiamento-tabela th, .financiamento-tabela td { padding: 6px 8px; border-bottom: 1px solid var(--bd); text-align: right; }
+.financiamento-tabela th:first-child, .financiamento-tabela td:first-child,
+.financiamento-tabela th:nth-child(2), .financiamento-tabela td:nth-child(2) { text-align: left; }
+.financiamento-tabela tr.parcela-paga { color: var(--success); }
+.financiamento-tabela tr.parcela-atrasada { color: var(--danger); }
+.parcela-paga-selo { font-size: 12px; color: var(--muted); }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 8px; }
+.form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.form-grid input, .form-grid select {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--bd); background: var(--bg-card); color: inherit;
+}
+
+.financiamentos-dica { font-size: 12px; color: var(--muted); margin-top: 10px; }
+
+.adiantamento-simulacao {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 14px; padding: 12px; border-radius: 8px;
+  background: var(--tag-in);
+}
+.adiantamento-simulacao > div { display: flex; justify-content: space-between; font-size: 13px; }
+.adiantamento-simulacao .economia { color: var(--success); }
+
+@media (max-width: 540px) {
+  .financiamento-barra-linha { grid-template-columns: 90px 1fr 70px; font-size: 12px; }
+  .financiamento-card-acoes { width: 100%; }
+}

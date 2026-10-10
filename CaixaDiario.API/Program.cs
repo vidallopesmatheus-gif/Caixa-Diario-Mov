@@ -119,6 +119,8 @@ builder.Services.AddScoped<IFaturaCartaoService, FaturaCartaoService>();
 builder.Services.AddScoped<IConciliacaoService, ConciliacaoService>();
 builder.Services.AddScoped<IPrevistoRealizadoService, PrevistoRealizadoService>();
 builder.Services.AddScoped<IDuplicataExtratoService, DuplicataExtratoService>();
+builder.Services.AddScoped<IFinanciamentoRepository, FinanciamentoRepository>();
+builder.Services.AddScoped<IFinanciamentoService, FinanciamentoService>();
 
 // Chat IA
 var groqApiKey = builder.Configuration["Groq:ApiKey"]

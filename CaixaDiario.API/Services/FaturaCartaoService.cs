@@ -197,7 +197,7 @@ public class FaturaCartaoService : IFaturaCartaoService
     // via ObterCompetencia). Nunca cria um lançamento só "informativo": o impacto real no fluxo de
     // caixa dos próximos meses tem que aparecer em cada fatura, não só na data da compra.
     public async Task LancarComprasParceladaAsync(
-        Guid contaCartaoId, Guid usuarioLogadoId, string perfil, LancarCompraParceladaDto dto)
+        Guid contaCartaoId, Guid usuarioLogadoId, string perfil, LancarCompraParceladaDto dto, Guid? origemMetaId = null)
     {
         var conta = await ObterCartaoOuFalharAsync(contaCartaoId);
         VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
@@ -240,6 +240,7 @@ public class FaturaCartaoService : IFaturaCartaoService
                     ParcelamentoId = parcelamentoId,
                     NumeroParcela = i + 1,
                     TotalParcelas = dto.QuantidadeParcelas,
+                    OrigemMetaId = origemMetaId,
                 },
             };
             registro.SaldoFinal -= valor;

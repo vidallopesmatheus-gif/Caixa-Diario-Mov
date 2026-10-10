@@ -310,6 +310,80 @@ public class TransferenciaService : ITransferenciaService
         return resultado;
     }
 
+    // Fase 5: cria o par do ZERO — nenhum dos dois lados existia antes. Mesmo padrão transacional
+    // de ConverterLancamentoAsync; Provisoria=true nos dois lados pra reconciliar com o extrato
+    // real (da conta de investimento, tipicamente) em vez de duplicar quando ele for importado.
+    public async Task<TransferenciaDto> CriarAsync(
+        Guid clienteId, Guid contaOrigemId, Guid contaDestinoId, DateOnly data, decimal valor, string descricao,
+        Guid usuarioLogadoId, string perfil)
+    {
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
+        if (valor <= 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe um valor maior que zero.", "valor");
+        if (contaOrigemId == contaDestinoId)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "A conta de origem deve ser diferente da conta de destino.");
+
+        var contaOrigem = await ObterContaDoClienteAsync(contaOrigemId, clienteId);
+        var contaDestino = await ObterContaDoClienteAsync(contaDestinoId, clienteId);
+        if (!contaOrigem.Ativa || !contaDestino.Ativa)
+            throw new ApiException(400, CodigoRetorno.CONTA_INATIVA, "As duas contas devem estar ativas.");
+
+        var transferenciaId = Guid.NewGuid();
+
+        await using var transacao = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
+        var (regOrigem, novoOrigem) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, contaOrigem, data);
+        regOrigem.Saidas = new List<ItemFinanceiroSaida>(regOrigem.Saidas)
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), Descricao = descricao, Valor = valor, Subcategoria = string.Empty,
+                Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia,
+                TransferenciaId = transferenciaId, Provisoria = true,
+            },
+        };
+        regOrigem.SaldoFinal -= valor;
+        regOrigem.SalvoEm = DateTime.UtcNow;
+        await RegistroDiaHelper.PersistirAsync(_registroRepo, regOrigem, novoOrigem);
+
+        var (regDestino, novoDestino) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, contaDestino, data);
+        regDestino.Entradas = new List<ItemFinanceiro>(regDestino.Entradas)
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), Descricao = descricao, Valor = valor,
+                Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia,
+                TransferenciaId = transferenciaId, Provisoria = true,
+            },
+        };
+        regDestino.SaldoFinal += valor;
+        regDestino.SalvoEm = DateTime.UtcNow;
+        await RegistroDiaHelper.PersistirAsync(_registroRepo, regDestino, novoDestino);
+
+        var transferencia = new Transferencia
+        {
+            Id = transferenciaId, ClienteId = clienteId, ContaOrigemId = contaOrigemId, ContaDestinoId = contaDestinoId,
+            Data = data, Valor = valor, Descricao = descricao, CriadoEm = DateTime.UtcNow,
+        };
+        var criada = await _transferenciaRepo.AdicionarAsync(transferencia);
+        if (transacao != null) await transacao.CommitAsync();
+
+        var resultado = MapToDto(criada, contaOrigem.Nome, contaDestino.Nome);
+        await _auditService.LogAsync(clienteId, usuarioLogadoId, "Transferencia", "Criacao",
+            transferenciaId.ToString(), null, JsonSerializer.Serialize(resultado));
+
+        // Cascata de saldo nas duas contas (mesma garantia do item 2) — a transferência pode cair
+        // numa data com registros futuros já existentes em qualquer uma das duas contas.
+        var registrosOrigem = await _registroRepo.ListarPorContaAsync(contaOrigemId);
+        await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, contaOrigemId, data, regOrigem.SaldoFinal, registrosOrigem);
+        var registrosDestino = await _registroRepo.ListarPorContaAsync(contaDestinoId);
+        await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, contaDestinoId, data, regDestino.SaldoFinal, registrosDestino);
+
+        return resultado;
+    }
+
     private async Task<ContaBancaria> ObterContaDoClienteAsync(Guid contaId, Guid clienteId)
     {
         var conta = await _contaRepo.ObterPorIdAsync(contaId)

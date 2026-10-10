@@ -339,4 +339,71 @@ public class TransferenciaServiceTests
 
         Assert.Equal(403, ex.StatusCode);
     }
+
+    // ── CriarAsync (Fase 5.3 — resgate de investimento do zero) ─────────────────────────────────
+
+    [Fact]
+    public async Task CriarAsync_CriaAsDuasPontasDoZeroComoProvisoriasEAjustaOsSaldos()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaInvestimento = CriarConta(clienteId, "Investimento", "Investimento", saldoInicial: 10000m);
+        var contaPagamento = CriarConta(clienteId, "Conta Corrente", "ContaCorrente", saldoInicial: 500m);
+        var data = new DateOnly(2026, 11, 10);
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimento.Id)).ReturnsAsync(contaInvestimento);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaPagamento.Id)).ReturnsAsync(contaPagamento);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(It.IsAny<Guid>(), data)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<RegistroDiario>());
+        var criados = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(criados.Add).ReturnsAsync((RegistroDiario r) => r);
+        _transferenciaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Transferencia>())).ReturnsAsync((Transferencia t) => t);
+
+        var resultado = await _sut.CriarAsync(
+            clienteId, contaInvestimento.Id, contaPagamento.Id, data, 4000m, "Resgate para 🏆 Macbook",
+            clienteId, "cliente");
+
+        var regOrigem = criados.Single(r => r.ContaBancariaId == contaInvestimento.Id);
+        var regDestino = criados.Single(r => r.ContaBancariaId == contaPagamento.Id);
+        var saida = Assert.Single(regOrigem.Saidas);
+        var entrada = Assert.Single(regDestino.Entradas);
+
+        Assert.Equal(4000m, saida.Valor);
+        Assert.True(saida.Provisoria);
+        Assert.Equal(resultado.Id, saida.TransferenciaId);
+        Assert.Equal(6000m, regOrigem.SaldoFinal); // 10000 - 4000
+
+        Assert.Equal(4000m, entrada.Valor);
+        Assert.True(entrada.Provisoria);
+        Assert.Equal(resultado.Id, entrada.TransferenciaId);
+        Assert.Equal(4500m, regDestino.SaldoFinal); // 500 + 4000
+    }
+
+    [Fact]
+    public async Task CriarAsync_MesmaContaDeOrigemEDestino_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaId = Guid.NewGuid();
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.CriarAsync(clienteId, contaId, contaId, new DateOnly(2026, 11, 10), 100m, "x", clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task CriarAsync_ContaInativa_LancaContaInativa()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaOrigem = CriarConta(clienteId, "Investimento", "Investimento", ativa: false);
+        var contaDestino = CriarConta(clienteId, "Conta Corrente");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaOrigem.Id)).ReturnsAsync(contaOrigem);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaDestino.Id)).ReturnsAsync(contaDestino);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.CriarAsync(clienteId, contaOrigem.Id, contaDestino.Id, new DateOnly(2026, 11, 10), 100m, "x", clienteId, "cliente"));
+
+        Assert.Equal(CodigoRetorno.CONTA_INATIVA, ex.Codigo);
+    }
 }

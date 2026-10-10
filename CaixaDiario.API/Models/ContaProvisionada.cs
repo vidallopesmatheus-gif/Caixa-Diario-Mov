@@ -26,4 +26,25 @@ public class ContaProvisionada
     // existente que o usuário escolheu vincular) — é o que diferencia o que o Estorno pode apagar
     // (o criado) do que ele só pode desvincular (o que já existia e representa dinheiro real).
     public bool LancamentoCriadoPelaBaixa { get; set; }
+    // Fase 5: preenchido quando esta conta a pagar foi criada por "🏆 Conquistei" (forma Boleto) —
+    // "Desfazer conquista" usa isso pra achar e remover as parcelas ainda não pagas.
+    public Guid? OrigemMetaId { get; set; }
+
+    // ── Fase 6: parcela de financiamento/empréstimo/consórcio ───────────────────────────────────
+    // Preenchido quando esta conta a pagar é uma parcela gerada por FinanciamentoService — a
+    // tabela de amortização "ao vivo" é só a lista de ContaProvisionada com este Id em comum,
+    // nunca duplicada em outro lugar.
+    public Guid? OrigemFinanciamentoId { get; set; }
+    // Decomposição planejada da parcela (preenchida na criação, igual vem da tabela de
+    // amortização) — Valor continua sendo o total (Juros + Amortizacao + Encargos).
+    public decimal? ValorJuros { get; set; }
+    public decimal? ValorAmortizacao { get; set; }
+    public decimal? ValorEncargos { get; set; }
+    // Preenchidos na baixa — diferente de LancamentoVinculadoId (singular, usado pelo fluxo
+    // genérico de ContaProvisionada), uma parcela de financiamento baixa em ATÉ 3 lançamentos
+    // (juros entra no resultado operacional, amortização fica em Atividades de Financiamento,
+    // encargos é uma despesa comum) — por isso precisa de um slot por componente.
+    public Guid? LancamentoJurosId { get; set; }
+    public Guid? LancamentoAmortizacaoId { get; set; }
+    public Guid? LancamentoEncargosId { get; set; }
 }

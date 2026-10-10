@@ -112,6 +112,22 @@ public class OrcamentoDinamicoServiceTests
         Assert.Equal(0m, resultado.AporteNecessario);
     }
 
+    // Fase 5.4: meta já conquistada não precisa mais de aporte nenhum — some de "Aporte p/ metas".
+    [Fact]
+    public void Calcular_IgnoraMetasConquistadas()
+    {
+        var metaConquistada = new MetaAnual
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ModoMeta = "metodo", Status = "Conquistada",
+            ValorSonho = 50000m, PrazoAnos = 3, TaxaRetorno = 10m,
+            AtualizadoEm = DateTime.UtcNow, CriadoEm = DateTime.UtcNow,
+        };
+
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente>(), new List<MetaAnual> { metaConquistada });
+
+        Assert.Equal(0m, resultado.AporteNecessario);
+    }
+
     [Fact]
     public void Calcular_IgnoraRegistrosExcluidos()
     {
