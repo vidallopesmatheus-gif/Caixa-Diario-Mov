@@ -4,6 +4,10 @@ body {
   background: var(--bg);
   color: var(--tx);
   min-height: 100vh;
+  /* Item 6: rede de segurança contra rolagem horizontal em telas estreitas (375px) — qualquer
+     elemento (dropdown, grid com coluna fixa, etc.) que vaze da viewport é cortado, não cria
+     scroll lateral na página inteira. */
+  overflow-x: hidden;
 }
 input  { font-family: inherit; }
 button { font-family: inherit; cursor: pointer; }

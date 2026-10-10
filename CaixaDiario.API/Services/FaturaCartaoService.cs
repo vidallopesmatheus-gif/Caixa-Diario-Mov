@@ -26,6 +26,7 @@ public class FaturaCartaoService : IFaturaCartaoService
     private readonly IContaBancariaRepository _contaRepo;
     private readonly IRegistroRepository _registroRepo;
     private readonly IPagamentoFaturaRepository _pagamentoRepo;
+    private readonly ICategoriaRepository _categoriaRepo;
     private readonly IAuditService _auditService;
     private readonly AppDbContext _context;
 
@@ -33,12 +34,14 @@ public class FaturaCartaoService : IFaturaCartaoService
         IContaBancariaRepository contaRepo,
         IRegistroRepository registroRepo,
         IPagamentoFaturaRepository pagamentoRepo,
+        ICategoriaRepository categoriaRepo,
         IAuditService auditService,
         AppDbContext context)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _pagamentoRepo = pagamentoRepo;
+        _categoriaRepo = categoriaRepo;
         _auditService = auditService;
         _context = context;
     }
@@ -187,6 +190,72 @@ public class FaturaCartaoService : IFaturaCartaoService
 
         await _auditService.LogAsync(pagamento.ClienteId, usuarioLogadoId, "PagamentoFatura", "Desvincular",
             pagamento.Id.ToString(), JsonSerializer.Serialize(pagamento), null);
+    }
+
+    // Item 9: compra parcelada lançada direto no cartão — cada parcela vira sua própria Saida,
+    // numa data um mês depois da anterior (cada uma cai numa competência/fatura futura diferente,
+    // via ObterCompetencia). Nunca cria um lançamento só "informativo": o impacto real no fluxo de
+    // caixa dos próximos meses tem que aparecer em cada fatura, não só na data da compra.
+    public async Task LancarComprasParceladaAsync(
+        Guid contaCartaoId, Guid usuarioLogadoId, string perfil, LancarCompraParceladaDto dto)
+    {
+        var conta = await ObterCartaoOuFalharAsync(contaCartaoId);
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+        if (!conta.Ativa)
+            throw new ApiException(400, CodigoRetorno.CONTA_INATIVA, "O cartão deve estar ativo.");
+        if (dto.QuantidadeParcelas < 2)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe ao menos 2 parcelas.", "quantidadeParcelas");
+        if (dto.ValorTotal <= 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe um valor total maior que zero.", "valorTotal");
+        if (string.IsNullOrWhiteSpace(dto.Categoria))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe a categoria da compra.", "categoria");
+
+        var tipoCusto = (await _categoriaRepo.ListarTodasAsync())
+            .ToDictionary(c => c.Nome, c => c.Tipo)
+            .GetValueOrDefault(dto.Categoria);
+
+        var parcelamentoId = Guid.NewGuid();
+        var valorParcela = Math.Round(dto.ValorTotal / dto.QuantidadeParcelas, 2);
+        var somaParcelasAnteriores = 0m;
+
+        for (var i = 0; i < dto.QuantidadeParcelas; i++)
+        {
+            // Última parcela absorve o resto do arredondamento — a soma das parcelas bate exatamente
+            // com o valor total da compra, nunca sobra/falta centavo em nenhuma fatura.
+            var ultimaParcela = i == dto.QuantidadeParcelas - 1;
+            var valor = ultimaParcela ? dto.ValorTotal - somaParcelasAnteriores : valorParcela;
+            somaParcelasAnteriores += valor;
+            var dataParcela = dto.Data.AddMonths(i);
+
+            var (registro, novo) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, conta, dataParcela);
+            registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas)
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    Descricao = $"{dto.Descricao} ({i + 1}/{dto.QuantidadeParcelas})",
+                    Valor = valor,
+                    Categoria = dto.Categoria,
+                    TipoCusto = tipoCusto,
+                    ParcelamentoId = parcelamentoId,
+                    NumeroParcela = i + 1,
+                    TotalParcelas = dto.QuantidadeParcelas,
+                },
+            };
+            registro.SaldoFinal -= valor;
+            registro.SalvoEm = DateTime.UtcNow;
+            await RegistroDiaHelper.PersistirAsync(_registroRepo, registro, novo);
+
+            // Mesma garantia do Caixa manual (item 2): se já havia algum registro futuro nesta
+            // conta depois desta parcela, o Inicio/SaldoFinal dele precisa refletir o novo saldo.
+            var registrosDaConta = await _registroRepo.ListarPorContaAsync(contaCartaoId);
+            await RegistroService.RecalcularDiasSeguintesAsync(
+                _registroRepo, contaCartaoId, dataParcela, registro.SaldoFinal, registrosDaConta);
+        }
+
+        await _auditService.LogAsync(conta.ClienteId, usuarioLogadoId, "ItemFinanceiroSaida", "LancarParcelado",
+            parcelamentoId.ToString(), null,
+            JsonSerializer.Serialize(new { dto.Descricao, dto.ValorTotal, dto.QuantidadeParcelas, dto.Data, dto.Categoria }));
     }
 
     private async Task<List<FaturaCartaoDto>> ListarFaturasInternoAsync(ContaBancaria contaCartao)

@@ -46,8 +46,14 @@ public class RegistroService : IRegistroService
 
         var contas = await _contaBancariaRepository.ListarPorClienteAsync(clienteId);
         var contaId = ResolverContaPadrao(contas, contaBancariaId);
-        var registro = await _registroRepository.ObterPorContaEDataAsync(contaId, data)
-            ?? await _registroRepository.ObterPorClienteEDataAsync(clienteId, data);
+        // [CRÍTICO, 4ª vez] Só cai pro "qualquer conta, mesma data" quando o CHAMADOR não pediu
+        // uma conta específica (registro legado sem conta vinculada). Quando uma conta EXATA foi
+        // pedida (ex.: tela de Caixa perguntando "a conta X já tem algo hoje?" antes de mesclar um
+        // item novo), null aqui significa só "essa conta ainda não tem registro nesse dia" — cair
+        // pro registro de OUTRA conta na mesma data já causou a mistura de itens/saldo entre contas.
+        var registro = await _registroRepository.ObterPorContaEDataAsync(contaId, data);
+        if (registro == null && !contaBancariaId.HasValue)
+            registro = await _registroRepository.ObterPorClienteEDataAsync(clienteId, data);
 
         if (registro != null) return MapToDto(registro);
 
@@ -299,6 +305,27 @@ public class RegistroService : IRegistroService
         registro.UsuarioAtualizacao = usuarioLogadoId.ToString();
 
         await _registroRepository.AtualizarAsync(registro);
+
+        // Item 2: excluir um dia não pode deixar os dias seguintes da MESMA conta com um Inicio
+        // baseado num SaldoFinal que não existe mais — recalcula a cadeia a partir do saldo que
+        // passa a valer no lugar do dia excluído (o último registro ativo anterior, ou o saldo
+        // inicial da conta, se não houver nenhum). Vale também pra datas futuras (ex.: contas a
+        // pagar/receber já materializadas com antecedência) — RecalcularDiasSeguintesAsync não
+        // distingue passado de futuro, só segue a cadeia por data. Registro sem conta vinculada
+        // nunca participa dessa cadeia (não há "conta" pra recalcular).
+        if (registro.ContaBancariaId.HasValue)
+        {
+            var contaId = registro.ContaBancariaId.Value;
+            var anterior = ((await _registroRepository.ListarPorContaAsync(contaId)) ?? new List<RegistroDiario>())
+                .Where(r => r.Data < data)
+                .OrderByDescending(r => r.Data)
+                .FirstOrDefault();
+            var saldoBase = anterior?.SaldoFinal ?? contas.FirstOrDefault(c => c.Id == contaId)?.SaldoInicial ?? 0m;
+
+            var registrosCliente = (await _registroRepository.ListarPorClienteAsync(clienteId)) ?? new List<RegistroDiario>();
+            await RecalcularDiasSeguintesAsync(_registroRepository, contaId, data, saldoBase, registrosCliente);
+        }
+
         await _auditService.LogAsync(clienteId, usuarioLogadoId, "RegistroDiario", "Exclusao",
             $"{clienteId}/{data}", dadosAntes, null);
     }
@@ -424,6 +451,7 @@ public class RegistroService : IRegistroService
         {
             Id = d.Id, Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, Subcategoria = d.Subcategoria,
             TipoCusto = d.TipoCusto, TransferenciaId = d.TransferenciaId, FitId = d.FitId, PendenteCategorizacao = d.PendenteCategorizacao,
+            ParcelamentoId = d.ParcelamentoId, NumeroParcela = d.NumeroParcela, TotalParcelas = d.TotalParcelas,
         };
 
     private static ContaProvisionada MapContaDto(ContaProvisionadaDto d, Guid? contaBancariaId = null) =>
@@ -561,6 +589,7 @@ public class RegistroService : IRegistroService
             Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria, Subcategoria = s.Subcategoria,
             TipoCusto = s.TipoCusto, TransferenciaId = s.TransferenciaId, FitId = s.FitId, PendenteCategorizacao = s.PendenteCategorizacao,
             ClassificadoPeloCliente = s.ClassificadoPeloCliente,
+            ParcelamentoId = s.ParcelamentoId, NumeroParcela = s.NumeroParcela, TotalParcelas = s.TotalParcelas,
         }).ToList(),
         ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ValorRealizado = s.ValorRealizado, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
         ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ValorRealizado = s.ValorRealizado, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),

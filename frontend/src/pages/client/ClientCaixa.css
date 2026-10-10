@@ -163,15 +163,17 @@
 .caixa-skeleton-form > div { height: 18px; width: 40%; margin-bottom: 10px; }
 .caixa-skeleton-form > div + div { height: 44px; width: 100%; margin-bottom: 16px; }
 
-/* ── Responsividade mobile (item 2.1/2.2): [descrição] / [valor][categoria] / [🔁][✔][✕] ── */
+/* ── Responsividade mobile (item 6): [descrição] / [valor][ações] / [categoria em largura total] ──
+   Categoria dividindo linha com valor (110px fixos) vazava rolagem horizontal em telas de 375px —
+   nome de categoria longo não cabe em 110px. Categoria ganha linha própria, largura total. */
 @media (max-width: 540px) {
   .lancamento-row {
-    grid-template-columns: 1fr 110px;
+    grid-template-columns: 1fr auto;
     grid-template-areas:
       "desc desc"
-      "valor cat"
-      "acoes acoes";
+      "valor acoes"
+      "cat cat";
     row-gap: 6px;
   }
-  .lanc-acoes { justify-content: flex-start; }
+  .lanc-acoes { justify-content: flex-end; }
 }

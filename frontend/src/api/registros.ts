@@ -51,6 +51,9 @@ function mapItemFinanceiroSaida(raw: any): ItemFinanceiroSaida {
     fitId: raw.FitId ?? raw.fitId ?? undefined,
     pendenteCategorizacao: raw.PendenteCategorizacao ?? raw.pendenteCategorizacao ?? false,
     classificadoPeloCliente: raw.ClassificadoPeloCliente ?? raw.classificadoPeloCliente ?? false,
+    parcelamentoId: raw.ParcelamentoId ?? raw.parcelamentoId ?? undefined,
+    numeroParcela: raw.NumeroParcela ?? raw.numeroParcela ?? undefined,
+    totalParcelas: raw.TotalParcelas ?? raw.totalParcelas ?? undefined,
   }
 }
 
@@ -114,6 +117,9 @@ export const salvarRegistro = async (dto: {
       TransferenciaId: s.transferenciaId,
       FitId: s.fitId,
       PendenteCategorizacao: s.pendenteCategorizacao,
+      ParcelamentoId: s.parcelamentoId,
+      NumeroParcela: s.numeroParcela,
+      TotalParcelas: s.totalParcelas,
     })),
     contasReceber: dto.contasAReceber.map(c => ({ Id: c.id, Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ValorRealizado: c.valorRealizado, ContaBancariaId: c.contaBancariaId, LancamentoVinculadoId: c.lancamentoVinculadoId })),
     contasPagar: dto.contasAPagar.map(c => ({ Id: c.id, Descricao: c.descricao, Valor: c.valor, DataVencimento: c.dataVencimento, Pago: c.pago, Categoria: c.categoria, RecorrenciaId: c.recorrenciaId, DataBaixa: c.dataBaixa, ValorRealizado: c.valorRealizado, ContaBancariaId: c.contaBancariaId, LancamentoVinculadoId: c.lancamentoVinculadoId })),

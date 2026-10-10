@@ -16,4 +16,7 @@ public class ItemFinanceiroSaidaDto
     public string? FitId { get; set; }
     public bool PendenteCategorizacao { get; set; }
     public bool ClassificadoPeloCliente { get; set; }
+    public Guid? ParcelamentoId { get; set; }
+    public int? NumeroParcela { get; set; }
+    public int? TotalParcelas { get; set; }
 }

@@ -15,6 +15,7 @@ public class FaturaCartaoServiceTests
     private readonly Mock<IContaBancariaRepository> _contaRepoMock = new();
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
     private readonly Mock<IPagamentoFaturaRepository> _pagamentoRepoMock = new();
+    private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
     private readonly Mock<IAuditService> _auditMock = new();
     private readonly FaturaCartaoService _sut;
 
@@ -26,8 +27,10 @@ public class FaturaCartaoServiceTests
 
     public FaturaCartaoServiceTests()
     {
+        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
         _sut = new FaturaCartaoService(
-            _contaRepoMock.Object, _registroRepoMock.Object, _pagamentoRepoMock.Object, _auditMock.Object, CriarContexto());
+            _contaRepoMock.Object, _registroRepoMock.Object, _pagamentoRepoMock.Object, _categoriaRepoMock.Object,
+            _auditMock.Object, CriarContexto());
     }
 
     private static ContaBancaria CriarConta(
@@ -299,5 +302,127 @@ public class FaturaCartaoServiceTests
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.CONTA_NAO_E_CARTAO, ex.Codigo);
+    }
+
+    // ── LancarComprasParceladaAsync (item 9) ─────────────────────────────────────────────────────
+
+    /// <summary>Fake simples por trás dos mocks de IRegistroRepository — ResolverOuCriarAsync e
+    /// RecalcularDiasSeguintesAsync precisam ver, em cada iteração do parcelamento, o que a
+    /// iteração anterior já persistiu (senão o Inicio nunca encadeia de uma parcela pra outra).</summary>
+    private List<RegistroDiario> ConfigurarRegistrosFake(Guid contaCartaoId)
+    {
+        var persistidos = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCartaoId, It.IsAny<DateOnly>()))
+            .ReturnsAsync((Guid _, DateOnly d) => persistidos.FirstOrDefault(r => r.Data == d));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartaoId)).ReturnsAsync(() => persistidos.ToList());
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(persistidos.Add).ReturnsAsync((RegistroDiario r) => r);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        return persistidos;
+    }
+
+    [Fact]
+    public async Task LancarComprasParceladaAsync_CriaUmaSaidaPorParcelaEmMesesConsecutivosEEncadeiaOSaldo()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartão", "CartaoCredito");
+        var dataCompra = new DateOnly(2026, 1, 10);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _categoriaRepoMock.Setup(r => r.ListarTodasAsync())
+            .ReturnsAsync(new List<Categoria> { new() { Nome = "Equipamentos", Tipo = "DespesaNaoOperacional" } });
+        var persistidos = ConfigurarRegistrosFake(contaCartao.Id);
+
+        var dto = new LancarCompraParceladaDto
+        {
+            Descricao = "Notebook", ValorTotal = 300m, Categoria = "Equipamentos", QuantidadeParcelas = 3, Data = dataCompra,
+        };
+
+        await _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto);
+
+        Assert.Equal(3, persistidos.Count);
+        var p1 = persistidos.Single(r => r.Data == dataCompra);
+        var p2 = persistidos.Single(r => r.Data == dataCompra.AddMonths(1));
+        var p3 = persistidos.Single(r => r.Data == dataCompra.AddMonths(2));
+
+        var s1 = Assert.Single(p1.Saidas);
+        Assert.Equal("Notebook (1/3)", s1.Descricao);
+        Assert.Equal(100m, s1.Valor);
+        Assert.Equal("DespesaNaoOperacional", s1.TipoCusto);
+        Assert.Equal(1, s1.NumeroParcela);
+        Assert.Equal(3, s1.TotalParcelas);
+        Assert.NotNull(s1.ParcelamentoId);
+
+        var s2 = Assert.Single(p2.Saidas);
+        var s3 = Assert.Single(p3.Saidas);
+        Assert.Equal("Notebook (2/3)", s2.Descricao);
+        Assert.Equal("Notebook (3/3)", s3.Descricao);
+        Assert.Equal(s1.ParcelamentoId, s2.ParcelamentoId);
+        Assert.Equal(s1.ParcelamentoId, s3.ParcelamentoId);
+
+        // Cada parcela parte do saldo onde a anterior deixou — nunca reseta nem acumula errado.
+        Assert.Equal(0m, p1.Inicio);
+        Assert.Equal(-100m, p1.SaldoFinal);
+        Assert.Equal(-100m, p2.Inicio);
+        Assert.Equal(-200m, p2.SaldoFinal);
+        Assert.Equal(-200m, p3.Inicio);
+        Assert.Equal(-300m, p3.SaldoFinal);
+    }
+
+    [Fact]
+    public async Task LancarComprasParceladaAsync_ValorNaoDivisivel_UltimaParcelaAbsorveOArredondamento()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartão", "CartaoCredito");
+        var dataCompra = new DateOnly(2026, 1, 10);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        var persistidos = ConfigurarRegistrosFake(contaCartao.Id);
+
+        var dto = new LancarCompraParceladaDto
+        {
+            Descricao = "Compra", ValorTotal = 100m, Categoria = "Software", QuantidadeParcelas = 3, Data = dataCompra,
+        };
+
+        await _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto);
+
+        var valores = persistidos.OrderBy(r => r.Data).Select(r => r.Saidas.Single().Valor).ToList();
+        Assert.Equal(new[] { 33.33m, 33.33m, 33.34m }, valores);
+        Assert.Equal(100m, valores.Sum());
+    }
+
+    [Fact]
+    public async Task LancarComprasParceladaAsync_ContaNaoECartao_LancaErro()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId, "Conta Corrente", "ContaCorrente");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+
+        var dto = new LancarCompraParceladaDto
+        {
+            Descricao = "Compra", ValorTotal = 300m, Categoria = "Equipamentos", QuantidadeParcelas = 3, Data = new DateOnly(2026, 1, 10),
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(
+            () => _sut.LancarComprasParceladaAsync(conta.Id, clienteId, "cliente", dto));
+
+        Assert.Equal(CodigoRetorno.CONTA_NAO_E_CARTAO, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task LancarComprasParceladaAsync_MenosDeDuasParcelas_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartão", "CartaoCredito");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+
+        var dto = new LancarCompraParceladaDto
+        {
+            Descricao = "Compra", ValorTotal = 300m, Categoria = "Equipamentos", QuantidadeParcelas = 1, Data = new DateOnly(2026, 1, 10),
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(
+            () => _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
     }
 }
