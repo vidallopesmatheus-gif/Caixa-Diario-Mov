@@ -29,14 +29,19 @@ public class CalculadoraAmortizacaoTests
         Assert.Equal(new DateOnly(2026, 1, 10), primeira.Vencimento);
     }
 
+    // Item A2 do bundle D6JWEAJa: a última parcela virava 1.000,04 (Valor = amortização + juros
+    // arredondado independentemente), o que inflava "juros totais" pra 12.000,04. Agora a última
+    // parcela mantém Valor = pmt (1.000,00) e os juros totais batem exato com pmt×n − principal.
     [Fact]
-    public void GerarTabelaPrice_30000Em42xDe1000_JurosTotaisSaoDozeMil()
+    public void GerarTabelaPrice_30000Em42xDe1000_JurosTotaisSaoDozeMilExato()
     {
         var taxa = CalculadoraAmortizacao.ResolverTaxaImplicitaPrice(30000m, 1000m, 42);
         var tabela = CalculadoraAmortizacao.GerarTabelaPrice(30000m, taxa, 42, new DateOnly(2026, 1, 10));
 
-        Assert.Equal(12000m, Math.Round(tabela.Sum(p => p.Juros), 0));
+        Assert.Equal(12000.00m, tabela.Sum(p => p.Juros));
         Assert.Equal(0m, tabela[^1].SaldoDevedor);
+        Assert.Equal(1000.00m, tabela[^1].Valor);
+        Assert.All(tabela, p => Assert.Equal(1000.00m, p.Valor));
     }
 
     [Fact]

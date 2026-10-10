@@ -33,4 +33,10 @@ public class FinanciamentoRepository : IFinanciamentoRepository
         await _context.SaveChangesAsync();
         return financiamento;
     }
+
+    public async Task RemoverAsync(Financiamento financiamento)
+    {
+        _context.Financiamentos.Remove(financiamento);
+        await _context.SaveChangesAsync();
+    }
 }

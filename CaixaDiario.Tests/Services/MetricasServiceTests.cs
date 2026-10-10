@@ -1196,6 +1196,32 @@ public class MetricasServiceTests
         Assert.Equal(-40m, grupoSemClasse.Total);
     }
 
+    // Item A3 do bundle D6JWEAJa: a entrada sem categoria era lançada em cheio dentro de Receitas
+    // Operacionais (inflando a receita) e o grupo "Não Classificado" de Despesas Operacionais só
+    // mostrava a saída bruta — as duas pontas nunca se encontravam na visão por blocos, mesmo a
+    // análise vertical (dre.NaoClassificado) já estando líquida. Agora a entrada sem categoria cai
+    // no MESMO grupo "Não Classificado" de Despesas Operacionais, como crédito, e Receitas
+    // Operacionais só soma entrada já classificada.
+    [Fact]
+    public void CalcularDre_Blocos_EntradaSemCategoria_NetaNoMesmoGrupoDeDespesasOperacionais()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 500m, "Vendas", "Receita"), Item("Entrada sem categoria", 100m, null, null) },
+            new() { Item("Gasto sem categoria", 150m, null, null) });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        var receitas = dre.Blocos.Single(b => b.Bloco == Blocos.ReceitasOperacionais);
+        Assert.Equal(500m, receitas.Total); // não inclui a entrada sem categoria
+        Assert.DoesNotContain(receitas.Grupos, g => g.Nome == "Não Classificado");
+
+        var despesas = dre.Blocos.Single(b => b.Bloco == Blocos.DespesasOperacionais);
+        var grupoSemClasse = Assert.Single(despesas.Grupos, g => g.Nome == "Não Classificado");
+        Assert.Equal(-50m, grupoSemClasse.Total); // -150 (saída) + 100 (entrada) = -50 líquido
+
+        Assert.Equal(500m, dre.ReceitaBruta);
+    }
+
     // ---- CalcularPontoEquilibrio (promovido a público — painel de KPIs da tela de DRE) ----
 
     [Fact]

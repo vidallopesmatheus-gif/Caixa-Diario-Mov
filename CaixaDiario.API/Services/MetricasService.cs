@@ -470,9 +470,21 @@ public class MetricasService : IMetricasService
         }
 
         // Entradas operacionais já vêm sem Transferência/Rendimento/Investimento/Financiamento
-        // (excluídos por EhOperacional antes daqui) — o que sobra é sempre Receita Operacional.
+        // (excluídos por EhOperacional antes daqui) — o que sobra é sempre Receita Operacional,
+        // EXCETO a sem categoria: essa não é receita confirmada (mesma regra de receitaBruta
+        // acima) — entra como crédito dentro do mesmo bucket "Não Classificado" de Despesas
+        // Operacionais que as saídas sem categoria, pra "Não classificados" virar uma única linha
+        // líquida (saídas − entradas) em vez de inflar Receitas Operacionais e mostrar só o bruto
+        // das saídas na outra ponta — item A3 do bundle D6JWEAJa.
         foreach (var entrada in entradasOperacionais)
+        {
+            if (string.IsNullOrWhiteSpace(entrada.Categoria))
+            {
+                Lancar(Blocos.DespesasOperacionais, null, entrada.Valor);
+                continue;
+            }
             Lancar(Blocos.ReceitasOperacionais, entrada.Categoria, entrada.Valor);
+        }
         foreach (var saida in saidasOperacionais)
         {
             var bloco = mapaBloco.TryGetValue(saida.Categoria ?? "", out var b) ? b

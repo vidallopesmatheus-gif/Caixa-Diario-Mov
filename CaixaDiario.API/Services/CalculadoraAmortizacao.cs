@@ -52,28 +52,33 @@ public static class CalculadoraAmortizacao
     }
 
     /// <summary>Tabela de amortização pelo sistema Price (parcela fixa, juros decrescente,
-    /// amortização crescente) — a última parcela absorve o resto do arredondamento, o saldo
-    /// devedor sempre termina em exatamente zero.</summary>
+    /// amortização crescente) — a última parcela absorve o resíduo só na amortização (o saldo
+    /// devedor termina em exatamente zero); o Valor continua igual ao das demais parcelas, nunca
+    /// "amortização + juros" (isso é o que causava a última parcela aparecer como 1.000,04 em vez
+    /// de 1.000,00 — item A2 do bundle D6JWEAJa). Juros totais = pmt × n − principal, exato.</summary>
     public static List<ParcelaAmortizacaoDto> GerarTabelaPrice(
         decimal valorFinanciado, decimal taxaMensal, int numeroParcelas, DateOnly dataPrimeiraParcela)
     {
-        var pmt = Math.Round((decimal)Pmt((double)valorFinanciado, (double)taxaMensal, numeroParcelas), 2);
+        var pmt = Math.Round((decimal)Pmt((double)valorFinanciado, (double)taxaMensal, numeroParcelas), 2, MidpointRounding.AwayFromZero);
         var parcelas = new List<ParcelaAmortizacaoDto>();
         var saldo = valorFinanciado;
 
         for (var i = 1; i <= numeroParcelas; i++)
         {
-            var juros = Math.Round(saldo * taxaMensal, 2);
-            decimal amortizacao, valor;
+            decimal amortizacao, juros, valor;
             if (i == numeroParcelas)
             {
-                // Última parcela: amortização = o que resta do saldo, nunca o valor "de tabela" —
-                // garante saldo final exatamente 0,00 mesmo com arredondamento acumulado nas outras.
+                // Última parcela: amortização = o que resta do saldo (garante saldo final
+                // exatamente 0,00 mesmo com arredondamento acumulado nas outras); Valor permanece
+                // o pmt de tabela, e Juros é derivado (valor − amortização) em vez de recalculado
+                // via saldo×taxa — é essa derivação que mantém "juros totais" exato.
                 amortizacao = saldo;
-                valor = amortizacao + juros;
+                valor = pmt;
+                juros = valor - amortizacao;
             }
             else
             {
+                juros = Math.Round(saldo * taxaMensal, 2, MidpointRounding.AwayFromZero);
                 amortizacao = pmt - juros;
                 valor = pmt;
             }
@@ -81,7 +86,8 @@ public static class CalculadoraAmortizacao
             parcelas.Add(new ParcelaAmortizacaoDto
             {
                 Numero = i, Vencimento = dataPrimeiraParcela.AddMonths(i - 1),
-                Valor = valor, Juros = juros, Amortizacao = amortizacao, SaldoDevedor = Math.Round(saldo, 2),
+                Valor = valor, Juros = juros, Amortizacao = amortizacao,
+                SaldoDevedor = Math.Round(saldo, 2, MidpointRounding.AwayFromZero),
             });
         }
 
@@ -93,21 +99,22 @@ public static class CalculadoraAmortizacao
     public static List<ParcelaAmortizacaoDto> GerarTabelaSac(
         decimal valorFinanciado, decimal taxaMensal, int numeroParcelas, DateOnly dataPrimeiraParcela)
     {
-        var amortizacaoFixa = Math.Round(valorFinanciado / numeroParcelas, 2);
+        var amortizacaoFixa = Math.Round(valorFinanciado / numeroParcelas, 2, MidpointRounding.AwayFromZero);
         var parcelas = new List<ParcelaAmortizacaoDto>();
         var saldo = valorFinanciado;
         var amortizadoAteAgora = 0m;
 
         for (var i = 1; i <= numeroParcelas; i++)
         {
-            var juros = Math.Round(saldo * taxaMensal, 2);
+            var juros = Math.Round(saldo * taxaMensal, 2, MidpointRounding.AwayFromZero);
             var amortizacao = i == numeroParcelas ? valorFinanciado - amortizadoAteAgora : amortizacaoFixa;
             amortizadoAteAgora += amortizacao;
             saldo -= amortizacao;
             parcelas.Add(new ParcelaAmortizacaoDto
             {
                 Numero = i, Vencimento = dataPrimeiraParcela.AddMonths(i - 1),
-                Valor = amortizacao + juros, Juros = juros, Amortizacao = amortizacao, SaldoDevedor = Math.Round(saldo, 2),
+                Valor = amortizacao + juros, Juros = juros, Amortizacao = amortizacao,
+                SaldoDevedor = Math.Round(saldo, 2, MidpointRounding.AwayFromZero),
             });
         }
 
