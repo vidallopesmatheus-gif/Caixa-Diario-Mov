@@ -9,6 +9,7 @@ import ClientContasPage from './pages/client/ClientContasPage'
 import ClientDashboardPage from './pages/client/ClientDashboardPage'
 import ClientBancoPage from './pages/client/ClientBancoPage'
 import ClientContaDetalhePage from './pages/client/ClientContaDetalhePage'
+import ClientFaturasCartaoPage from './pages/client/ClientFaturasCartaoPage'
 import ClientExtratoRevisaoPage from './pages/client/ClientExtratoRevisaoPage'
 import ResultadosPage from './pages/client/ResultadosPage'
 import RelatoriosPage from './pages/client/RelatoriosPage'
@@ -51,6 +52,7 @@ function ProtectedRoutes() {
         {/* Banco: operação (extrato, importação) — cadastro fica em Configurações */}
         <Route path="/banco" element={<ClientBancoPage />} />
         <Route path="/banco/:contaId" element={<ClientContaDetalhePage />} />
+        <Route path="/banco/:contaId/faturas" element={<ClientFaturasCartaoPage />} />
         <Route path="/banco/extrato/:contaId" element={<ClientExtratoRevisaoPage />} />
 
         {/* Resultados: DRE, Projeção, Indicadores (subabas na URL) */}

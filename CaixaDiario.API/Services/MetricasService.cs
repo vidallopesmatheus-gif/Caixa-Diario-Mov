@@ -218,7 +218,15 @@ public class MetricasService : IMetricasService
         // Transferências entre contas e rendimento de investimento não são receita/despesa —
         // ficam de fora do DRE (continuam visíveis no extrato/Caixa, só não entram no resultado).
         var saidasOperacionais = registros.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).ToList();
-        var receitaBruta = registros.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);
+        var entradasOperacionais = registros.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).ToList();
+        // Entrada sem categoria (ainda pendente de classificação) não é receita confirmada — fica de
+        // fora da Receita Bruta e entra, negativa, na linha "Não Classificados" (valor líquido junto
+        // com as saídas sem categoria). Sem isso esse dinheiro contaria a mais no Resultado Líquido:
+        // uma vez cheio na Receita Bruta, e nenhuma outra linha o desconta.
+        var entradasNaoClassificadasTotal = entradasOperacionais
+            .Where(e => string.IsNullOrWhiteSpace(e.Categoria))
+            .Sum(e => e.Valor);
+        var receitaBruta = entradasOperacionais.Sum(e => e.Valor) - entradasNaoClassificadasTotal;
 
         // Receita financeira (rendimento de investimento): fato modificativo, mas não é receita
         // operacional — nunca soma em receitaBruta. Correções negativas de rendimento são lançadas
@@ -334,6 +342,15 @@ public class MetricasService : IMetricasService
             bucket[nomeCat] = (bucket.TryGetValue(nomeCat, out var v) ? v : 0m) + saida.Valor;
         }
 
+        // Entrada sem categoria entra NEGATIVA no mesmo bucket "Não Classificado" — a linha vira o
+        // valor líquido (saídas sem categoria − entradas sem categoria), e o valor já foi retirado
+        // da Receita Bruta acima (ver entradasNaoClassificadasTotal), então não é contado duas vezes.
+        foreach (var entrada in entradasOperacionais.Where(e => string.IsNullOrWhiteSpace(e.Categoria)))
+        {
+            const string nomeCat = "Não Classificado";
+            naoClassificadoCats[nomeCat] = (naoClassificadoCats.TryGetValue(nomeCat, out var v) ? v : 0m) - entrada.Valor;
+        }
+
         // ---- Atividades de Investimento / Financiamento: fato modificativo pós-operacional ----
         // Mesmo padrão do Rendimento acima: nunca passam pelo filtro EhOperacional (excluídas de
         // saidasOperacionais/entradas), e o sinal vem de ser entrada (+) ou saída (-), não do Tipo —
@@ -397,7 +414,6 @@ public class MetricasService : IMetricasService
         var resultadoLiquido = resultadoOperacional + receitaFinanceira.Total - despesasNaoOperacionais.Total
             - naoClassificado.Total + atividadesInvestimento.Total + atividadesFinanciamento.Total;
 
-        var entradasOperacionais = registros.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).ToList();
         var blocos = MontarBlocos(
             entradasOperacionais, saidasOperacionais, receitaBruta, mapaBloco, mapaGrupo, mapaOrdem,
             receitaFinanceiraCats, atividadesInvestimento, atividadesFinanciamento);
@@ -565,9 +581,20 @@ public class MetricasService : IMetricasService
         if (evolucao.Count >= 2)
         {
             var atual = evolucao[^1];
-            var anterior = evolucao[^2];
-            if (anterior.Receita > 0)
-                variacaoMoM = Math.Round((atual.Receita - anterior.Receita) / anterior.Receita * 100, 1);
+            // Item 5: evolucao[^1] é sempre o mês de "hoje" — em andamento, só com os primeiros
+            // N dias lançados. Comparar isso com o mês anterior INTEIRO (fechado) sempre mostra
+            // uma queda artificial, mesmo num mês bom. Recorta o mês anterior nos mesmos N dias
+            // (mesma ideia já usada no Dashboard — ver utils/periodo.ts no frontend, Item 1.7).
+            var mesAnteriorRef = hoje.AddMonths(-1);
+            var ateAnteriorMesmosDias = new DateOnly(mesAnteriorRef.Year, mesAnteriorRef.Month,
+                Math.Min(hoje.Day, DateTime.DaysInMonth(mesAnteriorRef.Year, mesAnteriorRef.Month)));
+            var receitaAnteriorMesmosDias = registros
+                .Where(r => r.Data.Year == mesAnteriorRef.Year && r.Data.Month == mesAnteriorRef.Month && r.Data <= ateAnteriorMesmosDias)
+                .SelectMany(r => r.Entradas)
+                .Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto))
+                .Sum(e => e.Valor);
+            if (receitaAnteriorMesmosDias > 0)
+                variacaoMoM = Math.Round((atual.Receita - receitaAnteriorMesmosDias) / receitaAnteriorMesmosDias * 100, 1);
         }
         if (evolucao.Count >= 13)
         {

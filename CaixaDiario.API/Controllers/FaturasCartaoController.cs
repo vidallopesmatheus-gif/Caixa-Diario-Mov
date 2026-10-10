@@ -45,4 +45,11 @@ public class FaturasCartaoController : ControllerBase
         await _service.DesvincularPagamentoAsync(id, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<object> { Dados = null });
     }
+
+    [HttpPost("{contaCartaoId:guid}/lancar-parcelado")]
+    public async Task<IActionResult> LancarParcelado(Guid contaCartaoId, [FromBody] LancarCompraParceladaDto dto)
+    {
+        await _service.LancarComprasParceladaAsync(contaCartaoId, ObterUsuarioId(), ObterPerfil(), dto);
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
 }

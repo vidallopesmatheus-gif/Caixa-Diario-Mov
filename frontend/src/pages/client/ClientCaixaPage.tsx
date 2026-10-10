@@ -8,6 +8,7 @@ import { listarCategorias } from '../../api/categorias'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
 import { excluirLancamento } from '../../api/importacao'
+import { lancarCompraParcelada } from '../../api/faturasCartao'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, ContaBancaria, CategoriaAdmin } from '../../types'
 import './ClientCaixa.css'
@@ -27,14 +28,16 @@ const GUID_VAZIO = '00000000-0000-0000-0000-000000000000'
 // categoria de verdade) — guarda a conta contrapartida escolhida, pra criar o par vinculado
 // depois que a linha for salva (precisa existir de verdade antes de virar o outro lado do par).
 type LinhaEntrada = ItemFinanceiro & { contaId: string; transferenciaContaId?: string }
-type LinhaSaida = ItemFinanceiroSaida & { contaId: string; transferenciaContaId?: string }
+// Item 9: parcelas só é relevante quando a linha aponta pra uma conta CartaoCredito — default 1
+// (sem parcelamento, comportamento de sempre).
+type LinhaSaida = ItemFinanceiroSaida & { contaId: string; transferenciaContaId?: string; parcelas?: number }
 
 const CATEGORIA_TRANSFERENCIA = 'Transferência'
 
 // Id gerado no cliente pra todo lançamento novo nascer com identidade própria — sem isso, baixas
 // de Contas a Pagar/Receber não conseguem vincular com segurança a um lançamento manual específico.
 const novaEntrada = (contaId = ''): LinhaEntrada => ({ id: crypto.randomUUID(), descricao: '', valor: 0, contaId })
-const novaSaida = (contaId = ''): LinhaSaida => ({ id: crypto.randomUUID(), descricao: '', valor: 0, categoria: '', subcategoria: '', contaId })
+const novaSaida = (contaId = ''): LinhaSaida => ({ id: crypto.randomUUID(), descricao: '', valor: 0, categoria: '', subcategoria: '', contaId, parcelas: 1 })
 
 function agruparPorConta<T extends { contaId: string }>(itens: T[]): Map<string, T[]> {
   const mapa = new Map<string, T[]>()
@@ -154,10 +157,14 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   useEffect(() => {
     if (!clienteId || !contaId) return
     let ignore = false
-    // Item 2.4: limpa os selos JÁ, antes do fetch assíncrono — senão os selos da conta/dia
-    // anterior continuam visíveis (e contando no total) durante a troca.
+    // Item 2.4/7: limpa os selos JÁ, antes do fetch assíncrono — senão os selos da conta/dia
+    // anterior continuam visíveis (e contando no total) durante a troca. Inclui a mensagem de
+    // "Salvo com sucesso!" — sem isso ela ficava pendurada na tela, parecendo se referir à conta
+    // nova pra qual o usuário acabou de trocar.
     setSavedEntradas([])
     setSavedSaidas([])
+    setMsg('')
+    setSaveSuccess(false)
     const load = async () => {
       const reg = await buscarPorData(data, contaId)
       if (ignore) return
@@ -205,10 +212,45 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     })
   }
 
-  function handleSaveSaida(idx: number) {
+  // Item 9: linha apontando pra uma conta CartaoCredito com parcelas > 1 nunca entra como um
+  // lançamento só — vai direto pro backend, que divide em N saídas (uma em cada competência
+  // futura). Por isso é assíncrona e passa pelo servidor antes de sumir da lista de rascunhos
+  // (diferente de toda outra linha, que só confirma localmente até "Salvar e sincronizar").
+  async function handleSaveSaida(idx: number) {
     const item = saidas[idx]
     if (!item.descricao && !item.valor) return
     if (!item.categoria) { setMsg('Selecione uma categoria para a saída.'); setSaveSuccess(false); return }
+
+    const contaDaLinha = contas.find(c => c.id === (item.contaId || contaId))
+    const parcelas = item.parcelas ?? 1
+    if (contaDaLinha?.tipo === 'CartaoCredito' && parcelas > 1) {
+      setSaving(true)
+      setMsg('')
+      try {
+        await lancarCompraParcelada(contaDaLinha.id, {
+          descricao: item.descricao, valorTotal: item.valor, categoria: item.categoria,
+          quantidadeParcelas: parcelas, data,
+        })
+        setSaidas(prev => {
+          const next = prev.filter((_, j) => j !== idx)
+          return next.length ? next : [novaSaida(contaId)]
+        })
+        setSaidaDisplays(prev => {
+          const next = prev.filter((_, j) => j !== idx)
+          return next.length ? next : ['']
+        })
+        await recarregarRegistroAtual()
+        setSaveSuccess(true)
+        setMsg(`Compra parcelada em ${parcelas}x lançada!`)
+      } catch (e: unknown) {
+        setSaveSuccess(false)
+        setMsg(e instanceof Error ? e.message : 'Erro ao lançar compra parcelada.')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
+
     setSavedSaidas(prev => [...prev, item])
     setSaidas(prev => {
       const next = prev.filter((_, j) => j !== idx)
@@ -443,6 +485,12 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
 
   function updateSaidaConta(i: number, novaContaId: string) {
     setSaidas(prev => prev.map((x, j) => j === i ? { ...x, contaId: novaContaId } : x))
+  }
+
+  // Item 9: só tem efeito quando a linha vai confirmar numa conta CartaoCredito (ver handleSaveSaida).
+  function updateSaidaParcelas(i: number, valor: string) {
+    const n = Math.max(1, Number(valor) || 1)
+    setSaidas(prev => prev.map((x, j) => j === i ? { ...x, parcelas: n } : x))
   }
 
   function abrirEscolhaDeContrapartida(tipo: 'entrada' | 'saida', idx: number) {
@@ -741,6 +789,23 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                 >
                   {contas.filter(c => c.ativa).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
                 </select>
+              </div>
+            )}
+            {/* Item 9: compra no cartão pode ser parcelada — cada parcela vira sua própria saída,
+                numa competência futura diferente (ver handleSaveSaida/lancarCompraParcelada). */}
+            {contas.find(c => c.id === (s.contaId || contaId))?.tipo === 'CartaoCredito' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '-4px 0 8px 2px' }}>
+                <span style={{ fontSize: 11, color: 'var(--tx3)' }}>Parcelas:</span>
+                <input
+                  type="number" min={1} max={48} value={s.parcelas ?? 1}
+                  onChange={ev => updateSaidaParcelas(i, ev.target.value)}
+                  style={{ width: 52, fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-input)', color: 'var(--tx1)' }}
+                />
+                {(s.parcelas ?? 1) > 1 && s.valor > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--tx3)' }}>
+                    {(s.parcelas ?? 1)}x de {fmtBRL(s.valor / (s.parcelas ?? 1))}
+                  </span>
+                )}
               </div>
             )}
             </div>

@@ -576,6 +576,31 @@ public class MetricasServiceTests
         Assert.Equal(20.0m, resultado.VariacaoReceitaMesAnterior);
     }
 
+    // Item 5: o mês atual pode estar em andamento (só uns dias lançados) — comparar com o mês
+    // anterior INTEIRO sempre mostra uma queda artificial. A variação tem que recortar o mês
+    // anterior nos mesmos dias já percorridos neste mês.
+    [Fact]
+    public void CalcularIndicadores_MesAtualEmAndamento_ComparaComOsMesmosDiasDoMesAnterior()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var corteAnterior = hoje.AddMonths(-1); // mesmo dia-do-mês (ou o último, se o mês for mais curto)
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(hoje, new() { Item("Venda", 120m, "Vendas", "Receita") }, new()),
+            // Dentro da janela de comparação (até o mesmo ponto do mês anterior) — conta.
+            CriarRegistro(corteAnterior, new() { Item("Venda", 100m, "Vendas", "Receita") }, new()),
+            // Depois da janela — a parte do mês anterior que ainda nem aconteceu neste mês. Nunca
+            // pode contar, senão um mês anterior "cheio" sempre parece uma queda forte no meio do mês.
+            CriarRegistro(corteAnterior.AddDays(1), new() { Item("Venda", 900m, "Vendas", "Receita") }, new()),
+        };
+
+        var resultado = _sut.CalcularIndicadores(registros, mesesEvolucao: 6);
+
+        // 120 vs 100 (só o que já tinha acontecido até o mesmo ponto do mês anterior) = +20%, não a
+        // queda de quase 90% que (120 vs 1000, mês anterior inteiro) daria.
+        Assert.Equal(20.0m, resultado.VariacaoReceitaMesAnterior);
+    }
+
     [Fact]
     public void CalcularIndicadores_MesAnteriorSemReceita_VariacaoMesAMesNula()
     {
@@ -921,6 +946,43 @@ public class MetricasServiceTests
         Assert.Equal(dre.TotalDespesas, dre.Deducoes.Total + dre.CustosVariaveis.Total + dre.DespesasFixas.Total
             + dre.DespesasNaoOperacionais.Total + dre.NaoClassificado.Total);
         Assert.Equal(dre.Resultado, dre.ResultadoLiquido);
+    }
+
+    // Item 3: "Não Classificados" precisa ser o valor LÍQUIDO (saídas sem categoria − entradas sem
+    // categoria), não só a saída — senão a entrada sem categoria fica contada a mais (uma vez cheia
+    // na Receita Bruta, sem nenhuma linha descontando ela) e a soma das linhas visíveis não bate
+    // com o Resultado Líquido.
+    [Fact]
+    public void CalcularDre_EntradaSemCategoria_DescontaDaReceitaBrutaEEntraNetaEmNaoClassificado()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new()
+            {
+                Item("Venda", 900m, "Vendas", "Receita"),
+                Item("Pix sem categoria", 100m, null, null),
+            },
+            new()
+            {
+                Item("Aluguel", 400m, "Aluguel", "CustoFixo"),
+                Item("Saída sem categoria", 50m, null, null),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
+
+        // Receita Bruta não inclui mais o Pix sem categoria (900, não 1000).
+        Assert.Equal(900m, dre.ReceitaBruta);
+        // Não Classificado = 50 (saída) − 100 (entrada) = −50 — a entrada sem categoria domina.
+        Assert.Equal(-50m, dre.NaoClassificado.Total);
+
+        Assert.Equal(400m, dre.DespesasFixas.Total);
+        Assert.Equal(500m, dre.ResultadoOperacional); // 900 - 400
+        Assert.Equal(550m, dre.ResultadoLiquido); // 500 - (-50)
+
+        // Reconciliação: somando as linhas visíveis da cascata chega-se exatamente no Resultado Líquido.
+        Assert.Equal(dre.ResultadoLiquido,
+            dre.ReceitaBruta - dre.Deducoes.Total - dre.CustosVariaveis.Total - dre.DespesasFixas.Total
+            + dre.ReceitaFinanceira.Total - dre.DespesasNaoOperacionais.Total - dre.NaoClassificado.Total
+            + dre.AtividadesInvestimento.Total + dre.AtividadesFinanciamento.Total);
     }
 
     [Fact]

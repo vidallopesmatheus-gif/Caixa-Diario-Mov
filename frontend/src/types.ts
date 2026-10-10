@@ -54,6 +54,11 @@ export interface ItemFinanceiroSaida {
   fitId?: string
   pendenteCategorizacao?: boolean
   classificadoPeloCliente?: boolean
+  // Item 9: compra parcelada no cartão — cada parcela é sua própria saída (ver FaturaCartaoService.
+  // LancarComprasParceladaAsync), ligadas por parcelamentoId; numeroParcela/totalParcelas são só exibição.
+  parcelamentoId?: string
+  numeroParcela?: number
+  totalParcelas?: number
 }
 
 

@@ -93,3 +93,26 @@ export const vincularPagamentoFatura = async (dto: {
 export const desvincularPagamentoFatura = async (id: string): Promise<void> => {
   await apiFetch<ApiResponse<null>>(`/api/faturas-cartao/${id}`, { method: 'DELETE' })
 }
+
+/**
+ * Item 9: lança uma compra parcelada direto no cartão — cria uma saída por parcela, uma em cada
+ * competência futura (um mês depois da anterior), nunca um único lançamento "informativo".
+ */
+export const lancarCompraParcelada = async (contaCartaoId: string, dto: {
+  descricao: string
+  valorTotal: number
+  categoria: string
+  quantidadeParcelas: number
+  data: string
+}): Promise<void> => {
+  await apiFetch<ApiResponse<null>>(`/api/faturas-cartao/${contaCartaoId}/lancar-parcelado`, {
+    method: 'POST',
+    body: JSON.stringify({
+      Descricao: dto.descricao,
+      ValorTotal: dto.valorTotal,
+      Categoria: dto.categoria,
+      QuantidadeParcelas: dto.quantidadeParcelas,
+      Data: dto.data,
+    }),
+  })
+}

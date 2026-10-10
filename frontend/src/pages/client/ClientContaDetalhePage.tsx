@@ -581,6 +581,11 @@ export default function ClientContaDetalhePage() {
             📈 Registrar rendimento
           </button>
         )}
+        {conta.tipo === 'CartaoCredito' && (
+          <button className="cd-btn-importar" onClick={() => navigate(`/banco/${contaId}/faturas`)}>
+            💳 Ver faturas
+          </button>
+        )}
       </div>
 
       {resultadoImportacao && (

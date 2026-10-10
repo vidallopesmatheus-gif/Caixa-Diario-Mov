@@ -8,4 +8,5 @@ public interface IFaturaCartaoService
     Task<FaturaCartaoDto?> SugerirFaturaAsync(Guid contaCartaoId, decimal valor, DateOnly data, Guid usuarioLogadoId, string perfil);
     Task<PagamentoFaturaDto> VincularPagamentoAsync(VincularPagamentoFaturaDto dto, Guid usuarioLogadoId, string perfil);
     Task DesvincularPagamentoAsync(Guid id, Guid usuarioLogadoId, string perfil);
+    Task LancarComprasParceladaAsync(Guid contaCartaoId, Guid usuarioLogadoId, string perfil, LancarCompraParceladaDto dto);
 }

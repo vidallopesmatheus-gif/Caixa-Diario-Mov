@@ -726,6 +726,49 @@ public class RegistroServiceTests
         Assert.Empty(resultado.Saidas);
     }
 
+    // [CRÍTICO, 4ª vez]: tela do Caixa na conta Nubank, um item redirecionado pra conta C6 (que
+    // ainda não tem registro nesse dia). O GET que a tela faz pra "existe algo hoje na C6?" não
+    // pode, na ausência de registro da C6, devolver o registro de OUTRA conta (Nubank) do mesmo
+    // dia — isso faz o Caixa achar que esse OUTRO registro É o da C6 e mesclar tudo nele ao salvar
+    // (saldo inicial errado + itens de uma conta vazando pra outra). O fallback "qualquer conta,
+    // mesma data" só é válido quando NENHUMA conta específica foi pedida.
+    [Fact]
+    public async Task ObterPorData_ContaEspecificaSemRegistroMasOutraContaTemRegistroNaMesmaData_NaoMisturaComOutraConta()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaNubankId = Guid.NewGuid();
+        var contaC6Id = Guid.NewGuid();
+        var data = DataLocalHelper.Hoje();
+
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria>
+        {
+            new() { Id = contaNubankId, Tipo = "ContaCorrente", Nome = "Nubank", Ativa = true, SaldoInicial = 0m },
+            new() { Id = contaC6Id, Tipo = "ContaCorrente", Nome = "C6", Ativa = true, SaldoInicial = 50m },
+        });
+
+        // Nubank já tem registro hoje (2 itens) — é esse registro que o fallback ambíguo acha.
+        var registroNubank = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaNubankId, Data = data, Inicio = 1000m,
+            Entradas = new() { new() { Descricao = "Venda 1", Valor = 300m } },
+            Saidas = new() { new() { Descricao = "Mercado", Valor = 100m, Categoria = "Insumos/Mercadoria" } },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1200m,
+        };
+
+        // C6 nunca teve registro — nem hoje, nem antes.
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(contaC6Id, data)).ReturnsAsync((RegistroDiario?)null);
+        _repoMock.Setup(r => r.ObterPorClienteEDataAsync(clienteId, data)).ReturnsAsync(registroNubank);
+        _repoMock.Setup(r => r.ListarPorContaAsync(contaC6Id)).ReturnsAsync(new List<RegistroDiario>());
+
+        var resultado = await _sut.ObterPorDataAsync(clienteId, data, clienteId, "cliente", contaC6Id);
+
+        Assert.Equal(Guid.Empty, resultado.Id);
+        Assert.Equal(contaC6Id, resultado.ContaBancariaId);
+        Assert.Equal(50m, resultado.Inicio); // saldo inicial da C6, nunca o Inicio/saldo do Nubank
+        Assert.Empty(resultado.Entradas);
+        Assert.Empty(resultado.Saidas);
+    }
+
     [Fact]
     public async Task ObterPorData_RegistroNaoEncontradoESemRegistroAnterior_UsaSaldoInicialDaConta()
     {
@@ -801,6 +844,56 @@ public class RegistroServiceTests
 
         _repoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(x => x.Id == registroNubank.Id && x.Excluido)), Times.Once);
         _repoMock.Verify(r => r.ObterPorContaEDataAsync(contaCaixa.Id, It.IsAny<DateOnly>()), Times.Never);
+    }
+
+    // Item 2: excluir um dia não pode deixar os dias seguintes (inclusive futuros, ex.: uma conta a
+    // pagar já materializada com antecedência) com Inicio/SaldoFinal baseados num dia que não existe
+    // mais — tem que recalcular a cadeia a partir do último registro ativo anterior.
+    [Fact]
+    public async Task Excluir_RegistroComDiaSeguinteDaMesmaConta_RecalculaInicioESaldoFinalDoSeguinte()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaId = Guid.NewGuid();
+        var ontem = DataLocalHelper.Hoje().AddDays(-2);
+        var hoje = DataLocalHelper.Hoje().AddDays(-1);
+        var amanha = DataLocalHelper.Hoje();
+
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { new() { Id = contaId, Tipo = "ContaCorrente", Ativa = true, SaldoInicial = 0m } });
+
+        var registroAnterior = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = ontem,
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1000m,
+        };
+        var registroExcluido = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = hoje, Inicio = 1000m,
+            Entradas = new() { new() { Descricao = "Venda", Valor = 500m } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1500m,
+        };
+        // Conta a pagar já materializada com antecedência pro dia seguinte (futuro em relação ao
+        // dia excluído) — herdou Inicio/SaldoFinal do dia que está sendo excluído.
+        var registroFuturo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = amanha, Inicio = 1500m,
+            Entradas = new(), Saidas = new() { new() { Descricao = "Aluguel", Valor = 300m, Categoria = "Aluguel" } },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1200m,
+        };
+
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, hoje)).ReturnsAsync(registroExcluido);
+        _repoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registroAnterior });
+        _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<RegistroDiario> { registroAnterior, registroExcluido, registroFuturo });
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        await _sut.ExcluirAsync(clienteId, hoje, contaId, "motivo", Guid.NewGuid(), "admin");
+
+        // Sem o dia excluído (que trazia 500 de entrada), o dia seguinte passa a partir de 1000
+        // (saldo do dia anterior), não mais de 1500.
+        Assert.Equal(1000m, registroFuturo.Inicio);
+        Assert.Equal(700m, registroFuturo.SaldoFinal); // 1000 - 300 de saída
+        _repoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(x => x.Id == registroFuturo.Id)), Times.Once);
     }
 
     // --- D7: baixa financeira ajusta o saldo automaticamente ---
