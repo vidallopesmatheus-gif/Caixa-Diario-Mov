@@ -555,10 +555,10 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         onPick={novaData => { if (podeTrocarDeTelaAgora()) setData(novaData) }}
       />
       <div className="stats-grid">
-        <StatCard label="📥 Início" value={fmtBRL(inicio)} />
+        <StatCard label="📥 Início" value={fmtBRL(inicio)} className={inicio < 0 ? 'val-red' : undefined} />
         <StatCard label="📤 Entradas" value={fmtBRL(totalEntradas)} className="val-green" />
         <StatCard label="💸 Saídas" value={fmtBRL(totalSaidas)} className="val-red" />
-        <StatCard label="💰 Saldo" value={fmtBRL(calculado)} className="val-green" />
+        <StatCard label="💰 Saldo" value={fmtBRL(calculado)} className={calculado < 0 ? 'val-red' : 'val-green'} />
       </div>
 
       {contas.length > 1 && (

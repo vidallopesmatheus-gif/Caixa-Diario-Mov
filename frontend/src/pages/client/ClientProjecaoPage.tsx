@@ -298,7 +298,7 @@ export default function ClientProjecaoPage() {
             </div>
             <div className="pj-card">
               <span className="pj-card-label">Melhor saldo projetado</span>
-              <span className="pj-card-val val-green">{fmtBRL(maiorSaldo)}</span>
+              <span className={`pj-card-val ${maiorSaldo >= 0 ? 'val-green' : 'val-red'}`}>{fmtBRL(maiorSaldo)}</span>
             </div>
           </div>
 

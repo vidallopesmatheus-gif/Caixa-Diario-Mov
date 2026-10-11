@@ -430,6 +430,39 @@ public class ContaBancariaServiceTests
         _contaRepoMock.Verify(r => r.AdicionarAsync(It.Is<ContaBancaria>(c => c.Nome == "Conta Nova" && c.Ativa)), Times.Once);
     }
 
+    // Item E1 do bundle D6JWEAJa: saldo inicial negativo é uma situação real (conta que já começa
+    // no cheque especial) — nunca houve bloqueio no backend, mas o front mascarava o "-" no input;
+    // este teste trava que o backend continua aceitando, caso algum dia uma validação seja adicionada
+    // aqui por engano.
+    [Fact]
+    public async Task CriarAsync_ComSaldoInicialNegativo_CriaContaNormalmente()
+    {
+        var clienteId = Guid.NewGuid();
+        var dto = new CriarContaBancariaDto { ClienteId = clienteId, Nome = "Conta no cheque especial", Tipo = "ContaCorrente", SaldoInicial = -500m };
+        _contaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<ContaBancaria>()))
+            .ReturnsAsync((ContaBancaria c) => c);
+
+        var criada = await _sut.CriarAsync(dto, clienteId, "cliente");
+
+        Assert.Equal(-500m, criada.SaldoAtual);
+        _contaRepoMock.Verify(r => r.AdicionarAsync(It.Is<ContaBancaria>(c => c.SaldoInicial == -500m)), Times.Once);
+    }
+
+    [Fact]
+    public async Task AtualizarAsync_ComSaldoInicialNegativo_AtualizaNormalmente()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Conta", Tipo = "ContaCorrente", SaldoInicial = 100m, Ativa = true };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _contaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<ContaBancaria>())).ReturnsAsync((ContaBancaria c) => c);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario>());
+        var dto = new AtualizarContaBancariaDto { Nome = "Conta", Tipo = "ContaCorrente", SaldoInicial = -1200m, Ativa = true };
+
+        var atualizada = await _sut.AtualizarAsync(conta.Id, dto, clienteId, "cliente");
+
+        Assert.Equal(-1200m, atualizada.SaldoAtual);
+    }
+
     [Fact]
     public async Task CriarAsync_ComTipoInvalido_LancaDadosInvalidos()
     {

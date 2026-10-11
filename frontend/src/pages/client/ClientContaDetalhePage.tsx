@@ -548,7 +548,7 @@ export default function ClientContaDetalhePage() {
         </div>
         <div className="cd-saldo-box">
           <span className="cd-saldo-label">Saldo atual</span>
-          <span className="cd-saldo-val val-green">{fmtBRL(conta.saldoAtual)}</span>
+          <span className={`cd-saldo-val ${conta.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(conta.saldoAtual)}</span>
         </div>
       </div>
 
@@ -664,7 +664,7 @@ export default function ClientContaDetalhePage() {
           </div>
           <div className="cb-resumo-item">
             <span className="cb-resumo-label">Saldo atual</span>
-            <span className="cb-resumo-val val-green">{fmtBRL(conta.saldoAtual)}</span>
+            <span className={`cb-resumo-val ${conta.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(conta.saldoAtual)}</span>
           </div>
           <div className="cb-resumo-item">
             <span className="cb-resumo-label">Rentabilidade no período</span>
