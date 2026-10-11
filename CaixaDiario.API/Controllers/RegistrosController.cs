@@ -49,4 +49,11 @@ public class RegistrosController : ControllerBase
         await _registroService.ExcluirAsync(clienteId, data, contaBancariaId, dto.MotivoExclusao, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<object> { Dados = null });
     }
+
+    [HttpPatch("{clienteId:guid}/categoria")]
+    public async Task<IActionResult> EditarCategoriaLancamento(Guid clienteId, [FromBody] EditarCategoriaLancamentoDto dto)
+    {
+        var resultado = await _registroService.EditarCategoriaLancamentoAsync(clienteId, ObterUsuarioId(), ObterPerfil(), dto);
+        return Ok(new ApiResponse<EditarCategoriaLancamentoResultDto> { Dados = resultado });
+    }
 }

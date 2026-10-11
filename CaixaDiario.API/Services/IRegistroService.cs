@@ -8,4 +8,6 @@ public interface IRegistroService
     Task<RegistroDto> ObterPorDataAsync(Guid clienteId, DateOnly data, Guid usuarioLogadoId, string perfil, Guid? contaBancariaId = null);
     Task<(RegistroDto dto, bool criado)> SalvarAsync(CriarRegistroDto dto, string nomeUsuario);
     Task ExcluirAsync(Guid clienteId, DateOnly data, Guid? contaBancariaId, string motivo, Guid usuarioLogadoId, string perfil);
+    Task<EditarCategoriaLancamentoResultDto> EditarCategoriaLancamentoAsync(
+        Guid clienteId, Guid usuarioLogadoId, string perfil, EditarCategoriaLancamentoDto dto);
 }

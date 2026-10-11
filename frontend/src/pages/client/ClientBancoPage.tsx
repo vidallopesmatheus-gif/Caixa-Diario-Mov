@@ -60,7 +60,7 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
         </div>
         <div className="cb-resumo-item">
           <span className="cb-resumo-label">Disponível</span>
-          <span className="cb-resumo-val val-green">{fmtBRL(saldoConsolidado)}</span>
+          <span className={`cb-resumo-val ${saldoConsolidado < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(saldoConsolidado)}</span>
         </div>
         {cartoes.length > 0 && (
           <div className="cb-resumo-item">
@@ -93,7 +93,7 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
                   {TIPO_LABEL[c.tipo] ?? c.tipo}
                   {c.tipo === 'CartaoCredito'
                     ? (c.limite ? ` · Limite: ${fmtBRL(c.limite)}` : '')
-                    : (c.saldoInicial > 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`)}
+                    : (c.saldoInicial !== 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`)}
                 </div>
                 <div className="cb-conta-resumo-mes">
                   Este mês: <span className="val-green">+{fmtBRL(c.entradasMes)}</span>
@@ -106,7 +106,7 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
               </div>
               {c.tipo === 'CartaoCredito'
                 ? <div className="cb-conta-saldo val-red">{fmtBRL(c.saldoDevedor ?? 0)}</div>
-                : <div className="cb-conta-saldo val-green">{fmtBRL(c.saldoAtual)}</div>}
+                : <div className={`cb-conta-saldo ${c.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(c.saldoAtual)}</div>}
             </div>
           </div>
         ))}

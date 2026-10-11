@@ -20,7 +20,7 @@
   background: var(--accent-soft); border: 1px dashed var(--accent);
   border-radius: 10px; color: var(--accent); font-size: 13px; font-weight: 600; margin-top: 8px;
 }
-.btn-add-client:hover { background: rgba(124,58,237,.22); }
+.btn-add-client:hover { background: rgba(30,111,217,.22); }
 
 .overview-cards {
   display: grid;
@@ -44,4 +44,4 @@
   background: var(--vc-bg); border: 1px solid var(--vc-bd);
   border-radius: 8px; color: var(--accent); font-size: 13px; font-weight: 600;
 }
-.btn-view-client:hover { background: rgba(124,58,237,.22); }
+.btn-view-client:hover { background: rgba(30,111,217,.22); }

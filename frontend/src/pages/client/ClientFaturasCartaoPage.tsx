@@ -2,12 +2,21 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { listarContasBancarias } from '../../api/contasBancarias'
-import { listarFaturasCartao } from '../../api/faturasCartao'
+import { listarFaturasCartao, pagarFatura } from '../../api/faturasCartao'
 import type { FaturaCartao } from '../../api/faturasCartao'
-import { fmtBRL } from '../../utils/format'
+import { fmtBRL, todayISO } from '../../utils/format'
+import Modal from '../../components/shared/Modal'
 import type { ContaBancaria } from '../../types'
 import './ClientContasBancarias.css'
 import './ClientContaDetalhe.css'
+
+function fmtNum(n: number) {
+  if (!n) return ''
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function parseBRL(s: string): number {
+  return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0
+}
 
 interface Props { clienteIdOverride?: string }
 
@@ -36,9 +45,11 @@ export default function ClientFaturasCartaoPage({ clienteIdOverride }: Props) {
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
 
   const [conta, setConta] = useState<ContaBancaria | null>(null)
+  const [contasOrigem, setContasOrigem] = useState<ContaBancaria[]>([])
   const [faturas, setFaturas] = useState<FaturaCartao[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
+  const [pagarAlvo, setPagarAlvo] = useState<FaturaCartao | null>(null)
 
   const carregar = useCallback(async () => {
     if (!clienteId || !contaId) return
@@ -50,6 +61,7 @@ export default function ClientFaturasCartaoPage({ clienteIdOverride }: Props) {
         listarFaturasCartao(contaId),
       ])
       setConta(contas.find(c => c.id === contaId) ?? null)
+      setContasOrigem(contas.filter(c => c.ativa && c.tipo !== 'CartaoCredito'))
       setFaturas(lista)
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao carregar faturas.')
@@ -102,10 +114,90 @@ export default function ClientFaturasCartaoPage({ clienteIdOverride }: Props) {
               <div className={`cb-conta-saldo ${f.saldoDevedor > 0 ? 'val-red' : 'val-green'}`}>
                 {fmtBRL(f.saldoDevedor)}
               </div>
+              {f.status !== 'Paga' && (
+                <div className="cb-conta-acoes">
+                  <button className="cb-btn-editar" onClick={() => setPagarAlvo(f)}>Pagar</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
+
+      {pagarAlvo && contaId && (
+        <PagarFaturaModal
+          contaCartaoId={contaId}
+          fatura={pagarAlvo}
+          contasOrigem={contasOrigem}
+          onClose={() => setPagarAlvo(null)}
+          onPago={async () => { setPagarAlvo(null); await carregar() }}
+        />
+      )}
     </>
+  )
+}
+
+function PagarFaturaModal({ contaCartaoId, fatura, contasOrigem, onClose, onPago }: {
+  contaCartaoId: string
+  fatura: FaturaCartao
+  contasOrigem: ContaBancaria[]
+  onClose: () => void
+  onPago: () => void
+}) {
+  const [contaOrigemId, setContaOrigemId] = useState(contasOrigem[0]?.id ?? '')
+  const [data, setData] = useState(todayISO())
+  const [valorDisplay, setValorDisplay] = useState(fmtNum(fatura.saldoDevedor))
+  const [erro, setErro] = useState('')
+  const [salvando, setSalvando] = useState(false)
+
+  const handlePagar = async () => {
+    setErro('')
+    const valor = parseBRL(valorDisplay)
+    if (!contaOrigemId) { setErro('Selecione a conta de origem.'); return }
+    if (valor <= 0) { setErro('Informe um valor maior que zero.'); return }
+    setSalvando(true)
+    try {
+      await pagarFatura(contaCartaoId, { contaOrigemId, data, competencia: fatura.competencia, valor })
+      onPago()
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : 'Erro ao pagar fatura.')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <Modal open title={`Pagar fatura ${fmtCompetencia(fatura.competencia)}`} onClose={onClose} footer={
+      <>
+        <button className="btn-cancel" onClick={onClose}>Cancelar</button>
+        <button className="btn-primary" onClick={handlePagar} disabled={salvando}>
+          {salvando ? 'Pagando...' : 'Confirmar pagamento'}
+        </button>
+      </>
+    }>
+      {erro && <div className="cd-msg cd-msg-aviso">{erro}</div>}
+      <div className="inp-group">
+        <label>Conta de origem</label>
+        <select value={contaOrigemId} onChange={e => setContaOrigemId(e.target.value)}>
+          <option value="">Selecione...</option>
+          {contasOrigem.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+      </div>
+      <div className="inp-group">
+        <label>Data</label>
+        <input type="date" value={data} onChange={e => setData(e.target.value)} />
+      </div>
+      <div className="inp-group">
+        <label>Valor (saldo devedor: {fmtBRL(fatura.saldoDevedor)})</label>
+        <div className="val-input-wrap">
+          <span className="val-prefix">R$</span>
+          <input
+            type="text" inputMode="decimal" value={valorDisplay}
+            onChange={e => setValorDisplay(e.target.value)}
+            onBlur={() => setValorDisplay(fmtNum(parseBRL(valorDisplay)))}
+          />
+        </div>
+      </div>
+    </Modal>
   )
 }

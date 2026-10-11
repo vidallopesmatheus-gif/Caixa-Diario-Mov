@@ -28,13 +28,13 @@ export default function ChatPanel({ messages, isLoading, onSend, onClose }: Chat
   return (
     <div className="chat-panel">
       <div className="chat-panel__header">
-        <span>Assistente Caixa Diário</span>
+        <span>Assistente Money Vision</span>
         <button className="chat-panel__close" onClick={onClose} aria-label="Fechar chat">✕</button>
       </div>
 
       <div className="chat-panel__messages">
         {messages.length === 0 && (
-          <p className="chat-panel__empty">Como posso ajudar com o Caixa Diário?</p>
+          <p className="chat-panel__empty">Como posso ajudar com o Money Vision?</p>
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`chat-msg chat-msg--${msg.role}`}>

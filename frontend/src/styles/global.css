@@ -111,6 +111,10 @@ button { font-family: inherit; cursor: pointer; }
 .inp-group input:focus { outline: none; border-color: var(--accent); }
 .inp-group select      { width: 100%; box-sizing: border-box; padding: 10px 13px; background: var(--bg-input); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx); font-size: 15px; }
 .inp-group select:focus { outline: none; border-color: var(--accent); }
+/* Item C2: textarea não tinha regra própria — ficava com o fundo branco padrão do navegador
+   mesmo no tema escuro (só input/select tinham --bg-input/--tx aplicados). */
+.inp-group textarea    { width: 100%; box-sizing: border-box; padding: 10px 13px; background: var(--bg-input); border: 1px solid var(--bd); border-radius: 8px; color: var(--tx); font-size: 15px; font-family: inherit; resize: vertical; }
+.inp-group textarea:focus { outline: none; border-color: var(--accent); }
 
 /* ── Form card ── */
 .form-card    { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 14px; padding: 20px; margin-bottom: 16px; }

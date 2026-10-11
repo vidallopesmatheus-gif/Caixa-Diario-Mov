@@ -195,26 +195,28 @@ export default function ConquistarMetaModal({ meta, contasBancarias, onClose, on
         </select>
       </div>
 
-      {formaPagamento !== 'Financiado' && (
-        <>
-          <div className="inp-group" style={{ marginTop: 12 }}>
-            <label>Categoria</label>
-            <CategoriaCombobox
-              categorias={categorias.saidas}
-              value={categoria}
-              onChange={setCategoria}
-              onCategoriaCriada={handleCategoriaCriada}
-              blocoPadraoNovaCategoria="DESPESAS OPERACIONAIS"
-              placeholder="Buscar categoria..."
-            />
-          </div>
+      {/* Item C1: escondido por CSS (não desmontado) quando a forma é "Financiado" — trocar de
+          forma e voltar não pode perder a categoria/observação já preenchidas. Um "{cond && <JSX>}"
+          aqui desmontaria o CategoriaCombobox e, com ele, qualquer estado interno dependente do
+          ciclo de montagem (ex.: o texto digitado antes de confirmar a seleção). */}
+      <div style={{ display: formaPagamento === 'Financiado' ? 'none' : undefined }}>
+        <div className="inp-group" style={{ marginTop: 12 }}>
+          <label>Categoria</label>
+          <CategoriaCombobox
+            categorias={categorias.saidas}
+            value={categoria}
+            onChange={setCategoria}
+            onCategoriaCriada={handleCategoriaCriada}
+            blocoPadraoNovaCategoria="DESPESAS OPERACIONAIS"
+            placeholder="Buscar categoria..."
+          />
+        </div>
 
-          <div className="inp-group" style={{ marginTop: 12 }}>
-            <label>Observação (opcional)</label>
-            <textarea value={observacao} onChange={e => setObservacao(e.target.value)} rows={2} style={{ width: '100%' }} />
-          </div>
-        </>
-      )}
+        <div className="inp-group" style={{ marginTop: 12 }}>
+          <label>Observação (opcional)</label>
+          <textarea value={observacao} onChange={e => setObservacao(e.target.value)} rows={2} style={{ width: '100%' }} />
+        </div>
+      </div>
 
       {formaPagamento === 'AVista' && contaInvestimento && (
         <label className="inp-group" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>

@@ -11,11 +11,12 @@
 .login-logo h1 {
   font-size: 30px;
   font-family: 'DM Sans', 'Inter', sans-serif;
-  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  background: linear-gradient(135deg, var(--accent), var(--mv-blue-light));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+.login-subtitulo { color: var(--tx2); font-size: 14px; font-weight: 600; margin-top: 2px; }
 .login-logo p { color: var(--tx3); font-size: 13px; margin-top: 4px; }
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 13px; color: var(--tx2); font-weight: 600; margin-bottom: 6px; }

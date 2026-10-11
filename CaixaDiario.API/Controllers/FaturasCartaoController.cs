@@ -39,6 +39,13 @@ public class FaturasCartaoController : ControllerBase
         return Ok(new ApiResponse<PagamentoFaturaDto> { Dados = criado });
     }
 
+    [HttpPost("{contaCartaoId:guid}/pagar")]
+    public async Task<IActionResult> Pagar(Guid contaCartaoId, [FromBody] PagarFaturaDto dto)
+    {
+        var criado = await _service.PagarFaturaAsync(contaCartaoId, dto, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<PagamentoFaturaDto> { Dados = criado });
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DesvincularPagamento(Guid id)
     {

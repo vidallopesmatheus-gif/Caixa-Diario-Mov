@@ -132,8 +132,19 @@ public class RecorrenciaService : IRecorrenciaService
     public async Task MaterializarMesAtualAsync(Guid clienteId)
     {
         var hoje = DataLocalHelper.Hoje();
-        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
-        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+
+        // Item F5 do bundle D6JWEAJa: materializava só o mês atual — uma recorrência criada depois
+        // que um mês já tinha passado, ou um cliente que não abriu o Caixa durante aquele mês
+        // (nada aqui roda sem alguém salvar algo em RegistroService), perdia aquela ocorrência pra
+        // sempre: no mês seguinte "mês atual" já é outro, e nunca existiu um caminho de código que
+        // volte pra gerar o que ficou pra trás (ex.: recorrência da Pollye, vencimento 10/09, nunca
+        // materializada porque setembro virou outubro antes de qualquer save no Caixa). Cobre
+        // também o mês anterior — uma janela de 2 meses, não o histórico inteiro, pra não inundar
+        // o cliente com provisões antigas (já resolvidas por fora, ou de recorrências desativadas
+        // há muito tempo) quando ele abrir a app depois de um tempo parado.
+        var mesAnteriorRef = hoje.AddMonths(-1);
+        var primeiroDia = new DateOnly(mesAnteriorRef.Year, mesAnteriorRef.Month, 1);
+        var ultimoDia = new DateOnly(hoje.Year, hoje.Month, 1).AddMonths(1).AddDays(-1);
 
         var ativas = await _contaRepo.ListarAtivasPorClienteAsync(clienteId);
         if (ativas.Count == 0) return;

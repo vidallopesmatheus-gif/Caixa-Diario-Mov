@@ -42,7 +42,7 @@ export default function InstallPrompt() {
   return (
     <div className="install-banner" role="status" aria-live="polite">
       <span className="install-icon">📲</span>
-      <span className="install-text">Instale o Caixa Diário para acesso rápido</span>
+      <span className="install-text">Instale o Money Vision para acesso rápido</span>
       <button className="install-btn" onClick={handleInstall}>Instalar</button>
       <button className="install-dismiss" onClick={handleDismiss} aria-label="Fechar">✕</button>
     </div>

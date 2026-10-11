@@ -188,7 +188,9 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
               type="text" inputMode="decimal" placeholder="0,00"
               value={novoSaldoDisplay}
               onChange={e => {
-                const raw = e.target.value.replace(/[^\d,]/g, '')
+                // Item E1: permite saldo inicial negativo (ex.: conta que já começa no cheque
+                // especial) — o "-" só é aceito no início do valor.
+                const raw = e.target.value.replace(/[^\d,-]/g, '').replace(/(?!^)-/g, '')
                 setNovoSaldoDisplay(raw)
                 setNovoSaldo(parseBRL(raw))
               }}
@@ -256,7 +258,7 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
                       type="text" inputMode="decimal" placeholder="Saldo inicial"
                       value={editSaldoDisplay}
                       onChange={e => {
-                        const raw = e.target.value.replace(/[^\d,]/g, '')
+                        const raw = e.target.value.replace(/[^\d,-]/g, '').replace(/(?!^)-/g, '')
                         setEditSaldoDisplay(raw)
                         setEditSaldo(parseBRL(raw))
                       }}
@@ -307,12 +309,12 @@ export default function ContasBancariasCrudPage({ clienteIdOverride }: Props) {
                     {TIPO_LABEL[c.tipo] ?? c.tipo}
                     {c.tipo === 'CartaoCredito'
                       ? (c.limite ? ` · Limite: ${fmtBRL(c.limite)}` : '')
-                      : (c.saldoInicial > 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`)}
+                      : (c.saldoInicial !== 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`)}
                   </div>
                 </div>
                 {c.tipo === 'CartaoCredito'
                   ? <div className="cb-conta-saldo val-red">{fmtBRL(c.saldoDevedor ?? 0)}</div>
-                  : <div className="cb-conta-saldo val-green">{fmtBRL(c.saldoAtual)}</div>}
+                  : <div className={`cb-conta-saldo ${c.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(c.saldoAtual)}</div>}
                 <div className="cb-conta-acoes">
                   <button className="cb-btn-editar" onClick={() => iniciarEdicao(c)}>Editar</button>
                   <button className="cb-btn-inativar" onClick={() => handleExcluir(c.id)}>Excluir</button>

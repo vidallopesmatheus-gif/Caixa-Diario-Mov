@@ -149,6 +149,94 @@ public class FaturaCartaoService : IFaturaCartaoService
         return resultado;
     }
 
+    // Item F4 do bundle D6JWEAJa: paga uma fatura direto da tela de Faturas — diferente de
+    // VincularPagamentoAsync, não precisa de um lançamento já existente pra reclassificar; cria a
+    // saída na conta de origem e a entrada no cartão do zero (mesma ideia de TransferenciaService.
+    // CriarAsync pra transferências "do zero"). Por ser dinheiro novo saindo da origem (não uma
+    // reclassificação de algo que já tinha efeito no saldo), cascata o saldo da origem — diferente
+    // de VincularPagamentoAsync, que não cascata porque o lançamento já existia antes.
+    public async Task<PagamentoFaturaDto> PagarFaturaAsync(
+        Guid contaCartaoId, PagarFaturaDto dto, Guid usuarioLogadoId, string perfil)
+    {
+        var contaCartao = await ObterCartaoOuFalharAsync(contaCartaoId);
+        VerificarAcesso(contaCartao.ClienteId, usuarioLogadoId, perfil);
+        if (!contaCartao.Ativa)
+            throw new ApiException(400, CodigoRetorno.CONTA_INATIVA, "O cartão deve estar ativo.");
+
+        var contaOrigem = await _contaRepo.ObterPorIdAsync(dto.ContaOrigemId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        if (contaOrigem.ClienteId != contaCartao.ClienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Conta bancária não pertence a este cliente.");
+        if (contaOrigem.Tipo == "CartaoCredito")
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                "Escolha uma conta que não seja de cartão para pagar a fatura.", "contaOrigemId");
+        if (!contaOrigem.Ativa)
+            throw new ApiException(400, CodigoRetorno.CONTA_INATIVA, "A conta de origem deve estar ativa.");
+
+        var fatura = (await ListarFaturasInternoAsync(contaCartao)).FirstOrDefault(f => f.Competencia == dto.Competencia)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Fatura não encontrada.");
+        if (fatura.Status == "Paga")
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Esta fatura já está paga.");
+
+        var valorPago = dto.Valor ?? fatura.SaldoDevedor;
+        if (valorPago <= 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe um valor maior que zero.", "valor");
+
+        var pagamentoId = Guid.NewGuid();
+
+        await using var transacao = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
+        var (regOrigem, novoOrigem) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, contaOrigem, dto.Data);
+        regOrigem.Saidas = new List<ItemFinanceiroSaida>(regOrigem.Saidas)
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), Descricao = $"Pagamento fatura {dto.Competencia} — {contaCartao.Nome}",
+                Valor = valorPago, Categoria = "Pagamento de fatura", TipoCusto = LancamentoFiltro.TipoPagamentoFatura,
+                PagamentoFaturaId = pagamentoId,
+            },
+        };
+        regOrigem.SaldoFinal -= valorPago;
+        regOrigem.SalvoEm = DateTime.UtcNow;
+        await RegistroDiaHelper.PersistirAsync(_registroRepo, regOrigem, novoOrigem);
+
+        var registrosDaOrigem = await _registroRepo.ListarPorContaAsync(contaOrigem.Id);
+        await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, contaOrigem.Id, dto.Data, regOrigem.SaldoFinal, registrosDaOrigem);
+
+        var (regCartao, novoCartao) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, contaCartao, dto.Data);
+        regCartao.Entradas = new List<ItemFinanceiro>(regCartao.Entradas)
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), Descricao = $"Pagamento fatura {dto.Competencia}", Valor = valorPago,
+                Categoria = "Pagamento de fatura", TipoCusto = LancamentoFiltro.TipoPagamentoFatura,
+                PagamentoFaturaId = pagamentoId,
+            },
+        };
+        // Saldo do cartão é negativo (dívida) — somar o valor pago reduz a dívida em direção a zero.
+        regCartao.SaldoFinal += valorPago;
+        regCartao.SalvoEm = DateTime.UtcNow;
+        await RegistroDiaHelper.PersistirAsync(_registroRepo, regCartao, novoCartao);
+
+        var pagamento = new PagamentoFatura
+        {
+            Id = pagamentoId, ClienteId = contaOrigem.ClienteId, ContaCartaoId = contaCartaoId,
+            ContaOrigemId = dto.ContaOrigemId, Competencia = dto.Competencia, ValorPago = valorPago,
+            Data = dto.Data, CriadoEm = DateTime.UtcNow,
+        };
+        var criado = await _pagamentoRepo.AdicionarAsync(pagamento);
+        if (transacao != null) await transacao.CommitAsync();
+
+        var resultado = MapToDto(criado, contaCartao.Nome, contaOrigem.Nome);
+
+        await _auditService.LogAsync(contaOrigem.ClienteId, usuarioLogadoId, "PagamentoFatura", "Pagar",
+            pagamentoId.ToString(), null, JsonSerializer.Serialize(resultado));
+
+        return resultado;
+    }
+
     public async Task DesvincularPagamentoAsync(Guid id, Guid usuarioLogadoId, string perfil)
     {
         var pagamento = await _pagamentoRepo.ObterPorIdAsync(id)

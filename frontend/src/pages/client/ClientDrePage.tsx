@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { obterDre } from '../../api/metricas'
 import { listarContasBancarias } from '../../api/contasBancarias'
+import { editarCategoriaLancamento } from '../../api/registros'
+import { listarCategorias } from '../../api/categorias'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtPct, fmtDate } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
 import DreKpisPanel from './dre/DreKpisPanel'
 import type { Dre, DreBloco } from '../../api/metricas'
-import type { ContaBancaria, Bloco } from '../../types'
+import type { ContaBancaria, Bloco, Categorias } from '../../types'
 import './ClientDre.css'
 
 export type TipoPeriodo = 'mes' | 'trimestre' | 'ano'
@@ -144,7 +146,7 @@ function valorEPercentualSubtotal(dre: Dre, key: string): { total: number; perce
 export default function ClientDrePage() {
   const { user } = useAuth()
   const clienteId = user?.usuarioId ?? ''
-  const { registros } = useRegistros(clienteId || null)
+  const { registros, recarregar: recarregarRegistros } = useRegistros(clienteId || null)
 
   const hoje = new Date()
   const [tipo, setTipo] = useState<TipoPeriodo>('mes')
@@ -158,6 +160,10 @@ export default function ClientDrePage() {
   const [dresPorPeriodo, setDresPorPeriodo] = useState<Record<string, Dre>>({})
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState('')
+  const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
+  const [salvandoCategoriaId, setSalvandoCategoriaId] = useState<string | null>(null)
+  const [msgCategoria, setMsgCategoria] = useState('')
+  const [exportandoPdf, setExportandoPdf] = useState(false)
   const [blocosExpandidos, setBlocosExpandidos] = useState<Set<Bloco>>(new Set())
   const [gruposExpandidos, setGruposExpandidos] = useState<Set<string>>(new Set())
   const [drill, setDrill] = useState<Drill | null>(null)
@@ -168,6 +174,8 @@ export default function ClientDrePage() {
       .then(cs => setContas(cs.filter(c => c.ativa)))
       .catch(() => {})
   }, [clienteId])
+
+  useEffect(() => { listarCategorias().then(setCategorias).catch(() => {}) }, [])
 
   // Item 1.11: a tela abre no mês atual por padrão — se ele ainda não tem nenhum lançamento
   // (comum logo no início do mês), mostrar um DRE zerado não ajuda ninguém. Pula direto pro
@@ -247,23 +255,113 @@ export default function ClientDrePage() {
     setDrill({ periodoLabel: periodo.label, de: periodo.de, ate: periodo.ate, categoriaNome })
   }
 
+  interface LinhaDrill {
+    id?: string
+    contaBancariaId?: string
+    tipo: 'Entrada' | 'Saida'
+    data: string
+    descricao: string
+    valor: number
+    categoria: string
+  }
+
   const lancamentosDrill = useMemo(() => {
     if (!drill) return []
-    const linhas: { data: string; descricao: string; valor: number }[] = []
+    const linhas: LinhaDrill[] = []
     for (const r of registros) {
       if (r.data < drill.de || r.data > drill.ate) continue
       if (contaFiltro && r.contaBancariaId !== contaFiltro) continue
       for (const e of r.entradas) {
         const nomeEfetivo = e.categoria && e.categoria.trim() ? e.categoria : 'Não Classificado'
-        if (nomeEfetivo === drill.categoriaNome) linhas.push({ data: r.data, descricao: e.descricao, valor: e.valor })
+        if (nomeEfetivo === drill.categoriaNome) {
+          linhas.push({
+            id: e.id, contaBancariaId: r.contaBancariaId, tipo: 'Entrada', data: r.data,
+            descricao: e.descricao, valor: e.valor, categoria: e.categoria ?? '',
+          })
+        }
       }
       for (const s of r.saidas) {
         const nomeEfetivo = s.categoria && s.categoria.trim() ? s.categoria : 'Não Classificado'
-        if (nomeEfetivo === drill.categoriaNome) linhas.push({ data: r.data, descricao: s.descricao, valor: -s.valor })
+        if (nomeEfetivo === drill.categoriaNome) {
+          linhas.push({
+            id: s.id, contaBancariaId: r.contaBancariaId, tipo: 'Saida', data: r.data,
+            descricao: s.descricao, valor: -s.valor, categoria: s.categoria ?? '',
+          })
+        }
       }
     }
     return linhas.sort((a, b) => a.data.localeCompare(b.data))
   }, [drill, registros, contaFiltro])
+
+  // Item E2: mesma normalização usada pelo backend (DescricaoMatcher.NormalizarExata) — conta
+  // "quantos lançamentos parecidos" existem ANTES de perguntar, usando os registros já carregados
+  // nesta tela (sem round-trip extra); o número real pós-ação vem da resposta da API.
+  function normalizar(descricao: string) {
+    return descricao.toUpperCase().trim()
+  }
+
+  async function handleAlterarCategoria(linha: LinhaDrill, categoriaNova: string) {
+    if (!linha.id || !linha.contaBancariaId || categoriaNova === linha.categoria) return
+    setMsgCategoria('')
+
+    const descNorm = normalizar(linha.descricao)
+    const similares = registros.flatMap(r =>
+      linha.tipo === 'Entrada'
+        ? r.entradas.filter(e => e.id !== linha.id && !e.categoria?.trim() && normalizar(e.descricao) === descNorm)
+        : r.saidas.filter(s => s.id !== linha.id && !s.categoria?.trim() && normalizar(s.descricao) === descNorm),
+    )
+    const aplicarASimilares = similares.length > 0
+      && confirm(`Aplicar "${categoriaNova}" também a ${similares.length} lançamento(s) parecido(s) ainda sem categoria?`)
+
+    setSalvandoCategoriaId(linha.id)
+    try {
+      const resultado = await editarCategoriaLancamento(clienteId, {
+        contaBancariaId: linha.contaBancariaId, lancamentoId: linha.id, tipo: linha.tipo,
+        data: linha.data, categoriaNova, aplicarASimilares,
+      })
+      setMsgCategoria(
+        `Categoria atualizada.${resultado.similaresAtualizados > 0 ? ` ${resultado.similaresAtualizados} lançamento(s) parecido(s) também foram atualizados.` : ''}`,
+      )
+      // "Recalcule a DRE sem recarregar a página" — busca de novo o DRE e os registros (a lista do
+      // drill-down em si lê de `registros`), em vez de um reload de verdade.
+      await Promise.all([carregar(), recarregarRegistros()])
+    } catch (e: unknown) {
+      setMsgCategoria(e instanceof Error ? e.message : 'Erro ao atualizar categoria.')
+    } finally {
+      setSalvandoCategoriaId(null)
+    }
+  }
+
+  // Item E3: PDF sempre de UM mês (bate com o nome do arquivo, AAAA-MM) — usa o 1º período
+  // visível mesmo em modo "trimestre"/"ano" ou comparativo, pra sempre existir um mês de referência.
+  async function handleExportarPdf() {
+    if (!clienteId) return
+    setErro('')
+    setExportandoPdf(true)
+    try {
+      const referencia = periodosComDre[0].periodo.de
+      const [anoRef, mesRef] = referencia.split('-')
+      const token = localStorage.getItem('token')
+      const query = new URLSearchParams({ ano: anoRef, mes: String(Number(mesRef)) })
+      if (contaFiltro) query.set('contaBancariaId', contaFiltro)
+      const res = await fetch(`/api/export/${clienteId}/dre-pdf?${query.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) throw new Error(`Erro ${res.status}`)
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `MoneyVision_DRE_${user?.nomeUsuario ?? clienteId}_${anoRef}-${mesRef}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : 'Erro ao exportar PDF.')
+    } finally {
+      setExportandoPdf(false)
+    }
+  }
 
   const anosOpcoes = Array.from({ length: 5 }, (_, i) => hoje.getFullYear() - 2 + i)
   const trimestresOpcoes = [1, 2, 3, 4]
@@ -295,6 +393,9 @@ export default function ClientDrePage() {
             Bloco → Grupo → Categoria · % sobre Receita Operacional (base = 100%)
           </div>
         </div>
+        <button className="btn-cancel" onClick={handleExportarPdf} disabled={exportandoPdf || !todasCarregadas}>
+          {exportandoPdf ? '⏳ Gerando...' : '📄 Exportar PDF'}
+        </button>
       </div>
 
       <div className="dre-controles">
@@ -579,17 +680,38 @@ export default function ClientDrePage() {
         title={drill ? `${drill.categoriaNome} · ${drill.periodoLabel}` : ''}
         onClose={() => setDrill(null)}
       >
+        {msgCategoria && <p className="dre-drill-msg">{msgCategoria}</p>}
         {lancamentosDrill.length === 0 ? (
           <p className="dre-vazio-inline">Nenhum lançamento encontrado.</p>
         ) : (
           <div className="dre-drill-lista">
-            {lancamentosDrill.map((l, i) => (
-              <div key={i} className="dre-drill-item">
-                <span className="dre-drill-data">{fmtDate(l.data)}</span>
-                <span className="dre-drill-desc">{l.descricao}</span>
-                <span className="dre-drill-valor" style={{ color: l.valor >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(l.valor)}</span>
-              </div>
-            ))}
+            {lancamentosDrill.map((l, i) => {
+              const opcoes = l.tipo === 'Entrada' ? categorias.entradas : categorias.saidas
+              return (
+                <div key={i} className="dre-drill-item-wrap">
+                  <div className="dre-drill-item">
+                    <span className="dre-drill-data">{fmtDate(l.data)}</span>
+                    <span className="dre-drill-desc">{l.descricao}</span>
+                    <span className="dre-drill-valor" style={{ color: l.valor >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(l.valor)}</span>
+                  </div>
+                  {l.id && l.contaBancariaId ? (
+                    <select
+                      className="dre-drill-cat-select"
+                      value={l.categoria}
+                      disabled={salvandoCategoriaId === l.id}
+                      onChange={e => handleAlterarCategoria(l, e.target.value)}
+                    >
+                      {!l.categoria && <option value="">Não Classificado</option>}
+                      {opcoes.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+                    </select>
+                  ) : (
+                    <span className="dre-drill-cat-readonly" title="Lançamento antigo — não pode ser reclassificado por aqui.">
+                      {l.categoria || 'Não Classificado'}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </Modal>

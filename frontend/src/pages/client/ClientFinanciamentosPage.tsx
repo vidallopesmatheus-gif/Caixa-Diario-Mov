@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { fmtBRL, fmtDate, todayISO } from '../../utils/format'
+import { fmtBRL, fmtDate, fmtPct, todayISO } from '../../utils/format'
 import {
   listarFinanciamentos, criarFinanciamento, listarParcelasFinanciamento, baixarParcelaFinanciamento,
   adiantarFinanciamento, excluirFinanciamento, type AdiantamentoResultado,
@@ -25,6 +25,12 @@ function parseBRL(s: string): number {
 
 const TIPO_LABEL: Record<Financiamento['tipo'], string> = {
   Financiamento: 'Financiamento', Emprestimo: 'Empréstimo', Consorcio: 'Consórcio', Parcelamento: 'Parcelamento',
+}
+
+// Item B1: "Taxa: 1,67% a.m. (22,0% a.a.)" — taxa anual equivalente (juros compostos), não a
+// taxa mensal × 12 (isso subestimaria o custo real do contrato).
+function taxaAnualDe(taxaMensal: number): number {
+  return (Math.pow(1 + taxaMensal, 12) - 1) * 100
 }
 
 export interface PrefillFinanciamento {
@@ -133,27 +139,33 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
               </div>
               <div className="financiamento-card-acoes">
                 {f.status === 'Ativo' && (
-                  <button className="btn-secondary" onClick={() => setAdiantarAlvo(f)}>Adiantar</button>
+                  <button className="btn-fin-secundario" onClick={() => setAdiantarAlvo(f)}>Adiantar</button>
                 )}
-                <button className="btn-secondary" onClick={() => toggleExpandir(f)}>
+                <button className="btn-fin-secundario" onClick={() => toggleExpandir(f)}>
                   {expandidoId === f.id ? 'Ocultar parcelas' : 'Ver parcelas'}
                 </button>
                 {f.parcelasPagas === 0 && (
-                  <button className="btn-danger" onClick={() => handleExcluir(f)}>Excluir</button>
+                  <button className="btn-fin-danger" onClick={() => handleExcluir(f)}>Excluir</button>
                 )}
               </div>
             </div>
+
+            {f.taxaJurosMensal != null && f.taxaJurosMensal > 0 && (
+              <span className="financiamento-taxa">
+                Taxa: {fmtPct(f.taxaJurosMensal * 100, 2)} a.m. ({fmtPct(taxaAnualDe(f.taxaJurosMensal), 1)} a.a.)
+              </span>
+            )}
 
             <div className="financiamento-barras" title="Dívida quitada compara o valor em dinheiro já amortizado; Parcelas pagas é só a contagem — podem divergir por juros e adiantamentos.">
               <div className="financiamento-barra-linha">
                 <span>Dívida quitada</span>
                 <div className="financiamento-barra"><div className="financiamento-barra-fill" style={{ width: `${Math.min(100, f.percentualDividaQuitada)}%` }} /></div>
-                <span>{f.percentualDividaQuitada.toFixed(1)}%</span>
+                <span>{fmtPct(f.percentualDividaQuitada)}</span>
               </div>
               <div className="financiamento-barra-linha">
                 <span>Parcelas pagas</span>
                 <div className="financiamento-barra"><div className="financiamento-barra-fill alt" style={{ width: `${Math.min(100, f.percentualParcelasPagas)}%` }} /></div>
-                <span>{f.parcelasPagas}/{f.totalParcelasAtual} ({f.percentualParcelasPagas.toFixed(1)}%)</span>
+                <span>{f.parcelasPagas}/{f.totalParcelasAtual} ({fmtPct(f.percentualParcelasPagas)})</span>
               </div>
             </div>
 
@@ -188,7 +200,7 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
                       <td>{fmtBRL(p.amortizacao)}</td>
                       <td>{fmtBRL(p.saldoDevedor)}</td>
                       <td>
-                        {!p.pago && <button className="btn-link" onClick={() => handleBaixar(f.id, p.id)}>Baixar</button>}
+                        {!p.pago && <button className="financiamento-link-btn" onClick={() => handleBaixar(f.id, p.id)}>Baixar</button>}
                         {p.pago && <span className="parcela-paga-selo">pago {p.dataBaixa ? fmtDate(p.dataBaixa) : ''}</span>}
                       </td>
                     </tr>
@@ -274,7 +286,7 @@ function NovoFinanciamentoModal({ clienteId, contas, prefill, onClose, onCriado 
   return (
     <Modal open title="Novo financiamento" onClose={onClose} footer={
       <>
-        <button className="btn-secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn-cancel" onClick={onClose}>Cancelar</button>
         <button className="btn-primary" onClick={handleSalvar} disabled={salvando}>Salvar</button>
       </>
     }>
@@ -354,28 +366,27 @@ function AdiantarModal({ financiamento, onClose, onAplicado }: {
   const [erro, setErro] = useState('')
   const [processando, setProcessando] = useState(false)
 
-  const simular = async (valorNum: number, modoAtual: 'ReduzirPrazo' | 'ReduzirParcela') => {
-    setErro('')
-    if (valorNum <= 0) { setResultado(null); return }
-    try {
-      const r = await adiantarFinanciamento(financiamento.id, { valor: valorNum, data, modo: modoAtual, simular: true })
-      setResultado(r)
-    } catch (e) {
-      setResultado(null)
-      setErro(e instanceof Error ? e.message : 'Erro ao simular.')
-    }
-  }
+  const valorNum = parseBRL(valor)
 
-  const handleValorBlur = () => {
-    const formatado = fmtNum(parseBRL(valor))
-    setValor(formatado)
-    simular(parseBRL(formatado), modo)
-  }
+  // Item B3: recalcula enquanto o usuário digita (debounce de 300ms) em vez de só no blur — o
+  // efeito reage a valor/modo/data, então troca de modo ou de data também redispara a simulação.
+  useEffect(() => {
+    if (valorNum <= 0) { setResultado(null); setErro(''); return }
+    const timer = setTimeout(async () => {
+      setErro('')
+      try {
+        const r = await adiantarFinanciamento(financiamento.id, { valor: valorNum, data, modo, simular: true })
+        setResultado(r)
+      } catch (e) {
+        setResultado(null)
+        setErro(e instanceof Error ? e.message : 'Erro ao simular.')
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valorNum, modo, data])
 
-  const handleModoChange = (novoModo: 'ReduzirPrazo' | 'ReduzirParcela') => {
-    setModo(novoModo)
-    simular(parseBRL(valor), novoModo)
-  }
+  const handleValorBlur = () => setValor(fmtNum(valorNum))
 
   const handleConfirmar = async () => {
     setProcessando(true)
@@ -393,8 +404,8 @@ function AdiantarModal({ financiamento, onClose, onAplicado }: {
   return (
     <Modal open title={`Adiantar — ${financiamento.descricao}`} onClose={onClose} footer={
       <>
-        <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-        <button className="btn-primary" onClick={handleConfirmar} disabled={processando || !resultado}>Confirmar adiantamento</button>
+        <button className="btn-cancel" onClick={onClose}>Cancelar</button>
+        <button className="btn-primary" onClick={handleConfirmar} disabled={processando || valorNum <= 0}>Confirmar adiantamento</button>
       </>
     }>
       {erro && <div className="financiamentos-msg">{erro}</div>}
@@ -407,7 +418,7 @@ function AdiantarModal({ financiamento, onClose, onAplicado }: {
           <input type="date" value={data} onChange={e => setData(e.target.value)} />
         </label>
         <label>O que fazer com o adiantamento
-          <select value={modo} onChange={e => handleModoChange(e.target.value as 'ReduzirPrazo' | 'ReduzirParcela')}>
+          <select value={modo} onChange={e => setModo(e.target.value as 'ReduzirPrazo' | 'ReduzirParcela')}>
             <option value="ReduzirPrazo">Reduzir o número de parcelas (mantém o valor delas)</option>
             <option value="ReduzirParcela">Reduzir o valor de cada parcela (mantém a quantidade)</option>
           </select>

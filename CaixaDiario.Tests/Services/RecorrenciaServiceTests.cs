@@ -40,6 +40,16 @@ public class RecorrenciaServiceTests
         };
     }
 
+    // Item F5: a janela de materialização agora cobre o mês anterior inteiro + o atual (não só o
+    // atual) — espelha exatamente o cálculo de RecorrenciaService.MaterializarMesAtualAsync.
+    private static (DateOnly primeiroDia, DateOnly ultimoDia) JanelaMaterializacao(DateOnly hoje)
+    {
+        var mesAnteriorRef = hoje.AddMonths(-1);
+        var primeiroDia = new DateOnly(mesAnteriorRef.Year, mesAnteriorRef.Month, 1);
+        var ultimoDia = new DateOnly(hoje.Year, hoje.Month, 1).AddMonths(1).AddDays(-1);
+        return (primeiroDia, ultimoDia);
+    }
+
     private static ContaRecorrente Conta(
         DateOnly dataInicio,
         string periodicidade = "Mensal",
@@ -188,8 +198,7 @@ public class RecorrenciaServiceTests
         var clienteId = Guid.NewGuid();
         var conta = CriarConta(clienteId);
         var hoje = DataLocalHelper.Hoje();
-        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
-        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+        var (primeiroDia, ultimoDia) = JanelaMaterializacao(hoje);
 
         var registroExistente = new RegistroDiario
         {
@@ -222,8 +231,7 @@ public class RecorrenciaServiceTests
         var clienteId = Guid.NewGuid();
         var conta = CriarConta(clienteId, tipo: "Pagar");
         var hoje = DataLocalHelper.Hoje();
-        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
-        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+        var (primeiroDia, ultimoDia) = JanelaMaterializacao(hoje);
 
         var registroHoje = new RegistroDiario
         {
@@ -264,8 +272,7 @@ public class RecorrenciaServiceTests
         var recorrenciaA = CriarConta(clienteId, tipo: "Pagar", contaBancariaId: contaBancoA);
         var recorrenciaB = CriarConta(clienteId, tipo: "Pagar", contaBancariaId: contaBancoB);
         var hoje = DataLocalHelper.Hoje();
-        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
-        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+        var (primeiroDia, ultimoDia) = JanelaMaterializacao(hoje);
 
         _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaRecorrente> { recorrenciaA, recorrenciaB });
@@ -295,8 +302,7 @@ public class RecorrenciaServiceTests
         var clienteId = Guid.NewGuid();
         var conta = CriarConta(clienteId, tipo: "Pagar");
         var hoje = DataLocalHelper.Hoje();
-        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
-        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+        var (primeiroDia, ultimoDia) = JanelaMaterializacao(hoje);
 
         _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaRecorrente> { conta });
@@ -345,9 +351,8 @@ public class RecorrenciaServiceTests
     {
         var clienteId = Guid.NewGuid();
         var hoje = DataLocalHelper.Hoje();
-        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
-        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
-        var dataFimPassado = primeiroDia.AddDays(-1);  // expired before current month
+        var (primeiroDia, ultimoDia) = JanelaMaterializacao(hoje);
+        var dataFimPassado = new DateOnly(hoje.Year, hoje.Month, 1).AddDays(-1);  // expired before current month
         var conta = CriarConta(clienteId, dataFim: dataFimPassado);
 
         _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId))
@@ -361,6 +366,38 @@ public class RecorrenciaServiceTests
         _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
     }
 
+    // Item F5 do bundle D6JWEAJa: reproduz o bug relatado — a ocorrência da Pollye, vencimento
+    // 10/09, nunca foi materializada porque ninguém salvou nada no Caixa durante setembro; quando
+    // alguém finalmente salva algo em outubro, a janela de só "mês atual" nunca ia pra trás gerar
+    // o que ficou faltando. Agora cobre o mês anterior também.
+    [Fact]
+    public async Task MaterializarMesAtual_OcorrenciaDoMesAnteriorNuncaMaterializada_GeraAgora()
+    {
+        var clienteId = Guid.NewGuid();
+        var hoje = DataLocalHelper.Hoje();
+        var mesAnteriorRef = hoje.AddMonths(-1);
+        var diaVencimento = Math.Min(10, DateTime.DaysInMonth(mesAnteriorRef.Year, mesAnteriorRef.Month));
+        var vencimentoMesAnterior = new DateOnly(mesAnteriorRef.Year, mesAnteriorRef.Month, diaVencimento);
+
+        var conta = CriarConta(clienteId, tipo: "Pagar");
+        conta.DataInicio = hoje.AddMonths(-6); // recorrência antiga, criada bem antes do mês perdido
+        conta.DiaVencimento = diaVencimento;
+
+        var (primeiroDia, ultimoDia) = JanelaMaterializacao(hoje);
+        _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaRecorrente> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorPeriodoAsync(clienteId, primeiroDia, ultimoDia))
+            .ReturnsAsync(new List<RegistroDiario>()); // nada materializado em nenhum dos dois meses
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<RegistroDiario>());
+
+        await _sut.MaterializarMesAtualAsync(clienteId);
+
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.Is<RegistroDiario>(rd =>
+            rd.Data == vencimentoMesAnterior &&
+            rd.ContasPagar.Count == 1 && rd.ContasPagar[0].RecorrenciaId == conta.Id)), Times.Once);
+    }
+
     [Fact]
     public async Task MaterializarMesAtual_Semanal_MaterializaCadaOcorrenciaDoMes()
     {
@@ -368,8 +405,9 @@ public class RecorrenciaServiceTests
         // ocorrência semanal dentro do mês (em registros novos por dia).
         var clienteId = Guid.NewGuid();
         var hoje = DataLocalHelper.Hoje();
-        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
-        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+        var primeiroDiaMesAtual = new DateOnly(hoje.Year, hoje.Month, 1);
+        var ultimoDiaMesAtual = primeiroDiaMesAtual.AddMonths(1).AddDays(-1);
+        var (primeiroDia, ultimoDia) = JanelaMaterializacao(hoje);
 
         var conta = new ContaRecorrente
         {
@@ -378,15 +416,15 @@ public class RecorrenciaServiceTests
             Descricao = "Semanal",
             Valor = 50m,
             Tipo = "Pagar",
-            DataInicio = primeiroDia,
+            DataInicio = primeiroDiaMesAtual,
             Periodicidade = "Semanal",
             Ativo = true,
             CriadoEm = DateTime.UtcNow,
         };
 
         var ocorrenciasEsperadas = 0;
-        for (var d = primeiroDia; d <= ultimoDia; d = d.AddDays(1))
-            if ((d.DayNumber - primeiroDia.DayNumber) % 7 == 0) ocorrenciasEsperadas++;
+        for (var d = primeiroDiaMesAtual; d <= ultimoDiaMesAtual; d = d.AddDays(1))
+            if ((d.DayNumber - primeiroDiaMesAtual.DayNumber) % 7 == 0) ocorrenciasEsperadas++;
 
         _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaRecorrente> { conta });
@@ -502,8 +540,7 @@ public class RecorrenciaServiceTests
         var clienteId = Guid.NewGuid();
         var contaBancariaId = Guid.NewGuid();
         var hoje = DataLocalHelper.Hoje();
-        var primeiroDia = new DateOnly(hoje.Year, hoje.Month, 1);
-        var ultimoDia = primeiroDia.AddMonths(1).AddDays(-1);
+        var (primeiroDia, ultimoDia) = JanelaMaterializacao(hoje);
 
         var conta = new ContaRecorrente
         {

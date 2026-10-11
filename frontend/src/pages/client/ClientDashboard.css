@@ -69,7 +69,7 @@
 .meta-metodo-field { display: flex; flex-direction: column; gap: 4px; }
 .meta-aporte-result {
   padding: 14px 16px; background: var(--accent-soft);
-  border: 1px solid rgba(124,58,237,.2); border-radius: 10px; margin-top: 4px;
+  border: 1px solid rgba(30,111,217,.2); border-radius: 10px; margin-top: 4px;
 }
 
 /* ── Tempo até meta + Simulador ── */

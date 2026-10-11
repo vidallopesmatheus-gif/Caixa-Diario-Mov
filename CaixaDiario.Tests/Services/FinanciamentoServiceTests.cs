@@ -1,9 +1,11 @@
+using CaixaDiario.API.Data;
 using CaixaDiario.API.DTOs.Financiamentos;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
 using CaixaDiario.API.Services;
+using Microsoft.EntityFrameworkCore;
 using Moq;
 
 namespace CaixaDiario.Tests.Services;
@@ -60,6 +62,13 @@ public class FinanciamentoServiceTests
     private readonly List<Financiamento> _financiamentos = new();
     private readonly List<MetaAnual> _metas = new();
 
+    // InMemory não é relacional — o serviço detecta isso (Database.IsRelational()) e não tenta abrir
+    // transação, então o teste continua simulando só via mocks dos repositórios (mesmo padrão de
+    // TransferenciaServiceTests).
+    private static AppDbContext CriarContexto() =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
     public FinanciamentoServiceTests()
     {
         _financiamentoRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Financiamento>()))
@@ -69,6 +78,8 @@ public class FinanciamentoServiceTests
             .ReturnsAsync((Guid id) => _financiamentos.FirstOrDefault(f => f.Id == id));
         _financiamentoRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>()))
             .ReturnsAsync((Guid clienteId) => _financiamentos.Where(f => f.ClienteId == clienteId).ToList());
+        _financiamentoRepoMock.Setup(r => r.RemoverAsync(It.IsAny<Financiamento>()))
+            .Callback<Financiamento>(f => _financiamentos.Remove(f)).Returns(Task.CompletedTask);
 
         _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>
         {
@@ -82,7 +93,7 @@ public class FinanciamentoServiceTests
 
         _sut = new FinanciamentoService(
             _financiamentoRepoMock.Object, _contaRepoMock.Object, _registroRepo, _categoriaRepoMock.Object,
-            _metaRepoMock.Object, _auditMock.Object);
+            _metaRepoMock.Object, _auditMock.Object, CriarContexto());
     }
 
     private readonly List<ContaBancaria> _contas = new();
@@ -380,6 +391,20 @@ public class FinanciamentoServiceTests
 
         var restantes = _registroRepo.Registros.SelectMany(r => r.ContasPagar).Count(c => c.OrigemFinanciamentoId == financiamento.Id);
         Assert.Equal(0, restantes);
+    }
+
+    // Item A1 do bundle D6JWEAJa: excluir removia as parcelas mas deixava o contrato "fantasma"
+    // (Ativo, 0/0, 100% quitado) — ExcluirAsync agora também chama RemoverAsync no repositório.
+    [Fact]
+    public async Task ExcluirAsync_SemParcelaPaga_RemoveOProprioContratoDaListagem()
+    {
+        var (clienteId, _, financiamento) = await CriarFinanciamentoPadraoAsync(numeroParcelas: 3, valorBem: 2500m);
+
+        await _sut.ExcluirAsync(financiamento.Id, clienteId, "cliente");
+
+        var listagem = await _sut.ListarAsync(clienteId, clienteId, "cliente");
+        Assert.DoesNotContain(listagem, f => f.Id == financiamento.Id);
+        _financiamentoRepoMock.Verify(r => r.RemoverAsync(It.Is<Financiamento>(f => f.Id == financiamento.Id)), Times.Once);
     }
 
     [Fact]

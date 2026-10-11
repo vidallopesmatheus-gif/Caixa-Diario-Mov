@@ -14,19 +14,22 @@ public class RegistroService : IRegistroService
     private readonly IRecorrenciaService _recorrenciaService;
     private readonly IContaBancariaRepository _contaBancariaRepository;
     private readonly IConciliacaoService _conciliacaoService;
+    private readonly ICategoriaRepository _categoriaRepository;
 
     public RegistroService(
         IRegistroRepository registroRepository,
         IAuditService auditService,
         IRecorrenciaService recorrenciaService,
         IContaBancariaRepository contaBancariaRepository,
-        IConciliacaoService conciliacaoService)
+        IConciliacaoService conciliacaoService,
+        ICategoriaRepository categoriaRepository)
     {
         _registroRepository = registroRepository;
         _auditService = auditService;
         _recorrenciaService = recorrenciaService;
         _contaBancariaRepository = contaBancariaRepository;
         _conciliacaoService = conciliacaoService;
+        _categoriaRepository = categoriaRepository;
     }
 
     public async Task<List<RegistroDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -328,6 +331,120 @@ public class RegistroService : IRegistroService
 
         await _auditService.LogAsync(clienteId, usuarioLogadoId, "RegistroDiario", "Exclusao",
             $"{clienteId}/{data}", dadosAntes, null);
+    }
+
+    // Item E2 do bundle D6JWEAJa: reclassificar um lançamento a partir do drill-down da DRE —
+    // diferente de ImportacaoService.AtualizarCategoriasAsync (que só atende itens ainda
+    // "pendentes" de UMA conta), este edita qualquer lançamento já classificado ou não, de
+    // qualquer conta do cliente, e grava auditoria (quem/quando/de→para).
+    public async Task<EditarCategoriaLancamentoResultDto> EditarCategoriaLancamentoAsync(
+        Guid clienteId, Guid usuarioLogadoId, string perfil, EditarCategoriaLancamentoDto dto)
+    {
+        if (perfil == "cliente" && usuarioLogadoId != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+        if (string.IsNullOrWhiteSpace(dto.CategoriaNova))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe a categoria.", "categoriaNova");
+        if (dto.Tipo is not ("Entrada" or "Saida"))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Tipo inválido.", "tipo");
+
+        var conta = await _contaBancariaRepository.ObterPorIdAsync(dto.ContaBancariaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        if (conta.ClienteId != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Conta bancária não pertence a este cliente.");
+
+        var registro = await _registroRepository.ObterPorContaEDataAsync(dto.ContaBancariaId, dto.Data)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
+
+        var tipoCustoNovo = (await _categoriaRepository.ObterPorNomeAsync(dto.CategoriaNova))?.Tipo;
+        string? categoriaAnterior;
+        string descricaoAlvo;
+
+        if (dto.Tipo == "Entrada")
+        {
+            var item = registro.Entradas.FirstOrDefault(e => e.Id == dto.LancamentoId)
+                ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+            categoriaAnterior = item.Categoria;
+            descricaoAlvo = item.Descricao;
+            item.Categoria = dto.CategoriaNova;
+            item.TipoCusto = tipoCustoNovo;
+            item.PendenteCategorizacao = false;
+            item.CategoriaSugerida = false;
+            registro.Entradas = new List<ItemFinanceiro>(registro.Entradas);
+        }
+        else
+        {
+            var item = registro.Saidas.FirstOrDefault(s => s.Id == dto.LancamentoId)
+                ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+            categoriaAnterior = item.Categoria;
+            descricaoAlvo = item.Descricao;
+            item.Categoria = dto.CategoriaNova;
+            item.TipoCusto = tipoCustoNovo;
+            item.PendenteCategorizacao = false;
+            item.CategoriaSugerida = false;
+            registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas);
+        }
+
+        registro.SalvoEm = DateTime.UtcNow;
+        registro.AtualizadoEm = DateTime.UtcNow;
+        await _registroRepository.AtualizarAsync(registro);
+
+        await _auditService.LogAsync(clienteId, usuarioLogadoId, dto.Tipo == "Entrada" ? "ItemFinanceiro" : "ItemFinanceiroSaida",
+            "EditarCategoria", dto.LancamentoId.ToString(),
+            JsonSerializer.Serialize(new { categoria = categoriaAnterior }),
+            JsonSerializer.Serialize(new { categoria = dto.CategoriaNova }));
+
+        var similaresAtualizados = 0;
+        if (dto.AplicarASimilares)
+        {
+            var descNorm = DescricaoMatcher.NormalizarExata(descricaoAlvo);
+            var registrosCliente = await _registroRepository.ListarPorClienteAsync(clienteId);
+            foreach (var r in registrosCliente)
+            {
+                var mudou = false;
+                if (dto.Tipo == "Entrada")
+                {
+                    var alvos = r.Entradas.Where(e => e.Id != dto.LancamentoId && string.IsNullOrWhiteSpace(e.Categoria)
+                        && DescricaoMatcher.NormalizarExata(e.Descricao) == descNorm).ToList();
+                    foreach (var e in alvos)
+                    {
+                        e.Categoria = dto.CategoriaNova;
+                        e.TipoCusto = tipoCustoNovo;
+                        e.PendenteCategorizacao = false;
+                        e.CategoriaSugerida = false;
+                    }
+                    if (alvos.Count > 0) { r.Entradas = new List<ItemFinanceiro>(r.Entradas); mudou = true; }
+                    similaresAtualizados += alvos.Count;
+                }
+                else
+                {
+                    var alvos = r.Saidas.Where(s => s.Id != dto.LancamentoId && string.IsNullOrWhiteSpace(s.Categoria)
+                        && DescricaoMatcher.NormalizarExata(s.Descricao) == descNorm).ToList();
+                    foreach (var s in alvos)
+                    {
+                        s.Categoria = dto.CategoriaNova;
+                        s.TipoCusto = tipoCustoNovo;
+                        s.PendenteCategorizacao = false;
+                        s.CategoriaSugerida = false;
+                    }
+                    if (alvos.Count > 0) { r.Saidas = new List<ItemFinanceiroSaida>(r.Saidas); mudou = true; }
+                    similaresAtualizados += alvos.Count;
+                }
+
+                if (!mudou) continue;
+                r.SalvoEm = DateTime.UtcNow;
+                r.AtualizadoEm = DateTime.UtcNow;
+                await _registroRepository.AtualizarAsync(r);
+            }
+
+            if (similaresAtualizados > 0)
+            {
+                await _auditService.LogAsync(clienteId, usuarioLogadoId, dto.Tipo == "Entrada" ? "ItemFinanceiro" : "ItemFinanceiroSaida",
+                    "EditarCategoriaEmLote", dto.LancamentoId.ToString(), null,
+                    JsonSerializer.Serialize(new { categoria = dto.CategoriaNova, quantidade = similaresAtualizados }));
+            }
+        }
+
+        return new EditarCategoriaLancamentoResultDto { CategoriaAnterior = categoriaAnterior, SimilaresAtualizados = similaresAtualizados };
     }
 
     // Resolve a ContaBancariaId: usa a fornecida ou, na ausência dela (ex.: baixa de conta a

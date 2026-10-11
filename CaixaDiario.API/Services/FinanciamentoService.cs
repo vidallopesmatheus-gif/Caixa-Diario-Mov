@@ -1,9 +1,11 @@
 using System.Text.Json;
+using CaixaDiario.API.Data;
 using CaixaDiario.API.DTOs.Financiamentos;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace CaixaDiario.API.Services;
 
@@ -22,11 +24,12 @@ public class FinanciamentoService : IFinanciamentoService
     private readonly ICategoriaRepository _categoriaRepo;
     private readonly IMetaRepository _metaRepo;
     private readonly IAuditService _auditService;
+    private readonly AppDbContext _context;
 
     public FinanciamentoService(
         IFinanciamentoRepository financiamentoRepo, IContaBancariaRepository contaRepo,
         IRegistroRepository registroRepo, ICategoriaRepository categoriaRepo, IMetaRepository metaRepo,
-        IAuditService auditService)
+        IAuditService auditService, AppDbContext context)
     {
         _financiamentoRepo = financiamentoRepo;
         _contaRepo = contaRepo;
@@ -34,6 +37,7 @@ public class FinanciamentoService : IFinanciamentoService
         _categoriaRepo = categoriaRepo;
         _metaRepo = metaRepo;
         _auditService = auditService;
+        _context = context;
     }
 
     public async Task<FinanciamentoDto> CriarAsync(Guid clienteId, Guid usuarioLogadoId, string perfil, CriarFinanciamentoDto dto)
@@ -449,12 +453,22 @@ public class FinanciamentoService : IFinanciamentoService
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
                 "Este contrato já tem parcela paga — estorne todas antes de excluir.");
 
+        // Transacional: remover as parcelas e o contrato em si têm que valer juntos — senão uma
+        // falha no meio deixa o contrato "fantasma" (sem parcela nenhuma, mas ainda "Ativo" na
+        // lista), que foi exatamente o bug relatado (item A1 do bundle D6JWEAJa).
+        await using var transacao = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
         foreach (var (registro, _) in parcelas)
         {
             registro.ContasPagar = registro.ContasPagar.Where(c => c.OrigemFinanciamentoId != financiamentoId).ToList();
             registro.SalvoEm = DateTime.UtcNow;
             await _registroRepo.AtualizarAsync(registro);
         }
+
+        await _financiamentoRepo.RemoverAsync(financiamento);
+        if (transacao != null) await transacao.CommitAsync();
 
         await _auditService.LogAsync(financiamento.ClienteId, usuarioLogadoId, "Financiamento", "Exclusao",
             financiamentoId.ToString(), JsonSerializer.Serialize(financiamento), null);

@@ -2,7 +2,7 @@
 
 .financiamentos-header { display: flex; justify-content: flex-end; }
 
-.financiamentos-vazio { color: var(--muted); text-align: center; padding: 40px 0; }
+.financiamentos-vazio { color: var(--tx3); text-align: center; padding: 40px 0; }
 
 .financiamentos-msg { background: var(--tag-out); color: var(--danger); padding: 10px 14px; border-radius: 8px; font-size: 14px; }
 
@@ -15,22 +15,34 @@
 .financiamento-card.quitado { opacity: .75; }
 
 .financiamento-card-topo { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-.financiamento-tipo { color: var(--muted); font-size: 13px; }
+.financiamento-tipo { color: var(--tx3); font-size: 13px; }
 .financiamento-badge-quitado {
   margin-left: 8px; background: var(--success); color: #fff; font-size: 11px; font-weight: 700;
   padding: 2px 8px; border-radius: 999px;
 }
 .financiamento-card-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* Item B4: antes usavam classes que não existiam (.btn-secondary/.btn-link), ficando no estilo
+   padrão do navegador — estas seguem a mesma paleta de .btn-cancel/.btn-danger do app. */
+.btn-fin-secundario, .btn-fin-danger {
+  padding: 8px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.btn-fin-secundario { background: var(--btn-cancel-bg); color: var(--btn-cancel-c); }
+.btn-fin-secundario:hover { opacity: 0.85; }
+.btn-fin-danger { background: var(--danger); color: #fff; }
+.btn-fin-danger:hover { opacity: 0.88; }
+
+.financiamento-taxa { font-size: 13px; color: var(--tx3); }
+
 .financiamento-barras { display: flex; flex-direction: column; gap: 8px; }
-.financiamento-barra-linha { display: grid; grid-template-columns: 110px 1fr 90px; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.financiamento-barra-linha { display: grid; grid-template-columns: 110px 1fr 90px; align-items: center; gap: 8px; font-size: 13px; color: var(--tx3); }
 .financiamento-barra { height: 8px; background: var(--bd); border-radius: 6px; overflow: hidden; }
 .financiamento-barra-fill { height: 100%; background: var(--accent); transition: width .3s; }
 .financiamento-barra-fill.alt { background: var(--success); }
 
 .financiamento-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .financiamento-stats > div { display: flex; flex-direction: column; gap: 2px; }
-.financiamento-stats span { font-size: 12px; color: var(--muted); }
+.financiamento-stats span { font-size: 12px; color: var(--tx3); }
 .financiamento-stats strong { font-size: 14px; }
 
 .financiamento-tabela { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
@@ -39,15 +51,19 @@
 .financiamento-tabela th:nth-child(2), .financiamento-tabela td:nth-child(2) { text-align: left; }
 .financiamento-tabela tr.parcela-paga { color: var(--success); }
 .financiamento-tabela tr.parcela-atrasada { color: var(--danger); }
-.parcela-paga-selo { font-size: 12px; color: var(--muted); }
+.parcela-paga-selo { font-size: 12px; color: var(--tx3); }
+.financiamento-link-btn {
+  background: none; border: none; padding: 0; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.financiamento-link-btn:hover { text-decoration: underline; }
 
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 8px; }
-.form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--tx3); }
 .form-grid input, .form-grid select {
   padding: 8px 10px; border-radius: 8px; border: 1px solid var(--bd); background: var(--bg-card); color: inherit;
 }
 
-.financiamentos-dica { font-size: 12px; color: var(--muted); margin-top: 10px; }
+.financiamentos-dica { font-size: 12px; color: var(--tx3); margin-top: 10px; }
 
 .adiantamento-simulacao {
   display: flex; flex-direction: column; gap: 6px; margin-top: 14px; padding: 12px; border-radius: 8px;

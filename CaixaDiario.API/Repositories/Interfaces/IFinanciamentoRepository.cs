@@ -8,4 +8,5 @@ public interface IFinanciamentoRepository
     Task<List<Financiamento>> ListarPorClienteAsync(Guid clienteId);
     Task<Financiamento> AdicionarAsync(Financiamento financiamento);
     Task<Financiamento> AtualizarAsync(Financiamento financiamento);
+    Task RemoverAsync(Financiamento financiamento);
 }
