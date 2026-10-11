@@ -31,7 +31,8 @@ export default function LoginPage() {
     <div className="login-wrap">
       <div className="login-box">
         <div className="login-logo">
-          <h1>💰 Caixa Diário</h1>
+          <h1>💰 Money Vision</h1>
+          <p className="login-subtitulo">Caixa Diário</p>
           <p>Sistema de controle financeiro</p>
         </div>
         {erro && <div className="err-box">{erro}</div>}

@@ -9,7 +9,9 @@
   flex-wrap: wrap;
 }
 .topbar-left  { display: flex; align-items: center; gap: 16px; }
+.topbar-brand { display: flex; flex-direction: column; line-height: 1.15; }
 .topbar-logo  { font-size: 18px; font-weight: 700; }
+.topbar-subtitulo { font-size: 11px; font-weight: 500; color: var(--tx3); }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 
 .badge-role   { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 600; }

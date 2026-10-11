@@ -1,4 +1,11 @@
 :root {
+  /* ── Money Vision brand (Bloco D) ── */
+  --mv-navy:       #0B2545;
+  --mv-navy-2:     #13315C;
+  --mv-blue:       #1E6FD9;
+  --mv-blue-light: #4DA3FF;
+  --mv-blue-soft:  rgba(77,163,255,0.14);
+
   /* ── Backgrounds ── */
   --bg:        #090909;
   --bg-card:   #131313;
@@ -20,8 +27,8 @@
   --tx4:  #4B5563;
 
   /* ── Brand / Accent ── */
-  --accent:      #7C3AED;
-  --accent-soft: rgba(124,58,237,.14);
+  --accent:      var(--mv-blue);
+  --accent-soft: var(--mv-blue-soft);
 
   /* ── Semantic ── */
   --success:      #059669;
@@ -41,7 +48,7 @@
   --btn-lo-bd:     #3d1010;
 
   /* ── Badges ── */
-  --badge-adm-bg: #1c0d36;
+  --badge-adm-bg: #0d1f36;
   --badge-cli-bg: #071a0f;
 
   /* ── Day nav button ── */
@@ -52,20 +59,20 @@
   --rm-bd: #3d1010;
 
   /* ── Receivable accent (contas a receber) ── */
-  --rmp-bg: #0e0a1c;
-  --rmp-bd: #1e1640;
+  --rmp-bg: #0a1830;
+  --rmp-bd: #13315C;
 
   /* ── Tags ── */
   --tag-in:   #071a0f;
   --tag-out:  #1c0808;
-  --tag-prec: #0e0a1c;
+  --tag-prec: #0a1830;
   --tag-ppag: #1c0a08;
 
   /* ── Admin overview ── */
   --ov-stat: #0f0f0f;
-  --ov-hv:   #0e0a1c;
-  --vc-bg:   #0e0a1c;
-  --vc-bd:   #1e1640;
+  --ov-hv:   #0a1830;
+  --vc-bg:   #0a1830;
+  --vc-bd:   #13315C;
 
   /* ── Saldo box (caixa diária) ── */
   --sl-bg: #071a0f;
@@ -94,8 +101,8 @@ body.light {
   --tx4:  #9CA3AF;
 
   /* ── Brand / Accent ── */
-  --accent:      #6D28D9;
-  --accent-soft: rgba(109,40,217,.10);
+  --accent:      var(--mv-blue);
+  --accent-soft: var(--mv-blue-soft);
 
   /* ── Semantic ── */
   --success:      #047857;
@@ -115,7 +122,7 @@ body.light {
   --btn-lo-bd:     #FECACA;
 
   /* ── Badges ── */
-  --badge-adm-bg: #EDE9FE;
+  --badge-adm-bg: #DCEAFB;
   --badge-cli-bg: #D1FAE5;
 
   /* ── Day nav button ── */
@@ -126,20 +133,20 @@ body.light {
   --rm-bd: #FECACA;
 
   /* ── Receivable accent ── */
-  --rmp-bg: #EDE9FE;
-  --rmp-bd: #DDD6FE;
+  --rmp-bg: #DCEAFB;
+  --rmp-bd: #B8D4F5;
 
   /* ── Tags ── */
   --tag-in:   #D1FAE5;
   --tag-out:  #FFF0F0;
-  --tag-prec: #EDE9FE;
+  --tag-prec: #DCEAFB;
   --tag-ppag: #FFF7ED;
 
   /* ── Admin overview ── */
   --ov-stat: #F7F7F5;
-  --ov-hv:   #EDE9FE;
-  --vc-bg:   #EDE9FE;
-  --vc-bd:   #DDD6FE;
+  --ov-hv:   #DCEAFB;
+  --vc-bg:   #DCEAFB;
+  --vc-bd:   #B8D4F5;
 
   /* ── Saldo box ── */
   --sl-bg: #D1FAE5;

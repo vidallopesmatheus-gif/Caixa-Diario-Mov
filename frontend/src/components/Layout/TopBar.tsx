@@ -17,7 +17,10 @@ export default function TopBar() {
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <span className="topbar-logo">💰 Caixa Diário</span>
+        <div className="topbar-brand">
+          <span className="topbar-logo">💰 Money Vision</span>
+          <span className="topbar-subtitulo">Caixa Diário</span>
+        </div>
         <span className={`badge-role ${user.perfil === 'admin' ? 'badge-admin' : 'badge-client'}`}>
           {user.perfil === 'admin' ? 'Admin' : 'Cliente'}
         </span>

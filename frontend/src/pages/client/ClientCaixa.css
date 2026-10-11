@@ -62,7 +62,7 @@
 .lanc-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .btn-item-save-entrada { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-item-save-entrada:hover:not(:disabled) { background: #5b21b6; }
+.btn-item-save-entrada:hover:not(:disabled) { background: var(--mv-navy-2); }
 .btn-item-save-saida { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn-item-save-saida:hover:not(:disabled) { background: #991b1b; }
 
