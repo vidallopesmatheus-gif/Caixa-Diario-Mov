@@ -7,6 +7,7 @@ public interface IFaturaCartaoService
     Task<List<FaturaCartaoDto>> ListarFaturasAsync(Guid contaCartaoId, Guid usuarioLogadoId, string perfil);
     Task<FaturaCartaoDto?> SugerirFaturaAsync(Guid contaCartaoId, decimal valor, DateOnly data, Guid usuarioLogadoId, string perfil);
     Task<PagamentoFaturaDto> VincularPagamentoAsync(VincularPagamentoFaturaDto dto, Guid usuarioLogadoId, string perfil);
+    Task<PagamentoFaturaDto> PagarFaturaAsync(Guid contaCartaoId, PagarFaturaDto dto, Guid usuarioLogadoId, string perfil);
     Task DesvincularPagamentoAsync(Guid id, Guid usuarioLogadoId, string perfil);
     // origemMetaId: só preenchido internamente por MetaService.ConquistarAsync (forma Cartão) —
     // nunca vem de fora pelo DTO público (mesmo motivo de ContaProvisionadaService.CriarAsync).

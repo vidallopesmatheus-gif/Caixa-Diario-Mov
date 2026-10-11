@@ -95,6 +95,26 @@ export const desvincularPagamentoFatura = async (id: string): Promise<void> => {
 }
 
 /**
+ * Item F4: paga uma fatura direto da tela de Faturas, sem precisar de um lançamento já existente
+ * (diferente de vincularPagamentoFatura) — cria a saída na conta de origem e a entrada no cartão
+ * do zero. Se valor for omitido, paga o saldo devedor atual da fatura (pagamento integral).
+ */
+export const pagarFatura = async (contaCartaoId: string, dto: {
+  contaOrigemId: string
+  data: string
+  competencia: string
+  valor?: number
+}): Promise<PagamentoFatura> => {
+  const res = await apiFetch<ApiResponse<unknown>>(`/api/faturas-cartao/${contaCartaoId}/pagar`, {
+    method: 'POST',
+    body: JSON.stringify({
+      ContaOrigemId: dto.contaOrigemId, Data: dto.data, Competencia: dto.competencia, Valor: dto.valor,
+    }),
+  })
+  return mapPagamento(res.dados)
+}
+
+/**
  * Item 9: lança uma compra parcelada direto no cartão — cria uma saída por parcela, uma em cada
  * competência futura (um mês depois da anterior), nunca um único lançamento "informativo".
  */

@@ -160,3 +160,12 @@
     height: min(500px, 70vh);
   }
 }
+
+/* Item F2: com um modal aberto em QUALQUER lugar da tela (.modal-overlay.open, de
+   components/shared/Modal.tsx), o botão/painel do assistente só ficava por cima dos botões do
+   modal (z-index maior) — some por completo em vez de sobrepor, sem precisar de nenhum estado
+   React compartilhado entre páginas que nem se conhecem. */
+body:has(.modal-overlay.open) .chat-button,
+body:has(.modal-overlay.open) .chat-panel {
+  display: none;
+}

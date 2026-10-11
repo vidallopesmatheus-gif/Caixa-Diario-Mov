@@ -8,10 +8,14 @@
   grid-template-areas: "desc valor cat acoes";
   gap: 8px; margin-bottom: 8px; align-items: center;
 }
-.lanc-desc { grid-area: desc; }
-.lanc-valor { grid-area: valor; }
-.lanc-cat { grid-area: cat; position: relative; }
-.lanc-acoes { grid-area: acoes; display: flex; align-items: center; gap: 6px; }
+/* Item F1: min-width:0 em toda célula do grid — sem isso, um item com white-space:nowrap (ex.: o
+   nome da categoria no .cat-btn) força a coluna a crescer até caber o texto inteiro sem quebrar,
+   mesmo com overflow:hidden/text-overflow:ellipsis já definidos nele (que só funcionam se a caixa
+   puder ficar menor que o conteúdo) — essa era a causa real da rolagem horizontal em 375px. */
+.lanc-desc { grid-area: desc; min-width: 0; }
+.lanc-valor { grid-area: valor; min-width: 0; }
+.lanc-cat { grid-area: cat; position: relative; min-width: 0; }
+.lanc-acoes { grid-area: acoes; display: flex; align-items: center; gap: 6px; min-width: 0; }
 
 .lancamento-desc {
   padding: 9px 12px; background: var(--bg-input);
@@ -46,7 +50,7 @@
   text-align: left; transition: background 0.15s; border: 1px solid;
 }
 .cat-btn-entrada { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-.cat-btn-entrada:hover { background: rgba(124,58,237,.22); }
+.cat-btn-entrada:hover { background: rgba(30,111,217,.22); }
 .cat-btn-saida.sem-cat { background: var(--rm-bg); border-color: var(--rm-bd); color: var(--warning); }
 .cat-btn-saida.com-cat { background: var(--success-soft); border-color: var(--success); color: var(--success); }
 .cat-btn-saida:hover { filter: brightness(1.15); }
@@ -67,7 +71,7 @@
 .btn-item-save-saida:hover:not(:disabled) { background: #991b1b; }
 
 .btn-transferencia { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-.btn-transferencia:hover { background: rgba(124,58,237,.22); }
+.btn-transferencia:hover { background: rgba(30,111,217,.22); }
 
 /* ── Botão remover linha ── */
 .btn-rm {
@@ -82,7 +86,7 @@
   border-radius: 8px; color: var(--accent); font-size: 13px; font-weight: 600;
   background: var(--accent-soft); margin-top: 4px;
 }
-.btn-add-entrada:hover { background: rgba(124,58,237,.22); }
+.btn-add-entrada:hover { background: rgba(30,111,217,.22); }
 .btn-add-saida {
   width: 100%; padding: 9px; border: 1px dashed var(--rm-bd);
   border-radius: 8px; color: var(--danger); font-size: 13px; font-weight: 600;

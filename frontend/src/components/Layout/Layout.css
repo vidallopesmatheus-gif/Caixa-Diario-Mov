@@ -15,7 +15,7 @@
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 
 .badge-role   { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 600; }
-.badge-admin  { background: var(--badge-adm-bg); color: var(--accent); border: 1px solid rgba(124,58,237,.35); }
+.badge-admin  { background: var(--badge-adm-bg); color: var(--accent); border: 1px solid rgba(30,111,217,.35); }
 .badge-client { background: var(--badge-cli-bg); color: var(--success); border: 1px solid rgba(5,150,105,.35); }
 
 .avatar {
@@ -81,7 +81,7 @@
     flex: 1 1 0; min-width: 0; flex-direction: column; gap: 2px;
     padding: 6px 2px; border-bottom: none; border-radius: 8px;
   }
-  .tab-btn.active { background: var(--accent-soft, rgba(124,58,237,.12)); }
+  .tab-btn.active { background: var(--accent-soft, rgba(30,111,217,.12)); }
   .tab-btn-icone { font-size: 18px; }
   .tab-btn-label {
     font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;

@@ -173,6 +173,119 @@ public class FaturaCartaoServiceTests
         Assert.Equal(403, ex.StatusCode);
     }
 
+    // ── PagarFaturaAsync (item F4 do bundle D6JWEAJa) ──────────────────────────────────────────────
+
+    private (ContaBancaria contaCartao, ContaBancaria contaOrigem, List<RegistroDiario> registrosCartao) CriarCenarioFatura(
+        Guid clienteId, decimal valorCompra = 300m)
+    {
+        var contaCartao = CriarConta(clienteId, "Cartão", "CartaoCredito", diaFechamento: 15);
+        var contaOrigem = CriarConta(clienteId, "Conta Corrente", "ContaCorrente", saldoInicial: 1000m);
+        var registrosCartao = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2020, 1, 10),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = -valorCompra,
+                Saidas = new() { new ItemFinanceiroSaida { Valor = valorCompra, Categoria = "Software" } },
+            },
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaOrigem.Id)).ReturnsAsync(contaOrigem);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(registrosCartao);
+        _pagamentoRepoMock.Setup(r => r.ListarPorContaCartaoAsync(contaCartao.Id)).ReturnsAsync(new List<PagamentoFatura>());
+        _pagamentoRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<PagamentoFatura>())).ReturnsAsync((PagamentoFatura p) => p);
+        return (contaCartao, contaOrigem, registrosCartao);
+    }
+
+    [Fact]
+    public async Task PagarFaturaAsync_SemValorInformado_PagaOSaldoDevedorIntegralCriandoAsDuasPontasDoZero()
+    {
+        var clienteId = Guid.NewGuid();
+        var (contaCartao, contaOrigem, _) = CriarCenarioFatura(clienteId);
+        var dataPagamento = new DateOnly(2020, 2, 1);
+
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaOrigem.Id, dataPagamento)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaOrigem.Id)).ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCartao.Id, dataPagamento)).ReturnsAsync((RegistroDiario?)null);
+
+        var registrosCriados = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(registrosCriados.Add).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new PagarFaturaDto { ContaOrigemId = contaOrigem.Id, Data = dataPagamento, Competencia = "2020-01" };
+        var resultado = await _sut.PagarFaturaAsync(contaCartao.Id, dto, clienteId, "cliente");
+
+        Assert.Equal(300m, resultado.ValorPago);
+        var regOrigemCriado = registrosCriados.Single(r => r.ContaBancariaId == contaOrigem.Id);
+        var saidaOrigem = Assert.Single(regOrigemCriado.Saidas);
+        Assert.Equal(300m, saidaOrigem.Valor);
+        Assert.Equal(LancamentoFiltro.TipoPagamentoFatura, saidaOrigem.TipoCusto);
+        Assert.Equal(1000m - 300m, regOrigemCriado.SaldoFinal);
+
+        var regCartaoCriado = registrosCriados.Single(r => r.ContaBancariaId == contaCartao.Id);
+        var entradaCartao = Assert.Single(regCartaoCriado.Entradas);
+        Assert.Equal(300m, entradaCartao.Valor);
+        Assert.Equal(saidaOrigem.PagamentoFaturaId, entradaCartao.PagamentoFaturaId);
+    }
+
+    [Fact]
+    public async Task PagarFaturaAsync_ValorParcial_PagaSoOInformado()
+    {
+        var clienteId = Guid.NewGuid();
+        var (contaCartao, contaOrigem, _) = CriarCenarioFatura(clienteId);
+        var dataPagamento = new DateOnly(2020, 2, 1);
+
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaOrigem.Id, dataPagamento)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaOrigem.Id)).ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCartao.Id, dataPagamento)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new PagarFaturaDto { ContaOrigemId = contaOrigem.Id, Data = dataPagamento, Competencia = "2020-01", Valor = 100m };
+        var resultado = await _sut.PagarFaturaAsync(contaCartao.Id, dto, clienteId, "cliente");
+
+        Assert.Equal(100m, resultado.ValorPago);
+    }
+
+    [Fact]
+    public async Task PagarFaturaAsync_ContaOrigemECartao_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartão", "CartaoCredito", diaFechamento: 15);
+        var outroCartao = CriarConta(clienteId, "Outro Cartão", "CartaoCredito");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(outroCartao.Id)).ReturnsAsync(outroCartao);
+
+        var dto = new PagarFaturaDto { ContaOrigemId = outroCartao.Id, Data = new DateOnly(2020, 2, 1), Competencia = "2020-01" };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.PagarFaturaAsync(contaCartao.Id, dto, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task PagarFaturaAsync_FaturaInexistente_LancaNaoEncontrado()
+    {
+        var clienteId = Guid.NewGuid();
+        var (contaCartao, contaOrigem, _) = CriarCenarioFatura(clienteId);
+
+        var dto = new PagarFaturaDto { ContaOrigemId = contaOrigem.Id, Data = new DateOnly(2020, 2, 1), Competencia = "2099-12" };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.PagarFaturaAsync(contaCartao.Id, dto, clienteId, "cliente"));
+
+        Assert.Equal(404, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task PagarFaturaAsync_ClienteAcessandoOutroCliente_LancaAcessoNegado()
+    {
+        var clienteId = Guid.NewGuid();
+        var (contaCartao, contaOrigem, _) = CriarCenarioFatura(clienteId);
+
+        var dto = new PagarFaturaDto { ContaOrigemId = contaOrigem.Id, Data = new DateOnly(2020, 2, 1), Competencia = "2020-01" };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.PagarFaturaAsync(contaCartao.Id, dto, Guid.NewGuid(), "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
+    }
+
     // ── DesvincularPagamentoAsync ───────────────────────────────────────────────────────────────
 
     [Fact]
