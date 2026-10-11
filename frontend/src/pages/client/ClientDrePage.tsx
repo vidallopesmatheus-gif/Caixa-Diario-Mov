@@ -163,6 +163,7 @@ export default function ClientDrePage() {
   const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
   const [salvandoCategoriaId, setSalvandoCategoriaId] = useState<string | null>(null)
   const [msgCategoria, setMsgCategoria] = useState('')
+  const [exportandoPdf, setExportandoPdf] = useState(false)
   const [blocosExpandidos, setBlocosExpandidos] = useState<Set<Bloco>>(new Set())
   const [gruposExpandidos, setGruposExpandidos] = useState<Set<string>>(new Set())
   const [drill, setDrill] = useState<Drill | null>(null)
@@ -331,6 +332,37 @@ export default function ClientDrePage() {
     }
   }
 
+  // Item E3: PDF sempre de UM mês (bate com o nome do arquivo, AAAA-MM) — usa o 1º período
+  // visível mesmo em modo "trimestre"/"ano" ou comparativo, pra sempre existir um mês de referência.
+  async function handleExportarPdf() {
+    if (!clienteId) return
+    setErro('')
+    setExportandoPdf(true)
+    try {
+      const referencia = periodosComDre[0].periodo.de
+      const [anoRef, mesRef] = referencia.split('-')
+      const token = localStorage.getItem('token')
+      const query = new URLSearchParams({ ano: anoRef, mes: String(Number(mesRef)) })
+      if (contaFiltro) query.set('contaBancariaId', contaFiltro)
+      const res = await fetch(`/api/export/${clienteId}/dre-pdf?${query.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) throw new Error(`Erro ${res.status}`)
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `MoneyVision_DRE_${user?.nomeUsuario ?? clienteId}_${anoRef}-${mesRef}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : 'Erro ao exportar PDF.')
+    } finally {
+      setExportandoPdf(false)
+    }
+  }
+
   const anosOpcoes = Array.from({ length: 5 }, (_, i) => hoje.getFullYear() - 2 + i)
   const trimestresOpcoes = [1, 2, 3, 4]
 
@@ -361,6 +393,9 @@ export default function ClientDrePage() {
             Bloco → Grupo → Categoria · % sobre Receita Operacional (base = 100%)
           </div>
         </div>
+        <button className="btn-cancel" onClick={handleExportarPdf} disabled={exportandoPdf || !todasCarregadas}>
+          {exportandoPdf ? '⏳ Gerando...' : '📄 Exportar PDF'}
+        </button>
       </div>
 
       <div className="dre-controles">

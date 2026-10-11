@@ -18,8 +18,22 @@ namespace CaixaDiario.API.Controllers;
 public class ExportController : ControllerBase
 {
     private readonly IRegistroRepository _registroRepository;
+    private readonly IUsuarioRepository _usuarioRepository;
+    private readonly ICategoriaRepository _categoriaRepository;
+    private readonly IMetricasService _metricasService;
+    private readonly IFinanciamentoService _financiamentoService;
 
-    public ExportController(IRegistroRepository registroRepository) => _registroRepository = registroRepository;
+    public ExportController(
+        IRegistroRepository registroRepository, IUsuarioRepository usuarioRepository,
+        ICategoriaRepository categoriaRepository, IMetricasService metricasService,
+        IFinanciamentoService financiamentoService)
+    {
+        _registroRepository = registroRepository;
+        _usuarioRepository = usuarioRepository;
+        _categoriaRepository = categoriaRepository;
+        _metricasService = metricasService;
+        _financiamentoService = financiamentoService;
+    }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
     private string ObterPerfil() => User.FindFirst("perfil")!.Value;
@@ -198,5 +212,192 @@ public class ExportController : ControllerBase
 
         var pdfBytes = document.GeneratePdf();
         return File(pdfBytes, "application/pdf", $"relatorio_{de:yyyy-MM-dd}_a_{ate:yyyy-MM-dd}.pdf");
+    }
+
+    private static readonly Dictionary<string, string> BlocoLabel = new()
+    {
+        ["RECEITAS OPERACIONAIS"] = "Receitas Operacionais",
+        ["DEDUÇÕES DA RECEITA"] = "Deduções da Receita",
+        ["CUSTOS OPERACIONAIS"] = "Custos Operacionais",
+        ["DESPESAS OPERACIONAIS"] = "Despesas Operacionais",
+        ["ATIVIDADES DE INVESTIMENTO"] = "Atividades de Investimento",
+        ["ATIVIDADES DE FINANCIAMENTO"] = "Atividades de Financiamento",
+    };
+
+    private static readonly Color MvNavy = Color.FromHex("#0B2545");
+    private static readonly Color MvBlue = Color.FromHex("#1E6FD9");
+
+    // Item E3 do bundle D6JWEAJa: PDF da DRE — sempre um único mês (bate com o padrão de nome do
+    // arquivo AAAA-MM), nunca trimestre/ano, mesmo que a tela esteja comparando outros períodos.
+    [HttpGet("{clienteId:guid}/dre-pdf")]
+    public async Task<IActionResult> ExportarDrePdf(Guid clienteId, [FromQuery] int ano, [FromQuery] int mes, [FromQuery] Guid? contaBancariaId = null)
+    {
+        if (ObterPerfil() == "cliente" && ObterUsuarioId() != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+
+        var cliente = await _usuarioRepository.ObterPorIdAsync(clienteId)
+            ?? throw new ApiException(404, CodigoRetorno.USUARIO_NAO_ENCONTRADO, "Cliente não encontrado.");
+
+        var de = new DateOnly(ano, mes, 1);
+        var ate = new DateOnly(ano, mes, DateTime.DaysInMonth(ano, mes));
+        var refAnterior = de.AddMonths(-1);
+        var deAnterior = new DateOnly(refAnterior.Year, refAnterior.Month, 1);
+        var ateAnterior = new DateOnly(refAnterior.Year, refAnterior.Month, DateTime.DaysInMonth(refAnterior.Year, refAnterior.Month));
+
+        var categorias = await _categoriaRepository.ListarTodasAsync();
+        var todosRegistros = await _registroRepository.ListarPorPeriodoAsync(clienteId, deAnterior, ate);
+        if (contaBancariaId.HasValue)
+            todosRegistros = todosRegistros.Where(r => r.ContaBancariaId == contaBancariaId.Value).ToList();
+
+        var registrosMes = todosRegistros.Where(r => r.Data >= de && r.Data <= ate).ToList();
+        var registrosMesAnterior = todosRegistros.Where(r => r.Data >= deAnterior && r.Data <= ateAnterior).ToList();
+
+        var dre = _metricasService.CalcularDre(registrosMes, categorias);
+        var dreAnterior = _metricasService.CalcularDre(registrosMesAnterior, categorias);
+        var pontoEquilibrio = _metricasService.CalcularPontoEquilibrio(
+            dre.ReceitaBruta, dre.MargemContribuicao, Math.Abs(dre.DespesasFixas.Total), ate);
+
+        var financiamentos = await _financiamentoService.ListarAsync(clienteId, ObterUsuarioId(), ObterPerfil());
+        var financiamentosAtivos = financiamentos.Where(f => f.Status == "Ativo").ToList();
+        var saldoDevedorTotal = financiamentosAtivos.Sum(f => f.SaldoDevedor);
+        var parcelaMensalComprometida = financiamentosAtivos.Sum(f => f.ProximaParcelaValor ?? 0);
+
+        decimal? variacaoReceita = dreAnterior.ReceitaBruta > 0
+            ? Math.Round((dre.ReceitaBruta - dreAnterior.ReceitaBruta) / dreAnterior.ReceitaBruta * 100, 1)
+            : null;
+        decimal? variacaoResultado = dreAnterior.ResultadoLiquido != 0
+            ? Math.Round((dre.ResultadoLiquido - dreAnterior.ResultadoLiquido) / Math.Abs(dreAnterior.ResultadoLiquido) * 100, 1)
+            : null;
+
+        QuestPDF.Settings.License = LicenseType.Community;
+        var nomeMes = de.ToString("MMMM/yyyy", new System.Globalization.CultureInfo("pt-BR"));
+
+        var document = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(1.5f, Unit.Centimetre);
+                page.DefaultTextStyle(x => x.FontSize(9));
+
+                page.Header().Background(MvNavy).Padding(14).Row(row =>
+                {
+                    row.RelativeItem().Column(c =>
+                    {
+                        c.Item().Text("💰 Money Vision").FontColor(Colors.White).Bold().FontSize(16);
+                        c.Item().Text("Demonstrativo de Resultado (DRE)").FontColor(Colors.White).FontSize(10);
+                    });
+                    row.ConstantItem(180).Column(c =>
+                    {
+                        c.Item().AlignRight().Text(cliente.Nome).FontColor(Colors.White).Bold().FontSize(11);
+                        c.Item().AlignRight().Text(nomeMes).FontColor(Colors.White).FontSize(10);
+                    });
+                });
+
+                page.Content().PaddingTop(14).Column(col =>
+                {
+                    col.Spacing(12);
+
+                    col.Item().Text("Demonstrativo por bloco").Bold().FontSize(11).FontColor(MvNavy);
+                    col.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(c => { c.RelativeColumn(3); c.RelativeColumn(); c.RelativeColumn(); });
+                        table.Header(h =>
+                        {
+                            h.Cell().Text("Bloco").Bold();
+                            h.Cell().AlignRight().Text("Total").Bold();
+                            h.Cell().AlignRight().Text("%").Bold();
+                        });
+                        foreach (var bloco in dre.Blocos)
+                        {
+                            table.Cell().Text(BlocoLabel.GetValueOrDefault(bloco.Bloco, bloco.Bloco));
+                            table.Cell().AlignRight().Text($"R$ {bloco.Total:N2}");
+                            table.Cell().AlignRight().Text(bloco.Percentual.HasValue ? $"{bloco.Percentual:N1}%" : "—");
+                            foreach (var grupo in bloco.Grupos)
+                            {
+                                table.Cell().PaddingLeft(10).Text(grupo.Nome).FontColor(Colors.Grey.Darken1).FontSize(8);
+                                table.Cell().AlignRight().Text($"R$ {grupo.Total:N2}").FontColor(Colors.Grey.Darken1).FontSize(8);
+                                table.Cell().AlignRight().Text(grupo.Percentual.HasValue ? $"{grupo.Percentual:N1}%" : "—").FontColor(Colors.Grey.Darken1).FontSize(8);
+                            }
+                        }
+                    });
+
+                    col.Item().Row(row =>
+                    {
+                        row.RelativeItem().Text(t => { t.Span("Resultado Líquido: ").Bold(); t.Span($"R$ {dre.ResultadoLiquido:N2}"); });
+                        row.RelativeItem().AlignRight().Text(t => { t.Span("Margem: ").Bold(); t.Span(dre.ResultadoLiquidoPercentual.HasValue ? $"{dre.ResultadoLiquidoPercentual:N1}%" : "—"); });
+                    });
+
+                    col.Item().Text("Indicadores").Bold().FontSize(11).FontColor(MvNavy);
+                    col.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(c => { c.RelativeColumn(); c.RelativeColumn(); });
+                        void Linha(string label, string valor)
+                        {
+                            table.Cell().Text(label);
+                            table.Cell().AlignRight().Text(valor).Bold();
+                        }
+                        Linha("Margem bruta (contribuição)", dre.MargemContribuicaoPercentual.HasValue ? $"{dre.MargemContribuicaoPercentual:N1}%" : "—");
+                        Linha("Margem líquida", dre.ResultadoLiquidoPercentual.HasValue ? $"{dre.ResultadoLiquidoPercentual:N1}%" : "—");
+                        Linha("Despesas fixas (% da receita)", dre.DespesasFixas.Percentual.HasValue ? $"{dre.DespesasFixas.Percentual:N1}%" : "—");
+                        Linha("Ponto de equilíbrio (mensal)", pontoEquilibrio.Disponivel && pontoEquilibrio.ValorMensal.HasValue ? $"R$ {pontoEquilibrio.ValorMensal:N2}" : "Não disponível");
+                    });
+
+                    col.Item().Text($"Comparação com {refAnterior:MMMM/yyyy}").Bold().FontSize(11).FontColor(MvNavy);
+                    col.Item().Table(table =>
+                    {
+                        table.ColumnsDefinition(c => { c.RelativeColumn(2); c.RelativeColumn(); c.RelativeColumn(); c.RelativeColumn(); });
+                        table.Header(h =>
+                        {
+                            h.Cell().Text("");
+                            h.Cell().AlignRight().Text(nomeMes).Bold();
+                            h.Cell().AlignRight().Text(refAnterior.ToString("MMMM/yyyy", new System.Globalization.CultureInfo("pt-BR"))).Bold();
+                            h.Cell().AlignRight().Text("Var.").Bold();
+                        });
+                        table.Cell().Text("Receita Bruta");
+                        table.Cell().AlignRight().Text($"R$ {dre.ReceitaBruta:N2}");
+                        table.Cell().AlignRight().Text($"R$ {dreAnterior.ReceitaBruta:N2}");
+                        table.Cell().AlignRight().Text(variacaoReceita.HasValue ? $"{variacaoReceita:N1}%" : "—");
+                        table.Cell().Text("Resultado Líquido");
+                        table.Cell().AlignRight().Text($"R$ {dre.ResultadoLiquido:N2}");
+                        table.Cell().AlignRight().Text($"R$ {dreAnterior.ResultadoLiquido:N2}");
+                        table.Cell().AlignRight().Text(variacaoResultado.HasValue ? $"{variacaoResultado:N1}%" : "—");
+                    });
+
+                    col.Item().Text("💳 Dívidas").Bold().FontSize(11).FontColor(MvNavy);
+                    if (financiamentosAtivos.Count == 0)
+                    {
+                        col.Item().Text("Nenhum financiamento/empréstimo/consórcio ativo.").FontColor(Colors.Grey.Darken1);
+                    }
+                    else
+                    {
+                        col.Item().Table(table =>
+                        {
+                            table.ColumnsDefinition(c => { c.RelativeColumn(); c.RelativeColumn(); });
+                            table.Cell().Text("Saldo devedor total");
+                            table.Cell().AlignRight().Text($"R$ {saldoDevedorTotal:N2}").Bold();
+                            table.Cell().Text("Parcela mensal comprometida");
+                            table.Cell().AlignRight().Text($"R$ {parcelaMensalComprometida:N2}").Bold();
+                            table.Cell().Text("Contratos ativos");
+                            table.Cell().AlignRight().Text($"{financiamentosAtivos.Count}");
+                        });
+                    }
+                });
+
+                page.Footer().Column(col =>
+                {
+                    col.Item().AlignCenter().Text($"Gerado em {DateTime.Now:dd/MM/yyyy HH:mm}").FontSize(8).FontColor(Colors.Grey.Darken1);
+                    col.Item().AlignCenter().Text(x =>
+                    {
+                        x.DefaultTextStyle(y => y.FontSize(8).FontColor(Colors.Grey.Darken1));
+                        x.Span("Página "); x.CurrentPageNumber(); x.Span(" de "); x.TotalPages();
+                    });
+                });
+            });
+        });
+
+        var pdfBytes = document.GeneratePdf();
+        var nomeArquivo = $"MoneyVision_DRE_{cliente.NomeUsuario}_{ano:D4}-{mes:D2}.pdf";
+        return File(pdfBytes, "application/pdf", nomeArquivo);
     }
 }

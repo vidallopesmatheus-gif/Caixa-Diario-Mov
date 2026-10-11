@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using CaixaDiario.API.Controllers;
+using CaixaDiario.API.DTOs.Financiamentos;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
+using CaixaDiario.API.Services;
 using ClosedXML.Excel;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -13,10 +15,18 @@ namespace CaixaDiario.Tests.Controllers;
 public class ExportControllerTests
 {
     private readonly Mock<IRegistroRepository> _repoMock = new();
+    private readonly Mock<IUsuarioRepository> _usuarioRepoMock = new();
+    private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
+    private readonly Mock<IFinanciamentoService> _financiamentoServiceMock = new();
 
     private ExportController CriarSut(Guid usuarioId, string perfil)
     {
-        var sut = new ExportController(_repoMock.Object);
+        _categoriaRepoMock.Setup(c => c.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
+        _financiamentoServiceMock.Setup(f => f.ListarAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>()))
+            .ReturnsAsync(new List<FinanciamentoDto>());
+        var sut = new ExportController(
+            _repoMock.Object, _usuarioRepoMock.Object, _categoriaRepoMock.Object,
+            new MetricasService(), _financiamentoServiceMock.Object);
         var claims = new[] { new Claim("id", usuarioId.ToString()), new Claim("perfil", perfil) };
         sut.ControllerContext = new ControllerContext
         {
@@ -148,5 +158,57 @@ public class ExportControllerTests
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
             sut.ExportarCsv(clienteId, new DateOnly(2026, 1, 31), new DateOnly(2026, 1, 1)));
         Assert.Equal(400, ex.StatusCode);
+    }
+
+    // ── ExportarDrePdf (item E3 do bundle D6JWEAJa) ────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExportarDrePdf_RetornaArquivoPdfComNomeNoPadraoMoneyVision()
+    {
+        var clienteId = Guid.NewGuid();
+        var cliente = new Usuario { Id = clienteId, Nome = "Padaria Dois Irmãos", NomeUsuario = "padaria_dois_irmaos" };
+        _usuarioRepoMock.Setup(u => u.ObterPorIdAsync(clienteId)).ReturnsAsync(cliente);
+        _repoMock.Setup(r => r.ListarPorPeriodoAsync(clienteId, It.IsAny<DateOnly>(), It.IsAny<DateOnly>()))
+            .ReturnsAsync(CriarRegistros(clienteId));
+
+        var result = await CriarSut(Guid.NewGuid(), "admin").ExportarDrePdf(clienteId, 2026, 1, null);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.NotEmpty(file.FileContents);
+        Assert.Equal("MoneyVision_DRE_padaria_dois_irmaos_2026-01.pdf", file.FileDownloadName);
+    }
+
+    [Fact]
+    public async Task ExportarDrePdf_ClienteAcessandoOutro_LancaAcessoNegado()
+    {
+        var sut = CriarSut(Guid.NewGuid(), "cliente");
+        var ex = await Assert.ThrowsAsync<ApiException>(() => sut.ExportarDrePdf(Guid.NewGuid(), 2026, 1, null));
+        Assert.Equal(403, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExportarDrePdf_ClienteInexistente_LancaUsuarioNaoEncontrado()
+    {
+        var clienteId = Guid.NewGuid();
+        _usuarioRepoMock.Setup(u => u.ObterPorIdAsync(clienteId)).ReturnsAsync((Usuario?)null);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => CriarSut(clienteId, "cliente").ExportarDrePdf(clienteId, 2026, 1, null));
+
+        Assert.Equal(404, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExportarDrePdf_SemFinanciamentoAtivo_NaoQuebraEGeraPdf()
+    {
+        var clienteId = Guid.NewGuid();
+        _usuarioRepoMock.Setup(u => u.ObterPorIdAsync(clienteId)).ReturnsAsync(new Usuario { Id = clienteId, Nome = "Cliente", NomeUsuario = "cliente1" });
+        _repoMock.Setup(r => r.ListarPorPeriodoAsync(clienteId, It.IsAny<DateOnly>(), It.IsAny<DateOnly>()))
+            .ReturnsAsync(new List<RegistroDiario>());
+
+        var result = await CriarSut(clienteId, "cliente").ExportarDrePdf(clienteId, 2026, 2, null);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.NotEmpty(file.FileContents);
     }
 }
