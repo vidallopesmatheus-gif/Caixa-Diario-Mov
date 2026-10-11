@@ -16,6 +16,7 @@ public class RegistroServiceTests
     private readonly Mock<IRecorrenciaService> _recorrenciaMock = new();
     private readonly Mock<IContaBancariaRepository> _contaBancariaMock = new();
     private readonly Mock<IConciliacaoService> _conciliacaoMock = new();
+    private readonly Mock<ICategoriaRepository> _categoriaMock = new();
     private readonly RegistroService _sut;
 
     public RegistroServiceTests()
@@ -35,7 +36,7 @@ public class RegistroServiceTests
         // específicos de resolução de conta (ver região "ResolverContaPadraoAsync") sobrescrevem isso.
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(It.IsAny<Guid>()))
             .ReturnsAsync(new List<ContaBancaria> { new() { Id = Guid.NewGuid(), Tipo = "Caixa", Ativa = true } });
-        _sut = new RegistroService(_repoMock.Object, _auditMock.Object, _recorrenciaMock.Object, _contaBancariaMock.Object, _conciliacaoMock.Object);
+        _sut = new RegistroService(_repoMock.Object, _auditMock.Object, _recorrenciaMock.Object, _contaBancariaMock.Object, _conciliacaoMock.Object, _categoriaMock.Object);
     }
 
     private static CriarRegistroDto CriarDto(DateOnly? data = null)
@@ -1660,5 +1661,134 @@ public class RegistroServiceTests
 
         Assert.True(criado);
         Assert.Equal(0, resultado.TotalSugestoesVinculo);
+    }
+
+    // ── EditarCategoriaLancamentoAsync (item E2 do bundle D6JWEAJa) ────────────────────────────
+
+    [Fact]
+    public async Task EditarCategoriaLancamentoAsync_SaidaClassificada_TrocaCategoriaEGravaAuditoriaDeOParaA()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "ContaCorrente", Ativa = true };
+        var data = new DateOnly(2026, 9, 10);
+        var itemId = Guid.NewGuid();
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = itemId, Descricao = "Posto Shell", Valor = 200m, Categoria = "Combustível", TipoCusto = "CustoVariavel" } },
+        };
+        _contaBancariaMock.Setup(c => c.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(registro);
+        _categoriaMock.Setup(c => c.ObterPorNomeAsync("Manutenção de Veículo"))
+            .ReturnsAsync(new Categoria { Nome = "Manutenção de Veículo", Tipo = "CustoFixo" });
+
+        var dto = new EditarCategoriaLancamentoDto
+        {
+            ContaBancariaId = conta.Id, LancamentoId = itemId, Tipo = "Saida", Data = data, CategoriaNova = "Manutenção de Veículo",
+        };
+        var resultado = await _sut.EditarCategoriaLancamentoAsync(clienteId, clienteId, "cliente", dto);
+
+        Assert.Equal("Combustível", resultado.CategoriaAnterior);
+        Assert.Equal(0, resultado.SimilaresAtualizados);
+        var saidaAtualizada = Assert.Single(registro.Saidas);
+        Assert.Equal("Manutenção de Veículo", saidaAtualizada.Categoria);
+        Assert.Equal("CustoFixo", saidaAtualizada.TipoCusto);
+
+        _auditMock.Verify(a => a.LogAsync(clienteId, clienteId, "ItemFinanceiroSaida", "EditarCategoria", itemId.ToString(),
+            It.Is<string>(s => s.Contains("Combust")), It.Is<string>(s => s.Contains("Manuten"))), Times.Once);
+    }
+
+    [Fact]
+    public async Task EditarCategoriaLancamentoAsync_AplicarASimilares_SoAtualizaOsAindaSemCategoria()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "ContaCorrente", Ativa = true };
+        var data1 = new DateOnly(2026, 9, 10);
+        var data2 = new DateOnly(2026, 9, 15);
+        var data3 = new DateOnly(2026, 9, 20);
+        var itemId = Guid.NewGuid();
+        var idSemCategoria = Guid.NewGuid();
+        var idJaClassificado = Guid.NewGuid();
+
+        var registroAlvo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data1,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = itemId, Descricao = "UBER TRIP", Valor = 30m, Categoria = "", PendenteCategorizacao = true } },
+        };
+        var registroSemCategoria = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data2,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = idSemCategoria, Descricao = "uber trip", Valor = 28m, Categoria = "", PendenteCategorizacao = true } },
+        };
+        var registroJaClassificado = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data3,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = idJaClassificado, Descricao = "UBER TRIP", Valor = 32m, Categoria = "Transporte" } },
+        };
+
+        _contaBancariaMock.Setup(c => c.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data1)).ReturnsAsync(registroAlvo);
+        _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<RegistroDiario> { registroAlvo, registroSemCategoria, registroJaClassificado });
+        _categoriaMock.Setup(c => c.ObterPorNomeAsync("Transporte"))
+            .ReturnsAsync(new Categoria { Nome = "Transporte", Tipo = "CustoVariavel" });
+
+        var dto = new EditarCategoriaLancamentoDto
+        {
+            ContaBancariaId = conta.Id, LancamentoId = itemId, Tipo = "Saida", Data = data1,
+            CategoriaNova = "Transporte", AplicarASimilares = true,
+        };
+        var resultado = await _sut.EditarCategoriaLancamentoAsync(clienteId, clienteId, "cliente", dto);
+
+        Assert.Equal(1, resultado.SimilaresAtualizados);
+        Assert.Equal("Transporte", registroSemCategoria.Saidas.Single().Categoria);
+        Assert.False(registroSemCategoria.Saidas.Single().PendenteCategorizacao);
+        // O já classificado como "Transporte" por outra mão não é tocado (continua com o mesmo valor).
+        Assert.Equal(32m, registroJaClassificado.Saidas.Single().Valor);
+    }
+
+    [Fact]
+    public async Task EditarCategoriaLancamentoAsync_ContaDeOutroCliente_LancaAcessoNegado()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Tipo = "ContaCorrente", Ativa = true };
+        _contaBancariaMock.Setup(c => c.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+
+        var dto = new EditarCategoriaLancamentoDto
+        {
+            ContaBancariaId = conta.Id, LancamentoId = Guid.NewGuid(), Tipo = "Saida",
+            Data = new DateOnly(2026, 9, 10), CategoriaNova = "Qualquer",
+        };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.EditarCategoriaLancamentoAsync(clienteId, clienteId, "cliente", dto));
+
+        Assert.Equal(403, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task EditarCategoriaLancamentoAsync_LancamentoInexistente_LancaNaoEncontrado()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "ContaCorrente", Ativa = true };
+        var data = new DateOnly(2026, 9, 10);
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data,
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+        _contaBancariaMock.Setup(c => c.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _repoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(registro);
+
+        var dto = new EditarCategoriaLancamentoDto
+        {
+            ContaBancariaId = conta.Id, LancamentoId = Guid.NewGuid(), Tipo = "Saida", Data = data, CategoriaNova = "Qualquer",
+        };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.EditarCategoriaLancamentoAsync(clienteId, clienteId, "cliente", dto));
+
+        Assert.Equal(CodigoRetorno.REGISTRO_NAO_ENCONTRADO, ex.Codigo);
     }
 }

@@ -139,3 +139,31 @@ export const excluirRegistro = (clienteId: string, data: string, contaBancariaId
     body: JSON.stringify({ motivoExclusao }),
   })
 }
+
+export interface EditarCategoriaLancamentoResultado {
+  categoriaAnterior?: string
+  similaresAtualizados: number
+}
+
+/** Item E2: reclassifica um lançamento a partir do drill-down da DRE (ou de qualquer outra tela) —
+ * diferente do fluxo de "pendentes", edita qualquer lançamento já classificado ou não. */
+export const editarCategoriaLancamento = async (clienteId: string, dto: {
+  contaBancariaId: string
+  lancamentoId: string
+  tipo: 'Entrada' | 'Saida'
+  data: string
+  categoriaNova: string
+  aplicarASimilares?: boolean
+}): Promise<EditarCategoriaLancamentoResultado> => {
+  const res = await apiFetch<ApiResponse<{ categoriaAnterior?: string; similaresAtualizados: number }>>(
+    `/api/registros/${clienteId}/categoria`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ContaBancariaId: dto.contaBancariaId, LancamentoId: dto.lancamentoId, Tipo: dto.tipo,
+        Data: dto.data, CategoriaNova: dto.categoriaNova, AplicarASimilares: dto.aplicarASimilares ?? false,
+      }),
+    },
+  )
+  return { categoriaAnterior: res.dados?.categoriaAnterior, similaresAtualizados: res.dados?.similaresAtualizados ?? 0 }
+}

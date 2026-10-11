@@ -461,6 +461,39 @@
   min-width: 100px;
 }
 
+/* Item E2: categoria editável por lançamento, no drill-down da DRE. */
+.dre-drill-item-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bd);
+}
+.dre-drill-item-wrap .dre-drill-item { padding: 0; border-bottom: none; }
+.dre-drill-cat-select {
+  align-self: flex-end;
+  max-width: 220px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--bd);
+  background: var(--bg-input);
+  color: var(--tx);
+  font-size: 12px;
+}
+.dre-drill-cat-readonly {
+  align-self: flex-end;
+  font-size: 12px;
+  color: var(--tx3);
+}
+.dre-drill-msg {
+  background: var(--tag-in);
+  color: var(--success);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
 @media (max-width: 600px) {
   .dre-corpo { padding: 16px; }
   .dre-expand-bloco { padding-left: 12px; }
