@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import {
@@ -22,6 +22,7 @@ import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia
 import { listarMetas, salvarMeta } from '../../api/metas'
 import { listarCategorias } from '../../api/categorias'
 import { fmtBRL, fmtPct, fmtDate, todayISO, addDays } from '../../utils/format'
+import { limparDescricao } from '../../utils/descricaoExibicao'
 import Modal from '../../components/shared/Modal'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao, Categorias, CategoriaAdmin } from '../../types'
@@ -103,6 +104,17 @@ export default function ClientContaDetalhePage() {
   const [lancamentoParaEditar, setLancamentoParaEditar] = useState<LancamentoExtrato | null>(null)
   const [categoriaEdicao, setCategoriaEdicao] = useState('')
   const [salvandoEdicao, setSalvandoEdicao] = useState(false)
+  // Atalho rápido: clicar no chip da categoria abre o combobox ali mesmo, sem o painel inteiro.
+  const [chipAbertoKey, setChipAbertoKey] = useState<string | null>(null)
+  const [salvandoChip, setSalvandoChip] = useState(false)
+  // Layout do extrato (Money Vision — Bloco 1): confirmação de exclusão deixou de ser um
+  // confirm() nativo e virou modal com botão vermelho; saldo por linha fica atrás de um toggle
+  // (o padrão agora é mostrar só o saldo do dia, no cabeçalho do grupo).
+  const [excluirConfirmacao, setExcluirConfirmacao] = useState<LancamentoExtrato | null>(null)
+  const [excluindoLancamento, setExcluindoLancamento] = useState(false)
+  const [mostrarSaldoPorLinha, setMostrarSaldoPorLinha] = useState(false)
+  // Mobile (<768px): cada linha é um card; tocar nele abre uma bottom sheet com as ações.
+  const [acaoMobileLancamento, setAcaoMobileLancamento] = useState<LancamentoExtrato | null>(null)
 
   const [modalVincular, setModalVincular] = useState(false)
   const [metasDisponiveis, setMetasDisponiveis] = useState<MetaAnual[]>([])
@@ -311,12 +323,15 @@ export default function ClientContaDetalhePage() {
     }
   }
 
-  async function handleExcluirLancamento(lancamento: LancamentoExtrato) {
-    if (!lancamento.id || !contaId) return
-    const avisoTransferencia = lancamento.categoria === 'Transferência'
-      ? ' Esse lançamento é uma ponta de Transferência — a contrapartida na outra conta também será excluída.'
-      : ' Se ele foi usado para dar baixa em alguma conta a pagar/receber, o título volta a ficar em aberto.'
-    if (!confirm(`Excluir "${lancamento.descricao}"? Essa ação não pode ser desfeita.${avisoTransferencia}`)) return
+  function abrirConfirmarExclusao(lancamento: LancamentoExtrato) {
+    setExcluirConfirmacao(lancamento)
+    setMsg('')
+  }
+
+  async function confirmarExclusao() {
+    const lancamento = excluirConfirmacao
+    if (!lancamento?.id || !contaId) return
+    setExcluindoLancamento(true)
     setMsg('')
     try {
       const resultado = await excluirLancamento(contaId, { id: lancamento.id, data: lancamento.data })
@@ -340,8 +355,11 @@ export default function ClientContaDetalhePage() {
         }
       }
       carregarPendencias()
+      setExcluirConfirmacao(null)
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao excluir lançamento.')
+    } finally {
+      setExcluindoLancamento(false)
     }
   }
 
@@ -359,43 +377,62 @@ export default function ClientContaDetalhePage() {
     setMsg('')
   }
 
-  async function confirmarEdicaoCategoria() {
-    if (!lancamentoParaEditar?.id || !contaId || !categoriaEdicao) return
-    setSalvandoEdicao(true)
+  // Núcleo da troca de categoria — usado tanto pelo painel (✏️) quanto pelo chip clicável
+  // direto na linha, pra não duplicar a lógica de regra/estado local nos dois caminhos.
+  async function aplicarNovaCategoria(lancamento: LancamentoExtrato, novaCategoria: string) {
+    if (!lancamento.id || !contaId || !novaCategoria) return
     setMsg('')
-    try {
-      await categorizarPendentes(contaId, [{ id: lancamentoParaEditar.id, data: lancamentoParaEditar.data, categoria: categoriaEdicao }])
+    await categorizarPendentes(contaId, [{ id: lancamento.id, data: lancamento.data, categoria: novaCategoria }])
 
-      // Categoria veio de uma regra e o usuário trocou pra outra — a regra em si NUNCA é alterada
-      // sozinha, mas oferece atualizar (só essa reclassificação manual, não muda o critério).
-      const regraId = lancamentoParaEditar.regraCategorizacaoId
-      if (regraId && categoriaEdicao !== lancamentoParaEditar.categoria && clienteId) {
-        try {
-          const regras = await listarRegras(clienteId)
-          const regra = regras.find(r => r.id === regraId)
-          if (regra && regra.acaoTipo === 'Categoria' && regra.categoria !== categoriaEdicao
-            && confirm(`Esse lançamento veio da regra baseada em "${regra.descricaoReferencia}" (categoria "${regra.categoria}"). Atualizar a regra para usar "${categoriaEdicao}" daqui pra frente?`)) {
-            await atualizarRegra(regra.id, {
-              descricaoReferencia: regra.descricaoReferencia,
-              acaoTipo: regra.acaoTipo,
-              categoria: categoriaEdicao,
-              ativa: regra.ativa,
-            })
-          }
-        } catch {
-          // Não bloqueia a edição do lançamento (já salva) por causa disso.
+    // Categoria veio de uma regra e o usuário trocou pra outra — a regra em si NUNCA é alterada
+    // sozinha, mas oferece atualizar (só essa reclassificação manual, não muda o critério).
+    const regraId = lancamento.regraCategorizacaoId
+    if (regraId && novaCategoria !== lancamento.categoria && clienteId) {
+      try {
+        const regras = await listarRegras(clienteId)
+        const regra = regras.find(r => r.id === regraId)
+        if (regra && regra.acaoTipo === 'Categoria' && regra.categoria !== novaCategoria
+          && confirm(`Esse lançamento veio da regra baseada em "${regra.descricaoReferencia}" (categoria "${regra.categoria}"). Atualizar a regra para usar "${novaCategoria}" daqui pra frente?`)) {
+          await atualizarRegra(regra.id, {
+            descricaoReferencia: regra.descricaoReferencia,
+            acaoTipo: regra.acaoTipo,
+            categoria: novaCategoria,
+            ativa: regra.ativa,
+          })
         }
+      } catch {
+        // Não bloqueia a edição do lançamento (já salva) por causa disso.
       }
+    }
 
-      // Trocar categoria não move dinheiro (saldo/saldoAcumulado ficam intactos) — só a linha
-      // em si precisa refletir a categoria nova, sem recarregar conta/extrato inteiros.
-      setLancamentos(prev => prev.map(l =>
-        (l.id === lancamentoParaEditar.id && l.data === lancamentoParaEditar.data) ? { ...l, categoria: categoriaEdicao } : l))
+    // Trocar categoria não move dinheiro (saldo/saldoAcumulado ficam intactos) — só a linha
+    // em si precisa refletir a categoria nova, sem recarregar conta/extrato inteiros.
+    setLancamentos(prev => prev.map(l =>
+      (l.id === lancamento.id && l.data === lancamento.data) ? { ...l, categoria: novaCategoria } : l))
+  }
+
+  async function confirmarEdicaoCategoria() {
+    if (!lancamentoParaEditar || !categoriaEdicao) return
+    setSalvandoEdicao(true)
+    try {
+      await aplicarNovaCategoria(lancamentoParaEditar, categoriaEdicao)
       setLancamentoParaEditar(null)
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao editar categoria.')
     } finally {
       setSalvandoEdicao(false)
+    }
+  }
+
+  async function selecionarCategoriaViaChip(lancamento: LancamentoExtrato, novaCategoria: string) {
+    setSalvandoChip(true)
+    try {
+      await aplicarNovaCategoria(lancamento, novaCategoria)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao editar categoria.')
+    } finally {
+      setSalvandoChip(false)
+      setChipAbertoKey(null)
     }
   }
 
@@ -512,6 +549,125 @@ export default function ClientContaDetalhePage() {
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao desvincular meta.')
     }
+  }
+
+  // Tipo de categoria (Receita/CustoFixo/CustoVariavel/.../Investimento) por nome — pra colorir o
+  // chip do extrato sem duplicar a classificação que o backend já devolve em `categorias`.
+  const tipoPorCategoria = useMemo(
+    () => new Map([...categorias.entradas, ...categorias.saidas].map(c => [c.nome, c.tipoCusto])),
+    [categorias],
+  )
+
+  type TipoChip = 'receita' | 'despesa' | 'transferencia' | 'investimento' | 'sem-categoria'
+  function classificarChip(l: LancamentoExtrato): TipoChip {
+    if (l.pendenteCategorizacao || !l.categoria) return 'sem-categoria'
+    if (l.categoria === 'Transferência') return 'transferencia'
+    if (tipoPorCategoria.get(l.categoria) === 'Investimento') return 'investimento'
+    return l.valor >= 0 ? 'receita' : 'despesa'
+  }
+
+  // Agrupamento por dia (item 4, Bloco 1): `lancamentos` já vem do backend ordenado do mais
+  // recente pro mais antigo, e dentro do mesmo dia também mais recente primeiro (ver comentário
+  // de ObterExtratoAsync) — então o PRIMEIRO item de cada grupo já é o saldo de fim do dia.
+  interface GrupoDia { data: string; itens: LancamentoExtrato[]; entradas: number; saidas: number; saldoDoDia: number }
+  const gruposPorDia = useMemo<GrupoDia[]>(() => {
+    const porData = new Map<string, LancamentoExtrato[]>()
+    for (const l of lancamentos) {
+      const grupo = porData.get(l.data)
+      if (grupo) grupo.push(l)
+      else porData.set(l.data, [l])
+    }
+    return [...porData.entries()].map(([data, itens]) => ({
+      data,
+      itens,
+      entradas: itens.filter(l => l.valor >= 0).reduce((s, l) => s + l.valor, 0),
+      saidas: itens.filter(l => l.valor < 0).reduce((s, l) => s - l.valor, 0),
+      saldoDoDia: itens[0].saldoAcumulado,
+    }))
+  }, [lancamentos])
+
+  // Coluna de ações (item 1, Bloco 1) — ícones de 28px à esquerda da linha, substituindo os
+  // antigos links de texto embaixo da descrição. ✏️ funciona pra qualquer linha com id (inclusive
+  // pendente — era bloqueado antes, mas é exatamente como ela deixa de estar pendente).
+  function renderAcoesLinha(l: LancamentoExtrato) {
+    if (!l.id) return <span className="cd-acoes-linha" aria-hidden="true" />
+    const ehTransferencia = l.categoria === 'Transferência'
+    return (
+      <span className="cd-acoes-linha">
+        <button
+          type="button"
+          className="cd-acao-btn"
+          aria-label={`Editar categoria de "${l.descricao}"`}
+          title="Editar categoria"
+          onClick={() => abrirModalEditarCategoria(l)}
+        >
+          ✏️
+        </button>
+        {ehTransferencia ? (
+          <button
+            type="button"
+            className="cd-acao-btn"
+            aria-label={`Desfazer transferência de "${l.descricao}"`}
+            title="Desfazer classificação de transferência"
+            onClick={() => l.transferenciaId && handleDesfazerTransferencia(l.transferenciaId)}
+          >
+            ↩
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="cd-acao-btn"
+            aria-label={`Marcar "${l.descricao}" como transferência`}
+            title="Marcar como transferência"
+            onClick={() => abrirModalTransferencia(l)}
+          >
+            ⇄
+          </button>
+        )}
+        <button
+          type="button"
+          className="cd-acao-btn cd-acao-excluir"
+          aria-label={`Excluir lançamento ${l.descricao}`}
+          title="Excluir lançamento"
+          onClick={() => abrirConfirmarExclusao(l)}
+        >
+          🗑
+        </button>
+      </span>
+    )
+  }
+
+  // Chip da categoria (item 2 e 5, Bloco 1): clicar abre o combobox ali mesmo e salva ao escolher
+  // — transferência não é reclassificável por aqui (teria que desvincular o par primeiro).
+  function renderChip(l: LancamentoExtrato, chave: string) {
+    const tipo = classificarChip(l)
+    if (chipAbertoKey === chave) {
+      return (
+        <span className="cd-chip-combobox" onClick={e => e.stopPropagation()}>
+          <CategoriaCombobox
+            clienteId={clienteId}
+            categorias={l.valor >= 0 ? categorias.entradas : categorias.saidas}
+            value={l.categoria ?? ''}
+            onChange={nome => selecionarCategoriaViaChip(l, nome)}
+            onCategoriaCriada={handleCategoriaCriada}
+            blocoPadraoNovaCategoria={l.valor >= 0 ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
+            placeholder="Categoria..."
+          />
+        </span>
+      )
+    }
+    const rotulo = tipo === 'sem-categoria' ? 'Sem categoria' : (l.categoria || '—')
+    return (
+      <button
+        type="button"
+        className={`cd-chip cd-chip-${tipo}`}
+        onClick={() => tipo !== 'transferencia' && setChipAbertoKey(chave)}
+        disabled={salvandoChip || tipo === 'transferencia'}
+      >
+        {rotulo}
+        {l.regraCategorizacaoId && <span title="Categorizado automaticamente por uma regra"> ⚙️</span>}
+      </button>
+    )
   }
 
   const renderPendencia = (item: ContaProvisionada, tipo: 'receber' | 'pagar') => (
@@ -721,6 +877,10 @@ export default function ClientContaDetalhePage() {
           <div className="cd-filtro-periodo">
             <label>De <input type="date" value={de} onChange={e => setDe(e.target.value)} /></label>
             <label>Até <input type="date" value={ate} onChange={e => setAte(e.target.value)} /></label>
+            <label className="cd-toggle-saldo-linha">
+              <input type="checkbox" checked={mostrarSaldoPorLinha} onChange={e => setMostrarSaldoPorLinha(e.target.checked)} />
+              Mostrar saldo por linha
+            </label>
           </div>
 
           {loadingExtrato ? (
@@ -728,84 +888,68 @@ export default function ClientContaDetalhePage() {
           ) : lancamentos.length === 0 ? (
             <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhum lançamento no período selecionado.</p>
           ) : (
-            <div className="cd-extrato-lista">
-              <div className="cd-extrato-cabecalho">
-                <span>Data</span>
-                <span>Descrição</span>
-                <span>Categoria</span>
-                <span className="cd-col-valor">Valor</span>
-                <span className="cd-col-valor">Saldo</span>
-              </div>
-              {lancamentos.map((l, i) => (
-                <div key={`${l.data}-${i}`} className="cd-extrato-linha">
-                  <span>{fmtDate(l.data)}</span>
-                  <span>
-                    {l.descricao}
-                    {l.id && l.categoria !== 'Transferência' && (
-                      <button
-                        type="button"
-                        aria-label={`Marcar "${l.descricao}" como transferência`}
-                        onClick={() => abrirModalTransferencia(l)}
-                        title="Não é receita nem despesa — é uma transferência entre contas"
-                        style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
-                      >
-                        🔁 é transferência?
-                      </button>
-                    )}
-                    {l.categoria === 'Transferência' && l.transferenciaId && (
-                      <button
-                        type="button"
-                        onClick={() => handleDesfazerTransferencia(l.transferenciaId!)}
-                        title="Classificado por engano? Volta a ficar sem categoria, pendente"
-                        style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
-                      >
-                        ↩ desfazer classificação
-                      </button>
-                    )}
-                    {l.id && !l.pendenteCategorizacao && l.categoria !== 'Transferência' && (
-                      <button
-                        type="button"
-                        aria-label={`Editar categoria de "${l.descricao}"`}
-                        onClick={() => abrirModalEditarCategoria(l)}
-                        title="Trocar a categoria deste lançamento"
-                        style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--tx3)', textDecoration: 'underline', padding: 0 }}
-                      >
-                        ✏️ editar categoria
-                      </button>
-                    )}
-                    {l.id && (
-                      <button
-                        type="button"
-                        aria-label={`Excluir lançamento ${l.descricao}`}
-                        onClick={() => handleExcluirLancamento(l)}
-                        title="Excluir este lançamento"
-                        style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--danger, #e05252)', textDecoration: 'underline', padding: 0 }}
-                      >
-                        🗑️ excluir
-                      </button>
-                    )}
+            gruposPorDia.map(grupo => (
+              <div key={grupo.data} className="cd-extrato-grupo-dia">
+                <div className="cd-extrato-dia-cabecalho">
+                  <span className="cd-extrato-dia-data">{fmtDate(grupo.data)}</span>
+                  <span className="cd-extrato-dia-resumo">
+                    {grupo.entradas > 0 && <span className="val-green">Entradas +{fmtBRL(grupo.entradas)}</span>}
+                    {grupo.saidas > 0 && <span className="val-red">Saídas −{fmtBRL(grupo.saidas)}</span>}
+                    <span>Saldo do dia {fmtBRL(grupo.saldoDoDia)}</span>
                   </span>
-                  <span className="cd-categoria">
-                    {l.pendenteCategorizacao ? (
-                      <span style={{ color: 'var(--warning)' }} title="Sem categoria — afeta o saldo normalmente, só falta classificar">
-                        🏷️ Pendente
-                      </span>
-                    ) : (
-                      <>
-                        {l.categoria || '—'}
-                        {l.regraCategorizacaoId && (
-                          <span title="Categorizado automaticamente por uma regra" style={{ marginLeft: 4, fontSize: 11, color: 'var(--tx3)' }}>⚙️</span>
-                        )}
-                      </>
-                    )}
-                  </span>
-                  <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
-                    {l.valor >= 0 ? '+' : ''}{fmtBRL(l.valor)}
-                  </span>
-                  <span className="cd-col-valor">{fmtBRL(l.saldoAcumulado)}</span>
                 </div>
-              ))}
-            </div>
+
+                {/* Desktop/tablet (≥768px) — linhas em grid; ver .cd-extrato-cards pra <768px */}
+                <div className={`cd-extrato-lista${mostrarSaldoPorLinha ? ' cd-extrato-lista--com-saldo' : ''}`}>
+                  {grupo.itens.map((l, i) => {
+                    const chave = `${l.data}-${l.id ?? i}`
+                    const { titulo, subtitulo } = limparDescricao(l.descricao)
+                    return (
+                      <div key={chave} className="cd-extrato-linha">
+                        {renderAcoesLinha(l)}
+                        <span className="cd-extrato-desc" title={l.descricao}>
+                          <span className="cd-extrato-desc-titulo">{titulo}</span>
+                          {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
+                        </span>
+                        {renderChip(l, chave)}
+                        <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
+                          {l.valor >= 0 ? '+' : ''}{fmtBRL(l.valor)}
+                        </span>
+                        {mostrarSaldoPorLinha && <span className="cd-col-valor cd-col-saldo-linha">{fmtBRL(l.saldoAcumulado)}</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Mobile (<768px) — cards tocáveis, ações na bottom sheet (ver acaoMobileLancamento) */}
+                <div className="cd-extrato-cards">
+                  {grupo.itens.map((l, i) => {
+                    const chave = `${l.data}-${l.id ?? i}`
+                    const tipo = classificarChip(l)
+                    const { titulo, subtitulo } = limparDescricao(l.descricao)
+                    return (
+                      <button
+                        key={chave}
+                        type="button"
+                        className="cd-extrato-card"
+                        onClick={() => l.id && setAcaoMobileLancamento(l)}
+                      >
+                        <span className="cd-extrato-card-desc">
+                          <span className="cd-extrato-desc-titulo">{titulo}</span>
+                          {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
+                          <span className={`cd-chip cd-chip-${tipo}`}>
+                            {tipo === 'sem-categoria' ? 'Sem categoria' : (l.categoria || '—')}
+                          </span>
+                        </span>
+                        <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
+                          {l.valor >= 0 ? '+' : ''}{fmtBRL(l.valor)}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))
           )}
         </>
       )}
@@ -1154,6 +1298,76 @@ export default function ClientContaDetalhePage() {
           </>
         )}
       </Modal>
+
+      {/* Item 1, Bloco 1: confirmação de exclusão deixou de ser um confirm() nativo — agora é
+          modal com botão vermelho (--danger), igual o padrão do resto do app. */}
+      <Modal
+        open={!!excluirConfirmacao}
+        title="🗑 Excluir lançamento"
+        onClose={() => setExcluirConfirmacao(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setExcluirConfirmacao(null)}>Cancelar</button>
+            <button className="btn-danger" onClick={confirmarExclusao} disabled={excluindoLancamento}>
+              {excluindoLancamento ? 'Excluindo...' : 'Excluir'}
+            </button>
+          </>
+        }
+      >
+        {excluirConfirmacao && (
+          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+            Excluir "{excluirConfirmacao.descricao}"? Essa ação não pode ser desfeita.
+            {excluirConfirmacao.categoria === 'Transferência'
+              ? ' Esse lançamento é uma ponta de Transferência — a contrapartida na outra conta também será excluída.'
+              : ' Se ele foi usado para dar baixa em alguma conta a pagar/receber, o título volta a ficar em aberto.'}
+          </p>
+        )}
+      </Modal>
+
+      {/* Item 9, Bloco 1: no mobile (<768px), tocar num card abre essa bottom sheet com as mesmas
+          3 ações da coluna de ícones do desktop — nunca um menu separado com lógica própria. */}
+      {acaoMobileLancamento && (
+        <div className="cd-sheet-overlay" onClick={() => setAcaoMobileLancamento(null)}>
+          <div className="cd-sheet" onClick={e => e.stopPropagation()}>
+            <div className="cd-sheet-desc">{limparDescricao(acaoMobileLancamento.descricao).titulo}</div>
+            <button
+              type="button"
+              className="cd-sheet-acao"
+              onClick={() => { abrirModalEditarCategoria(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
+            >
+              ✏️ Editar categoria
+            </button>
+            {acaoMobileLancamento.categoria === 'Transferência' ? (
+              <button
+                type="button"
+                className="cd-sheet-acao"
+                onClick={() => {
+                  if (acaoMobileLancamento.transferenciaId) handleDesfazerTransferencia(acaoMobileLancamento.transferenciaId)
+                  setAcaoMobileLancamento(null)
+                }}
+              >
+                ↩ Desfazer transferência
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="cd-sheet-acao"
+                onClick={() => { abrirModalTransferencia(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
+              >
+                ⇄ Marcar como transferência
+              </button>
+            )}
+            <button
+              type="button"
+              className="cd-sheet-acao cd-sheet-acao-excluir"
+              onClick={() => { abrirConfirmarExclusao(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
+            >
+              🗑 Excluir
+            </button>
+            <button type="button" className="cd-sheet-cancelar" onClick={() => setAcaoMobileLancamento(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
     </>
   )
 }
