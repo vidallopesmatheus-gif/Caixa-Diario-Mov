@@ -96,7 +96,7 @@ export default function ClientExtratoRevisaoPage() {
     try {
       const [pend, cats, contas, linksCarregados] = await Promise.all([
         listarPendentesCategorizacao(contaId),
-        listarCategorias(),
+        listarCategorias(clienteId),
         listarContasBancarias(clienteId),
         listarLinksConciliacao(clienteId),
       ])
@@ -526,6 +526,7 @@ export default function ClientExtratoRevisaoPage() {
                 return (
                   <ExtratoLinhaPendente
                     key={item.id}
+                    clienteId={clienteId}
                     item={item}
                     categoriasDisponiveis={categoriasItem}
                     selecionado={selecionados.has(item.id)}
@@ -554,6 +555,7 @@ export default function ClientExtratoRevisaoPage() {
                       {g.itens.length} lançamentos parecidos: "{g.itens[0].descricao}"
                     </span>
                     <CategoriaCombobox
+                      clienteId={clienteId}
                       categorias={categoriasGrupo}
                       value=""
                       onChange={cat => aplicarCategoria(g.itens, cat)}
@@ -582,6 +584,7 @@ export default function ClientExtratoRevisaoPage() {
                     {g.itens.map(item => (
                       <ExtratoLinhaPendente
                         key={item.id}
+                        clienteId={clienteId}
                         item={item}
                         categoriasDisponiveis={categoriasGrupo}
                         selecionado={selecionados.has(item.id)}
@@ -799,6 +802,7 @@ export default function ClientExtratoRevisaoPage() {
               <div className="inp-group" style={{ marginTop: 12 }}>
                 <label>Categoria</label>
                 <CategoriaCombobox
+                  clienteId={clienteId}
                   categorias={regraOrigemItens[0].tipo === 'Entrada' ? categorias.entradas : categorias.saidas}
                   value={regraCategoria}
                   onChange={setRegraCategoria}
@@ -894,6 +898,7 @@ export default function ClientExtratoRevisaoPage() {
 }
 
 interface ExtratoLinhaPendenteProps {
+  clienteId: string
   item: PendenteCategorizacao
   categoriasDisponiveis: Categorias['saidas']
   selecionado: boolean
@@ -911,7 +916,7 @@ interface ExtratoLinhaPendenteProps {
 }
 
 function ExtratoLinhaPendente({
-  item, categoriasDisponiveis, selecionado, salvando,
+  clienteId, item, categoriasDisponiveis, selecionado, salvando,
   onToggleSelecionado, onCategorizar, onCategoriaCriada, onNavigate, registerInputRef, onMarcarTransferencia, onCriarRegra,
   onMarcarPagamentoFatura, onConfirmarTransferenciaSugerida, confirmandoTransferenciaSugerida,
 }: ExtratoLinhaPendenteProps) {
@@ -937,6 +942,7 @@ function ExtratoLinhaPendente({
       </div>
       <CategoriaCombobox
         ref={el => registerInputRef(item.id, el)}
+        clienteId={clienteId}
         categorias={categoriasDisponiveis}
         value={item.categoria ?? ''}
         onChange={onCategorizar}

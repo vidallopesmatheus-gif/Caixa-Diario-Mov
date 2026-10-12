@@ -1069,7 +1069,7 @@ public class MetricasServiceTests
         Assert.Equal(dre.ResultadoLiquido,
             dre.ReceitaBruta - dre.Deducoes.Total - dre.CustosVariaveis.Total - dre.DespesasFixas.Total
             + dre.ReceitaFinanceira.Total - dre.DespesasNaoOperacionais.Total - dre.NaoClassificado.Total
-            + dre.AtividadesInvestimento.Total + dre.AtividadesFinanciamento.Total);
+            + dre.AtividadesInvestimento.Total + dre.AtividadesFinanciamento.Total - dre.RetiradasSocios.Total);
     }
 
     [Fact]
@@ -1166,6 +1166,7 @@ public class MetricasServiceTests
         CatComBloco("Publicidade", "CustoFixo", "Despesas com Marketing", Blocos.DespesasOperacionais),
         CatComBloco("Equipamentos", "Investimento", "Imobilizado", Blocos.AtividadesDeInvestimento),
         CatComBloco("Empréstimo Banco X", "Financiamento", "Empréstimos/Financiamentos", Blocos.AtividadesDeFinanciamento),
+        CatComBloco("Pró-labore", "RetiradaSocios", "Pró-Labore / Retiradas", Blocos.RetiradasSocios),
     };
 
     [Fact]
@@ -1229,6 +1230,32 @@ public class MetricasServiceTests
         Assert.Equal(400m, dre.ResultadoLiquido); // 800 - 300 - 100
     }
 
+    // Correção de integridade (Parte 1, item 6): Pró-labore/retiradas dos sócios é a ÚLTIMA dedução
+    // antes do Resultado Líquido — depois de Investimento e Financiamento, nunca despesa fixa.
+    [Fact]
+    public void CalcularDre_RetiradaDeSocios_UltimaDeducaoAntesDoResultadoLiquido()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Aluguel", 200m, "Aluguel", "CustoFixo"),
+                Item("Compra equipamento", 300m, "Equipamentos", "Investimento"),
+                Item("Parcela empréstimo", 100m, "Empréstimo Banco X", "Financiamento"),
+                Item("Retirada sócio A", 150m, "Pró-labore", "RetiradaSocios"),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        Assert.Equal(150m, dre.RetiradasSocios.Total); // linha vertical: magnitude positiva, como DespesasFixas
+        Assert.Equal(800m, dre.ResultadoOperacional); // 1000 - 200, pró-labore não é despesa operacional
+        Assert.Equal(250m, dre.ResultadoLiquido); // 800 - 300 - 100 - 150
+
+        var blocoRetiradas = dre.Blocos.Single(b => b.Bloco == Blocos.RetiradasSocios);
+        Assert.Equal(-150m, blocoRetiradas.Total); // árvore: sinal de saída — mesmo valor usado no resultado
+        Assert.Equal(Blocos.RetiradasSocios, Blocos.Ordem[^1]); // sempre a última posição de exibição
+    }
+
     [Fact]
     public void CalcularDre_Blocos_MontaArvoreHierarquicaComTotaisETipo()
     {
@@ -1246,7 +1273,7 @@ public class MetricasServiceTests
 
         var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
 
-        Assert.Equal(6, dre.Blocos.Count); // os 6 blocos aparecem, cada um com pelo menos 1 lançamento
+        Assert.Equal(7, dre.Blocos.Count); // os 7 blocos sempre aparecem, mesmo os sem lançamento no período
 
         var receitas = dre.Blocos.Single(b => b.Bloco == Blocos.ReceitasOperacionais);
         Assert.Equal(1000m, receitas.Total);

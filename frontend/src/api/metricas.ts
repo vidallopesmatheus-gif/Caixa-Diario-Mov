@@ -126,6 +126,7 @@ export interface Dre {
   naoClassificado: DreLinhaVertical
   atividadesInvestimento: DreLinhaVertical
   atividadesFinanciamento: DreLinhaVertical
+  retiradasSocios: DreLinhaVertical
   resultadoLiquido: number
   resultadoLiquidoPercentual: number | null
 

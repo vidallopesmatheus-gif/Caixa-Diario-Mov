@@ -202,7 +202,7 @@ public class RegraCategorizacaoService : IRegraCategorizacaoService
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Reative a regra antes de aplicá-la retroativamente.");
 
         var categoriasPorNome = regra.AcaoTipo == "Categoria"
-            ? (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo)
+            ? (await _categoriaRepo.ListarTodasPorClienteAsync(regra.ClienteId)).ToDictionary(c => c.Nome, c => c.Tipo)
             : new Dictionary<string, string>();
 
         var registros = await _registroRepo.ListarPorContaAsync(regra.ContaBancariaId);

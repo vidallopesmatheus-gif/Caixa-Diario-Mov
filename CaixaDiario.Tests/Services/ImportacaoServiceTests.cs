@@ -26,7 +26,7 @@ public class ImportacaoServiceTests
         // Espelha o Plano de Contas real (nome -> tipo) só com as categorias usadas nos testes,
         // pra AtualizarCategoriasAsync/ImportarArquivoAsync resolverem o TipoCusto sem precisar
         // configurar isso em todo teste individualmente.
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>
         {
             new() { Id = Guid.NewGuid(), Nome = "Manutenção", Tipo = "CustoFixo" },
             new() { Id = Guid.NewGuid(), Nome = "Material de Escritório", Tipo = "CustoFixo" },
@@ -976,7 +976,7 @@ public class ImportacaoServiceTests
         var data = new DateOnly(2026, 8, 20);
         var itemId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(clienteId)).ReturnsAsync(new List<Categoria>
         {
             new() { Id = Guid.NewGuid(), Nome = "Frete", Tipo = "CustoVariavel" },
         });
@@ -1015,7 +1015,7 @@ public class ImportacaoServiceTests
         var data = new DateOnly(2026, 7, 20);
         var itemId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(clienteId)).ReturnsAsync(new List<Categoria>
         {
             new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita" },
         });

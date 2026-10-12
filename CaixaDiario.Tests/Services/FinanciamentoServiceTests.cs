@@ -81,7 +81,7 @@ public class FinanciamentoServiceTests
         _financiamentoRepoMock.Setup(r => r.RemoverAsync(It.IsAny<Financiamento>()))
             .Callback<Financiamento>(f => _financiamentos.Remove(f)).Returns(Task.CompletedTask);
 
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>
         {
             new() { Id = Guid.NewGuid(), Nome = "Juros", Tipo = "CustoFixo" },
             new() { Id = Guid.NewGuid(), Nome = "Tarifas bancárias", Tipo = "CustoFixo" },

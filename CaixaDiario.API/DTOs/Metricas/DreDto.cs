@@ -68,6 +68,9 @@ public class DreDto
     // negativos (amortização, aquisição de imobilizado); nunca assumidos como saída.
     public DreLinhaVerticalDto AtividadesInvestimento { get; set; } = new();
     public DreLinhaVerticalDto AtividadesFinanciamento { get; set; } = new();
+    // Pró-labore/retiradas dos sócios: última dedução antes do Resultado Líquido, depois de
+    // Investimento e Financiamento (decisão explícita do usuário) — nunca despesa fixa.
+    public DreLinhaVerticalDto RetiradasSocios { get; set; } = new();
     public decimal ResultadoLiquido { get; set; }
     public decimal? ResultadoLiquidoPercentual { get; set; }
 

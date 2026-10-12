@@ -311,7 +311,7 @@ public class ImportacaoService : IImportacaoService
         var totalDuplicatasEntreArquivosIgnoradas = 0;
 
         var registrosPorData = registros.ToDictionary(r => r.Data);
-        var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
+        var categoriasPorNome = (await _categoriaRepo.ListarTodasPorClienteAsync(conta.ClienteId)).ToDictionary(c => c.Nome, c => c.Tipo);
         var regrasPorTipo = (await _regraRepo.ListarAtivasPorContaAsync(contaBancariaId))
             .GroupBy(r => r.Tipo)
             .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Ordem).ToList());
@@ -746,14 +746,14 @@ public class ImportacaoService : IImportacaoService
     public async Task AtualizarCategoriasAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, AtualizarCategoriaDto dto)
     {
-        await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
 
         // O TipoCusto (Receita/CustoFixo/CustoVariavel) é resolvido aqui a partir do Plano de
         // Contas, nunca confiado ao payload do cliente — é ele, e não o nome da categoria, que
         // o DRE/Indicadores usam pra classificar o lançamento (ver LancamentoFiltro/MetricasService).
         // Sem isso, categorizar (ou criar categoria nova) marcava o nome certo mas o lançamento
         // continuava sem TipoCusto, "perdendo" a classificação escolhida.
-        var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
+        var categoriasPorNome = (await _categoriaRepo.ListarTodasPorClienteAsync(conta.ClienteId)).ToDictionary(c => c.Nome, c => c.Tipo);
 
         var porData = dto.Itens
             .Where(i => DateOnly.TryParse(i.Data, out _))

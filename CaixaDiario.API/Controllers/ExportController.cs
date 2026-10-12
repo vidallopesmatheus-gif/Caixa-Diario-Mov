@@ -244,7 +244,7 @@ public class ExportController : ControllerBase
         var deAnterior = new DateOnly(refAnterior.Year, refAnterior.Month, 1);
         var ateAnterior = new DateOnly(refAnterior.Year, refAnterior.Month, DateTime.DaysInMonth(refAnterior.Year, refAnterior.Month));
 
-        var categorias = await _categoriaRepository.ListarTodasAsync();
+        var categorias = await _categoriaRepository.ListarTodasPorClienteAsync(clienteId);
         var todosRegistros = await _registroRepository.ListarPorPeriodoAsync(clienteId, deAnterior, ate);
         if (contaBancariaId.HasValue)
             todosRegistros = todosRegistros.Where(r => r.ContaBancariaId == contaBancariaId.Value).ToList();

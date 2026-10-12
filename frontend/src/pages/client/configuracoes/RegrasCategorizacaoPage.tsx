@@ -51,7 +51,7 @@ export default function RegrasCategorizacaoPage({ clienteIdOverride }: Props) {
     if (!clienteId) return
     carregar()
     listarContasBancarias(clienteId).then(setContasBancarias).catch(() => {})
-    listarCategorias().then(setCategorias).catch(() => {})
+    listarCategorias(clienteId).then(setCategorias).catch(() => {})
   }, [clienteId])
 
   function carregar() {
@@ -364,6 +364,7 @@ export default function RegrasCategorizacaoPage({ clienteIdOverride }: Props) {
               <div className="inp-group" style={{ marginTop: 12 }}>
                 <label>Categoria</label>
                 <CategoriaCombobox
+                  clienteId={clienteId ?? ''}
                   categorias={editRegra.tipo === 'Entrada' ? categorias.entradas : categorias.saidas}
                   value={editCategoria}
                   onChange={setEditCategoria}

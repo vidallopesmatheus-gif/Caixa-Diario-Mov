@@ -143,7 +143,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     if (!clienteId) return
     listarContasRecorrentes(clienteId).then(setRecorrentes).catch(console.error)
     listarContasBancarias(clienteId).then(setContasBancarias).catch(console.error)
-    listarCategorias().then(setCategorias).catch(console.error)
+    listarCategorias(clienteId).then(setCategorias).catch(console.error)
     listarSugestoesRecorrencia(clienteId).then(setSugestoesRecorrencia).catch(console.error)
   }, [clienteId])
 

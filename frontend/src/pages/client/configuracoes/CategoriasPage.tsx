@@ -13,6 +13,7 @@ import {
   desativarGrupo,
 } from '../../../api/categorias'
 import Modal from '../../../components/shared/Modal'
+import { useAuth } from '../../../contexts/AuthContext'
 import type { CategoriaAdmin, Grupo, Bloco } from '../../../types'
 import { BLOCOS_ORDEM } from '../../../types'
 import '../ClientContasBancarias.css'
@@ -25,6 +26,7 @@ const BLOCO_LABEL: Record<Bloco, string> = {
   'DESPESAS OPERACIONAIS': 'Despesas Operacionais',
   'ATIVIDADES DE INVESTIMENTO': 'Atividades de Investimento',
   'ATIVIDADES DE FINANCIAMENTO': 'Atividades de Financiamento',
+  'RETIRADAS DOS SÓCIOS': 'Retiradas dos Sócios',
 }
 
 function lerSetSalvo<T extends string>(chave: string): Set<T> {
@@ -44,6 +46,8 @@ function DirecaoIcone({ ehEntrada, ehSaida }: { ehEntrada: boolean; ehSaida: boo
 }
 
 export default function CategoriasPage() {
+  const { user } = useAuth()
+  const clienteId = user?.usuarioId ?? ''
   const [categorias, setCategorias] = useState<CategoriaAdmin[]>([])
   const [grupos, setGrupos] = useState<Grupo[]>([])
   const [loading, setLoading] = useState(true)
@@ -103,11 +107,12 @@ export default function CategoriasPage() {
     })
   }
 
-  useEffect(() => { carregar() }, [])
+  useEffect(() => { carregar() }, [clienteId])
 
   function carregar() {
+    if (!clienteId) return
     setLoading(true)
-    Promise.all([listarCategoriasParaGerenciar(), listarGrupos()])
+    Promise.all([listarCategoriasParaGerenciar(clienteId), listarGrupos()])
       .then(([cats, gps]) => {
         setCategorias(cats)
         setGrupos(gps)
@@ -176,7 +181,7 @@ export default function CategoriasPage() {
         const grupoCriado = await criarGrupo(novoGrupoNovoNome.trim(), novoBloco)
         grupoId = grupoCriado.id
       }
-      await criarCategoria(novoNome.trim(), grupoId)
+      await criarCategoria(clienteId, novoNome.trim(), grupoId)
       setNovoNome('')
       setNovoGrupoNovoNome('')
       showMsg('Categoria criada com sucesso!')
@@ -198,7 +203,7 @@ export default function CategoriasPage() {
     if (!editId || !editGrupoId) return
     setSalvandoEdit(true)
     try {
-      await atualizarCategoria(editId, editNome.trim(), editGrupoId, true)
+      await atualizarCategoria(clienteId, editId, editNome.trim(), editGrupoId, true)
       setEditId(null)
       showMsg('Categoria atualizada!')
       carregar()
@@ -212,7 +217,7 @@ export default function CategoriasPage() {
   async function handleDesativar(id: string) {
     if (!confirm('Desativar esta categoria? Ela deixa de aparecer nos formulários, mas o histórico é preservado.')) return
     try {
-      await desativarCategoria(id)
+      await desativarCategoria(clienteId, id)
       showMsg('Categoria desativada.')
       carregar()
     } catch (e: unknown) {
@@ -222,7 +227,7 @@ export default function CategoriasPage() {
 
   async function handleReativar(c: CategoriaAdmin) {
     try {
-      await atualizarCategoria(c.id, c.nome, c.grupoId, true)
+      await atualizarCategoria(clienteId, c.id, c.nome, c.grupoId, true)
       showMsg('Categoria reativada.')
       carregar()
     } catch (e: unknown) {
@@ -233,7 +238,7 @@ export default function CategoriasPage() {
   async function handleExcluir(c: CategoriaAdmin) {
     if (!confirm(`Excluir a categoria "${c.nome}"?`)) return
     try {
-      const resultado = await excluirCategoria(c.id)
+      const resultado = await excluirCategoria(clienteId, c.id)
       if (!resultado.excluida) {
         setEmUso({ categoria: c, quantidade: resultado.quantidadeLancamentos })
         return
@@ -257,7 +262,7 @@ export default function CategoriasPage() {
 
     const ids = [...novaOrdemAtivas.map(c => c.id), ...inativas.map(c => c.id)]
     try {
-      await reordenarCategorias(ids)
+      await reordenarCategorias(clienteId, ids)
       carregar()
     } catch (e: unknown) {
       showMsg(e instanceof Error ? e.message : 'Erro ao reordenar.', false)
@@ -268,7 +273,7 @@ export default function CategoriasPage() {
     if (!emUso || !destinoMigracao) return
     setMigrando(true)
     try {
-      await migrarCategoria(emUso.categoria.id, destinoMigracao)
+      await migrarCategoria(clienteId, emUso.categoria.id, destinoMigracao)
       showMsg(`Lançamentos migrados para a nova categoria. "${emUso.categoria.nome}" foi desativada.`)
       setEmUso(null)
       setDestinoMigracao('')

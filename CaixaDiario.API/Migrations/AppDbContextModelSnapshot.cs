@@ -88,11 +88,19 @@ namespace CaixaDiario.API.Migrations
                         .HasDefaultValue(true)
                         .HasColumnName("ativa");
 
+                    b.Property<Guid?>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
                     b.Property<DateTime>("CriadoEm")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("criado_em")
                         .HasDefaultValueSql("NOW()");
+
+                    b.Property<Guid?>("CriadoPor")
+                        .HasColumnType("uuid")
+                        .HasColumnName("criado_por");
 
                     b.Property<Guid>("GrupoId")
                         .HasColumnType("uuid")
@@ -109,6 +117,13 @@ namespace CaixaDiario.API.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("ordem");
 
+                    b.Property<string>("Origem")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Padrao")
+                        .HasColumnName("origem");
+
                     b.Property<string>("Tipo")
                         .IsRequired()
                         .HasColumnType("text")
@@ -118,10 +133,10 @@ namespace CaixaDiario.API.Migrations
 
                     b.HasIndex("GrupoId");
 
-                    b.HasIndex("Nome")
-                        .IsUnique();
-
                     b.HasIndex("Ativa", "Ordem");
+
+                    b.HasIndex("ClienteId", "Nome")
+                        .IsUnique();
 
                     b.ToTable("categorias", (string)null);
                 });

@@ -25,6 +25,7 @@ const BLOCO_COR: Record<Bloco, string> = {
   'DESPESAS OPERACIONAIS': '#ffa94d',
   'ATIVIDADES DE INVESTIMENTO': '#74c0fc',
   'ATIVIDADES DE FINANCIAMENTO': '#a9e34b',
+  'RETIRADAS DOS SÓCIOS': '#f783ac',
 }
 
 const BLOCO_PREFIXO: Record<Bloco, string> = {
@@ -34,6 +35,7 @@ const BLOCO_PREFIXO: Record<Bloco, string> = {
   'DESPESAS OPERACIONAIS': '(-) ',
   'ATIVIDADES DE INVESTIMENTO': '(±) ',
   'ATIVIDADES DE FINANCIAMENTO': '(±) ',
+  'RETIRADAS DOS SÓCIOS': '(-) ',
 }
 
 function periodoParaDatas(tipo: TipoPeriodo, ano: number, mes: number): { de: string; ate: string } {
@@ -135,6 +137,9 @@ const LINHAS: LinhaDre[] = [
   { key: 'naoClassificado', tipo: 'vertical', label: 'Não Classificados', verticalKey: 'naoClassificado' },
   { key: 'ATIVIDADES DE INVESTIMENTO', tipo: 'bloco', label: 'Atividades de Investimento', bloco: 'ATIVIDADES DE INVESTIMENTO' },
   { key: 'ATIVIDADES DE FINANCIAMENTO', tipo: 'bloco', label: 'Atividades de Financiamento', bloco: 'ATIVIDADES DE FINANCIAMENTO' },
+  // Pró-labore/retiradas dos sócios: última dedução antes do Resultado Líquido, depois de
+  // Investimento e Financiamento (decisão explícita do usuário) — nunca despesa fixa.
+  { key: 'RETIRADAS DOS SÓCIOS', tipo: 'bloco', label: 'Retiradas dos Sócios', bloco: 'RETIRADAS DOS SÓCIOS' },
   { key: 'resultadoLiquido', tipo: 'subtotal', label: 'Resultado Líquido', final: true },
 ]
 
@@ -176,7 +181,7 @@ export default function ClientDrePage() {
       .catch(() => {})
   }, [clienteId])
 
-  useEffect(() => { listarCategorias().then(setCategorias).catch(() => {}) }, [])
+  useEffect(() => { if (clienteId) listarCategorias(clienteId).then(setCategorias).catch(() => {}) }, [clienteId])
 
   // Item 1.11: a tela abre no mês atual por padrão — se ele ainda não tem nenhum lançamento
   // (comum logo no início do mês), mostrar um DRE zerado não ajuda ninguém. Pula direto pro
@@ -720,6 +725,7 @@ export default function ClientDrePage() {
                   {l.id && l.contaBancariaId ? (
                     <>
                       <CategoriaCombobox
+                        clienteId={clienteId}
                         categorias={opcoes}
                         value={l.categoria}
                         onChange={nome => handleAlterarCategoria(l, nome)}

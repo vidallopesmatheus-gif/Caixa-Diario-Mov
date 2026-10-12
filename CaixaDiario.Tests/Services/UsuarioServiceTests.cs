@@ -11,11 +11,13 @@ namespace CaixaDiario.Tests.Services;
 public class UsuarioServiceTests
 {
     private readonly Mock<IUsuarioRepository> _repoMock = new();
+    private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
     private readonly UsuarioService _sut;
 
     public UsuarioServiceTests()
     {
-        _sut = new UsuarioService(_repoMock.Object);
+        _categoriaRepoMock.Setup(r => r.ListarPadraoAtivasAsync()).ReturnsAsync(new List<Categoria>());
+        _sut = new UsuarioService(_repoMock.Object, _categoriaRepoMock.Object);
     }
 
     private static Usuario CriarUsuario() => new()
@@ -42,6 +44,40 @@ public class UsuarioServiceTests
         Assert.Equal("Novo Cliente", resultado.NomeCompleto);
         Assert.Equal("cliente", resultado.Perfil);
         Assert.True(resultado.Ativo);
+    }
+
+    // Correção de integridade (Parte 1): todo cliente novo tem que nascer com sua PRÓPRIA cópia
+    // do plano de categorias padrão — sem isso ele ficaria sem nenhuma categoria pra usar (e o
+    // bug original era o oposto: via a lista de outro cliente).
+    [Fact]
+    public async Task Criar_ClienteNovo_RecebeCopiaProprioDasCategoriasPadraoAtivas()
+    {
+        var grupoId = Guid.NewGuid();
+        var padrao = new List<Categoria>
+        {
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", GrupoId = grupoId, Ordem = 0, Ativa = true, ClienteId = null, Origem = "Padrao" },
+            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", GrupoId = grupoId, Ordem = 1, Ativa = true, ClienteId = null, Origem = "Padrao" },
+        };
+        _categoriaRepoMock.Setup(r => r.ListarPadraoAtivasAsync()).ReturnsAsync(padrao);
+        _repoMock.Setup(r => r.ExisteNomeUsuarioAsync("novocliente", null)).ReturnsAsync(false);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<Usuario>())).ReturnsAsync((Usuario u) => u);
+
+        List<Categoria>? copiasRecebidas = null;
+        _categoriaRepoMock.Setup(r => r.AdicionarVariasAsync(It.IsAny<List<Categoria>>()))
+            .Callback<List<Categoria>>(c => copiasRecebidas = c)
+            .Returns(Task.CompletedTask);
+
+        var dto = new CriarUsuarioDto { NomeUsuario = "novocliente", Senha = "senha1", NomeCompleto = "Novo Cliente" };
+        var resultado = await _sut.CriarAsync(dto, "admin");
+
+        Assert.NotNull(copiasRecebidas);
+        Assert.Equal(2, copiasRecebidas!.Count);
+        Assert.All(copiasRecebidas, c => Assert.Equal(resultado.Id, c.ClienteId));
+        Assert.All(copiasRecebidas, c => Assert.Equal("Cliente", c.Origem));
+        Assert.Contains(copiasRecebidas, c => c.Nome == "Aluguel" && c.Tipo == "CustoFixo");
+        Assert.Contains(copiasRecebidas, c => c.Nome == "Vendas" && c.Tipo == "Receita");
+        // Cada cópia é um registro NOVO e independente — nunca o mesmo Id do molde padrão.
+        Assert.DoesNotContain(copiasRecebidas, c => padrao.Any(p => p.Id == c.Id));
     }
 
     [Fact]

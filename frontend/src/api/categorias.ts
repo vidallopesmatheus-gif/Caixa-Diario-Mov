@@ -1,29 +1,33 @@
 import { apiFetch } from './client'
 import type { Categorias, CategoriaAdmin, ApiResponse, Grupo, Bloco } from '../types'
 
-// Module-level cache: categories are static app data, fetched once per session.
+// Correção de integridade (Parte 1): categoria deixou de ser global — o cache agora é por
+// cliente (nunca compartilhado entre clientes), e é invalidado sempre que o cliente muda.
+let _cacheClienteId: string | null = null
 let _cache: Categorias | null = null
 
-// Note: /api/categorias returns the payload directly, not wrapped in ApiResponse.
-export async function listarCategorias(): Promise<Categorias> {
-  if (_cache) return _cache
+// Note: /api/clientes/{clienteId}/categorias retorna o payload direto, não embrulhado em ApiResponse.
+export async function listarCategorias(clienteId: string): Promise<Categorias> {
+  if (_cache && _cacheClienteId === clienteId) return _cache
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const res = await apiFetch<any>('/api/categorias')
+  const res = await apiFetch<any>(`/api/clientes/${clienteId}/categorias`)
   _cache = res as Categorias
+  _cacheClienteId = clienteId
   return _cache
 }
 
 export function resetCategoriaCache(): void {
   _cache = null
+  _cacheClienteId = null
 }
 
-export async function listarCategoriasParaGerenciar(): Promise<CategoriaAdmin[]> {
-  const res = await apiFetch<ApiResponse<CategoriaAdmin[]>>('/api/categorias/gerenciar')
+export async function listarCategoriasParaGerenciar(clienteId: string): Promise<CategoriaAdmin[]> {
+  const res = await apiFetch<ApiResponse<CategoriaAdmin[]>>(`/api/clientes/${clienteId}/categorias/gerenciar`)
   return res.dados
 }
 
-export async function criarCategoria(nome: string, grupoId: string): Promise<CategoriaAdmin> {
-  const res = await apiFetch<ApiResponse<CategoriaAdmin>>('/api/categorias', {
+export async function criarCategoria(clienteId: string, nome: string, grupoId: string): Promise<CategoriaAdmin> {
+  const res = await apiFetch<ApiResponse<CategoriaAdmin>>(`/api/clientes/${clienteId}/categorias`, {
     method: 'POST',
     body: JSON.stringify({ nome, grupoId }),
   })
@@ -31,8 +35,8 @@ export async function criarCategoria(nome: string, grupoId: string): Promise<Cat
   return res.dados
 }
 
-export async function atualizarCategoria(id: string, nome: string, grupoId: string, ativa: boolean): Promise<CategoriaAdmin> {
-  const res = await apiFetch<ApiResponse<CategoriaAdmin>>(`/api/categorias/${id}`, {
+export async function atualizarCategoria(clienteId: string, id: string, nome: string, grupoId: string, ativa: boolean): Promise<CategoriaAdmin> {
+  const res = await apiFetch<ApiResponse<CategoriaAdmin>>(`/api/clientes/${clienteId}/categorias/${id}`, {
     method: 'PUT',
     body: JSON.stringify({ nome, grupoId, ativa }),
   })
@@ -40,13 +44,13 @@ export async function atualizarCategoria(id: string, nome: string, grupoId: stri
   return res.dados
 }
 
-export async function desativarCategoria(id: string): Promise<void> {
-  await apiFetch<ApiResponse<null>>(`/api/categorias/${id}/desativar`, { method: 'POST' })
+export async function desativarCategoria(clienteId: string, id: string): Promise<void> {
+  await apiFetch<ApiResponse<null>>(`/api/clientes/${clienteId}/categorias/${id}/desativar`, { method: 'POST' })
   resetCategoriaCache()
 }
 
-export async function reordenarCategorias(ids: string[]): Promise<void> {
-  await apiFetch<ApiResponse<null>>('/api/categorias/reordenar', {
+export async function reordenarCategorias(clienteId: string, ids: string[]): Promise<void> {
+  await apiFetch<ApiResponse<null>>(`/api/clientes/${clienteId}/categorias/reordenar`, {
     method: 'PUT',
     body: JSON.stringify({ ids }),
   })
@@ -59,9 +63,9 @@ export interface ExclusaoCategoriaResultado {
 }
 
 /** Tenta excluir; se a categoria estiver em uso, retorna a contagem em vez de lançar erro. */
-export async function excluirCategoria(id: string): Promise<ExclusaoCategoriaResultado> {
+export async function excluirCategoria(clienteId: string, id: string): Promise<ExclusaoCategoriaResultado> {
   const token = localStorage.getItem('token')
-  const res = await fetch(`/api/categorias/${id}`, {
+  const res = await fetch(`/api/clientes/${clienteId}/categorias/${id}`, {
     method: 'DELETE',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
@@ -74,15 +78,16 @@ export async function excluirCategoria(id: string): Promise<ExclusaoCategoriaRes
   return body.dados
 }
 
-export async function migrarCategoria(origemId: string, paraCategoriaId: string): Promise<void> {
-  await apiFetch<ApiResponse<null>>(`/api/categorias/${origemId}/migrar`, {
+export async function migrarCategoria(clienteId: string, origemId: string, paraCategoriaId: string): Promise<void> {
+  await apiFetch<ApiResponse<null>>(`/api/clientes/${clienteId}/categorias/${origemId}/migrar`, {
     method: 'POST',
     body: JSON.stringify({ paraCategoriaId }),
   })
   resetCategoriaCache()
 }
 
-// ── Grupos (nível entre Bloco fixo e Categoria) ──────────────────────────────────────────
+// ── Grupos (nível entre Bloco fixo e Categoria) — seguem globais (molde do Plano de Contas,
+// compartilhado por todos os clientes; só a Categoria dentro de cada Grupo é por cliente). ──────
 
 export async function listarGrupos(): Promise<Grupo[]> {
   const res = await apiFetch<ApiResponse<Grupo[]>>('/api/grupos')

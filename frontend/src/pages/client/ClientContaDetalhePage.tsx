@@ -139,7 +139,7 @@ export default function ClientContaDetalhePage() {
 
   useEffect(() => { carregarExtrato() }, [carregarExtrato])
 
-  useEffect(() => { listarCategorias().then(setCategorias).catch(() => {}) }, [])
+  useEffect(() => { if (clienteId) listarCategorias(clienteId).then(setCategorias).catch(() => {}) }, [clienteId])
 
   const carregarPendencias = useCallback(() => {
     if (!contaId) return
@@ -1143,6 +1143,7 @@ export default function ClientContaDetalhePage() {
             <div className="inp-group">
               <label>Categoria</label>
               <CategoriaCombobox
+                clienteId={clienteId}
                 categorias={lancamentoParaEditar.valor >= 0 ? categorias.entradas : categorias.saidas}
                 value={categoriaEdicao}
                 onChange={setCategoriaEdicao}

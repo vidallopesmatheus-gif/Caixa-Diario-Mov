@@ -60,7 +60,7 @@ public class ConciliacaoPublicaService : IConciliacaoPublicaService
             .OrderBy(c => c.ContaNome)
             .ToList();
 
-        var categorias = await _categoriaService.ListarAgrupadasAsync();
+        var categorias = await _categoriaService.ListarAgrupadasAsync(link.ClienteId);
 
         return new PortalConciliacaoDto
         {
@@ -74,7 +74,7 @@ public class ConciliacaoPublicaService : IConciliacaoPublicaService
     public async Task ClassificarAsync(string token, ClassificarPendentesDto dto)
     {
         var link = await ObterLinkValidoAsync(token);
-        var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
+        var categoriasPorNome = (await _categoriaRepo.ListarTodasPorClienteAsync(link.ClienteId)).ToDictionary(c => c.Nome, c => c.Tipo);
 
         var porContaEData = dto.Itens
             .Where(i => DateOnly.TryParse(i.Data, out _))

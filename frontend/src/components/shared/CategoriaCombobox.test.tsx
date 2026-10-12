@@ -24,6 +24,7 @@ describe('CategoriaCombobox — criação de categoria nova', () => {
 
     render(
       <CategoriaCombobox
+        clienteId="cliente-1"
         categorias={[]}
         value=""
         onChange={() => {}}
@@ -42,6 +43,6 @@ describe('CategoriaCombobox — criação de categoria nova', () => {
 
     await user.click(screen.getByText('Criar e usar'))
 
-    await waitFor(() => expect(criarSpy).toHaveBeenCalledWith('Frete e entrega', 'g-marketing'))
+    await waitFor(() => expect(criarSpy).toHaveBeenCalledWith('cliente-1', 'Frete e entrega', 'g-marketing'))
   })
 })

@@ -355,7 +355,7 @@ public class RegistroService : IRegistroService
         var registro = await _registroRepository.ObterPorContaEDataAsync(dto.ContaBancariaId, dto.Data)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Registro não encontrado.");
 
-        var tipoCustoNovo = (await _categoriaRepository.ObterPorNomeAsync(dto.CategoriaNova))?.Tipo;
+        var tipoCustoNovo = (await _categoriaRepository.ObterPorNomeAsync(clienteId, dto.CategoriaNova))?.Tipo;
         string? categoriaAnterior;
         string descricaoAlvo;
 
