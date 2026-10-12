@@ -379,6 +379,9 @@
 .cd-chip-transferencia { background: var(--mv-blue-soft); color: var(--mv-blue); }
 .cd-chip-investimento  { background: rgba(77,163,255,.16); color: var(--mv-blue-light); }
 .cd-chip-sem-categoria { background: rgba(217,119,6,.14);  color: var(--warning); }
+/* Bloco 3, item 10: ajuste de saldo é cinza/itálico — nunca a cor "real" de receita/despesa, pra
+   deixar claro de cara que essa linha não é uma transação, é só um acerto de saldo. */
+.cd-chip-ajuste { background: transparent; border: 1px dashed var(--bd); color: var(--tx3); font-style: italic; font-weight: 500; }
 
 .cd-chip-combobox {
   min-width: 180px;
@@ -487,6 +490,13 @@
 
 .cd-sheet-acao-excluir {
   color: var(--danger);
+}
+
+.cd-sheet-aviso {
+  padding: 10px 12px;
+  color: var(--tx3);
+  font-size: 13px;
+  font-style: italic;
 }
 
 .cd-sheet-cancelar {

@@ -177,6 +177,7 @@ public class ContaBancariaService : IContaBancariaService
                     PendenteCategorizacao = entrada.PendenteCategorizacao,
                     TransferenciaId = entrada.TransferenciaId,
                     RegraCategorizacaoId = entrada.RegraCategorizacaoId,
+                    TipoCusto = entrada.TipoCusto,
                 }));
             }
 
@@ -216,6 +217,7 @@ public class ContaBancariaService : IContaBancariaService
                     PendenteCategorizacao = saida.PendenteCategorizacao,
                     TransferenciaId = saida.TransferenciaId,
                     RegraCategorizacaoId = saida.RegraCategorizacaoId,
+                    TipoCusto = saida.TipoCusto,
                 }));
             }
 

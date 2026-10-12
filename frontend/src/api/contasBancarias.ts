@@ -42,6 +42,8 @@ function mapLancamento(raw: any): LancamentoExtrato {
     saldoAcumulado: raw.saldoAcumulado ?? 0,
     pendenteCategorizacao: raw.pendenteCategorizacao ?? false,
     transferenciaId: raw.transferenciaId ?? undefined,
+    regraCategorizacaoId: raw.regraCategorizacaoId ?? undefined,
+    tipoCusto: raw.tipoCusto ?? undefined,
   }
 }
 

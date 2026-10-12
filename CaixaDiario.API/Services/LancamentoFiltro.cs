@@ -18,9 +18,13 @@ public static class LancamentoFiltro
     // cartão (ver FaturaCartaoService) — a despesa já foi reconhecida na compra, então o pagamento
     // da fatura não pode contar de novo, senão duplica no DRE.
     public const string TipoPagamentoFatura = "PagamentoFatura";
+    // Money Vision — Bloco 3: linha sintética de acerto de saldo (ex.: descrição "saldo" lançada
+    // manualmente pra bater o extrato do banco) — nunca é receita/despesa real, nunca entra no
+    // DRE nem nas médias, mesmo que tenha sido categorizada (ex.: "Devoluções") antes desta correção.
+    public const string TipoAjusteSaldo = "AjusteSaldo";
 
     public static bool EhOperacional(string? tipoCusto) =>
         tipoCusto != TipoTransferencia && tipoCusto != TipoRendimento
         && tipoCusto != TipoInvestimento && tipoCusto != TipoFinanciamento
-        && tipoCusto != TipoPagamentoFatura;
+        && tipoCusto != TipoPagamentoFatura && tipoCusto != TipoAjusteSaldo;
 }

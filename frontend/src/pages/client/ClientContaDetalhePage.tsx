@@ -614,12 +614,21 @@ export default function ClientContaDetalhePage() {
     [categorias],
   )
 
-  type TipoChip = 'receita' | 'despesa' | 'transferencia' | 'investimento' | 'sem-categoria'
+  type TipoChip = 'receita' | 'despesa' | 'transferencia' | 'investimento' | 'sem-categoria' | 'ajuste'
   function classificarChip(l: LancamentoExtrato): TipoChip {
+    // Bloco 3: ajuste de saldo vem antes de tudo — mesmo categorizado (ex.: "Devoluções" por
+    // engano antes desta correção), nunca é receita/despesa/transferência de verdade.
+    if (l.tipoCusto === 'AjusteSaldo') return 'ajuste'
     if (l.pendenteCategorizacao || !l.categoria) return 'sem-categoria'
     if (l.categoria === 'Transferência') return 'transferencia'
     if (tipoPorCategoria.get(l.categoria) === 'Investimento') return 'investimento'
     return l.valor >= 0 ? 'receita' : 'despesa'
+  }
+
+  function rotuloChip(tipo: TipoChip, categoria?: string): string {
+    if (tipo === 'ajuste') return 'Ajuste de saldo'
+    if (tipo === 'sem-categoria') return 'Sem categoria'
+    return categoria || '—'
   }
 
   // Barra de filtros (item 6, Bloco 2) — nomes únicos pro dropdown de categoria.
@@ -662,13 +671,18 @@ export default function ClientContaDetalhePage() {
       if (grupo) grupo.push(l)
       else porData.set(l.data, [l])
     }
-    return [...porData.entries()].map(([data, itens]) => ({
-      data,
-      itens,
-      entradas: itens.filter(l => l.valor >= 0).reduce((s, l) => s + l.valor, 0),
-      saidas: itens.filter(l => l.valor < 0).reduce((s, l) => s - l.valor, 0),
-      saldoDoDia: saldoPorDia.get(data) ?? itens[0].saldoAcumulado,
-    }))
+    return [...porData.entries()].map(([data, itens]) => {
+      // Ajuste de saldo não é uma transação de verdade — não conta no "Entradas +X · Saídas −Y"
+      // do dia (item 10, Bloco 3), mas o Saldo do dia continua o real (vem de saldoPorDia).
+      const itensReais = itens.filter(l => l.tipoCusto !== 'AjusteSaldo')
+      return {
+        data,
+        itens,
+        entradas: itensReais.filter(l => l.valor >= 0).reduce((s, l) => s + l.valor, 0),
+        saidas: itensReais.filter(l => l.valor < 0).reduce((s, l) => s - l.valor, 0),
+        saldoDoDia: saldoPorDia.get(data) ?? itens[0].saldoAcumulado,
+      }
+    })
   }, [lancamentosFiltrados, saldoPorDia])
 
   // Seleção em lote (item 7, Bloco 2).
@@ -761,14 +775,18 @@ export default function ClientContaDetalhePage() {
   function renderAcoesLinha(l: LancamentoExtrato) {
     if (!l.id) return <span className="cd-acoes-linha" aria-hidden="true" />
     const ehTransferencia = l.categoria === 'Transferência'
+    // Bloco 3: ajuste de saldo não é uma transação de verdade — não faz sentido trocar categoria
+    // nem virar transferência, só excluir (se foi lançado errado).
+    const ehAjuste = l.tipoCusto === 'AjusteSaldo'
     return (
       <span className="cd-acoes-linha">
         <button
           type="button"
           className="cd-acao-btn"
           aria-label={`Editar categoria de "${l.descricao}"`}
-          title="Editar categoria"
+          title={ehAjuste ? 'Ajuste de saldo não é reclassificável' : 'Editar categoria'}
           onClick={() => abrirModalEditarCategoria(l)}
+          disabled={ehAjuste}
         >
           ✏️
         </button>
@@ -787,8 +805,9 @@ export default function ClientContaDetalhePage() {
             type="button"
             className="cd-acao-btn"
             aria-label={`Marcar "${l.descricao}" como transferência`}
-            title="Marcar como transferência"
+            title={ehAjuste ? 'Ajuste de saldo não é reclassificável' : 'Marcar como transferência'}
             onClick={() => abrirModalTransferencia(l)}
+            disabled={ehAjuste}
           >
             ⇄
           </button>
@@ -825,15 +844,15 @@ export default function ClientContaDetalhePage() {
         </span>
       )
     }
-    const rotulo = tipo === 'sem-categoria' ? 'Sem categoria' : (l.categoria || '—')
+    const naoClicavel = tipo === 'transferencia' || tipo === 'ajuste'
     return (
       <button
         type="button"
         className={`cd-chip cd-chip-${tipo}`}
-        onClick={() => tipo !== 'transferencia' && setChipAbertoKey(chave)}
-        disabled={salvandoChip || tipo === 'transferencia'}
+        onClick={() => !naoClicavel && setChipAbertoKey(chave)}
+        disabled={salvandoChip || naoClicavel}
       >
-        {rotulo}
+        {rotuloChip(tipo, l.categoria)}
         {l.regraCategorizacaoId && <span title="Categorizado automaticamente por uma regra"> ⚙️</span>}
       </button>
     )
@@ -1165,7 +1184,7 @@ export default function ClientContaDetalhePage() {
                             <span className="cd-extrato-desc-titulo">{titulo}</span>
                             {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
                             <span className={`cd-chip cd-chip-${tipo}`}>
-                              {tipo === 'sem-categoria' ? 'Sem categoria' : (l.categoria || '—')}
+                              {rotuloChip(tipo, l.categoria)}
                             </span>
                           </span>
                           <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
@@ -1662,32 +1681,38 @@ export default function ClientContaDetalhePage() {
         <div className="cd-sheet-overlay" onClick={() => setAcaoMobileLancamento(null)}>
           <div className="cd-sheet" onClick={e => e.stopPropagation()}>
             <div className="cd-sheet-desc">{limparDescricao(acaoMobileLancamento.descricao).titulo}</div>
-            <button
-              type="button"
-              className="cd-sheet-acao"
-              onClick={() => { abrirModalEditarCategoria(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
-            >
-              ✏️ Editar categoria
-            </button>
-            {acaoMobileLancamento.categoria === 'Transferência' ? (
-              <button
-                type="button"
-                className="cd-sheet-acao"
-                onClick={() => {
-                  if (acaoMobileLancamento.transferenciaId) handleDesfazerTransferencia(acaoMobileLancamento.transferenciaId)
-                  setAcaoMobileLancamento(null)
-                }}
-              >
-                ↩ Desfazer transferência
-              </button>
+            {acaoMobileLancamento.tipoCusto === 'AjusteSaldo' ? (
+              <div className="cd-sheet-aviso">Ajuste de saldo — não é reclassificável, só pode ser excluído.</div>
             ) : (
-              <button
-                type="button"
-                className="cd-sheet-acao"
-                onClick={() => { abrirModalTransferencia(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
-              >
-                ⇄ Marcar como transferência
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="cd-sheet-acao"
+                  onClick={() => { abrirModalEditarCategoria(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
+                >
+                  ✏️ Editar categoria
+                </button>
+                {acaoMobileLancamento.categoria === 'Transferência' ? (
+                  <button
+                    type="button"
+                    className="cd-sheet-acao"
+                    onClick={() => {
+                      if (acaoMobileLancamento.transferenciaId) handleDesfazerTransferencia(acaoMobileLancamento.transferenciaId)
+                      setAcaoMobileLancamento(null)
+                    }}
+                  >
+                    ↩ Desfazer transferência
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="cd-sheet-acao"
+                    onClick={() => { abrirModalTransferencia(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
+                  >
+                    ⇄ Marcar como transferência
+                  </button>
+                )}
+              </>
             )}
             <button
               type="button"

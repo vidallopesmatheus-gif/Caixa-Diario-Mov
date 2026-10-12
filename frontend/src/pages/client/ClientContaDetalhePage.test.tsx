@@ -228,3 +228,42 @@ test('categorizar via chip oferece aplicar a todos e criar regra quando há lan�
   })))
   await waitFor(() => expect(regrasApi.aplicarRegraRetroativamente).toHaveBeenCalledWith('regra-1'))
 })
+
+// ── Bloco 3: Ajuste de Saldo ──────────────────────────────────────────────────────────────────
+
+test('lançamento com tipoCusto AjusteSaldo mostra o chip cinza "Ajuste de saldo", mesmo categorizado', async () => {
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([
+    lancamento({ descricao: 'saldo', categoria: 'Devoluções', tipoCusto: 'AjusteSaldo' }),
+  ])
+  renderPagina()
+
+  const chip = await screen.findByRole('button', { name: 'Ajuste de saldo' })
+  expect(chip.className).toContain('cd-chip-ajuste')
+  expect(chip).toBeDisabled()
+})
+
+test('ajuste de saldo desabilita editar categoria e marcar transferência, mas não excluir', async () => {
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([
+    lancamento({ descricao: 'saldo', categoria: 'Devoluções', tipoCusto: 'AjusteSaldo' }),
+  ])
+  renderPagina()
+
+  expect(await screen.findByRole('button', { name: /Editar categoria/ })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /Marcar .* como transferência/ })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /Excluir lançamento/ })).toBeEnabled()
+})
+
+test('ajuste de saldo não entra no subtotal de Entradas/Saídas do dia, mas o saldo do dia é o real', async () => {
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([
+    // Lista vem do backend da mais recente pra mais antiga do dia — o ajuste é o último evento
+    // do dia, por isso aparece primeiro, e o saldo do dia é o dele (132.66, não 432.66).
+    lancamento({ id: 'b', descricao: 'saldo', categoria: 'Devoluções', tipoCusto: 'AjusteSaldo', valor: -3895.76, saldoAcumulado: 132.66 }),
+    lancamento({ id: 'a', descricao: 'Venda', categoria: 'Vendas', valor: 300, saldoAcumulado: 432.66 }),
+  ])
+  renderPagina()
+
+  const cabecalho = (await screen.findByText('08/10/2026')).closest('.cd-extrato-dia-cabecalho') as HTMLElement
+  expect(within(cabecalho).getByText(/Entradas \+R\$ 300,00/)).toBeInTheDocument()
+  expect(within(cabecalho).queryByText(/Saídas/)).not.toBeInTheDocument()
+  expect(within(cabecalho).getByText(/Saldo do dia R\$ 132,66/)).toBeInTheDocument()
+})
