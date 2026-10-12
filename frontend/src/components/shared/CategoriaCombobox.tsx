@@ -11,9 +11,11 @@ const BLOCO_LABEL_CURTO: Record<Bloco, string> = {
   'DESPESAS OPERACIONAIS': 'Despesas',
   'ATIVIDADES DE INVESTIMENTO': 'Investimento',
   'ATIVIDADES DE FINANCIAMENTO': 'Financiamento',
+  'RETIRADAS DOS SÓCIOS': 'Retiradas dos Sócios',
 }
 
 interface CategoriaComboboxProps {
+  clienteId: string
   categorias: CategoriaItem[]
   value: string
   onChange: (nome: string) => void
@@ -24,7 +26,7 @@ interface CategoriaComboboxProps {
 }
 
 const CategoriaCombobox = forwardRef<HTMLInputElement, CategoriaComboboxProps>(function CategoriaCombobox(
-  { categorias, value, onChange, onCategoriaCriada, blocoPadraoNovaCategoria, placeholder, onNavigate },
+  { clienteId, categorias, value, onChange, onCategoriaCriada, blocoPadraoNovaCategoria, placeholder, onNavigate },
   ref,
 ) {
   const [texto, setTexto] = useState(value)
@@ -74,7 +76,7 @@ const CategoriaCombobox = forwardRef<HTMLInputElement, CategoriaComboboxProps>(f
     setSalvando(true)
     setErro('')
     try {
-      const nova = await criarCategoria(nome, grupoNovaId)
+      const nova = await criarCategoria(clienteId, nome, grupoNovaId)
       onCategoriaCriada?.(nova)
       selecionar(nova.nome)
       setCriando(false)

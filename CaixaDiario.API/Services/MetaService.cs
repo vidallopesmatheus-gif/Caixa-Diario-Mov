@@ -179,7 +179,7 @@ public class MetaService : IMetaService
 
         if (dto.FormaPagamento == "AVista")
         {
-            var tipoCusto = (await _categoriaRepository.ListarTodasAsync())
+            var tipoCusto = (await _categoriaRepository.ListarTodasPorClienteAsync(meta.ClienteId))
                 .ToDictionary(c => c.Nome, c => c.Tipo)
                 .GetValueOrDefault(dto.Categoria);
 

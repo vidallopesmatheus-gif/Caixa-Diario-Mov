@@ -19,7 +19,7 @@ public class RegraCategorizacaoServiceTests
 
     public RegraCategorizacaoServiceTests()
     {
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>
         {
             new() { Id = Guid.NewGuid(), Nome = "Aplicações Financeiras", Tipo = "Investimento" },
         });

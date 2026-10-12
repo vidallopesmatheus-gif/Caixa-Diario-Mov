@@ -236,7 +236,7 @@ public class FinanciamentoService : IFinanciamentoService
         var amortizacaoLancada = parcela.ValorAmortizacao ?? parcela.Valor;
         var encargosLancado = parcela.ValorEncargos ?? 0;
 
-        var categoriasPorNome = (await _categoriaRepo.ListarTodasAsync()).ToDictionary(c => c.Nome, c => c.Tipo);
+        var categoriasPorNome = (await _categoriaRepo.ListarTodasPorClienteAsync(financiamento.ClienteId)).ToDictionary(c => c.Nome, c => c.Tipo);
         var (regDestino, novo) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, conta, dto.DataPagamento);
         var novasSaidas = new List<ItemFinanceiroSaida>(regDestino.Saidas);
         var totalLancado = 0m;

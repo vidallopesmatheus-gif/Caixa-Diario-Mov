@@ -90,12 +90,13 @@ public class GrupoServiceTests
     }
 
     [Fact]
-    public async Task ListarBlocosAsync_RetornaOs6BlocosFixos()
+    public async Task ListarBlocosAsync_RetornaOs7BlocosFixos()
     {
         var blocos = await _sut.ListarBlocosAsync();
 
-        Assert.Equal(6, blocos.Length);
+        Assert.Equal(7, blocos.Length);
         Assert.Contains(Blocos.ReceitasOperacionais, blocos);
         Assert.Contains(Blocos.AtividadesDeFinanciamento, blocos);
+        Assert.Contains(Blocos.RetiradasSocios, blocos);
     }
 }

@@ -1680,7 +1680,7 @@ public class RegistroServiceTests
         };
         _contaBancariaMock.Setup(c => c.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
         _repoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(registro);
-        _categoriaMock.Setup(c => c.ObterPorNomeAsync("Manutenção de Veículo"))
+        _categoriaMock.Setup(c => c.ObterPorNomeAsync(clienteId, "Manutenção de Veículo"))
             .ReturnsAsync(new Categoria { Nome = "Manutenção de Veículo", Tipo = "CustoFixo" });
 
         var dto = new EditarCategoriaLancamentoDto
@@ -1734,7 +1734,7 @@ public class RegistroServiceTests
         _repoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data1)).ReturnsAsync(registroAlvo);
         _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId))
             .ReturnsAsync(new List<RegistroDiario> { registroAlvo, registroSemCategoria, registroJaClassificado });
-        _categoriaMock.Setup(c => c.ObterPorNomeAsync("Transporte"))
+        _categoriaMock.Setup(c => c.ObterPorNomeAsync(clienteId, "Transporte"))
             .ReturnsAsync(new Categoria { Nome = "Transporte", Tipo = "CustoVariavel" });
 
         var dto = new EditarCategoriaLancamentoDto

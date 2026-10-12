@@ -110,8 +110,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   }, [clienteId])
 
   useEffect(() => {
-    listarCategorias().then(setCategorias).catch(console.error)
-  }, [])
+    if (!clienteId) return
+    listarCategorias(clienteId).then(setCategorias).catch(console.error)
+  }, [clienteId])
 
   useEffect(() => {
     if (!clienteId) return
@@ -674,6 +675,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   </div>
                 ) : (
                   <CategoriaCombobox
+                    clienteId={clienteId ?? ''}
                     categorias={categoriasEntradaPermitidas()}
                     value={e.categoria ?? ''}
                     onChange={nome => updateEntrada(i, 'categoria', nome)}
@@ -781,6 +783,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   </div>
                 ) : (
                   <CategoriaCombobox
+                    clienteId={clienteId ?? ''}
                     categorias={categorias.saidas}
                     value={s.categoria}
                     onChange={nome => updateSaida(i, 'categoria', nome)}

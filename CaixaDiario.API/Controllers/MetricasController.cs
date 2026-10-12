@@ -59,7 +59,7 @@ public class MetricasController : ControllerBase
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
         var doPeriodo = todos.Where(r => r.Data >= de && r.Data <= ate).ToList();
         var saldoConsolidado = await CalcularSaldoConsolidadoAsync(clienteId, todos);
-        var categorias = await _categoriaRepo.ListarTodasAsync();
+        var categorias = await _categoriaRepo.ListarTodasPorClienteAsync(clienteId);
         var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo, saldoConsolidado, multiplo, categorias);
         return Ok(new ApiResponse<MetricasPeriodoDto> { Dados = resultado });
     }
@@ -89,7 +89,7 @@ public class MetricasController : ControllerBase
         if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
             filtrados = filtrados.Where(r => r.ContaBancariaId == contaBancariaId).ToList();
 
-        var categorias = await _categoriaRepo.ListarTodasAsync();
+        var categorias = await _categoriaRepo.ListarTodasPorClienteAsync(clienteId);
         var resultado = _metricasService.CalcularDre(filtrados, categorias);
 
         // Painel de KPIs da tela de DRE — reaproveita o próprio resultado do CalcularDre (não
@@ -111,7 +111,7 @@ public class MetricasController : ControllerBase
         VerificarAcesso(clienteId);
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
         var registros = todos.Where(r => !r.Excluido).ToList();
-        var categorias = await _categoriaRepo.ListarTodasAsync();
+        var categorias = await _categoriaRepo.ListarTodasPorClienteAsync(clienteId);
         var saldoConsolidado = await CalcularSaldoConsolidadoAsync(clienteId, todos);
         DateOnly? mesRef = null;
         if (!string.IsNullOrWhiteSpace(mesReferencia))

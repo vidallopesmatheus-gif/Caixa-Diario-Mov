@@ -9,8 +9,13 @@ namespace CaixaDiario.API.Services;
 public class UsuarioService : IUsuarioService
 {
     private readonly IUsuarioRepository _usuarioRepository;
+    private readonly ICategoriaRepository _categoriaRepository;
 
-    public UsuarioService(IUsuarioRepository usuarioRepository) => _usuarioRepository = usuarioRepository;
+    public UsuarioService(IUsuarioRepository usuarioRepository, ICategoriaRepository categoriaRepository)
+    {
+        _usuarioRepository = usuarioRepository;
+        _categoriaRepository = categoriaRepository;
+    }
 
     public async Task<List<UsuarioDto>> ListarAsync()
     {
@@ -50,6 +55,29 @@ public class UsuarioService : IUsuarioService
         };
 
         var criado = await _usuarioRepository.AdicionarAsync(usuario);
+
+        // Correção de integridade (Parte 1): todo cliente novo recebe sua PRÓPRIA cópia do plano
+        // de categorias padrão (molde ClienteId == null, Origem == "Padrao") — dali em diante a
+        // lista dele é independente; editar/desativar nunca afeta outro cliente nem o molde.
+        var padrao = await _categoriaRepository.ListarPadraoAtivasAsync();
+        if (padrao.Count > 0)
+        {
+            var copias = padrao.Select(c => new Categoria
+            {
+                Id = Guid.NewGuid(),
+                Nome = c.Nome,
+                Tipo = c.Tipo,
+                GrupoId = c.GrupoId,
+                Ordem = c.Ordem,
+                Ativa = true,
+                CriadoEm = DateTime.UtcNow,
+                ClienteId = criado.Id,
+                Origem = "Cliente",
+                CriadoPor = null,
+            }).ToList();
+            await _categoriaRepository.AdicionarVariasAsync(copias);
+        }
+
         return MapToDto(criado);
     }
 

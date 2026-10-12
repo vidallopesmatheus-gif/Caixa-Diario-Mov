@@ -298,7 +298,7 @@ public class FaturaCartaoService : IFaturaCartaoService
         if (string.IsNullOrWhiteSpace(dto.Categoria))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe a categoria da compra.", "categoria");
 
-        var tipoCusto = (await _categoriaRepo.ListarTodasAsync())
+        var tipoCusto = (await _categoriaRepo.ListarTodasPorClienteAsync(conta.ClienteId))
             .ToDictionary(c => c.Nome, c => c.Tipo)
             .GetValueOrDefault(dto.Categoria);
 

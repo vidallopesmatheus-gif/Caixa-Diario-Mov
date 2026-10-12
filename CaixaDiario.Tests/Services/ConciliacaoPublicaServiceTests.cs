@@ -20,8 +20,8 @@ public class ConciliacaoPublicaServiceTests
 
     public ConciliacaoPublicaServiceTests()
     {
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
-        _categoriaServiceMock.Setup(s => s.ListarAgrupadasAsync()).ReturnsAsync(new CategoriasAgrupadasDto());
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>());
+        _categoriaServiceMock.Setup(s => s.ListarAgrupadasAsync(It.IsAny<Guid>())).ReturnsAsync(new CategoriasAgrupadasDto());
         _sut = new ConciliacaoPublicaService(
             _linkRepoMock.Object, _registroRepoMock.Object, _contaRepoMock.Object, _categoriaRepoMock.Object,
             _categoriaServiceMock.Object, _regraRepoMock.Object);

@@ -62,6 +62,7 @@ const mockIndicadores: IndicadoresDecisao = {
     naoClassificado: { total: 0, percentual: 0, categorias: [] },
     atividadesInvestimento: { total: 0, percentual: 0, categorias: [] },
     atividadesFinanciamento: { total: 0, percentual: 0, categorias: [] },
+    retiradasSocios: { total: 0, percentual: 0, categorias: [] },
     resultadoLiquido: 600,
     resultadoLiquidoPercentual: 60,
     blocos: [],

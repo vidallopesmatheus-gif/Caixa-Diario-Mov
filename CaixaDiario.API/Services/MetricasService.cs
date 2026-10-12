@@ -317,6 +317,10 @@ public class MetricasService : IMetricasService
         var despesasFixasCats = new Dictionary<string, decimal>();
         var despesasNaoOperacionaisCats = new Dictionary<string, decimal>();
         var naoClassificadoCats = new Dictionary<string, decimal>();
+        // Correção de integridade (Parte 1, item 6): Pró-labore/retiradas dos sócios — nunca foi
+        // despesa fixa nem atividade de investimento/financiamento; é a última linha antes do
+        // Resultado Líquido (decisão explícita do usuário), nunca "Não classificado".
+        var retiradasSociosCats = new Dictionary<string, decimal>();
 
         foreach (var saida in saidasOperacionais)
         {
@@ -332,11 +336,13 @@ public class MetricasService : IMetricasService
             var bucket = bloco == Blocos.DeducoesDaReceita ? deducoesCats
                 : bloco == Blocos.CustosOperacionais ? custosVariaveisCats
                 : bloco == Blocos.DespesasOperacionais ? despesasFixasCats
+                : bloco == Blocos.RetiradasSocios ? retiradasSociosCats
                 : bloco != null ? naoClassificadoCats
                 : string.Equals(grupo, "Impostos", StringComparison.OrdinalIgnoreCase) ? deducoesCats
                 : tipo == "CustoVariavel" ? custosVariaveisCats
                 : tipo == "CustoFixo" ? despesasFixasCats
                 : tipo == "DespesaNaoOperacional" ? despesasNaoOperacionaisCats
+                : tipo == "RetiradaSocios" ? retiradasSociosCats
                 : naoClassificadoCats;
 
             bucket[nomeCat] = (bucket.TryGetValue(nomeCat, out var v) ? v : 0m) + saida.Valor;
@@ -411,8 +417,11 @@ public class MetricasService : IMetricasService
         var naoClassificado = MontarLinhaVertical(naoClassificadoCats);
         var atividadesInvestimento = MontarLinhaAtividade(LancamentoFiltro.TipoInvestimento);
         var atividadesFinanciamento = MontarLinhaAtividade(LancamentoFiltro.TipoFinanciamento);
+        // Pró-labore/retiradas dos sócios: decisão explícita do usuário — última dedução antes do
+        // Resultado Líquido, depois de Investimento e Financiamento (não é despesa fixa nem atividade).
+        var retiradasSocios = MontarLinhaVertical(retiradasSociosCats);
         var resultadoLiquido = resultadoOperacional + receitaFinanceira.Total - despesasNaoOperacionais.Total
-            - naoClassificado.Total + atividadesInvestimento.Total + atividadesFinanciamento.Total;
+            - naoClassificado.Total + atividadesInvestimento.Total + atividadesFinanciamento.Total - retiradasSocios.Total;
 
         var blocos = MontarBlocos(
             entradasOperacionais, saidasOperacionais, receitaBruta, mapaBloco, mapaGrupo, mapaOrdem,
@@ -441,6 +450,7 @@ public class MetricasService : IMetricasService
             NaoClassificado = naoClassificado,
             AtividadesInvestimento = atividadesInvestimento,
             AtividadesFinanciamento = atividadesFinanciamento,
+            RetiradasSocios = retiradasSocios,
             ResultadoLiquido = resultadoLiquido,
             ResultadoLiquidoPercentual = Percentual(resultadoLiquido),
             Blocos = blocos,

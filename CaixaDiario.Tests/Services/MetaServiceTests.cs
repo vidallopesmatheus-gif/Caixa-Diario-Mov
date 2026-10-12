@@ -25,7 +25,7 @@ public class MetaServiceTests
 
     public MetaServiceTests()
     {
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>());
         _sut = new MetaService(
             _repoMock.Object, _metaProgressoMock.Object, _contaBancariaRepoMock.Object,
             _registroRepoMock.Object, _categoriaRepoMock.Object, _contaProvisionadaServiceMock.Object,

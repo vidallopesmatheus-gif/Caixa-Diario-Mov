@@ -27,7 +27,7 @@ public class FaturaCartaoServiceTests
 
     public FaturaCartaoServiceTests()
     {
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>());
         _sut = new FaturaCartaoService(
             _contaRepoMock.Object, _registroRepoMock.Object, _pagamentoRepoMock.Object, _categoriaRepoMock.Object,
             _auditMock.Object, CriarContexto());
@@ -441,7 +441,7 @@ public class FaturaCartaoServiceTests
         var contaCartao = CriarConta(clienteId, "Cartão", "CartaoCredito");
         var dataCompra = new DateOnly(2026, 1, 10);
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
-        _categoriaRepoMock.Setup(r => r.ListarTodasAsync())
+        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(clienteId))
             .ReturnsAsync(new List<Categoria> { new() { Nome = "Equipamentos", Tipo = "DespesaNaoOperacional" } });
         var persistidos = ConfigurarRegistrosFake(contaCartao.Id);
 

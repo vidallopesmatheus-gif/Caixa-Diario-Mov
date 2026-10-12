@@ -12,10 +12,11 @@ public class CategoriaServiceTests
     private readonly Mock<ICategoriaRepository> _repoMock = new();
     private readonly Mock<IGrupoRepository> _grupoRepoMock = new();
     private readonly CategoriaService _sut;
+    private readonly Guid _clienteId = Guid.NewGuid();
 
     public CategoriaServiceTests()
     {
-        _repoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria>());
+        _repoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>());
         _sut = new CategoriaService(_repoMock.Object, _grupoRepoMock.Object);
     }
 
@@ -28,7 +29,7 @@ public class CategoriaServiceTests
         _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
         _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<Categoria>())).ReturnsAsync((Categoria c) => c);
 
-        var criada = await _sut.CriarAsync(new CriarCategoriaDto { Nome = "Equipamentos", GrupoId = grupo.Id });
+        var criada = await _sut.CriarAsync(_clienteId, new CriarCategoriaDto { Nome = "Equipamentos", GrupoId = grupo.Id }, _clienteId, "cliente");
 
         Assert.Equal("Investimento", criada.Tipo);
         Assert.Equal(grupo.Id, criada.GrupoId);
@@ -42,22 +43,35 @@ public class CategoriaServiceTests
         _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupoId)).ReturnsAsync((Grupo?)null);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.CriarAsync(new CriarCategoriaDto { Nome = "X", GrupoId = grupoId }));
+            _sut.CriarAsync(_clienteId, new CriarCategoriaDto { Nome = "X", GrupoId = grupoId }, _clienteId, "cliente"));
 
         Assert.Equal(404, ex.StatusCode);
     }
 
     [Fact]
-    public async Task CriarAsync_ComNomeDuplicado_LancaConflito()
+    public async Task CriarAsync_ComNomeDuplicadoNoMesmoCliente_LancaConflito()
     {
         var grupo = Grupo("Custos Diretos", Blocos.CustosOperacionais);
         _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
-        _repoMock.Setup(r => r.ObterPorNomeAsync("Insumos")).ReturnsAsync(new Categoria { Id = Guid.NewGuid(), Nome = "Insumos", GrupoId = grupo.Id, Grupo = grupo });
+        _repoMock.Setup(r => r.ObterPorNomeAsync(_clienteId, "Insumos"))
+            .ReturnsAsync(new Categoria { Id = Guid.NewGuid(), Nome = "Insumos", GrupoId = grupo.Id, Grupo = grupo, ClienteId = _clienteId });
 
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
-            _sut.CriarAsync(new CriarCategoriaDto { Nome = "Insumos", GrupoId = grupo.Id }));
+            _sut.CriarAsync(_clienteId, new CriarCategoriaDto { Nome = "Insumos", GrupoId = grupo.Id }, _clienteId, "cliente"));
 
         Assert.Equal(409, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task CriarAsync_ComUsuarioDeOutroCliente_LancaAcessoNegado()
+    {
+        var outroClienteId = Guid.NewGuid();
+        var grupo = Grupo("Custos Diretos", Blocos.CustosOperacionais);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.CriarAsync(_clienteId, new CriarCategoriaDto { Nome = "X", GrupoId = grupo.Id }, outroClienteId, "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
     }
 
     [Fact]
@@ -65,15 +79,35 @@ public class CategoriaServiceTests
     {
         var grupoAntigo = Grupo("Custos Diretos", Blocos.CustosOperacionais);
         var grupoNovo = Grupo("Despesas com Marketing", Blocos.DespesasOperacionais);
-        var categoria = new Categoria { Id = Guid.NewGuid(), Nome = "Publicidade", Tipo = "CustoVariavel", GrupoId = grupoAntigo.Id, Grupo = grupoAntigo, Ativa = true };
+        var categoria = new Categoria
+        {
+            Id = Guid.NewGuid(), Nome = "Publicidade", Tipo = "CustoVariavel",
+            GrupoId = grupoAntigo.Id, Grupo = grupoAntigo, Ativa = true, ClienteId = _clienteId,
+        };
         _repoMock.Setup(r => r.ObterPorIdAsync(categoria.Id)).ReturnsAsync(categoria);
         _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupoNovo.Id)).ReturnsAsync(grupoNovo);
         _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<Categoria>())).ReturnsAsync((Categoria c) => c);
 
-        var atualizada = await _sut.AtualizarAsync(categoria.Id, new AtualizarCategoriaDto { Nome = "Publicidade", GrupoId = grupoNovo.Id, Ativa = true });
+        var atualizada = await _sut.AtualizarAsync(
+            _clienteId, categoria.Id, new AtualizarCategoriaDto { Nome = "Publicidade", GrupoId = grupoNovo.Id, Ativa = true }, _clienteId, "cliente");
 
         Assert.Equal("CustoFixo", atualizada.Tipo);
         Assert.Equal(grupoNovo.Id, atualizada.GrupoId);
+    }
+
+    [Fact]
+    public async Task AtualizarAsync_CategoriaDeOutroCliente_LancaAcessoNegado()
+    {
+        var outroClienteId = Guid.NewGuid();
+        var grupo = Grupo("Custos Diretos", Blocos.CustosOperacionais);
+        var categoria = new Categoria { Id = Guid.NewGuid(), Nome = "Publicidade", GrupoId = grupo.Id, Grupo = grupo, ClienteId = outroClienteId };
+        _repoMock.Setup(r => r.ObterPorIdAsync(categoria.Id)).ReturnsAsync(categoria);
+        _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.AtualizarAsync(_clienteId, categoria.Id, new AtualizarCategoriaDto { Nome = "Publicidade", GrupoId = grupo.Id, Ativa = true }, _clienteId, "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
     }
 
     [Fact]
@@ -84,13 +118,13 @@ public class CategoriaServiceTests
         var grupoDespesa = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
         var ativas = new List<Categoria>
         {
-            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", Grupo = grupoReceita, Ativa = true },
-            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true },
-            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", Grupo = grupoInvest, Ativa = true },
+            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", Grupo = grupoReceita, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", Grupo = grupoInvest, Ativa = true, ClienteId = _clienteId },
         };
-        _repoMock.Setup(r => r.ListarAtivasAsync()).ReturnsAsync(ativas);
+        _repoMock.Setup(r => r.ListarAtivasPorClienteAsync(_clienteId)).ReturnsAsync(ativas);
 
-        var agrupadas = await _sut.ListarAgrupadasAsync();
+        var agrupadas = await _sut.ListarAgrupadasAsync(_clienteId);
 
         Assert.Contains(agrupadas.Entradas, c => c.Nome == "Vendas");
         Assert.Contains(agrupadas.Entradas, c => c.Nome == "Equipamentos");
@@ -110,12 +144,12 @@ public class CategoriaServiceTests
         var grupoDespesa = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
         var ativas = new List<Categoria>
         {
-            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", Grupo = grupoDevolucao, Ativa = true },
-            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true },
+            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", Grupo = grupoDevolucao, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
         };
-        _repoMock.Setup(r => r.ListarAtivasAsync()).ReturnsAsync(ativas);
+        _repoMock.Setup(r => r.ListarAtivasPorClienteAsync(_clienteId)).ReturnsAsync(ativas);
 
-        var agrupadas = await _sut.ListarAgrupadasAsync();
+        var agrupadas = await _sut.ListarAgrupadasAsync(_clienteId);
 
         Assert.Contains(agrupadas.Entradas, c => c.Nome == "Devoluções");
         Assert.DoesNotContain(agrupadas.Entradas, c => c.Nome == "Aluguel");
@@ -133,14 +167,14 @@ public class CategoriaServiceTests
         var grupoInvest = Grupo("Imobilizado", Blocos.AtividadesDeInvestimento);
         var todas = new List<Categoria>
         {
-            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", Grupo = grupoReceita, Ativa = true },
-            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", Grupo = grupoDevolucao, Ativa = true },
-            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true },
-            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", Grupo = grupoInvest, Ativa = true },
+            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", Grupo = grupoReceita, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", Grupo = grupoDevolucao, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", Grupo = grupoInvest, Ativa = true, ClienteId = _clienteId },
         };
-        _repoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(todas);
+        _repoMock.Setup(r => r.ListarTodasPorClienteAsync(_clienteId)).ReturnsAsync(todas);
 
-        var resultado = await _sut.ListarParaGerenciarAsync();
+        var resultado = await _sut.ListarParaGerenciarAsync(_clienteId, _clienteId, "cliente");
 
         var vendas = resultado.Single(c => c.Nome == "Vendas");
         Assert.True(vendas.EhEntrada);
@@ -157,5 +191,16 @@ public class CategoriaServiceTests
         var equipamentos = resultado.Single(c => c.Nome == "Equipamentos");
         Assert.True(equipamentos.EhEntrada);
         Assert.True(equipamentos.EhSaida);
+    }
+
+    [Fact]
+    public async Task ListarParaGerenciarAsync_ComUsuarioDeOutroCliente_LancaAcessoNegado()
+    {
+        var outroClienteId = Guid.NewGuid();
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.ListarParaGerenciarAsync(_clienteId, outroClienteId, "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
     }
 }

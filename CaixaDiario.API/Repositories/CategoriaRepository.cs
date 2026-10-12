@@ -24,17 +24,44 @@ public class CategoriaRepository : ICategoriaRepository
             .OrderBy(c => c.Ordem)
             .ToListAsync();
 
+    public async Task<List<Categoria>> ListarAtivasPorClienteAsync(Guid clienteId) =>
+        await _context.Categorias
+            .Include(c => c.Grupo)
+            .Where(c => c.Ativa && c.ClienteId == clienteId)
+            .OrderBy(c => c.Ordem)
+            .ToListAsync();
+
+    public async Task<List<Categoria>> ListarTodasPorClienteAsync(Guid clienteId) =>
+        await _context.Categorias
+            .Include(c => c.Grupo)
+            .Where(c => c.ClienteId == clienteId)
+            .OrderBy(c => c.Ordem)
+            .ToListAsync();
+
+    public async Task<List<Categoria>> ListarPadraoAtivasAsync() =>
+        await _context.Categorias
+            .Include(c => c.Grupo)
+            .Where(c => c.Ativa && c.ClienteId == null && c.Origem == "Padrao")
+            .OrderBy(c => c.Ordem)
+            .ToListAsync();
+
     public async Task<Categoria?> ObterPorIdAsync(Guid id) =>
         await _context.Categorias.Include(c => c.Grupo).FirstOrDefaultAsync(c => c.Id == id);
 
-    public async Task<Categoria?> ObterPorNomeAsync(string nome) =>
-        await _context.Categorias.FirstOrDefaultAsync(c => c.Nome == nome);
+    public async Task<Categoria?> ObterPorNomeAsync(Guid clienteId, string nome) =>
+        await _context.Categorias.FirstOrDefaultAsync(c => c.ClienteId == clienteId && c.Nome == nome);
 
     public async Task<Categoria> AdicionarAsync(Categoria categoria)
     {
         _context.Categorias.Add(categoria);
         await _context.SaveChangesAsync();
         return categoria;
+    }
+
+    public async Task AdicionarVariasAsync(List<Categoria> categorias)
+    {
+        _context.Categorias.AddRange(categorias);
+        await _context.SaveChangesAsync();
     }
 
     public async Task<Categoria> AtualizarAsync(Categoria categoria)
@@ -60,17 +87,17 @@ public class CategoriaRepository : ICategoriaRepository
         await _context.SaveChangesAsync();
     }
 
-    public async Task<int> ContarUsoAsync(string nome)
+    public async Task<int> ContarUsoAsync(Guid clienteId, string nome)
     {
-        var registros = await _context.RegistrosDiarios.Where(r => !r.Excluido).ToListAsync();
+        var registros = await _context.RegistrosDiarios.Where(r => r.ClienteId == clienteId && !r.Excluido).ToListAsync();
         return registros.Sum(r =>
             r.Entradas.Count(e => e.Categoria == nome) +
             r.Saidas.Count(s => s.Categoria == nome));
     }
 
-    public async Task MigrarUsoAsync(string nomeOrigem, string nomeDestino, string tipoDestino)
+    public async Task MigrarUsoAsync(Guid clienteId, string nomeOrigem, string nomeDestino, string tipoDestino)
     {
-        var registros = await _context.RegistrosDiarios.Where(r => !r.Excluido).ToListAsync();
+        var registros = await _context.RegistrosDiarios.Where(r => r.ClienteId == clienteId && !r.Excluido).ToListAsync();
         foreach (var registro in registros)
         {
             var precisaAtualizarEntradas = registro.Entradas.Any(e => e.Categoria == nomeOrigem);

@@ -345,13 +345,18 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Ordem).HasColumnName("ordem").HasDefaultValue(0);
             entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.Origem).HasColumnName("origem").IsRequired().HasDefaultValue("Padrao");
+            entity.Property(e => e.CriadoPor).HasColumnName("criado_por");
 
             entity.HasOne(e => e.Grupo)
                 .WithMany()
                 .HasForeignKey(e => e.GrupoId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            entity.HasIndex(e => e.Nome).IsUnique();
+            // Correção de integridade (Parte 1): categoria é por cliente — único (ClienteId, Nome),
+            // nunca (Nome) isolado (era isso que deixava categoria de um cliente vazar pra outro).
+            entity.HasIndex(e => new { e.ClienteId, e.Nome }).IsUnique();
             entity.HasIndex(e => new { e.Ativa, e.Ordem });
         });
 

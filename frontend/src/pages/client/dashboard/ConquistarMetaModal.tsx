@@ -53,7 +53,7 @@ export default function ConquistarMetaModal({ meta, contasBancarias, onClose, on
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
-  useEffect(() => { listarCategorias().then(setCategorias).catch(() => {}) }, [])
+  useEffect(() => { listarCategorias(meta.clienteId).then(setCategorias).catch(() => {}) }, [meta.clienteId])
 
   const contasAtivas = useMemo(() => contasBancarias.filter(c => c.ativa), [contasBancarias])
   const contaCartaoSelecionada = contasAtivas.find(c => c.id === contaPagamentoId)?.tipo === 'CartaoCredito'
@@ -203,6 +203,7 @@ export default function ConquistarMetaModal({ meta, contasBancarias, onClose, on
         <div className="inp-group" style={{ marginTop: 12 }}>
           <label>Categoria</label>
           <CategoriaCombobox
+            clienteId={meta.clienteId}
             categorias={categorias.saidas}
             value={categoria}
             onChange={setCategoria}

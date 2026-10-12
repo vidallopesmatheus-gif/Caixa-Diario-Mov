@@ -14,7 +14,7 @@ public class CategoriaService : ICategoriaService
     private static readonly HashSet<string> TiposDeEntrada = new() { "Receita", "Investimento", "Financiamento" };
     private static readonly HashSet<string> TiposDeSaida = new()
     {
-        "CustoVariavel", "CustoFixo", "DespesaNaoOperacional", "Investimento", "Financiamento",
+        "CustoVariavel", "CustoFixo", "DespesaNaoOperacional", "Investimento", "Financiamento", "RetiradaSocios",
     };
     // Categoria.Tipo por si só não distingue "Deduções da Receita" (bloco DeducoesDaReceita) de
     // despesa comum (bloco DespesasOperacionais) — os dois mapeiam pra "CustoFixo" (ver
@@ -36,9 +36,9 @@ public class CategoriaService : ICategoriaService
         _grupoRepo = grupoRepo;
     }
 
-    public async Task<CategoriasAgrupadasDto> ListarAgrupadasAsync()
+    public async Task<CategoriasAgrupadasDto> ListarAgrupadasAsync(Guid clienteId)
     {
-        var ativas = await _repo.ListarAtivasAsync();
+        var ativas = await _repo.ListarAtivasPorClienteAsync(clienteId);
         return new CategoriasAgrupadasDto
         {
             Entradas = ativas.Where(EhEntrada).Select(MapToItemDto).ToList(),
@@ -46,20 +46,22 @@ public class CategoriaService : ICategoriaService
         };
     }
 
-    public async Task<List<CategoriaDto>> ListarParaGerenciarAsync()
+    public async Task<List<CategoriaDto>> ListarParaGerenciarAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
     {
-        var todas = await _repo.ListarTodasAsync();
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
+        var todas = await _repo.ListarTodasPorClienteAsync(clienteId);
         return todas.Select(MapToDto).ToList();
     }
 
-    public async Task<CategoriaDto> CriarAsync(CriarCategoriaDto dto)
+    public async Task<CategoriaDto> CriarAsync(Guid clienteId, CriarCategoriaDto dto, Guid usuarioLogadoId, string perfil)
     {
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
         var grupo = await ObterGrupoOuFalharAsync(dto.GrupoId);
         var nome = dto.Nome.Trim();
-        if (await _repo.ObterPorNomeAsync(nome) is not null)
+        if (await _repo.ObterPorNomeAsync(clienteId, nome) is not null)
             throw new ApiException(409, CodigoRetorno.CATEGORIA_DUPLICADA, "Já existe uma categoria com esse nome.");
 
-        var maiorOrdem = (await _repo.ListarTodasAsync()).Select(c => c.Ordem).DefaultIfEmpty(-1).Max();
+        var maiorOrdem = (await _repo.ListarTodasPorClienteAsync(clienteId)).Select(c => c.Ordem).DefaultIfEmpty(-1).Max();
 
         var categoria = new Categoria
         {
@@ -70,19 +72,23 @@ public class CategoriaService : ICategoriaService
             Ordem = maiorOrdem + 1,
             Ativa = true,
             CriadoEm = DateTime.UtcNow,
+            ClienteId = clienteId,
+            Origem = "Cliente",
+            CriadoPor = usuarioLogadoId,
         };
         var criada = await _repo.AdicionarAsync(categoria);
         criada.Grupo = grupo;
         return MapToDto(criada);
     }
 
-    public async Task<CategoriaDto> AtualizarAsync(Guid id, AtualizarCategoriaDto dto)
+    public async Task<CategoriaDto> AtualizarAsync(Guid clienteId, Guid id, AtualizarCategoriaDto dto, Guid usuarioLogadoId, string perfil)
     {
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
         var grupo = await ObterGrupoOuFalharAsync(dto.GrupoId);
-        var categoria = await ObterOuFalharAsync(id);
+        var categoria = await ObterDoClienteOuFalharAsync(clienteId, id);
 
         var nome = dto.Nome.Trim();
-        var existente = await _repo.ObterPorNomeAsync(nome);
+        var existente = await _repo.ObterPorNomeAsync(clienteId, nome);
         if (existente is not null && existente.Id != id)
             throw new ApiException(409, CodigoRetorno.CATEGORIA_DUPLICADA, "Já existe uma categoria com esse nome.");
 
@@ -95,23 +101,30 @@ public class CategoriaService : ICategoriaService
         return MapToDto(atualizada);
     }
 
-    public async Task DesativarAsync(Guid id)
+    public async Task DesativarAsync(Guid clienteId, Guid id, Guid usuarioLogadoId, string perfil)
     {
-        var categoria = await ObterOuFalharAsync(id);
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
+        var categoria = await ObterDoClienteOuFalharAsync(clienteId, id);
         categoria.Ativa = false;
         await _repo.AtualizarAsync(categoria);
     }
 
-    public async Task ReordenarAsync(ReordenarCategoriasDto dto)
+    public async Task ReordenarAsync(Guid clienteId, ReordenarCategoriasDto dto, Guid usuarioLogadoId, string perfil)
     {
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
+        var doCliente = (await _repo.ListarTodasPorClienteAsync(clienteId)).Select(c => c.Id).ToHashSet();
+        if (dto.Ids.Any(id => !doCliente.Contains(id)))
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+
         var novaOrdem = dto.Ids.Select((id, indice) => (Id: id, Ordem: indice)).ToList();
         await _repo.ReordenarAsync(novaOrdem);
     }
 
-    public async Task<ExclusaoCategoriaResultDto> ExcluirOuInformarUsoAsync(Guid id)
+    public async Task<ExclusaoCategoriaResultDto> ExcluirOuInformarUsoAsync(Guid clienteId, Guid id, Guid usuarioLogadoId, string perfil)
     {
-        var categoria = await ObterOuFalharAsync(id);
-        var quantidade = await _repo.ContarUsoAsync(categoria.Nome);
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
+        var categoria = await ObterDoClienteOuFalharAsync(clienteId, id);
+        var quantidade = await _repo.ContarUsoAsync(clienteId, categoria.Nome);
         if (quantidade > 0)
             return new ExclusaoCategoriaResultDto { Excluida = false, QuantidadeLancamentos = quantidade };
 
@@ -119,20 +132,34 @@ public class CategoriaService : ICategoriaService
         return new ExclusaoCategoriaResultDto { Excluida = true, QuantidadeLancamentos = 0 };
     }
 
-    public async Task MigrarLancamentosAsync(Guid origemId, Guid destinoId)
+    public async Task MigrarLancamentosAsync(Guid clienteId, Guid origemId, Guid destinoId, Guid usuarioLogadoId, string perfil)
     {
-        var origem = await ObterOuFalharAsync(origemId);
-        var destino = await ObterOuFalharAsync(destinoId);
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
+        var origem = await ObterDoClienteOuFalharAsync(clienteId, origemId);
+        var destino = await ObterDoClienteOuFalharAsync(clienteId, destinoId);
 
-        await _repo.MigrarUsoAsync(origem.Nome, destino.Nome, destino.Tipo);
+        await _repo.MigrarUsoAsync(clienteId, origem.Nome, destino.Nome, destino.Tipo);
 
         origem.Ativa = false;
         await _repo.AtualizarAsync(origem);
     }
 
-    private async Task<Categoria> ObterOuFalharAsync(Guid id) =>
-        await _repo.ObterPorIdAsync(id)
+    private static void VerificarAcesso(Guid clienteId, Guid usuarioLogadoId, string perfil)
+    {
+        if (perfil == "cliente" && usuarioLogadoId != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+    }
+
+    private async Task<Categoria> ObterDoClienteOuFalharAsync(Guid clienteId, Guid id)
+    {
+        var categoria = await _repo.ObterPorIdAsync(id)
             ?? throw new ApiException(404, CodigoRetorno.CATEGORIA_NAO_ENCONTRADA, "Categoria não encontrada.");
+        // Nunca deixa um cliente operar numa categoria de outro cliente (ou no molde padrão) só
+        // porque adivinhou/reutilizou um Id — mesmo estando autenticado e com acesso ao próprio clienteId.
+        if (categoria.ClienteId != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+        return categoria;
+    }
 
     private async Task<Grupo> ObterGrupoOuFalharAsync(Guid grupoId) =>
         await _grupoRepo.ObterPorIdAsync(grupoId)

@@ -9,9 +9,11 @@ export interface Usuario {
   criadoPor?: string
 }
 
-export type TipoCusto = 'Receita' | 'CustoFixo' | 'CustoVariavel' | 'DespesaNaoOperacional' | 'Investimento' | 'Financiamento'
+export type TipoCusto =
+  | 'Receita' | 'CustoFixo' | 'CustoVariavel' | 'DespesaNaoOperacional' | 'Investimento' | 'Financiamento'
+  | 'RetiradaSocios'
 
-// Os 6 blocos são fixos na estrutura do demonstrativo — não são cadastráveis, só os Grupos dentro
+// Os 7 blocos são fixos na estrutura do demonstrativo — não são cadastráveis, só os Grupos dentro
 // de cada um são (ver Configurações → Plano de Contas).
 export type Bloco =
   | 'RECEITAS OPERACIONAIS'
@@ -20,10 +22,12 @@ export type Bloco =
   | 'DESPESAS OPERACIONAIS'
   | 'ATIVIDADES DE INVESTIMENTO'
   | 'ATIVIDADES DE FINANCIAMENTO'
+  | 'RETIRADAS DOS SÓCIOS'
 
 export const BLOCOS_ORDEM: Bloco[] = [
   'RECEITAS OPERACIONAIS', 'DEDUÇÕES DA RECEITA', 'CUSTOS OPERACIONAIS',
   'DESPESAS OPERACIONAIS', 'ATIVIDADES DE INVESTIMENTO', 'ATIVIDADES DE FINANCIAMENTO',
+  'RETIRADAS DOS SÓCIOS',
 ]
 
 export interface ItemFinanceiro {
