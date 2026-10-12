@@ -17,7 +17,7 @@ import type { ResolucaoDuplicata } from '../../api/importacao'
 import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
 import { listarSugestoesVinculo } from '../../api/conciliacao'
 import { atualizarContaProvisionada } from '../../api/contasProvisionadas'
-import { listarRegras, atualizarRegra } from '../../api/regras'
+import { listarRegras, atualizarRegra, criarRegra, contarCorrespondencias, aplicarRegraRetroativamente } from '../../api/regras'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
 import { listarMetas, salvarMeta } from '../../api/metas'
 import { listarCategorias } from '../../api/categorias'
@@ -115,6 +115,26 @@ export default function ClientContaDetalhePage() {
   const [mostrarSaldoPorLinha, setMostrarSaldoPorLinha] = useState(false)
   // Mobile (<768px): cada linha é um card; tocar nele abre uma bottom sheet com as ações.
   const [acaoMobileLancamento, setAcaoMobileLancamento] = useState<LancamentoExtrato | null>(null)
+
+  // ── Bloco 2: barra de filtros (item 6) ───────────────────────────────────
+  const [filtroTexto, setFiltroTexto] = useState('')
+  const [filtroTipo, setFiltroTipo] = useState<'todos' | 'entrada' | 'saida'>('todos')
+  const [filtroCategoria, setFiltroCategoria] = useState('')
+  const [filtroSoSemCategoria, setFiltroSoSemCategoria] = useState(false)
+  const [filtroSoTransferenciaInvestimento, setFiltroSoTransferenciaInvestimento] = useState(false)
+
+  // ── Bloco 2: seleção em lote (item 7) ─────────────────────────────────────
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [loteCategoriaAberta, setLoteCategoriaAberta] = useState(false)
+  const [loteCategoriaValor, setLoteCategoriaValor] = useState('')
+  const [loteTransferenciaAberta, setLoteTransferenciaAberta] = useState(false)
+  const [loteContaContrapartidaId, setLoteContaContrapartidaId] = useState('')
+  const [loteExcluirAberta, setLoteExcluirAberta] = useState(false)
+  const [processandoLote, setProcessandoLote] = useState(false)
+
+  // ── Bloco 2: "aplicar a todos e criar regra?" (item 8) ────────────────────
+  const [ofertaRegra, setOfertaRegra] = useState<{ lancamento: LancamentoExtrato; categoria: string; contagem: number } | null>(null)
+  const [criandoOfertaRegra, setCriandoOfertaRegra] = useState(false)
 
   const [modalVincular, setModalVincular] = useState(false)
   const [metasDisponiveis, setMetasDisponiveis] = useState<MetaAnual[]>([])
@@ -409,6 +429,42 @@ export default function ClientContaDetalhePage() {
     // em si precisa refletir a categoria nova, sem recarregar conta/extrato inteiros.
     setLancamentos(prev => prev.map(l =>
       (l.id === lancamento.id && l.data === lancamento.data) ? { ...l, categoria: novaCategoria } : l))
+
+    // Item 8, Bloco 2: lançamento categorizado manualmente (não veio de regra) — se existem outros
+    // parecidos, oferece aplicar a todos de uma vez e criar uma regra pras próximas importações.
+    if (!regraId) {
+      const tipo = lancamento.valor >= 0 ? 'Entrada' : 'Saida'
+      try {
+        const contagem = await contarCorrespondencias(contaId, tipo, lancamento.descricao)
+        if (contagem > 0) setOfertaRegra({ lancamento, categoria: novaCategoria, contagem })
+      } catch {
+        // Não bloqueia a edição por causa disso — só não oferece a regra.
+      }
+    }
+  }
+
+  async function confirmarOfertaRegra() {
+    if (!ofertaRegra || !contaId || !clienteId) return
+    setCriandoOfertaRegra(true)
+    setMsg('')
+    try {
+      const tipo = ofertaRegra.lancamento.valor >= 0 ? 'Entrada' : 'Saida'
+      const regra = await criarRegra(clienteId, {
+        contaBancariaId: contaId,
+        tipo,
+        descricaoReferencia: ofertaRegra.lancamento.descricao,
+        acaoTipo: 'Categoria',
+        categoria: ofertaRegra.categoria,
+      })
+      const total = await aplicarRegraRetroativamente(regra.id)
+      setMsg(`Regra criada! ${total} lançamento(s) parecido(s) foram categorizados como "${ofertaRegra.categoria}".`)
+      setOfertaRegra(null)
+      carregarExtrato()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao criar regra.')
+    } finally {
+      setCriandoOfertaRegra(false)
+    }
   }
 
   async function confirmarEdicaoCategoria() {
@@ -566,13 +622,42 @@ export default function ClientContaDetalhePage() {
     return l.valor >= 0 ? 'receita' : 'despesa'
   }
 
-  // Agrupamento por dia (item 4, Bloco 1): `lancamentos` já vem do backend ordenado do mais
-  // recente pro mais antigo, e dentro do mesmo dia também mais recente primeiro (ver comentário
-  // de ObterExtratoAsync) — então o PRIMEIRO item de cada grupo já é o saldo de fim do dia.
+  // Barra de filtros (item 6, Bloco 2) — nomes únicos pro dropdown de categoria.
+  const categoriasNomes = useMemo(
+    () => [...new Set([...categorias.entradas, ...categorias.saidas].map(c => c.nome))].sort(),
+    [categorias],
+  )
+
+  const lancamentosFiltrados = useMemo(() => {
+    const texto = filtroTexto.trim().toLowerCase()
+    return lancamentos.filter(l => {
+      if (texto && !l.descricao.toLowerCase().includes(texto)) return false
+      if (filtroTipo === 'entrada' && l.valor < 0) return false
+      if (filtroTipo === 'saida' && l.valor >= 0) return false
+      if (filtroCategoria && l.categoria !== filtroCategoria) return false
+      if (filtroSoSemCategoria && !(l.pendenteCategorizacao || !l.categoria)) return false
+      if (filtroSoTransferenciaInvestimento) {
+        const tipo = classificarChip(l)
+        if (tipo !== 'transferencia' && tipo !== 'investimento') return false
+      }
+      return true
+    })
+  }, [lancamentos, filtroTexto, filtroTipo, filtroCategoria, filtroSoSemCategoria, filtroSoTransferenciaInvestimento, tipoPorCategoria])
+
+  // Saldo de fim de dia vem sempre do extrato COMPLETO (nunca do filtrado) — filtrar a visão não
+  // pode fazer parecer que o saldo real de um dia mudou. Primeiro encontrado = mais recente do
+  // dia, já que `lancamentos` vem ordenado assim (ver comentário de ObterExtratoAsync).
+  const saldoPorDia = useMemo(() => {
+    const mapa = new Map<string, number>()
+    for (const l of lancamentos) if (!mapa.has(l.data)) mapa.set(l.data, l.saldoAcumulado)
+    return mapa
+  }, [lancamentos])
+
+  // Agrupamento por dia (item 4, Bloco 1).
   interface GrupoDia { data: string; itens: LancamentoExtrato[]; entradas: number; saidas: number; saldoDoDia: number }
   const gruposPorDia = useMemo<GrupoDia[]>(() => {
     const porData = new Map<string, LancamentoExtrato[]>()
-    for (const l of lancamentos) {
+    for (const l of lancamentosFiltrados) {
       const grupo = porData.get(l.data)
       if (grupo) grupo.push(l)
       else porData.set(l.data, [l])
@@ -582,9 +667,93 @@ export default function ClientContaDetalhePage() {
       itens,
       entradas: itens.filter(l => l.valor >= 0).reduce((s, l) => s + l.valor, 0),
       saidas: itens.filter(l => l.valor < 0).reduce((s, l) => s - l.valor, 0),
-      saldoDoDia: itens[0].saldoAcumulado,
+      saldoDoDia: saldoPorDia.get(data) ?? itens[0].saldoAcumulado,
     }))
-  }, [lancamentos])
+  }, [lancamentosFiltrados, saldoPorDia])
+
+  // Seleção em lote (item 7, Bloco 2).
+  function chaveLancamento(l: LancamentoExtrato): string { return `${l.data}-${l.id}` }
+  function toggleSelecao(l: LancamentoExtrato) {
+    if (!l.id) return
+    const chave = chaveLancamento(l)
+    setSelecionados(prev => {
+      const next = new Set(prev)
+      if (next.has(chave)) next.delete(chave)
+      else next.add(chave)
+      return next
+    })
+  }
+  const itensSelecionados = useMemo(
+    () => lancamentos.filter(l => l.id && selecionados.has(chaveLancamento(l))),
+    [lancamentos, selecionados],
+  )
+  function limparSelecao() { setSelecionados(new Set()) }
+
+  async function confirmarLoteCategoria() {
+    if (!contaId || !loteCategoriaValor || itensSelecionados.length === 0) return
+    setProcessandoLote(true)
+    setMsg('')
+    try {
+      await categorizarPendentes(contaId, itensSelecionados.map(l => ({ id: l.id!, data: l.data, categoria: loteCategoriaValor })))
+      setLancamentos(prev => prev.map(l => (l.id && selecionados.has(chaveLancamento(l))) ? { ...l, categoria: loteCategoriaValor } : l))
+      setMsg(`${itensSelecionados.length} lançamento(s) categorizado(s) como "${loteCategoriaValor}".`)
+      setLoteCategoriaAberta(false)
+      setLoteCategoriaValor('')
+      limparSelecao()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao aplicar categoria em lote.')
+    } finally {
+      setProcessandoLote(false)
+    }
+  }
+
+  async function confirmarLoteTransferencia() {
+    if (!contaId || !loteContaContrapartidaId || itensSelecionados.length === 0) return
+    setProcessandoLote(true)
+    setMsg('')
+    try {
+      for (const l of itensSelecionados) {
+        if (!l.id) continue
+        await converterLancamentoEmTransferencia({
+          contaId, lancamentoId: l.id, data: l.data,
+          tipo: l.valor >= 0 ? 'Entrada' : 'Saida',
+          contaContrapartidaId: loteContaContrapartidaId,
+        })
+      }
+      setMsg(`${itensSelecionados.length} lançamento(s) marcado(s) como transferência.`)
+      setLoteTransferenciaAberta(false)
+      setLoteContaContrapartidaId('')
+      limparSelecao()
+      carregarConta()
+      carregarExtrato()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao marcar lote como transferência.')
+    } finally {
+      setProcessandoLote(false)
+    }
+  }
+
+  async function confirmarLoteExcluir() {
+    if (!contaId || itensSelecionados.length === 0) return
+    setProcessandoLote(true)
+    setMsg('')
+    try {
+      for (const l of itensSelecionados) {
+        if (!l.id) continue
+        await excluirLancamento(contaId, { id: l.id, data: l.data })
+      }
+      setMsg(`${itensSelecionados.length} lançamento(s) excluído(s).`)
+      setLoteExcluirAberta(false)
+      limparSelecao()
+      carregarConta()
+      carregarExtrato()
+      carregarPendencias()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao excluir em lote.')
+    } finally {
+      setProcessandoLote(false)
+    }
+  }
 
   // Coluna de ações (item 1, Bloco 1) — ícones de 28px à esquerda da linha, substituindo os
   // antigos links de texto embaixo da descrição. ✏️ funciona pra qualquer linha com id (inclusive
@@ -883,10 +1052,51 @@ export default function ClientContaDetalhePage() {
             </label>
           </div>
 
+          {/* Barra de filtros (item 6, Bloco 2) */}
+          <div className="cd-filtros-extrato">
+            <input
+              type="text"
+              className="cd-filtro-busca"
+              placeholder="🔎 Buscar na descrição..."
+              value={filtroTexto}
+              onChange={e => setFiltroTexto(e.target.value)}
+            />
+            <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value as typeof filtroTipo)}>
+              <option value="todos">Entradas e saídas</option>
+              <option value="entrada">Só entradas</option>
+              <option value="saida">Só saídas</option>
+            </select>
+            <select value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)}>
+              <option value="">Todas as categorias</option>
+              {categoriasNomes.map(nome => <option key={nome} value={nome}>{nome}</option>)}
+            </select>
+            <label className="cd-filtro-check">
+              <input type="checkbox" checked={filtroSoSemCategoria} onChange={e => setFiltroSoSemCategoria(e.target.checked)} />
+              Só sem categoria
+            </label>
+            <label className="cd-filtro-check">
+              <input type="checkbox" checked={filtroSoTransferenciaInvestimento} onChange={e => setFiltroSoTransferenciaInvestimento(e.target.checked)} />
+              Só transferências/investimentos
+            </label>
+          </div>
+
+          {/* Barra de seleção em lote (item 7, Bloco 2) */}
+          {selecionados.size > 0 && (
+            <div className="cd-lote-barra">
+              <span>{selecionados.size} selecionado(s)</span>
+              <button type="button" className="cd-lote-btn" onClick={() => setLoteCategoriaAberta(true)}>Aplicar categoria</button>
+              <button type="button" className="cd-lote-btn" onClick={() => setLoteTransferenciaAberta(true)}>Marcar como transferência</button>
+              <button type="button" className="cd-lote-btn cd-lote-btn-excluir" onClick={() => setLoteExcluirAberta(true)}>Excluir</button>
+              <button type="button" className="cd-lote-limpar" onClick={limparSelecao}>Limpar seleção</button>
+            </div>
+          )}
+
           {loadingExtrato ? (
             <p style={{ color: 'var(--tx3)' }}>Carregando extrato...</p>
           ) : lancamentos.length === 0 ? (
             <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhum lançamento no período selecionado.</p>
+          ) : gruposPorDia.length === 0 ? (
+            <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhum lançamento casa com os filtros.</p>
           ) : (
             gruposPorDia.map(grupo => (
               <div key={grupo.data} className="cd-extrato-grupo-dia">
@@ -906,6 +1116,14 @@ export default function ClientContaDetalhePage() {
                     const { titulo, subtitulo } = limparDescricao(l.descricao)
                     return (
                       <div key={chave} className="cd-extrato-linha">
+                        <input
+                          type="checkbox"
+                          className="cd-checkbox-selecao"
+                          disabled={!l.id}
+                          checked={!!l.id && selecionados.has(chaveLancamento(l))}
+                          onChange={() => toggleSelecao(l)}
+                          aria-label={`Selecionar "${l.descricao}"`}
+                        />
                         {renderAcoesLinha(l)}
                         <span className="cd-extrato-desc" title={l.descricao}>
                           <span className="cd-extrato-desc-titulo">{titulo}</span>
@@ -928,23 +1146,33 @@ export default function ClientContaDetalhePage() {
                     const tipo = classificarChip(l)
                     const { titulo, subtitulo } = limparDescricao(l.descricao)
                     return (
-                      <button
-                        key={chave}
-                        type="button"
-                        className="cd-extrato-card"
-                        onClick={() => l.id && setAcaoMobileLancamento(l)}
-                      >
-                        <span className="cd-extrato-card-desc">
-                          <span className="cd-extrato-desc-titulo">{titulo}</span>
-                          {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
-                          <span className={`cd-chip cd-chip-${tipo}`}>
-                            {tipo === 'sem-categoria' ? 'Sem categoria' : (l.categoria || '—')}
+                      <div key={chave} className="cd-extrato-card">
+                        <input
+                          type="checkbox"
+                          className="cd-checkbox-selecao"
+                          disabled={!l.id}
+                          checked={!!l.id && selecionados.has(chaveLancamento(l))}
+                          onChange={() => toggleSelecao(l)}
+                          onClick={e => e.stopPropagation()}
+                          aria-label={`Selecionar "${l.descricao}"`}
+                        />
+                        <button
+                          type="button"
+                          className="cd-extrato-card-corpo"
+                          onClick={() => l.id && setAcaoMobileLancamento(l)}
+                        >
+                          <span className="cd-extrato-card-desc">
+                            <span className="cd-extrato-desc-titulo">{titulo}</span>
+                            {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
+                            <span className={`cd-chip cd-chip-${tipo}`}>
+                              {tipo === 'sem-categoria' ? 'Sem categoria' : (l.categoria || '—')}
+                            </span>
                           </span>
-                        </span>
-                        <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
-                          {l.valor >= 0 ? '+' : ''}{fmtBRL(l.valor)}
-                        </span>
-                      </button>
+                          <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
+                            {l.valor >= 0 ? '+' : ''}{fmtBRL(l.valor)}
+                          </span>
+                        </button>
+                      </div>
                     )
                   })}
                 </div>
@@ -1320,6 +1548,110 @@ export default function ClientContaDetalhePage() {
             {excluirConfirmacao.categoria === 'Transferência'
               ? ' Esse lançamento é uma ponta de Transferência — a contrapartida na outra conta também será excluída.'
               : ' Se ele foi usado para dar baixa em alguma conta a pagar/receber, o título volta a ficar em aberto.'}
+          </p>
+        )}
+      </Modal>
+
+      {/* Item 7, Bloco 2: aplicar categoria a todos os lançamentos selecionados de uma vez. */}
+      <Modal
+        open={loteCategoriaAberta}
+        title="🏷️ Aplicar categoria em lote"
+        onClose={() => setLoteCategoriaAberta(false)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setLoteCategoriaAberta(false)}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarLoteCategoria} disabled={!loteCategoriaValor || processandoLote}>
+              {processandoLote ? 'Aplicando...' : 'Aplicar'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+          {itensSelecionados.length} lançamento(s) selecionado(s) vão receber a mesma categoria.
+        </p>
+        <div className="inp-group">
+          <label>Categoria</label>
+          <CategoriaCombobox
+            clienteId={clienteId}
+            categorias={[...categorias.entradas, ...categorias.saidas]}
+            value={loteCategoriaValor}
+            onChange={setLoteCategoriaValor}
+            onCategoriaCriada={handleCategoriaCriada}
+            blocoPadraoNovaCategoria="DESPESAS OPERACIONAIS"
+          />
+        </div>
+      </Modal>
+
+      {/* Item 7, Bloco 2: marcar vários lançamentos como transferência pra uma mesma conta
+          contrapartida — cada um cria sua própria perna automática na conta destino. */}
+      <Modal
+        open={loteTransferenciaAberta}
+        title="⇄ Marcar lote como transferência"
+        onClose={() => setLoteTransferenciaAberta(false)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setLoteTransferenciaAberta(false)}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarLoteTransferencia} disabled={!loteContaContrapartidaId || processandoLote}>
+              {processandoLote ? 'Convertendo...' : 'Confirmar'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+          {itensSelecionados.length} lançamento(s) selecionado(s) viram transferência — cada um cria
+          automaticamente a contrapartida na conta escolhida.
+        </p>
+        <div className="inp-group">
+          <label>Conta contrapartida</label>
+          <select value={loteContaContrapartidaId} onChange={e => setLoteContaContrapartidaId(e.target.value)}>
+            <option value="">Selecione...</option>
+            {contasBancarias.filter(c => c.ativa && c.id !== contaId).map(c => (
+              <option key={c.id} value={c.id}>{c.nome}</option>
+            ))}
+          </select>
+        </div>
+      </Modal>
+
+      {/* Item 7, Bloco 2: exclusão em lote — mesmo padrão de botão vermelho da exclusão individual. */}
+      <Modal
+        open={loteExcluirAberta}
+        title="🗑 Excluir lançamentos selecionados"
+        onClose={() => setLoteExcluirAberta(false)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setLoteExcluirAberta(false)}>Cancelar</button>
+            <button className="btn-danger" onClick={confirmarLoteExcluir} disabled={processandoLote}>
+              {processandoLote ? 'Excluindo...' : 'Excluir'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+          Excluir {itensSelecionados.length} lançamento(s) selecionado(s)? Essa ação não pode ser desfeita.
+        </p>
+      </Modal>
+
+      {/* Item 8, Bloco 2: depois de categorizar manualmente, oferece aplicar a todos os parecidos
+          e criar uma regra pras próximas importações — nunca pergunta de novo se o item já veio
+          de uma regra (esse caso já é tratado como "atualizar a regra existente"). */}
+      <Modal
+        open={!!ofertaRegra}
+        title="⚙️ Aplicar a todos e criar regra?"
+        onClose={() => setOfertaRegra(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setOfertaRegra(null)}>Não, só esta</button>
+            <button className="btn-confirm" onClick={confirmarOfertaRegra} disabled={criandoOfertaRegra}>
+              {criandoOfertaRegra ? 'Aplicando...' : 'Aplicar e criar regra'}
+            </button>
+          </>
+        }
+      >
+        {ofertaRegra && (
+          <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+            Encontrei {ofertaRegra.contagem} outro(s) lançamento(s) parecido(s) com "{ofertaRegra.lancamento.descricao}".
+            Aplicar "{ofertaRegra.categoria}" a todos eles e criar uma regra pra categorizar
+            automaticamente nas próximas importações desta conta?
           </p>
         )}
       </Modal>
