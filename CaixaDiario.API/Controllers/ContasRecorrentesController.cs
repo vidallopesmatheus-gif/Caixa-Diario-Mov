@@ -12,8 +12,13 @@ namespace CaixaDiario.API.Controllers;
 public class ContasRecorrentesController : ControllerBase
 {
     private readonly IContaRecorrenteService _service;
+    private readonly IDetectorRecorrenciaService _detectorService;
 
-    public ContasRecorrentesController(IContaRecorrenteService service) => _service = service;
+    public ContasRecorrentesController(IContaRecorrenteService service, IDetectorRecorrenciaService detectorService)
+    {
+        _service = service;
+        _detectorService = detectorService;
+    }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
     private string ObterPerfil() => User.FindFirst("perfil")!.Value;
@@ -44,6 +49,22 @@ public class ContasRecorrentesController : ControllerBase
     public async Task<IActionResult> Desativar(Guid clienteId, Guid id, [FromQuery] bool removerPendentes = false)
     {
         await _service.DesativarAsync(clienteId, id, removerPendentes, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<object?> { Dados = null });
+    }
+
+    // Item 2 do Bloco 4 ("Visão de Futuro"): padrões detectados no histórico que ainda não são
+    // ContaRecorrente — "Criar Contas a Pagar?" na tela.
+    [HttpGet("{clienteId:guid}/sugestoes")]
+    public async Task<IActionResult> ListarSugestoes(Guid clienteId)
+    {
+        var resultado = await _detectorService.ListarSugestoesAsync(clienteId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<List<SugestaoRecorrenciaDto>> { Dados = resultado });
+    }
+
+    [HttpPost("{clienteId:guid}/sugestoes/ignorar")]
+    public async Task<IActionResult> IgnorarSugestao(Guid clienteId, [FromBody] IgnorarSugestaoRecorrenciaDto dto)
+    {
+        await _detectorService.IgnorarAsync(clienteId, dto.Chave, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<object?> { Dados = null });
     }
 }

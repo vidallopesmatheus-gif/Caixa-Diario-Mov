@@ -4,12 +4,14 @@ import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
 import {
   listarContasRecorrentes, criarContaRecorrente, atualizarContaRecorrente, desativarContaRecorrente,
+  listarSugestoesRecorrencia, ignorarSugestaoRecorrencia, type SugestaoRecorrencia,
 } from '../../api/contasRecorrentes'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { criarContaProvisionada, atualizarContaProvisionada, excluirContaProvisionada } from '../../api/contasProvisionadas'
 import { listarSugestoesVinculo, ignorarSugestaoVinculo, type SugestaoVinculo } from '../../api/conciliacao'
+import { listarCategorias } from '../../api/categorias'
 import Modal from '../../components/shared/Modal'
-import type { ContaProvisionada, ContaRecorrente, ContaBancaria } from '../../types'
+import type { ContaProvisionada, ContaRecorrente, ContaBancaria, Categorias } from '../../types'
 import './ClientContas.css'
 import './ClientContasBancarias.css'
 
@@ -57,6 +59,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [recFim, setRecFim] = useState('')
   const [recPeriodicidade, setRecPeriodicidade] = useState('Mensal')
   const [recParcelas, setRecParcelas] = useState('')
+  const [recCategoria, setRecCategoria] = useState('')
   const [recValorVariavel, setRecValorVariavel] = useState(false)
   const [recDiaVencimento, setRecDiaVencimento] = useState('')
   const [saving, setSaving] = useState(false)
@@ -65,6 +68,12 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   const [recorrentes, setRecorrentes] = useState<ContaRecorrente[]>([])
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
+  // Item 1 do Bloco 4 ("Visão de Futuro"): categoria obrigatória em recorrência — usada tanto no
+  // formulário de criação quanto no de edição e na correção inline das recorrências antigas.
+  const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
+  const [correcaoCategoriaId, setCorrecaoCategoriaId] = useState<string | null>(null)
+  const [correcaoCategoriaValor, setCorrecaoCategoriaValor] = useState('')
+  const [salvandoCorrecaoCategoria, setSalvandoCorrecaoCategoria] = useState(false)
   const [contaSelecionadaId, setContaSelecionadaId] = useState('')
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [pendingDuplicate, setPendingDuplicate] = useState<{
@@ -105,6 +114,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [editRec, setEditRec] = useState<ContaRecorrente | null>(null)
   const [editRecValorDisplay, setEditRecValorDisplay] = useState('')
   const [editRecValor, setEditRecValor] = useState(0)
+  const [editRecCategoria, setEditRecCategoria] = useState('')
   const [editRecPeriodicidade, setEditRecPeriodicidade] = useState('Mensal')
   const [editRecInicio, setEditRecInicio] = useState('')
   const [editRecFim, setEditRecFim] = useState('')
@@ -125,10 +135,16 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [sugestoesIgnoradas, setSugestoesIgnoradas] = useState<Set<string>>(new Set())
   const [vinculandoSugestaoId, setVinculandoSugestaoId] = useState<string | null>(null)
 
+  // ── Item 2 do Bloco 4 ("Visão de Futuro"): padrões detectados no histórico sem recorrência ──
+  const [sugestoesRecorrencia, setSugestoesRecorrencia] = useState<SugestaoRecorrencia[]>([])
+  const [ignorandoRecorrenciaChave, setIgnorandoRecorrenciaChave] = useState<string | null>(null)
+
   useEffect(() => {
     if (!clienteId) return
     listarContasRecorrentes(clienteId).then(setRecorrentes).catch(console.error)
     listarContasBancarias(clienteId).then(setContasBancarias).catch(console.error)
+    listarCategorias().then(setCategorias).catch(console.error)
+    listarSugestoesRecorrencia(clienteId).then(setSugestoesRecorrencia).catch(console.error)
   }, [clienteId])
 
   useEffect(() => {
@@ -174,6 +190,33 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     if (clienteId) ignorarSugestaoVinculo(clienteId, s.contaProvisionadaId, s.lancamentoId).catch(console.error)
   }
 
+  // Item 2 do Bloco 4: pré-preenche o formulário de recorrência com a sugestão detectada — o
+  // cliente só confirma com "＋ Adicionar Recorrente" (não cria nada sozinho, nunca sem revisão).
+  function usarSugestaoRecorrencia(s: SugestaoRecorrencia) {
+    setTipo(s.tipo === 'Receber' ? 'receber' : 'pagar')
+    setDesc(s.descricao)
+    setValorDisplay(fmtNum(s.valorMedio))
+    setValor(s.valorMedio)
+    setIsRecorrente(true)
+    setRecCategoria(s.categoria ?? '')
+    if (s.contaBancariaId) setContaSelecionadaId(s.contaBancariaId)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  async function handleIgnorarSugestaoRecorrencia(s: SugestaoRecorrencia) {
+    if (!clienteId) return
+    setIgnorandoRecorrenciaChave(s.chave)
+    try {
+      await ignorarSugestaoRecorrencia(clienteId, s.chave)
+      setSugestoesRecorrencia(prev => prev.filter(x => x.chave !== s.chave))
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
+    } finally {
+      setIgnorandoRecorrenciaChave(null)
+    }
+  }
+
   useEffect(() => {
     if (!contasBancarias.length) return
     if (!contaSelecionadaId) {
@@ -188,7 +231,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   function resetForm() {
     setDesc(''); setValorDisplay(''); setValor(0); setVenc(todayISO())
     setRecInicio(todayISO()); setRecFim(''); setRecPeriodicidade('Mensal'); setRecParcelas('')
-    setRecValorVariavel(false); setRecDiaVencimento('')
+    setRecCategoria(''); setRecValorVariavel(false); setRecDiaVencimento('')
     setTipo('receber')
     if (contasBancarias.length > 0) {
       const caixa = contasBancarias.find(c => c.tipo === 'Caixa' || c.nome.toLowerCase() === 'caixa') ?? contasBancarias[0]
@@ -216,8 +259,9 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       if (isRecorrente) {
         if (!recInicio) { setMsg('Informe a data de início.'); setMsgOk(false); return }
         if (!contaSelecionadaId) { setMsg('Cadastre uma conta bancária em Configurações antes de continuar.'); setMsgOk(false); return }
+        if (!recCategoria) { setMsg('Selecione a categoria da recorrência.'); setMsgOk(false); return }
         const nova = await criarContaRecorrente({
-          clienteId, descricao: desc, valor,
+          clienteId, descricao: desc, valor, categoria: recCategoria,
           tipo: tipo === 'receber' ? 'Receber' : 'Pagar',
           dataInicio: recInicio, dataFim: recFim || undefined,
           periodicidade: recPeriodicidade,
@@ -509,6 +553,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     setEditRec(r)
     setEditRecValor(r.valor)
     setEditRecValorDisplay(fmtNum(r.valor))
+    setEditRecCategoria(r.categoria ?? '')
     setEditRecPeriodicidade(r.periodicidade)
     setEditRecInicio(r.dataInicio)
     setEditRecFim(r.dataFim ?? '')
@@ -518,12 +563,31 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     setEditRecAlcance('')
   }
 
+  // Item 1 do Bloco 4: correção rápida das recorrências antigas sem categoria, sem precisar abrir
+  // o modal de edição inteiro — aparece como uma linha extra só nelas, na própria lista.
+  async function salvarCorrecaoCategoria(r: ContaRecorrente) {
+    if (!clienteId || !correcaoCategoriaValor) return
+    setSalvandoCorrecaoCategoria(true)
+    try {
+      const atualizada = await atualizarContaRecorrente(clienteId, r.id, { categoria: correcaoCategoriaValor })
+      setRecorrentes(prev => prev.map(x => x.id === atualizada.id ? atualizada : x))
+      setCorrecaoCategoriaId(null)
+      setCorrecaoCategoriaValor('')
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e))
+      setMsgOk(false)
+    } finally {
+      setSalvandoCorrecaoCategoria(false)
+    }
+  }
+
   async function confirmarEdicaoRecorrencia() {
-    if (!editRec || !clienteId || !editRecAlcance || !editRecValor) return
+    if (!editRec || !clienteId || !editRecAlcance || !editRecValor || !editRecCategoria) return
     setSalvandoEditRec(true)
     try {
       const atualizada = await atualizarContaRecorrente(clienteId, editRec.id, {
         valor: editRecValor,
+        categoria: editRecCategoria,
         periodicidade: editRecPeriodicidade,
         dataInicio: editRecInicio,
         dataFim: editRecFim || undefined,
@@ -674,7 +738,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
   // Conta bancária agora é obrigatória pra QUALQUER lançamento, recorrente ou não (Fase 0.2) —
   // antes, isRecorrente pulava essa checagem e deixava nascer recorrência sem conta vinculada.
-  const podeAdicionar = !!desc && valor > 0 && (!isRecorrente || !!recInicio) && !!contaSelecionadaId
+  const podeAdicionar = !!desc && valor > 0 && (!isRecorrente || (!!recInicio && !!recCategoria)) && !!contaSelecionadaId
 
   return (
     <>
@@ -756,6 +820,15 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           <div className="rec-options">
             <div className="conta-form-row">
               <div style={{ flex: 1 }}>
+                <label className="rec-field-label">Categoria</label>
+                <select value={recCategoria} onChange={e => setRecCategoria(e.target.value)} className="rec-field-input">
+                  <option value="">Selecione...</option>
+                  {(tipo === 'receber' ? categorias.entradas : categorias.saidas).map(c => (
+                    <option key={c.nome} value={c.nome}>{c.nome}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
                 <label className="rec-field-label">Início</label>
                 <input type="date" value={recInicio} onChange={e => setRecInicio(e.target.value)}
                   className="rec-field-input" />
@@ -792,8 +865,11 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
               <div style={{ flex: 2, display: 'flex', alignItems: 'center', gap: 6, paddingTop: 18 }}>
                 <input id="rec-valor-variavel" type="checkbox" className="rec-field-checkbox" checked={recValorVariavel}
                   onChange={e => setRecValorVariavel(e.target.checked)} />
-                <label htmlFor="rec-valor-variavel" style={{ fontSize: 13, color: 'var(--tx2)' }}>
-                  Valor variável — previsto = média das últimas 3 ocorrências pagas
+                <label
+                  htmlFor="rec-valor-variavel" style={{ fontSize: 13, color: 'var(--tx2)' }}
+                  title="A cada novo vencimento, o valor previsto é recalculado como a média das últimas 3 ocorrências PAGAS desta recorrência (nunca o valor cadastrado). Enquanto ainda não houver nenhuma paga, o valor previsto é o cadastrado abaixo."
+                >
+                  Valor variável — previsto = média das últimas 3 ocorrências pagas ⓘ
                 </label>
               </div>
             </div>
@@ -827,6 +903,32 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
                 <button className="btn-cancel" disabled={vinculandoSugestaoId === s.contaProvisionadaId}
                   onClick={() => ignorarSugestao(s)}>
                   Ignorar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {sugestoesRecorrencia.length > 0 && (
+        <div className="contas-section">
+          <h3>🔁 Parece uma conta recorrente? ({sugestoesRecorrencia.length})</h3>
+          {sugestoesRecorrencia.map(s => (
+            <div key={s.chave} className="conta-item" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <strong>{s.descricao}</strong> — {fmtBRL(s.valorMedio)}/mês ({s.tipo === 'Receber' ? 'a receber' : 'a pagar'})
+                <div style={{ fontSize: 12, color: 'var(--tx3)' }}>
+                  Apareceu em {s.quantidadeOcorrencias} meses diferentes · última vez em {fmtDate(s.ultimaOcorrencia)}
+                  {s.categoria ? ` · ${s.categoria}` : ''}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn-confirm" onClick={() => usarSugestaoRecorrencia(s)}>
+                  {s.tipo === 'Receber' ? 'Criar Conta a Receber?' : 'Criar Contas a Pagar?'}
+                </button>
+                <button className="btn-cancel" disabled={ignorandoRecorrenciaChave === s.chave}
+                  onClick={() => handleIgnorarSugestaoRecorrencia(s)}>
+                  {ignorandoRecorrenciaChave === s.chave ? 'Ignorando...' : 'Ignorar'}
                 </button>
               </div>
             </div>
@@ -1120,21 +1222,63 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       {recorrentes.length > 0 && (
         <div className="contas-section">
           <h3>🔁 Recorrentes Ativas ({recorrentes.length})</h3>
+          {recorrentes.some(r => !r.categoria) && (
+            <p className="rec-sem-categoria-aviso">
+              ⚠️ {recorrentes.filter(r => !r.categoria).length} recorrência(s) antiga(s) sem categoria — complete abaixo pra entrarem certo nos relatórios.
+            </p>
+          )}
           {recorrentes.map(r => (
-            <div key={r.id} className="conta-item">
-              <div className="conta-info">
-                <div className="conta-desc">{r.descricao}</div>
-                <div className="conta-meta">
-                  {r.tipo} · {fmtBRL(r.valor)} · {r.periodicidade} · desde {fmtDate(r.dataInicio)}
-                  {r.dataFim ? ` até ${fmtDate(r.dataFim)}` : ''}
-                  {r.quantidadeParcelas ? ` · ${r.quantidadeParcelas}x` : ''}
-                  {r.contaBancariaId ? ` · ${contasBancarias.find(c => c.id === r.contaBancariaId)?.nome ?? 'Conta'}` : ''}
+            <div key={r.id} className="conta-item-wrapper">
+              <div className="conta-item">
+                <div className="conta-info">
+                  <div className="conta-desc">{r.descricao}</div>
+                  <div className="conta-meta">
+                    {r.tipo} · {fmtBRL(r.valor)} · {r.periodicidade} · desde {fmtDate(r.dataInicio)}
+                    {r.dataFim ? ` até ${fmtDate(r.dataFim)}` : ''}
+                    {r.quantidadeParcelas ? ` · ${r.quantidadeParcelas}x` : ''}
+                    {r.contaBancariaId ? ` · ${contasBancarias.find(c => c.id === r.contaBancariaId)?.nome ?? 'Conta'}` : ''}
+                    {r.categoria ? ` · ${r.categoria}` : ''}
+                  </div>
+                </div>
+                <div className="conta-item-acoes">
+                  <button className="cb-btn-editar" onClick={() => abrirEdicaoRecorrencia(r)}>Editar</button>
+                  <button className="cb-btn-inativar" onClick={() => abrirExclusaoRecorrencia(r)}>Excluir</button>
                 </div>
               </div>
-              <div className="conta-item-acoes">
-                <button className="cb-btn-editar" onClick={() => abrirEdicaoRecorrencia(r)}>Editar</button>
-                <button className="cb-btn-inativar" onClick={() => abrirExclusaoRecorrencia(r)}>Excluir</button>
-              </div>
+              {!r.categoria && (
+                <div className="rec-sem-categoria-fix">
+                  {correcaoCategoriaId === r.id ? (
+                    <>
+                      <select
+                        value={correcaoCategoriaValor}
+                        onChange={e => setCorrecaoCategoriaValor(e.target.value)}
+                        autoFocus
+                      >
+                        <option value="">Selecione a categoria...</option>
+                        {(r.tipo === 'Receber' ? categorias.entradas : categorias.saidas).map(c => (
+                          <option key={c.nome} value={c.nome}>{c.nome}</option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn-confirm" disabled={!correcaoCategoriaValor || salvandoCorrecaoCategoria}
+                        onClick={() => salvarCorrecaoCategoria(r)}
+                      >
+                        {salvandoCorrecaoCategoria ? 'Salvando...' : 'Salvar'}
+                      </button>
+                      <button className="btn-cancel" onClick={() => { setCorrecaoCategoriaId(null); setCorrecaoCategoriaValor('') }}>
+                        Cancelar
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="rec-sem-categoria-btn"
+                      onClick={() => { setCorrecaoCategoriaId(r.id); setCorrecaoCategoriaValor('') }}
+                    >
+                      ⚠️ Sem categoria — clique para corrigir
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -1147,7 +1291,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         footer={
           <>
             <button className="btn-cancel" onClick={() => setEditRec(null)} disabled={salvandoEditRec}>Cancelar</button>
-            <button className="btn-confirm" onClick={confirmarEdicaoRecorrencia} disabled={salvandoEditRec || !editRecAlcance || !editRecValor}>
+            <button className="btn-confirm" onClick={confirmarEdicaoRecorrencia} disabled={salvandoEditRec || !editRecAlcance || !editRecValor || !editRecCategoria}>
               {salvandoEditRec ? 'Salvando...' : 'Salvar'}
             </button>
           </>
@@ -1173,6 +1317,15 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
                   onBlur={() => setEditRecValorDisplay(editRecValor ? fmtNum(editRecValor) : '')}
                 />
               </div>
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Categoria</label>
+              <select value={editRecCategoria} onChange={e => setEditRecCategoria(e.target.value)}>
+                <option value="">Selecione...</option>
+                {(editRec.tipo === 'Receber' ? categorias.entradas : categorias.saidas).map(c => (
+                  <option key={c.nome} value={c.nome}>{c.nome}</option>
+                ))}
+              </select>
             </div>
             <div className="inp-group" style={{ marginTop: 12 }}>
               <label>Periodicidade</label>
@@ -1201,8 +1354,11 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
             <div className="inp-group" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input id="edit-rec-valor-variavel" type="checkbox" className="rec-field-checkbox" checked={editRecValorVariavel}
                 onChange={e => setEditRecValorVariavel(e.target.checked)} />
-              <label htmlFor="edit-rec-valor-variavel" style={{ fontSize: 13, margin: 0 }}>
-                Valor variável — previsto = média das últimas 3 ocorrências pagas
+              <label
+                htmlFor="edit-rec-valor-variavel" style={{ fontSize: 13, margin: 0 }}
+                title="A cada novo vencimento, o valor previsto é recalculado como a média das últimas 3 ocorrências PAGAS desta recorrência (nunca o valor cadastrado). Enquanto ainda não houver nenhuma paga, o valor previsto é o cadastrado abaixo."
+              >
+                Valor variável — previsto = média das últimas 3 ocorrências pagas ⓘ
               </label>
             </div>
             <div className="inp-group" style={{ marginTop: 12 }}>

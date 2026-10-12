@@ -12,12 +12,13 @@ namespace CaixaDiario.Tests.Controllers;
 public class ContasRecorrentesControllerTests
 {
     private readonly Mock<IContaRecorrenteService> _serviceMock = new();
+    private readonly Mock<IDetectorRecorrenciaService> _detectorMock = new();
     private readonly ContasRecorrentesController _sut;
     private readonly Guid _usuarioId = Guid.NewGuid();
 
     public ContasRecorrentesControllerTests()
     {
-        _sut = new ContasRecorrentesController(_serviceMock.Object);
+        _sut = new ContasRecorrentesController(_serviceMock.Object, _detectorMock.Object);
         var claims = new[] { new Claim("id", _usuarioId.ToString()), new Claim("perfil", "admin") };
         _sut.ControllerContext = new ControllerContext
         {
@@ -100,5 +101,32 @@ public class ContasRecorrentesControllerTests
 
         Assert.IsType<OkObjectResult>(result);
         _serviceMock.Verify(s => s.DesativarAsync(clienteId, id, true, _usuarioId, "admin"), Times.Once);
+    }
+
+    // Item 2 do Bloco 4 ("Visão de Futuro")
+    [Fact]
+    public async Task ListarSugestoes_RetornaOkComLista()
+    {
+        var clienteId = Guid.NewGuid();
+        _detectorMock.Setup(d => d.ListarSugestoesAsync(clienteId, _usuarioId, "admin"))
+            .ReturnsAsync(new List<SugestaoRecorrenciaDto> { new() { Chave = "Pagar:X", Descricao = "X", Tipo = "Pagar" } });
+
+        var result = await _sut.ListarSugestoes(clienteId);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<List<SugestaoRecorrenciaDto>>>(ok.Value);
+        Assert.Single(body.Dados!);
+    }
+
+    [Fact]
+    public async Task IgnorarSugestao_RepassaChavePraOServico()
+    {
+        var clienteId = Guid.NewGuid();
+        _detectorMock.Setup(d => d.IgnorarAsync(clienteId, "Pagar:X", _usuarioId, "admin")).Returns(Task.CompletedTask);
+
+        var result = await _sut.IgnorarSugestao(clienteId, new IgnorarSugestaoRecorrenciaDto { Chave = "Pagar:X" });
+
+        Assert.IsType<OkObjectResult>(result);
+        _detectorMock.Verify(d => d.IgnorarAsync(clienteId, "Pagar:X", _usuarioId, "admin"), Times.Once);
     }
 }

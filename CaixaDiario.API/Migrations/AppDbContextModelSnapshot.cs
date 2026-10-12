@@ -897,6 +897,36 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("regras_categorizacao", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.SugestaoRecorrenciaIgnorada", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ChaveNormalizada")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("chave_normalizada");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClienteId", "ChaveNormalizada")
+                        .IsUnique();
+
+                    b.ToTable("sugestoes_recorrencia_ignoradas", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.SugestaoVinculoIgnorada", b =>
                 {
                     b.Property<Guid>("Id")

@@ -58,6 +58,12 @@ public class ContaRecorrenteService : IContaRecorrenteService
         if (!PeriodicidadesValidas.Contains(dto.Periodicidade))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Periodicidade inválida.", "periodicidade");
 
+        // Item 1 do Bloco 4 ("Visão de Futuro"): categoria passa a ser obrigatória em recorrências
+        // NOVAS — recorrências antigas sem categoria continuam existindo (nunca quebradas por uma
+        // regra criada depois delas); a tela sinaliza essas separadamente pro cliente completar.
+        if (string.IsNullOrWhiteSpace(dto.Categoria))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Categoria é obrigatória.", "categoria");
+
         if (dto.QuantidadeParcelas.HasValue && dto.QuantidadeParcelas.Value < 1)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Quantidade de parcelas deve ser maior que zero.", "quantidadeParcelas");
 
@@ -110,6 +116,12 @@ public class ContaRecorrenteService : IContaRecorrenteService
 
         if (dto.Periodicidade != null && !PeriodicidadesValidas.Contains(dto.Periodicidade))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Periodicidade inválida.", "periodicidade");
+
+        // dto.Categoria == null significa "não mudar" (padrão dos outros campos aqui); "" vazio é
+        // uma tentativa explícita de limpar — nunca permitida, senão uma recorrência já categorizada
+        // voltaria pro estado "sem categoria" que o item 1 do Bloco 4 está justamente corrigindo.
+        if (dto.Categoria != null && string.IsNullOrWhiteSpace(dto.Categoria))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Categoria é obrigatória.", "categoria");
 
         if (dto.DiaVencimento is < 1 or > 31)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Dia de vencimento deve estar entre 1 e 31.", "diaVencimento");

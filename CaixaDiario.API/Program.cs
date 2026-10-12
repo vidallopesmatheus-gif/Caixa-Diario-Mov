@@ -93,9 +93,11 @@ builder.Services.AddScoped<IContaProvisionadaService, ContaProvisionadaService>(
 builder.Services.AddScoped<IOcorrenciaRecorrenteDispensadaRepository, OcorrenciaRecorrenteDispensadaRepository>();
 builder.Services.AddScoped<IDuplicataDispensadaRepository, DuplicataDispensadaRepository>();
 builder.Services.AddScoped<ISugestaoVinculoIgnoradaRepository, SugestaoVinculoIgnoradaRepository>();
+builder.Services.AddScoped<ISugestaoRecorrenciaIgnoradaRepository, SugestaoRecorrenciaIgnoradaRepository>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IRecorrenciaService, RecorrenciaService>();
 builder.Services.AddScoped<IContaRecorrenteService, ContaRecorrenteService>();
+builder.Services.AddScoped<IDetectorRecorrenciaService, DetectorRecorrenciaService>();
 builder.Services.AddScoped<IMetricasService, MetricasService>();
 builder.Services.AddScoped<IProjecaoService, ProjecaoService>();
 builder.Services.AddScoped<IPreferenciasFuturoService, PreferenciasFuturoService>();

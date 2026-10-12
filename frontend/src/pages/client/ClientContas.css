@@ -129,3 +129,25 @@
   .conta-valor { align-self: flex-start; }
   .conta-item-acoes { width: 100%; justify-content: flex-end; }
 }
+
+/* Item 1 do Bloco 4 ("Visão de Futuro"): recorrências antigas sem categoria. */
+.conta-item-wrapper { margin-bottom: 8px; }
+.conta-item-wrapper .conta-item { margin-bottom: 0; }
+.rec-sem-categoria-aviso {
+  background: var(--warning-soft, rgba(217,119,6,.1)); border: 1px solid var(--warning);
+  color: var(--warning); font-size: 13px; padding: 8px 14px; border-radius: 8px; margin-bottom: 10px;
+}
+.rec-sem-categoria-fix {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  background: rgba(217,119,6,.06); border: 1px solid rgba(217,119,6,.25); border-top: none;
+  border-radius: 0 0 10px 10px; padding: 8px 14px;
+}
+.rec-sem-categoria-fix select {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--bd); background: var(--bg);
+  color: var(--tx1); font-size: 13px;
+}
+.rec-sem-categoria-btn {
+  background: none; border: none; color: var(--warning); font-size: 13px; font-weight: 600;
+  cursor: pointer; padding: 0;
+}
+.rec-sem-categoria-btn:hover { text-decoration: underline; }
