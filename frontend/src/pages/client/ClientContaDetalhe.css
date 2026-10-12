@@ -141,6 +141,101 @@
   margin: 0;
 }
 
+/* ── Barra de filtros (Bloco 2, item 6) ── */
+
+.cd-filtros-extrato {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.cd-filtro-busca {
+  flex: 1 1 220px;
+  min-width: 160px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg-input);
+  color: var(--tx1);
+  font-size: 13px;
+}
+
+.cd-filtros-extrato select {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg-input);
+  color: var(--tx1);
+  font-size: 13px;
+}
+
+.cd-filtro-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tx3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cd-filtro-check input {
+  margin: 0;
+}
+
+/* ── Seleção em lote (Bloco 2, item 7) ── */
+
+.cd-lote-barra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--tx1);
+}
+
+.cd-lote-btn {
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--bd);
+  background: var(--bg-card);
+  color: var(--tx1);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cd-lote-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cd-lote-btn-excluir:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.cd-lote-limpar {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--tx3);
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.cd-checkbox-selecao {
+  margin: 0;
+}
+
 /* ── Agrupamento por dia (Money Vision — Bloco 1, item 4) ── */
 
 .cd-extrato-grupo-dia {
@@ -182,7 +277,7 @@
 
 .cd-extrato-linha {
   display: grid;
-  grid-template-columns: 96px 1fr 180px 110px;
+  grid-template-columns: 20px 96px 1fr 180px 110px;
   gap: 8px;
   align-items: center;
   padding: 10px 8px;
@@ -192,7 +287,7 @@
 }
 
 .cd-extrato-lista.cd-extrato-lista--com-saldo .cd-extrato-linha {
-  grid-template-columns: 96px 1fr 180px 110px 110px;
+  grid-template-columns: 20px 96px 1fr 180px 110px 110px;
 }
 
 .cd-extrato-linha:last-child {
@@ -302,21 +397,30 @@
 
 .cd-extrato-card {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   padding: 12px 8px;
-  border: none;
   border-bottom: 1px solid var(--bd);
-  background: none;
-  color: var(--tx1);
-  text-align: left;
-  cursor: pointer;
 }
 
 .cd-extrato-card:last-child {
   border-bottom: none;
+}
+
+.cd-extrato-card-corpo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--tx1);
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
 }
 
 .cd-extrato-card-desc {
