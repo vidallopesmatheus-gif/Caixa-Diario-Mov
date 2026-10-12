@@ -7,6 +7,7 @@ import * as contasBancariasApi from '../../api/contasBancarias'
 import * as categoriasApi from '../../api/categorias'
 import * as importacaoApi from '../../api/importacao'
 import * as regrasApi from '../../api/regras'
+import * as transferenciasApi from '../../api/transferencias'
 import type { ContaBancaria, LancamentoExtrato, Categorias } from '../../types'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
@@ -62,6 +63,7 @@ beforeEach(() => {
   vi.mocked(contasBancariasApi.obterPendenciasConta).mockResolvedValue({ recebiveis: [], pagamentos: [] })
   vi.mocked(categoriasApi.listarCategorias).mockResolvedValue(categorias)
   vi.mocked(regrasApi.contarCorrespondencias).mockResolvedValue(0)
+  vi.mocked(transferenciasApi.listarTransferencias).mockResolvedValue([])
 })
 
 test('agrupa lançamentos por dia com entradas, saídas e saldo do dia no cabeçalho', async () => {
@@ -266,4 +268,20 @@ test('ajuste de saldo não entra no subtotal de Entradas/Saídas do dia, mas o s
   expect(within(cabecalho).getByText(/Entradas \+R\$ 300,00/)).toBeInTheDocument()
   expect(within(cabecalho).queryByText(/Saídas/)).not.toBeInTheDocument()
   expect(within(cabecalho).getByText(/Saldo do dia R\$ 132,66/)).toBeInTheDocument()
+})
+
+// ── Bloco 4: chip de transferência mostra a outra conta ─────────────────────────────────────────
+
+test('chip de transferência mostra "⇄ {outra conta}" em vez do literal "Transferência"', async () => {
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([
+    lancamento({ categoria: 'Transferência', transferenciaId: 'transf-1' }),
+  ])
+  vi.mocked(transferenciasApi.listarTransferencias).mockResolvedValue([{
+    id: 'transf-1', clienteId: 'cliente-1', contaOrigemId: 'conta-1', contaOrigemNome: 'Nubank',
+    contaDestinoId: 'conta-investimento', contaDestinoNome: 'Nubank Investimento', data: '2026-10-08', valor: 50, criadoEm: '2026-10-08',
+  }])
+  renderPagina()
+
+  const chip = await screen.findByRole('button', { name: '⇄ Nubank Investimento' })
+  expect(chip.className).toContain('cd-chip-transferencia')
 })

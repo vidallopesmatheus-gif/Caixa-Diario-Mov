@@ -372,6 +372,35 @@ public class ImportacaoServiceTests
         Assert.Equal(1, resultado.TotalPendentesCategorizacao);
     }
 
+    // Money Vision — Bloco 4, item 2 da Parte 2: "Caixinha"/"Porquinho"/"Guardar dinheiro"/
+    // "Resgate" sugerem Categoria "Transferência" assim como "Aplicação RDB/CDB" já fazia.
+    [Theory]
+    [InlineData("Transferência para Caixinha Nubank")]
+    [InlineData("Porquinho PicPay")]
+    [InlineData("Guardar dinheiro - Reserva")]
+    [InlineData("Resgate de aplicação")]
+    public async Task ImportarArquivoAsync_SaidaComPalavraChaveDeTransferencia_SugereCategoriaTransferencia(string descricao)
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = $"Data;Descricao;Valor\n26/07/2026;{descricao};-300,00\n";
+        var arquivo = CriarArquivoTexto("extrato.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        var saida = Assert.Single(criado!.Saidas);
+        Assert.Equal("Transferência", saida.Categoria);
+        Assert.True(saida.PendenteCategorizacao);
+        Assert.True(saida.CategoriaSugerida);
+    }
+
     [Fact]
     public async Task ImportarArquivoAsync_SaidaComRegraDoCliente_ConfirmaSozinhaSemSugestao()
     {

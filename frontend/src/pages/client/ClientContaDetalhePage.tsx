@@ -14,7 +14,8 @@ import {
 import { previewExtrato, importarExtrato, categorizarPendentes, excluirLancamento } from '../../api/importacao'
 import type { DuplicataProvavel } from '../../api/contasBancarias'
 import type { ResolucaoDuplicata } from '../../api/importacao'
-import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
+import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia, listarTransferencias } from '../../api/transferencias'
+import type { Transferencia } from '../../api/transferencias'
 import { listarSugestoesVinculo } from '../../api/conciliacao'
 import { atualizarContaProvisionada } from '../../api/contasProvisionadas'
 import { listarRegras, atualizarRegra, criarRegra, contarCorrespondencias, aplicarRegraRetroativamente } from '../../api/regras'
@@ -101,6 +102,9 @@ export default function ClientContaDetalhePage() {
   // ── Editar categoria de lançamento já classificado (reaproveita o mesmo endpoint da
   // categorização de pendentes — ele já localiza o item por Id e não depende de estar pendente) ──
   const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
+  // Bloco 4 (Money Vision): o chip de transferência mostra o nome da OUTRA conta ("⇄ Investimento
+  // Nubank"), não o literal "Transferência" — precisa das Transferencias do cliente pra achar qual é a outra ponta.
+  const [transferencias, setTransferencias] = useState<Transferencia[]>([])
   const [lancamentoParaEditar, setLancamentoParaEditar] = useState<LancamentoExtrato | null>(null)
   const [categoriaEdicao, setCategoriaEdicao] = useState('')
   const [salvandoEdicao, setSalvandoEdicao] = useState(false)
@@ -172,6 +176,7 @@ export default function ClientContaDetalhePage() {
   useEffect(() => { carregarExtrato() }, [carregarExtrato])
 
   useEffect(() => { if (clienteId) listarCategorias(clienteId).then(setCategorias).catch(() => {}) }, [clienteId])
+  useEffect(() => { if (clienteId) listarTransferencias(clienteId).then(setTransferencias).catch(() => {}) }, [clienteId])
 
   const carregarPendencias = useCallback(() => {
     if (!contaId) return
@@ -625,10 +630,26 @@ export default function ClientContaDetalhePage() {
     return l.valor >= 0 ? 'receita' : 'despesa'
   }
 
-  function rotuloChip(tipo: TipoChip, categoria?: string): string {
+  // Bloco 4, item 1: o chip de transferência mostra a OUTRA conta ("⇄ Investimento Nubank"), não
+  // o literal "Transferência" — olha nas Transferencias do cliente qual é a ponta que não é esta conta.
+  const nomeOutraContaPorTransferenciaId = useMemo(() => {
+    const mapa = new Map<string, string>()
+    if (!conta) return mapa
+    for (const t of transferencias) {
+      if (t.contaOrigemId === conta.id) mapa.set(t.id, t.contaDestinoNome)
+      else if (t.contaDestinoId === conta.id) mapa.set(t.id, t.contaOrigemNome)
+    }
+    return mapa
+  }, [transferencias, conta])
+
+  function rotuloChip(l: LancamentoExtrato, tipo: TipoChip): string {
     if (tipo === 'ajuste') return 'Ajuste de saldo'
     if (tipo === 'sem-categoria') return 'Sem categoria'
-    return categoria || '—'
+    if (tipo === 'transferencia') {
+      const outraConta = l.transferenciaId ? nomeOutraContaPorTransferenciaId.get(l.transferenciaId) : undefined
+      return outraConta ? `⇄ ${outraConta}` : 'Transferência'
+    }
+    return l.categoria || '—'
   }
 
   // Barra de filtros (item 6, Bloco 2) — nomes únicos pro dropdown de categoria.
@@ -852,7 +873,7 @@ export default function ClientContaDetalhePage() {
         onClick={() => !naoClicavel && setChipAbertoKey(chave)}
         disabled={salvandoChip || naoClicavel}
       >
-        {rotuloChip(tipo, l.categoria)}
+        {rotuloChip(l, tipo)}
         {l.regraCategorizacaoId && <span title="Categorizado automaticamente por uma regra"> ⚙️</span>}
       </button>
     )
@@ -1184,7 +1205,7 @@ export default function ClientContaDetalhePage() {
                             <span className="cd-extrato-desc-titulo">{titulo}</span>
                             {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
                             <span className={`cd-chip cd-chip-${tipo}`}>
-                              {rotuloChip(tipo, l.categoria)}
+                              {rotuloChip(l, tipo)}
                             </span>
                           </span>
                           <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>

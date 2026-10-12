@@ -384,6 +384,89 @@ public class TransferenciaService : ITransferenciaService
         return resultado;
     }
 
+    // Money Vision — Bloco 4, item 4 da Parte 2: varre todos os registros do cliente procurando
+    // lançamentos que a importação (dicionário de palavras-chave de ImportacaoService) já marcou
+    // como "parece transferência" (Categoria="Transferência", CategoriaSugerida=true) mas que
+    // ainda estão pendentes — nunca passaram por ConverterLancamentoAsync de verdade.
+    public async Task<List<SugestaoTransferenciaSemParDto>> ListarSugestoesSemParAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
+    {
+        VerificarAcesso(clienteId, usuarioLogadoId, perfil);
+
+        var contas = await _contaRepo.ListarPorClienteAsync(clienteId);
+        var contasAtivasPorId = contas.Where(c => c.Ativa).ToDictionary(c => c.Id);
+        // Só dá pra sugerir destino com confiança quando há exatamente UMA conta de investimento
+        // ativa — com duas ou mais, adivinhar qual é "a certa" erraria tanto quanto não sugerir nada.
+        var unicaContaInvestimento = contas.Count(c => c.Ativa && c.Tipo == "Investimento") == 1
+            ? contas.First(c => c.Ativa && c.Tipo == "Investimento") : null;
+
+        var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
+        var resultado = new List<SugestaoTransferenciaSemParDto>();
+
+        foreach (var registro in registros.Where(r => !r.Excluido))
+        {
+            if (!contasAtivasPorId.TryGetValue(registro.ContaBancariaId ?? Guid.Empty, out var conta)) continue;
+            var destinoSugerido = unicaContaInvestimento != null && unicaContaInvestimento.Id != conta.Id ? unicaContaInvestimento : null;
+
+            foreach (var entrada in registro.Entradas.Where(EhSugestaoSemPar))
+            {
+                resultado.Add(new SugestaoTransferenciaSemParDto
+                {
+                    ContaBancariaId = conta.Id, ContaBancariaNome = conta.Nome, LancamentoId = entrada.Id,
+                    Data = registro.Data, Descricao = entrada.Descricao, Valor = entrada.Valor, Tipo = "Entrada",
+                    ContaDestinoSugeridaId = destinoSugerido?.Id, ContaDestinoSugeridaNome = destinoSugerido?.Nome,
+                });
+            }
+            foreach (var saida in registro.Saidas.Where(EhSugestaoSemPar))
+            {
+                resultado.Add(new SugestaoTransferenciaSemParDto
+                {
+                    ContaBancariaId = conta.Id, ContaBancariaNome = conta.Nome, LancamentoId = saida.Id,
+                    Data = registro.Data, Descricao = saida.Descricao, Valor = -saida.Valor, Tipo = "Saida",
+                    ContaDestinoSugeridaId = destinoSugerido?.Id, ContaDestinoSugeridaNome = destinoSugerido?.Nome,
+                });
+            }
+        }
+
+        return resultado.OrderByDescending(s => s.Data).ToList();
+    }
+
+    private static bool EhSugestaoSemPar(ItemFinanceiro e) =>
+        e.Categoria == "Transferência" && e.CategoriaSugerida && e.PendenteCategorizacao;
+
+    private static bool EhSugestaoSemPar(ItemFinanceiroSaida s) =>
+        s.Categoria == "Transferência" && s.CategoriaSugerida && s.PendenteCategorizacao;
+
+    public async Task DescartarSugestaoAsync(DescartarSugestaoTransferenciaDto dto, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(dto.ContaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+
+        var registro = await _registroRepo.ObterPorContaEDataAsync(dto.ContaId, dto.Data)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+
+        var saida = registro.Saidas.FirstOrDefault(s => s.Id == dto.LancamentoId);
+        if (saida != null)
+        {
+            saida.Categoria = string.Empty;
+            saida.TipoCusto = null;
+            saida.CategoriaSugerida = false;
+            registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas);
+        }
+        else
+        {
+            var entrada = registro.Entradas.FirstOrDefault(e => e.Id == dto.LancamentoId)
+                ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+            entrada.Categoria = null;
+            entrada.TipoCusto = null;
+            entrada.CategoriaSugerida = false;
+            registro.Entradas = new List<ItemFinanceiro>(registro.Entradas);
+        }
+
+        registro.SalvoEm = DateTime.UtcNow;
+        await _registroRepo.AtualizarAsync(registro);
+    }
+
     private async Task<ContaBancaria> ObterContaDoClienteAsync(Guid contaId, Guid clienteId)
     {
         var conta = await _contaRepo.ObterPorIdAsync(contaId)
