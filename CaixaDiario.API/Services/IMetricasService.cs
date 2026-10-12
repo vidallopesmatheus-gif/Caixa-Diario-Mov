@@ -12,10 +12,14 @@ public interface IMetricasService
     MetricasPeriodoDto CalcularPeriodo(
         List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal saldoConsolidado,
         decimal multiplo = 3m, IReadOnlyList<Categoria>? categorias = null);
-    List<EvolucaoMensalDto> CalcularEvolucao(List<RegistroDiario> registros, int meses);
+    List<EvolucaoMensalDto> CalcularEvolucao(List<RegistroDiario> registros, int meses, DateOnly? ateMesReferencia = null);
     DreDto CalcularDre(List<RegistroDiario> registros, IReadOnlyList<Categoria>? categorias = null);
+    // Item 10 do Bloco 5 ("Visão de Futuro"): mesReferencia (null = mês atual) permite que o
+    // front caia pro último mês com dados quando o atual ainda está vazio — mesma lógica que já
+    // existia na DRE (Item 1.11), agora disponível aqui também.
     IndicadoresDecisaoDto CalcularIndicadores(
-        List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null, decimal saldoDisponivel = 0m);
+        List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null,
+        decimal saldoDisponivel = 0m, DateOnly? mesReferencia = null);
     PontoEquilibrioDetalhadoDto CalcularPontoEquilibrio(decimal receitaBruta, decimal margemContribuicao, decimal despesasFixasTotal, DateOnly diaReferencia);
     List<ResultadoLiquidoMensalDto> CalcularResultadoLiquidoMensal(List<RegistroDiario> registros, DateOnly ateMesReferencia, IReadOnlyList<Categoria>? categorias, int meses = 6);
 }

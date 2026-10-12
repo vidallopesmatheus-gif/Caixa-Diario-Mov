@@ -356,6 +356,63 @@ public class MetricasServiceTests
         Assert.Null(categoria.VariacaoPercentual);
     }
 
+    // ---- Item 10 do Bloco 5 ("Visão de Futuro"): mesReferencia (fallback de mês vazio) ----
+
+    [Fact]
+    public void CalcularIndicadores_ComMesReferenciaNoPassado_UsaOsDadosDesseMesEmVezDoAtual()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var mesPassado = hoje.AddMonths(-2);
+        var reg = CriarRegistro(mesPassado,
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new() { Item("Aluguel", 200m, "Aluguel", "CustoFixo") });
+        // "hoje" não tem nenhum lançamento — mês atual vazio; só o mesPassado tem dado.
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }, mesReferencia: new DateOnly(mesPassado.Year, mesPassado.Month, 1));
+
+        Assert.Equal(1000m, resultado.Dre.ReceitaBruta);
+        var categoria = Assert.Single(resultado.RankingCategorias);
+        Assert.Equal(200m, categoria.Total);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_ComMesReferenciaNoPassado_NaoExtrapolaORanking()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var mesPassado = hoje.AddMonths(-2);
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(mesPassado, new(), new() { Item("Aluguel", 100m, "Aluguel", "CustoFixo") }),
+        };
+        for (int i = 1; i <= 3; i++)
+            registros.Add(CriarRegistro(mesPassado.AddMonths(-i), new(), new() { Item("Aluguel", 100m, "Aluguel", "CustoFixo") }));
+
+        var resultado = _sut.CalcularIndicadores(registros, mesReferencia: new DateOnly(mesPassado.Year, mesPassado.Month, 1));
+
+        // Se extrapolasse (como faz pro mês em andamento), 100 ÷ dia-do-mesRef(=1) × dias-do-mês
+        // infladaria o total muito acima dos 100 históricos — mesRef passado nunca extrapola.
+        var categoria = resultado.RankingCategorias.Single(c => c.Nome == "Aluguel");
+        Assert.Equal(100m, categoria.MediaMesesAnteriores);
+        Assert.Equal(0m, categoria.VariacaoPercentual);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_ComMesReferenciaNoPassado_ComparaReceitaDosMesesInteiros()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var mesPassado = hoje.AddMonths(-2);
+        var mesAnterior = mesPassado.AddMonths(-1);
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(mesPassado, new() { Item("Venda", 1000m, "Vendas", "Receita") }, new()),
+            CriarRegistro(mesAnterior, new() { Item("Venda", 500m, "Vendas", "Receita") }, new()),
+        };
+
+        var resultado = _sut.CalcularIndicadores(registros, mesReferencia: new DateOnly(mesPassado.Year, mesPassado.Month, 1));
+
+        Assert.Equal(100m, resultado.VariacaoReceitaMesAnterior); // 1000 vs 500 = +100%
+    }
+
     // ---- Ponto de Equilíbrio ----
 
     [Fact]

@@ -7,6 +7,12 @@ export function fmtPct(value: number, casas = 1): string {
   return `${value.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`
 }
 
+/** Item 7 do Bloco 5 ("Visão de Futuro"): número com vírgula decimal pt-BR — "7,5" em vez de
+ * "7.5" (`.toFixed()` nunca usa vírgula, mesmo com o resto da tela em pt-BR). */
+export function fmtNumDecimal(value: number, casas = 1): string {
+  return value.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })
+}
+
 export function fmtDate(iso: string): string {
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`

@@ -99,6 +99,7 @@
   background: var(--sl-bg, #071a0f); border: 1px solid var(--sl-bd, #1a3a22);
   border-radius: 12px; padding: 16px 20px;
   display: flex; align-items: center; justify-content: space-between; margin: 16px 0;
+  flex-wrap: wrap; gap: 12px;
 }
 .saldo-calc-lbl { font-size: 13px; color: var(--tx3); }
 .saldo-calc-val { font-size: 24px; font-weight: 800; color: var(--success); }
@@ -180,4 +181,11 @@
     row-gap: 6px;
   }
   .lanc-acoes { justify-content: flex-end; }
+
+  /* Item 6 do Bloco 5: "Saldo calculado" à esquerda + input "Confirmar saldo" (140px fixos) à
+     direita não cabiam lado a lado em telas estreitas (ex.: 378px) — empilha, cada lado com a
+     largura toda. */
+  .saldo-box > div { width: 100%; }
+  .saldo-box > div:last-child { text-align: left !important; }
+  .saldo-box input[type="number"] { width: 100% !important; box-sizing: border-box; }
 }

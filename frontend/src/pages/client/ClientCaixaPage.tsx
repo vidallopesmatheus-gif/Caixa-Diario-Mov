@@ -69,6 +69,13 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const [entradaDisplays, setEntradaDisplays] = useState<string[]>([''])
   const [saidaDisplays, setSaidaDisplays] = useState<string[]>([''])
   const [confirmado, setConfirmado] = useState('')
+  // Item 5 do Bloco 5 ("Visão de Futuro"): "calculado" no momento em que "confirmado" foi
+  // carregado/sincronizado da última vez — ancora o efeito abaixo, que desloca "confirmado" pela
+  // MESMA diferença quando o usuário adiciona/edita um lançamento sem re-digitar o campo. Sem
+  // isso, "Confirmar saldo" ficava com o valor antigo (de antes da edição) na hora de salvar,
+  // silenciosamente divergindo do saldo real — preserva a diferença (reconciliação manual), só
+  // aplica o delta da nova movimentação.
+  const calculadoAnteriorRef = useRef(0)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
@@ -154,6 +161,18 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const calculado = inicio + totalEntradas - totalSaidas
   const dif = confirmado !== '' ? calculado - Number(confirmado) : null
 
+  // Item 5 do Bloco 5: desloca "confirmado" pela MESMA diferença que "calculado" mudou (nunca
+  // sobrescreve com o valor novo cru — isso destruiria uma reconciliação manual legítima).
+  // calculadoAnteriorRef é sincronizado nos 3 pontos que carregam/recarregam confirmado (troca de
+  // dia/conta e pós-salvar) com o calculado JÁ daquele momento, então nessas trocas o delta aqui
+  // sai zero — só dispara de verdade quando o usuário edita um lançamento na mesma tela aberta.
+  useEffect(() => {
+    const delta = calculado - calculadoAnteriorRef.current
+    calculadoAnteriorRef.current = calculado
+    if (delta === 0) return
+    setConfirmado(prev => prev === '' ? '' : String(Math.round((Number(prev) + delta) * 100) / 100))
+  }, [calculado])
+
   useEffect(() => {
     if (!clienteId || !contaId) return
     let ignore = false
@@ -179,6 +198,9 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setEntradaDisplays([''])
         setSaidaDisplays([''])
         setConfirmado(String(reg.saldoConfirmado))
+        calculadoAnteriorRef.current = reg.saldoInicio
+          + reg.entradas.reduce((s, e) => s + (Number(e.valor) || 0), 0)
+          - reg.saidas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
       } else {
         setInicio(reg?.saldoInicio ?? 0)
         setSavedEntradas([])
@@ -188,6 +210,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setEntradaDisplays([''])
         setSaidaDisplays([''])
         setConfirmado('')
+        calculadoAnteriorRef.current = reg?.saldoInicio ?? 0
       }
       if (!primeiraCargaFeita.current) {
         primeiraCargaFeita.current = true
@@ -351,6 +374,11 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSaidas([novaSaida(contaId)])
     setEntradaDisplays([''])
     setSaidaDisplays([''])
+    calculadoAnteriorRef.current = existe
+      ? reg!.saldoInicio
+        + reg!.entradas.reduce((s, e) => s + (Number(e.valor) || 0), 0)
+        - reg!.saidas.reduce((s, x) => s + (Number(x.valor) || 0), 0)
+      : reg?.saldoInicio ?? 0
   }
 
   async function handleSave() {

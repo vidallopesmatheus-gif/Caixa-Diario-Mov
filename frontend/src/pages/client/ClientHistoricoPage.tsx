@@ -91,7 +91,7 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
         <StatCard label="📅 Mês selecionado" value={monthLabel(mesSelecionado)} className="val-blue" />
         <StatCard label="📤 Total entradas" value={fmtBRL(totalEnt)} className="val-green" />
         <StatCard label="💸 Total saídas" value={fmtBRL(totalSai)} className="val-red" />
-        <StatCard label="💰 Último saldo" value={fmtBRL(ultimo)} className="val-green" />
+        <StatCard label="💰 Último saldo" value={fmtBRL(ultimo)} className={ultimo < 0 ? 'val-red' : 'val-green'} />
       </div>
 
       {doMes.length === 0 && (

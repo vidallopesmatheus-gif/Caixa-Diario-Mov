@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import StatCard from '../../components/shared/StatCard'
-import { fmtBRL, fmtPct as fmtPctBase } from '../../utils/format'
+import { fmtBRL, fmtPct as fmtPctBase, fmtNumDecimal } from '../../utils/format'
 import { obterIndicadores } from '../../api/metricas'
 import type { IndicadoresDecisao, CategoriaIndicador } from '../../api/metricas'
 import { useRegistros } from '../../hooks/useRegistros'
@@ -49,19 +49,46 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const [categoriaAberta, setCategoriaAberta] = useState<string | null>(null)
   const { registros } = useRegistros(clienteId)
 
+  // Item 10 do Bloco 5 ("Visão de Futuro"): mesmo fallback já usado na DRE (Item 1.11) — se o mês
+  // atual ainda não tem nenhum lançamento, usa o último mês com dados em vez de mostrar tudo
+  // zerado. Roda só uma vez, quando os registros terminam de carregar.
+  const [mesRefAjustado, setMesRefAjustado] = useState<string | null>(null)
+  const ajusteInicialRef = useRef(false)
+  useEffect(() => {
+    if (ajusteInicialRef.current) return
+    if (registros.length === 0) return
+    ajusteInicialRef.current = true
+
+    const hojeAjuste = new Date()
+    const anoHoje = hojeAjuste.getFullYear()
+    const mesHoje = hojeAjuste.getMonth() + 1
+    const temAtividadeNoMesAtual = registros.some(r => {
+      const [a, m] = r.data.split('-').map(Number)
+      return a === anoHoje && m === mesHoje
+    })
+    if (temAtividadeNoMesAtual) return
+
+    const maisRecente = registros.reduce((max, r) => (r.data > max ? r.data : max), registros[0].data)
+    setMesRefAjustado(maisRecente.slice(0, 7))
+  }, [registros])
+
   useEffect(() => {
     if (!clienteId) return
     setLoading(true)
-    obterIndicadores(clienteId)
+    obterIndicadores(clienteId, 13, mesRefAjustado ?? undefined)
       .then(setIndicadores)
       .catch(e => setErro(e instanceof Error ? e.message : 'Erro ao carregar indicadores.'))
       .finally(() => setLoading(false))
-  }, [clienteId])
+  }, [clienteId, mesRefAjustado])
 
   const hoje = new Date()
   const lancamentosPorCategoria = useMemo(() => {
-    const anoAtual = hoje.getFullYear()
-    const mesAtual = hoje.getMonth() + 1
+    let anoAtual = hoje.getFullYear()
+    let mesAtual = hoje.getMonth() + 1
+    if (mesRefAjustado) {
+      const [a, m] = mesRefAjustado.split('-').map(Number)
+      anoAtual = a; mesAtual = m
+    }
     const mapa: Record<string, { data: string; descricao: string; valor: number }[]> = {}
     for (const r of registros) {
       const [ano, mes] = r.data.split('-').map(Number)
@@ -74,7 +101,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
     }
     return mapa
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registros])
+  }, [registros, mesRefAjustado])
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
   if (erro) return <p className="val-red">{erro}</p>
@@ -200,6 +227,12 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
 
   return (
     <>
+      {mesRefAjustado && (
+        <p className="ind-vazio" style={{ marginBottom: 16 }}>
+          📅 O mês atual ainda não tem lançamentos — mostrando {mesLabel(mesRefAjustado)}, o último mês com movimento.
+        </p>
+      )}
+
       {/* BLOCO 1 */}
       <section className="ind-bloco">
         <h2 className="ind-pergunta">Meu negócio dá lucro de verdade?</h2>
@@ -350,7 +383,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
                 className="ind-margem-valor"
                 style={{ color: folegoCaixa.faixa === 'critico' ? 'var(--danger)' : folegoCaixa.faixa === 'atencao' ? 'var(--warning)' : 'var(--success)' }}
               >
-                {folegoCaixa.meses?.toFixed(1)} {folegoCaixa.meses === 1 ? 'mês' : 'meses'}
+                {fmtNumDecimal(folegoCaixa.meses ?? 0)} {folegoCaixa.meses === 1 ? 'mês' : 'meses'}
               </div>
               <div className="ind-margem-leitura">
                 Saldo disponível: {fmtBRL(folegoCaixa.saldoDisponivel)} · Custo fixo médio: {fmtBRL(folegoCaixa.custoFixoMedioMensal ?? 0)}/mês
@@ -398,7 +431,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
           <>
             <div className="ind-margem-card">
               <div className="ind-margem-valor">
-                {prazoRecebimento.mediaDias! > 0 ? '+' : ''}{prazoRecebimento.mediaDias?.toFixed(1)} dias
+                {prazoRecebimento.mediaDias! > 0 ? '+' : ''}{fmtNumDecimal(prazoRecebimento.mediaDias ?? 0)} dias
               </div>
               <div className="ind-margem-leitura">
                 Com base em {prazoRecebimento.quantidadeAmostras} conta(s) a receber já baixadas
