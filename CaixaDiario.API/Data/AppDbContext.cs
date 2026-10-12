@@ -197,6 +197,10 @@ public class AppDbContext : DbContext
             entity.Property(e => e.OrigemMetaId).HasColumnName("origem_meta_id");
             entity.Property(e => e.ValorAdiantado).HasColumnName("valor_adiantado").HasColumnType("decimal(18,2)").HasDefaultValue(0m);
             entity.Property(e => e.EconomiaJurosAcumulada).HasColumnName("economia_juros_acumulada").HasColumnType("decimal(18,2)").HasDefaultValue(0m);
+            entity.Property(e => e.Adiantamentos).HasColumnName("adiantamentos").HasColumnType("jsonb")
+                .HasConversion(
+                    v => JsonSerializer.Serialize(v, _jsonOptions),
+                    v => JsonSerializer.Deserialize<List<AdiantamentoFinanciamento>>(v, _jsonOptions) ?? new());
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
 

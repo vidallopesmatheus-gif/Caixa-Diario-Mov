@@ -370,6 +370,58 @@ public class FinanciamentoServiceTests
         Assert.Contains(registroAdiantamento.Saidas, s => s.Valor == 5000m && s.TipoCusto == LancamentoFiltro.TipoFinanciamento);
     }
 
+    // Itens 1 e 2 da rodada "Visão de Futuro": a tabela de parcelas precisa terminar em saldo
+    // 0,00 (o adiantamento entra como linha própria na linha do tempo) e os rótulos "(n/total)"
+    // de TODA parcela — paga ou não — precisam refletir o novo total após reduzir o prazo.
+    [Fact]
+    public async Task AdiantarAsync_ReduzirPrazo_TabelaTerminaEmSaldoZeroEContemALinhaDeAdiantamento()
+    {
+        var (clienteId, _, financiamento) = await CriarFinanciamentoPadraoAsync();
+        var parcelas = (await _sut.ListarParcelasAsync(financiamento.Id, clienteId, "cliente")).OrderBy(p => p.Vencimento).ToList();
+        foreach (var p in parcelas.Take(12))
+            await _sut.BaixarParcelaAsync(financiamento.Id, clienteId, "cliente",
+                new BaixarParcelaFinanciamentoDto { ParcelaId = p.Id, DataPagamento = p.Vencimento });
+
+        var dataAdiantamento = new DateOnly(2028, 2, 1);
+        await _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente",
+            new AdiantarFinanciamentoDto { Valor = 5000m, Data = dataAdiantamento, Modo = "ReduzirPrazo", Simular = false });
+
+        var linhas = (await _sut.ListarParcelasAsync(financiamento.Id, clienteId, "cliente")).OrderBy(p => p.Vencimento).ToList();
+
+        var adiantamentoRow = Assert.Single(linhas, l => l.Tipo == "Adiantamento");
+        Assert.Equal(5000m, adiantamentoRow.Valor);
+        Assert.Null(adiantamentoRow.Numero);
+        Assert.Equal(dataAdiantamento, adiantamentoRow.Vencimento);
+
+        var ultima = linhas.Last();
+        Assert.Equal("Parcela", ultima.Tipo);
+        Assert.Equal(0m, ultima.SaldoDevedor);
+    }
+
+    [Fact]
+    public async Task AdiantarAsync_ReduzirPrazo_RenumeraOsRotulosDeTodasAsParcelasComONovoTotal()
+    {
+        var (clienteId, _, financiamento) = await CriarFinanciamentoPadraoAsync();
+        var parcelas = (await _sut.ListarParcelasAsync(financiamento.Id, clienteId, "cliente")).OrderBy(p => p.Vencimento).ToList();
+        foreach (var p in parcelas.Take(12))
+            await _sut.BaixarParcelaAsync(financiamento.Id, clienteId, "cliente",
+                new BaixarParcelaFinanciamentoDto { ParcelaId = p.Id, DataPagamento = p.Vencimento });
+
+        await _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente",
+            new AdiantarFinanciamentoDto { Valor = 5000m, Data = new DateOnly(2028, 2, 1), Modo = "ReduzirPrazo", Simular = false });
+
+        var financiamentoAtualizado = (await _sut.ListarAsync(clienteId, clienteId, "cliente")).Single(f => f.Id == financiamento.Id);
+        Assert.Equal(35, financiamentoAtualizado.NumeroParcelas); // 12 pagas + 23 restantes
+
+        var itensDoContrato = _registroRepo.Registros.SelectMany(r => r.ContasPagar)
+            .Where(c => c.OrigemFinanciamentoId == financiamento.Id)
+            .OrderBy(c => c.DataVencimento)
+            .ToList();
+        Assert.Equal("Carro (1/35)", itensDoContrato[0].Descricao); // primeira paga, renumerada
+        Assert.Equal("Carro (13/35)", itensDoContrato[12].Descricao); // primeira ainda não paga
+        Assert.Equal("Carro (35/35)", itensDoContrato[^1].Descricao); // última da nova tabela
+    }
+
     [Fact]
     public async Task AdiantarAsync_ValorMaiorOuIgualAoSaldo_LancaDadosInvalidos()
     {
@@ -378,6 +430,88 @@ public class FinanciamentoServiceTests
         var dto = new AdiantarFinanciamentoDto { Valor = 30000m, Data = new DateOnly(2027, 2, 1), Modo = "ReduzirPrazo" };
         var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente", dto));
         Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task AdiantarAsync_FinanciamentoQuitado_LancaErro()
+    {
+        var (clienteId, _, financiamento) = await CriarFinanciamentoPadraoAsync(numeroParcelas: 2, valorParcela: 502m, valorBem: 1000m);
+        var parcelas = (await _sut.ListarParcelasAsync(financiamento.Id, clienteId, "cliente")).OrderBy(p => p.Vencimento).ToList();
+        foreach (var p in parcelas)
+            await _sut.BaixarParcelaAsync(financiamento.Id, clienteId, "cliente",
+                new BaixarParcelaFinanciamentoDto { ParcelaId = p.Id, DataPagamento = p.Vencimento });
+
+        var dto = new AdiantarFinanciamentoDto { Valor = 100m, Data = new DateOnly(2027, 3, 1), Modo = "ReduzirPrazo" };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente", dto));
+        Assert.Equal(CodigoRetorno.FINANCIAMENTO_JA_QUITADO, ex.Codigo);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-100)]
+    public async Task AdiantarAsync_ValorZeroOuNegativo_LancaDadosInvalidos(decimal valor)
+    {
+        var (clienteId, _, financiamento) = await CriarFinanciamentoPadraoAsync();
+        var dto = new AdiantarFinanciamentoDto { Valor = valor, Data = new DateOnly(2027, 2, 1), Modo = "ReduzirPrazo" };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente", dto));
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task AdiantarAsync_ModoInvalido_LancaDadosInvalidos()
+    {
+        var (clienteId, _, financiamento) = await CriarFinanciamentoPadraoAsync();
+        var dto = new AdiantarFinanciamentoDto { Valor = 100m, Data = new DateOnly(2027, 2, 1), Modo = "Invalido" };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente", dto));
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    // Caso defensivo: nenhuma parcela em aberto mas o financiamento ainda não foi marcado como
+    // Quitado (mutação direta no fake, sem passar por BaixarParcelaAsync, que já cobre o guard
+    // anterior ao marcar o contrato como Quitado).
+    [Fact]
+    public async Task AdiantarAsync_SemParcelasEmAberto_LancaDadosInvalidos()
+    {
+        var (clienteId, _, financiamento) = await CriarFinanciamentoPadraoAsync(numeroParcelas: 1, valorParcela: 1050m, valorBem: 1000m);
+        var parcela = _registroRepo.Registros.SelectMany(r => r.ContasPagar)
+            .Single(c => c.OrigemFinanciamentoId == financiamento.Id);
+        parcela.Pago = true;
+
+        var dto = new AdiantarFinanciamentoDto { Valor = 100m, Data = new DateOnly(2027, 2, 1), Modo = "ReduzirPrazo" };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente", dto));
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task AdiantarAsync_ContaBancariaNaoEncontrada_LancaErro()
+    {
+        var (clienteId, conta, financiamento) = await CriarFinanciamentoPadraoAsync();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync((ContaBancaria?)null);
+
+        var dto = new AdiantarFinanciamentoDto { Valor = 100m, Data = new DateOnly(2027, 2, 1), Modo = "ReduzirPrazo", Simular = false };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente", dto));
+        Assert.Equal(CodigoRetorno.REGISTRO_NAO_ENCONTRADO, ex.Codigo);
+    }
+
+    // Item 1 da rodada "Visão de Futuro": quando a parcela não tem amortização/juros/encargos
+    // calculados (nem vencimento próprio), a tabela usa o valor cheio e a 1ª parcela do contrato
+    // como fallback — garante que a tabela nunca "quebra" nesses itens legados/incompletos.
+    [Fact]
+    public async Task ListarParcelasAsync_ParcelaSemCamposCalculados_UsaFallbacksDeValorEData()
+    {
+        var (clienteId, _, financiamento) = await CriarFinanciamentoPadraoAsync(numeroParcelas: 1, valorParcela: 550m, valorBem: 500m);
+        var parcela = _registroRepo.Registros.SelectMany(r => r.ContasPagar)
+            .Single(c => c.OrigemFinanciamentoId == financiamento.Id);
+        parcela.ValorAmortizacao = null;
+        parcela.ValorJuros = null;
+        parcela.ValorEncargos = null;
+        parcela.DataVencimento = null;
+
+        var linha = Assert.Single(await _sut.ListarParcelasAsync(financiamento.Id, clienteId, "cliente"));
+        Assert.Equal(0m, linha.Juros);
+        Assert.Equal(0m, linha.Encargos);
+        Assert.Equal(linha.Valor, linha.Amortizacao);
+        Assert.Equal(financiamento.DataPrimeiraParcela, linha.Vencimento);
     }
 
     // ── ExcluirAsync ────────────────────────────────────────────────────────────────────────────
@@ -417,6 +551,40 @@ public class FinanciamentoServiceTests
 
         var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirAsync(financiamento.Id, clienteId, "cliente"));
         Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    // Item 3 da rodada "Visão de Futuro": excluir um financiamento que já teve adiantamento (sem
+    // nenhuma parcela paga — adiantar não exige isso) deixava a saída "Amortização extraordinária"
+    // órfã no Caixa, derrubando o saldo sem nenhum contrato por trás pra explicar.
+    [Fact]
+    public async Task ExcluirAsync_ComAdiantamentoERemoverAdiantamentosTrue_RemoveOLancamentoEDevolveOSaldo()
+    {
+        var (clienteId, conta, financiamento) = await CriarFinanciamentoPadraoAsync(numeroParcelas: 3, valorBem: 2500m);
+        var dataAdiantamento = new DateOnly(2027, 1, 20);
+        await _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente",
+            new AdiantarFinanciamentoDto { Valor = 500m, Data = dataAdiantamento, Modo = "ReduzirPrazo", Simular = false });
+
+        var registro = _registroRepo.Registros.Single(r => r.ContaBancariaId == conta.Id && r.Data == dataAdiantamento);
+        var saldoAntesExcluir = registro.SaldoFinal;
+
+        await _sut.ExcluirAsync(financiamento.Id, clienteId, "cliente", removerAdiantamentos: true);
+
+        Assert.DoesNotContain(registro.Saidas, s => s.OrigemFinanciamentoId == financiamento.Id);
+        Assert.Equal(saldoAntesExcluir + 500m, registro.SaldoFinal);
+    }
+
+    [Fact]
+    public async Task ExcluirAsync_ComAdiantamentoERemoverAdiantamentosFalse_MantemOLancamentoNoCaixa()
+    {
+        var (clienteId, conta, financiamento) = await CriarFinanciamentoPadraoAsync(numeroParcelas: 3, valorBem: 2500m);
+        var dataAdiantamento = new DateOnly(2027, 1, 20);
+        await _sut.AdiantarAsync(financiamento.Id, clienteId, "cliente",
+            new AdiantarFinanciamentoDto { Valor = 500m, Data = dataAdiantamento, Modo = "ReduzirPrazo", Simular = false });
+
+        await _sut.ExcluirAsync(financiamento.Id, clienteId, "cliente", removerAdiantamentos: false);
+
+        var registro = _registroRepo.Registros.Single(r => r.ContaBancariaId == conta.Id && r.Data == dataAdiantamento);
+        Assert.Contains(registro.Saidas, s => s.OrigemFinanciamentoId == financiamento.Id && s.Valor == 500m);
     }
 
     // ── EstornarParcelaAsync ────────────────────────────────────────────────────────────────────

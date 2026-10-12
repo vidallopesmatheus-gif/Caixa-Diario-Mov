@@ -13,4 +13,7 @@ public class ContaProvisionadaDto
     public decimal? ValorRealizado { get; set; }
     public Guid? ContaBancariaId { get; set; }
     public Guid? LancamentoVinculadoId { get; set; }
+    // Rodada "Visão de Futuro" item 6: permite o front agrupar as parcelas de um mesmo contrato
+    // de financiamento na lista de Contas a Pagar, em vez de uma a uma.
+    public Guid? OrigemFinanciamentoId { get; set; }
 }

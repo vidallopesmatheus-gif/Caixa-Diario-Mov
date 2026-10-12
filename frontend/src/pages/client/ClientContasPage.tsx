@@ -302,6 +302,37 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const totalPendentePagar = pendentesPagar.reduce((s, v) => s + v.conta.valor, 0)
   const contaSelecionada = contasBancarias.find(c => c.id === contaSelecionadaId)
 
+  // Item 6 do bundle "Visão de Futuro": a lista de A Pagar some embaixo de dezenas de parcelas de
+  // financiamento — por padrão mostra só os próximos 90 dias, e agrupa parcelas do mesmo contrato
+  // (origemFinanciamentoId) numa linha recolhível em vez de uma a uma.
+  const [pagarMostrarTudo, setPagarMostrarTudo] = useState(false)
+  const limite90Dias = addDays(todayISO(), 90)
+  const pendentesPagarVisiveis = pagarMostrarTudo
+    ? pendentesPagar
+    : pendentesPagar.filter(v => (v.conta.dataVencimento ?? v.registroData) <= limite90Dias)
+
+  const [gruposPagarAbertos, setGruposPagarAbertos] = useState<Set<string>>(new Set())
+  function toggleGrupoPagar(id: string) {
+    setGruposPagarAbertos(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const pagarAgrupado = useMemo(() => {
+    const grupos = new Map<string, ContaView[]>()
+    const semGrupo: ContaView[] = []
+    for (const v of pendentesPagarVisiveis) {
+      const chave = v.conta.origemFinanciamentoId
+      if (!chave) { semGrupo.push(v); continue }
+      if (!grupos.has(chave)) grupos.set(chave, [])
+      grupos.get(chave)!.push(v)
+    }
+    return { grupos, semGrupo }
+  }, [pendentesPagarVisiveis])
+
   function origemRegistro(view: ContaView) {
     return registros.find(r => r.id === view.registroId)
   }
@@ -605,7 +636,9 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       <div className="conta-info">
         <div className="conta-desc">{view.conta.descricao}</div>
         <div className="conta-meta">
-          Lançado em {fmtDate(view.registroData)}
+          {view.conta.pago || view.conta.dataVencimento !== view.registroData
+            ? `Lançado em ${fmtDate(view.registroData)}`
+            : 'Previsto'}
           {view.conta.dataVencimento ? ` · Vence: ${fmtDate(view.conta.dataVencimento)}` : ''}
           {` · Conta: ${contaNome}`}
           {vencida && <span className="conta-atrasada"> · atrasada há {diasAtraso} dia{diasAtraso > 1 ? 's' : ''}</span>}
@@ -844,9 +877,36 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       </div>
 
       <div className="contas-section">
-        <h3>📤 A Pagar ({pendentesPagar.length})</h3>
-        {pendentesPagar.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma pendente.</p>}
-        {pendentesPagar.map(renderConta)}
+        <h3>
+          📤 A Pagar ({pendentesPagarVisiveis.length}
+          {!pagarMostrarTudo && pendentesPagar.length !== pendentesPagarVisiveis.length ? ` de ${pendentesPagar.length}` : ''})
+        </h3>
+        <div className="contas-pagar-periodo">
+          <button type="button" className={!pagarMostrarTudo ? 'ativo' : ''} onClick={() => setPagarMostrarTudo(false)}>Próximos 90 dias</button>
+          <button type="button" className={pagarMostrarTudo ? 'ativo' : ''} onClick={() => setPagarMostrarTudo(true)}>Tudo</button>
+        </div>
+        {pendentesPagarVisiveis.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma pendente.</p>}
+        {[...pagarAgrupado.grupos.entries()].map(([financiamentoId, views]) => {
+          const ordenado = [...views].sort((a, b) =>
+            (a.conta.dataVencimento ?? a.registroData).localeCompare(b.conta.dataVencimento ?? b.registroData))
+          const proxima = ordenado[0]
+          const nomeContrato = proxima.conta.descricao.replace(/\s*\(\d+\/\d+\)$/, '')
+          const totalGrupo = views.reduce((s, v) => s + v.conta.valor, 0)
+          const aberto = gruposPagarAbertos.has(financiamentoId)
+          return (
+            <div key={financiamentoId} className="conta-grupo-financiamento">
+              <button type="button" className="conta-grupo-header" onClick={() => toggleGrupoPagar(financiamentoId)}>
+                <span>
+                  {aberto ? '▾' : '▸'} {nomeContrato}: {views.length} parcela{views.length > 1 ? 's' : ''} · próxima{' '}
+                  {fmtDate(proxima.conta.dataVencimento ?? proxima.registroData)} · {fmtBRL(proxima.conta.valor)}
+                </span>
+                <strong>{fmtBRL(totalGrupo)}</strong>
+              </button>
+              {aberto && ordenado.map(renderConta)}
+            </div>
+          )
+        })}
+        {pagarAgrupado.semGrupo.map(renderConta)}
       </div>
 
       {recebidasList.length > 0 && (

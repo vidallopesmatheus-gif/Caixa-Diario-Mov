@@ -313,6 +313,11 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("Adiantamentos")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("adiantamentos");
+
                     b.Property<DateTime>("AtualizadoEm")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("atualizado_em");

@@ -23,6 +23,22 @@
 
 .contas-section { margin-bottom: 24px; }
 .contas-section h3 { font-size: 14px; font-weight: 700; color: var(--tx3); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .05em; }
+
+.contas-pagar-periodo { display: flex; gap: 6px; margin-bottom: 10px; }
+.contas-pagar-periodo button {
+  padding: 5px 12px; border-radius: 999px; border: 1px solid var(--bd); background: var(--bg-card);
+  color: var(--tx3); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.contas-pagar-periodo button.ativo { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.conta-grupo-financiamento { margin-bottom: 8px; }
+.conta-grupo-header {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  background: var(--bg-card); border: 1px solid var(--bd); border-radius: 10px; padding: 12px 16px;
+  cursor: pointer; font-size: 13px; color: var(--tx2); text-align: left;
+}
+.conta-grupo-header:hover { opacity: 0.88; }
+.conta-grupo-financiamento .conta-item { margin-left: 16px; }
 .conta-item { background: var(--bg-card); border: 1px solid var(--bd); border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
 .conta-item.pago { opacity: 0.5; }
 /* Item 2.5: conta pendente vencida (vencimento antes de hoje) — borda e detalhe em vermelho. */

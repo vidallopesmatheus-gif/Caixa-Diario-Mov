@@ -55,6 +55,7 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
   const [novoOpen, setNovoOpen] = useState(false)
   const [prefill, setPrefill] = useState<PrefillFinanciamento | null>(null)
   const [adiantarAlvo, setAdiantarAlvo] = useState<Financiamento | null>(null)
+  const [excluirAlvo, setExcluirAlvo] = useState<Financiamento | null>(null)
 
   // Fase 5G: "🏆 Conquistei" com forma "Financiado" manda o usuário pra aqui já com o cadastro
   // aberto e pré-preenchido (sonho = descrição, valorSonho = valor do bem) — limpa o state da
@@ -102,11 +103,11 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
     }
   }
 
-  const handleExcluir = async (f: Financiamento) => {
-    if (!confirm(`Excluir "${f.descricao}"? Isso só é possível se nenhuma parcela foi paga.`)) return
+  const handleExcluir = async (f: Financiamento, removerAdiantamentos: boolean) => {
     setMsg('')
     try {
-      await excluirFinanciamento(f.id)
+      await excluirFinanciamento(f.id, removerAdiantamentos)
+      setExcluirAlvo(null)
       await carregar()
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Erro ao excluir.')
@@ -145,7 +146,7 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
                   {expandidoId === f.id ? 'Ocultar parcelas' : 'Ver parcelas'}
                 </button>
                 {f.parcelasPagas === 0 && (
-                  <button className="btn-fin-danger" onClick={() => handleExcluir(f)}>Excluir</button>
+                  <button className="btn-fin-danger" onClick={() => setExcluirAlvo(f)}>Excluir</button>
                 )}
               </div>
             </div>
@@ -191,7 +192,16 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
                   <tr><th>#</th><th>Vencimento</th><th>Valor</th><th>Juros</th><th>Amortização</th><th>Saldo devedor</th><th></th></tr>
                 </thead>
                 <tbody>
-                  {parcelas.map(p => (
+                  {parcelas.map(p => p.tipo === 'Adiantamento' ? (
+                    <tr key={p.id} className="parcela-adiantamento">
+                      <td colSpan={2}>💰 Adiantamento em {fmtDate(p.vencimento)}</td>
+                      <td>{fmtBRL(p.valor)}</td>
+                      <td>—</td>
+                      <td>{fmtBRL(p.amortizacao)}</td>
+                      <td>{fmtBRL(p.saldoDevedor)}</td>
+                      <td><span className="parcela-paga-selo">aplicado</span></td>
+                    </tr>
+                  ) : (
                     <tr key={p.id} className={p.pago ? 'parcela-paga' : p.atrasada ? 'parcela-atrasada' : ''}>
                       <td>{p.numero}</td>
                       <td>{fmtDate(p.vencimento)}</td>
@@ -229,7 +239,45 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
           onAplicado={async () => { setAdiantarAlvo(null); await carregar() }}
         />
       )}
+
+      {excluirAlvo && (
+        <ExcluirFinanciamentoModal
+          financiamento={excluirAlvo}
+          onClose={() => setExcluirAlvo(null)}
+          onConfirmar={removerAdiantamentos => handleExcluir(excluirAlvo, removerAdiantamentos)}
+        />
+      )}
     </div>
+  )
+}
+
+function ExcluirFinanciamentoModal({ financiamento, onClose, onConfirmar }: {
+  financiamento: Financiamento
+  onClose: () => void
+  onConfirmar: (removerAdiantamentos: boolean) => void
+}) {
+  const [removerAdiantamentos, setRemoverAdiantamentos] = useState(true)
+  const temAdiantamento = financiamento.valorAdiantado > 0
+
+  return (
+    <Modal open title={`Excluir — ${financiamento.descricao}`} onClose={onClose} footer={
+      <>
+        <button className="btn-cancel" onClick={onClose}>Cancelar</button>
+        <button className="btn-fin-danger" onClick={() => onConfirmar(removerAdiantamentos)}>Excluir</button>
+      </>
+    }>
+      <p>Excluir "{financiamento.descricao}"? Isso só é possível porque nenhuma parcela foi paga.</p>
+      {temAdiantamento && (
+        <label className="financiamentos-checkbox">
+          <input
+            type="checkbox"
+            checked={removerAdiantamentos}
+            onChange={e => setRemoverAdiantamentos(e.target.checked)}
+          />
+          Remover também os adiantamentos lançados no caixa ({fmtBRL(financiamento.valorAdiantado)}) e devolver o saldo da conta
+        </label>
+      )}
+    </Modal>
   )
 }
 

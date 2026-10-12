@@ -165,20 +165,44 @@ public class FinanciamentoService : IFinanciamentoService
 
         var parcelas = await ObterParcelasAsync(financiamento.ClienteId, financiamentoId);
         var hoje = DataLocalHelper.Hoje();
+
+        // Rodada "Visão de Futuro", item 1: parcelas e adiantamentos entram na MESMA linha do
+        // tempo, ordenados por data — um adiantamento feito entre a parcela 12 e a 13 precisa
+        // abater o saldo ANTES da parcela 13 "ver" o saldo, senão a última parcela nunca zera
+        // (o saldo ficava preso no valor do adiantamento, ex.: R$ 5.000,00 em vez de 0,00).
+        var linhas = parcelas
+            .Select(p => (Data: p.DataVencimento ?? financiamento.DataPrimeiraParcela, Ordem: 0, Parcela: (ContaProvisionada?)p, Adiantamento: (AdiantamentoFinanciamento?)null))
+            .Concat(financiamento.Adiantamentos.Select(a => (Data: a.Data, Ordem: 1, Parcela: (ContaProvisionada?)null, Adiantamento: (AdiantamentoFinanciamento?)a)))
+            // Ordem=1 (adiantamento) antes de Ordem=0 (parcela) no mesmo dia — se alguém adianta e
+            // paga uma parcela na mesma data, o abatimento conta primeiro.
+            .OrderBy(x => x.Data).ThenBy(x => x.Ordem)
+            .ToList();
+
         var saldo = financiamento.ValorFinanciado;
         var resultado = new List<ParcelaFinanciamentoDto>();
         var numero = 0;
 
-        foreach (var p in parcelas)
+        foreach (var (data, _, p, a) in linhas)
         {
+            if (a != null)
+            {
+                saldo -= a.Valor;
+                resultado.Add(new ParcelaFinanciamentoDto
+                {
+                    Id = a.Id, Tipo = "Adiantamento", Numero = null, Vencimento = data, Valor = a.Valor,
+                    Amortizacao = a.Valor, SaldoDevedor = Math.Round(saldo, 2), Pago = true, DataBaixa = data,
+                });
+                continue;
+            }
+
             numero++;
-            saldo -= p.ValorAmortizacao ?? p.Valor;
+            saldo -= p!.ValorAmortizacao ?? p.Valor;
             resultado.Add(new ParcelaFinanciamentoDto
             {
-                Id = p.Id, Numero = numero, Vencimento = p.DataVencimento ?? financiamento.DataPrimeiraParcela,
+                Id = p.Id, Tipo = "Parcela", Numero = numero, Vencimento = data,
                 Valor = p.Valor, Juros = p.ValorJuros ?? 0, Amortizacao = p.ValorAmortizacao ?? p.Valor,
                 Encargos = p.ValorEncargos ?? 0, SaldoDevedor = Math.Round(saldo, 2), Pago = p.Pago,
-                DataBaixa = p.DataBaixa, Atrasada = !p.Pago && p.DataVencimento.HasValue && p.DataVencimento.Value < hoje,
+                DataBaixa = p.DataBaixa, Atrasada = !p.Pago && data < hoje,
             });
         }
         return resultado;
@@ -391,6 +415,24 @@ public class FinanciamentoService : IFinanciamentoService
 
         if (dto.Simular) return resultado;
 
+        // Item 2 da rodada "Visão de Futuro": reduzir o prazo muda quantas parcelas restam — sem
+        // reindexar, o rótulo "(n/42)" de toda parcela (inclusive as já pagas) ficava descasado do
+        // total novo. O total final é sempre pagas + o que sobrou da nova tabela.
+        var pagas = (await ObterParcelasAsync(financiamento.ClienteId, financiamentoId))
+            .Where(p => p.Pago).OrderBy(p => p.DataVencimento).ToList();
+        var novoTotalParcelas = pagas.Count + novaTabela.Count;
+        var mudouTotal = novoTotalParcelas != financiamento.NumeroParcelas;
+
+        if (mudouTotal)
+        {
+            var numeroPaga = 0;
+            foreach (var p in pagas)
+            {
+                numeroPaga++;
+                p.Descricao = $"{financiamento.Descricao} ({numeroPaga}/{novoTotalParcelas})";
+            }
+        }
+
         for (var i = 0; i < naoPagas.Count; i++)
         {
             var (registro, parcela) = naoPagas[i];
@@ -400,6 +442,8 @@ public class FinanciamentoService : IFinanciamentoService
                 parcela.Valor = valor;
                 parcela.ValorJuros = juros;
                 parcela.ValorAmortizacao = amortizacao;
+                if (mudouTotal)
+                    parcela.Descricao = $"{financiamento.Descricao} ({pagas.Count + i + 1}/{novoTotalParcelas})";
             }
             else
             {
@@ -407,6 +451,20 @@ public class FinanciamentoService : IFinanciamentoService
             }
             registro.SalvoEm = DateTime.UtcNow;
             await _registroRepo.AtualizarAsync(registro);
+        }
+
+        // As pagas moram em registros potencialmente diferentes dos de naoPagas — persistidos à
+        // parte (a reatribuição da lista, abaixo, é o que faz o EF detectar a mudança no jsonb).
+        if (mudouTotal)
+        {
+            var registrosDasPagas = await _registroRepo.ListarPorClienteAsync(financiamento.ClienteId);
+            foreach (var r in registrosDasPagas.Where(r => r.ContasPagar.Any(c => pagas.Contains(c))))
+            {
+                r.ContasPagar = new List<ContaProvisionada>(r.ContasPagar);
+                r.SalvoEm = DateTime.UtcNow;
+                await _registroRepo.AtualizarAsync(r);
+            }
+            financiamento.NumeroParcelas = novoTotalParcelas;
         }
 
         var conta = await _contaRepo.ObterPorIdAsync(financiamento.ContaBancariaId)
@@ -429,6 +487,10 @@ public class FinanciamentoService : IFinanciamentoService
 
         financiamento.ValorAdiantado += dto.Valor;
         financiamento.EconomiaJurosAcumulada += Math.Max(0, resultado.EconomiaJuros);
+        financiamento.Adiantamentos = new List<AdiantamentoFinanciamento>(financiamento.Adiantamentos)
+        {
+            new() { Id = Guid.NewGuid(), Data = dto.Data, Valor = dto.Valor, EconomiaJuros = Math.Max(0, resultado.EconomiaJuros) },
+        };
         financiamento.AtualizadoEm = DateTime.UtcNow;
         await _financiamentoRepo.AtualizarAsync(financiamento);
 
@@ -438,7 +500,12 @@ public class FinanciamentoService : IFinanciamentoService
         return resultado;
     }
 
-    public async Task ExcluirAsync(Guid financiamentoId, Guid usuarioLogadoId, string perfil)
+    // removerAdiantamentos: item 3 da rodada "Visão de Futuro" — sem parcela paga (guard abaixo),
+    // qualquer Saída tagueada com este financiamento SÓ PODE ser uma amortização extraordinária
+    // (baixa de parcela geraria Juros/Amortização/Encargos, mas exige parcela paga, que já bloqueia
+    // a exclusão). Default true porque o front sempre pergunta antes, com a opção pré-marcada —
+    // aqui é só o que a confirmação do usuário decidiu.
+    public async Task ExcluirAsync(Guid financiamentoId, Guid usuarioLogadoId, string perfil, bool removerAdiantamentos = true)
     {
         var financiamento = await ObterOuFalharAsync(financiamentoId);
         VerificarAcesso(financiamento.ClienteId, usuarioLogadoId, perfil);
@@ -453,9 +520,10 @@ public class FinanciamentoService : IFinanciamentoService
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
                 "Este contrato já tem parcela paga — estorne todas antes de excluir.");
 
-        // Transacional: remover as parcelas e o contrato em si têm que valer juntos — senão uma
-        // falha no meio deixa o contrato "fantasma" (sem parcela nenhuma, mas ainda "Ativo" na
-        // lista), que foi exatamente o bug relatado (item A1 do bundle D6JWEAJa).
+        // Transacional: remover as parcelas, os adiantamentos lançados no caixa e o contrato em si
+        // têm que valer juntos — senão uma falha no meio deixa o contrato "fantasma" (sem parcela
+        // nenhuma, mas ainda "Ativo" na lista — item A1 do bundle D6JWEAJa) ou o adiantamento órfão
+        // derrubando o saldo sem nenhum contrato por trás (item 3 da rodada "Visão de Futuro").
         await using var transacao = _context.Database.IsRelational()
             ? await _context.Database.BeginTransactionAsync()
             : null;
@@ -467,11 +535,32 @@ public class FinanciamentoService : IFinanciamentoService
             await _registroRepo.AtualizarAsync(registro);
         }
 
+        if (removerAdiantamentos && financiamento.Adiantamentos.Count > 0)
+        {
+            var saidasTageadas = registros
+                .Select(r => (Registro: r, Saidas: r.Saidas.Where(s => s.OrigemFinanciamentoId == financiamentoId).ToList()))
+                .Where(x => x.Saidas.Count > 0)
+                .ToList();
+
+            foreach (var (registro, saidasDoDia) in saidasTageadas)
+            {
+                var total = saidasDoDia.Sum(s => s.Valor);
+                registro.Saidas = registro.Saidas.Where(s => s.OrigemFinanciamentoId != financiamentoId).ToList();
+                registro.SaldoFinal += total;
+                registro.SalvoEm = DateTime.UtcNow;
+                await _registroRepo.AtualizarAsync(registro);
+
+                var registrosDaConta = await _registroRepo.ListarPorContaAsync(financiamento.ContaBancariaId);
+                await RegistroService.RecalcularDiasSeguintesAsync(
+                    _registroRepo, financiamento.ContaBancariaId, registro.Data, registro.SaldoFinal, registrosDaConta);
+            }
+        }
+
         await _financiamentoRepo.RemoverAsync(financiamento);
         if (transacao != null) await transacao.CommitAsync();
 
         await _auditService.LogAsync(financiamento.ClienteId, usuarioLogadoId, "Financiamento", "Exclusao",
-            financiamentoId.ToString(), JsonSerializer.Serialize(financiamento), null);
+            financiamentoId.ToString(), JsonSerializer.Serialize(new { financiamento, removerAdiantamentos }), null);
     }
 
     // Grupo "Consórcios" tem sua própria categoria (item 6.7); os demais tipos usam a categoria

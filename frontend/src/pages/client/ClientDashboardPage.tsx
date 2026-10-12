@@ -334,7 +334,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         const remainingMonths = periodoMeses - idx
         const dre = dres[idx]
         const receitaReal = dre?.receitaBruta ?? 0
-        const lucroReal = dre?.resultadoLiquido ?? 0
+        // Item 4 (rodada "Visão de Futuro"): resultadoLiquido inclui Atividades de Financiamento —
+        // um adiantamento de empréstimo (amortização extraordinária) entrava como "prejuízo" na
+        // Meta de Lucro, mesmo sem ser despesa nenhuma. resultadoOperacional é a mesma régua que a
+        // própria tela de DRE usa pra separar "resultado do negócio" de financiamento/investimento.
+        const lucroReal = dre?.resultadoOperacional ?? 0
 
         const isPassado = ano < anoAtual || (ano === anoAtual && mes < mesAtual)
         const isAtual = ano === anoAtual && mes === mesAtual
