@@ -102,3 +102,37 @@ export async function atualizarContaRecorrente(clienteId: string, id: string, dt
 export async function desativarContaRecorrente(clienteId: string, id: string, removerPendentes = false): Promise<void> {
   await apiFetch(`/api/contas-recorrentes/${clienteId}/${id}?removerPendentes=${removerPendentes}`, { method: 'DELETE' })
 }
+
+// Item 2 do Bloco 4 ("Visão de Futuro"): padrões detectados no histórico que ainda não são
+// ContaRecorrente — "Criar Contas a Pagar?" na tela.
+export interface SugestaoRecorrencia {
+  chave: string
+  descricao: string
+  categoria?: string
+  tipo: 'Receber' | 'Pagar'
+  valorMedio: number
+  quantidadeOcorrencias: number
+  contaBancariaId?: string
+  ultimaOcorrencia: string
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapSugestaoRecorrencia(raw: any): SugestaoRecorrencia {
+  return {
+    chave: raw.chave, descricao: raw.descricao, categoria: raw.categoria ?? undefined,
+    tipo: raw.tipo, valorMedio: raw.valorMedio, quantidadeOcorrencias: raw.quantidadeOcorrencias,
+    contaBancariaId: raw.contaBancariaId ?? undefined, ultimaOcorrencia: raw.ultimaOcorrencia,
+  }
+}
+
+export async function listarSugestoesRecorrencia(clienteId: string): Promise<SugestaoRecorrencia[]> {
+  const res = await apiFetch<ApiResponse<unknown[]>>(`/api/contas-recorrentes/${clienteId}/sugestoes`)
+  return (res.dados ?? []).map(mapSugestaoRecorrencia)
+}
+
+export async function ignorarSugestaoRecorrencia(clienteId: string, chave: string): Promise<void> {
+  await apiFetch<ApiResponse<null>>(`/api/contas-recorrentes/${clienteId}/sugestoes/ignorar`, {
+    method: 'POST',
+    body: JSON.stringify({ chave }),
+  })
+}

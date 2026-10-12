@@ -8,8 +8,9 @@ import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtPct, fmtDate } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
 import DreKpisPanel from './dre/DreKpisPanel'
+import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import type { Dre, DreBloco } from '../../api/metricas'
-import type { ContaBancaria, Bloco, Categorias } from '../../types'
+import type { ContaBancaria, Bloco, Categorias, CategoriaAdmin } from '../../types'
 import './ClientDre.css'
 
 export type TipoPeriodo = 'mes' | 'trimestre' | 'ano'
@@ -298,6 +299,27 @@ export default function ClientDrePage() {
   // nesta tela (sem round-trip extra); o número real pós-ação vem da resposta da API.
   function normalizar(descricao: string) {
     return descricao.toUpperCase().trim()
+  }
+
+  // Item 1 do Bloco 5 ("Visão de Futuro"): mesmo helper usado em ClientCaixaPage/
+  // ClientContaDetalhePage — categoria criada ali no próprio combobox entra na lista local sem
+  // precisar recarregar a tela inteira.
+  function handleCategoriaCriada(nova: CategoriaAdmin) {
+    const item = { nome: nova.nome, tipoCusto: nova.tipo, grupo: nova.grupoNome }
+    if (nova.ehEntrada) setCategorias(prev => ({ ...prev, entradas: [...prev.entradas, item] }))
+    if (nova.ehSaida) setCategorias(prev => ({ ...prev, saidas: [...prev.saidas, item] }))
+  }
+
+  // Item 2 do Bloco 5: "sugerir categoria" — procura, entre os lançamentos JÁ carregados nesta
+  // tela, outro com a mesma descrição normalizada que já tem categoria, e propõe ela num clique.
+  // Não é uma regra nova (não existe tela de criar regra manualmente) — é reusar uma categoria que
+  // o próprio cliente já escolheu antes pra essa mesma descrição.
+  function sugerirCategoriaPara(linha: LinhaDrill): string | null {
+    const descNorm = normalizar(linha.descricao)
+    const candidato = registros
+      .flatMap(r => linha.tipo === 'Entrada' ? r.entradas : r.saidas)
+      .find(item => item.id !== linha.id && item.categoria?.trim() && normalizar(item.descricao) === descNorm)
+    return candidato?.categoria?.trim() || null
   }
 
   async function handleAlterarCategoria(linha: LinhaDrill, categoriaNova: string) {
@@ -687,6 +709,7 @@ export default function ClientDrePage() {
           <div className="dre-drill-lista">
             {lancamentosDrill.map((l, i) => {
               const opcoes = l.tipo === 'Entrada' ? categorias.entradas : categorias.saidas
+              const sugestao = !l.categoria ? sugerirCategoriaPara(l) : null
               return (
                 <div key={i} className="dre-drill-item-wrap">
                   <div className="dre-drill-item">
@@ -695,15 +718,25 @@ export default function ClientDrePage() {
                     <span className="dre-drill-valor" style={{ color: l.valor >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(l.valor)}</span>
                   </div>
                   {l.id && l.contaBancariaId ? (
-                    <select
-                      className="dre-drill-cat-select"
-                      value={l.categoria}
-                      disabled={salvandoCategoriaId === l.id}
-                      onChange={e => handleAlterarCategoria(l, e.target.value)}
-                    >
-                      {!l.categoria && <option value="">Não Classificado</option>}
-                      {opcoes.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
-                    </select>
+                    <>
+                      <CategoriaCombobox
+                        categorias={opcoes}
+                        value={l.categoria}
+                        onChange={nome => handleAlterarCategoria(l, nome)}
+                        onCategoriaCriada={handleCategoriaCriada}
+                        blocoPadraoNovaCategoria={l.tipo === 'Entrada' ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
+                        placeholder="Não Classificado"
+                      />
+                      {sugestao && (
+                        <button
+                          type="button" className="dre-drill-sugerir-link"
+                          disabled={salvandoCategoriaId === l.id}
+                          onClick={() => handleAlterarCategoria(l, sugestao)}
+                        >
+                          💡 sugerir "{sugestao}"
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <span className="dre-drill-cat-readonly" title="Lançamento antigo — não pode ser reclassificado por aqui.">
                       {l.categoria || 'Não Classificado'}

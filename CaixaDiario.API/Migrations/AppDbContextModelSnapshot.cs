@@ -313,6 +313,11 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("Adiantamentos")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("adiantamentos");
+
                     b.Property<DateTime>("AtualizadoEm")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("atualizado_em");
@@ -892,6 +897,36 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("regras_categorizacao", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.SugestaoRecorrenciaIgnorada", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ChaveNormalizada")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("chave_normalizada");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClienteId", "ChaveNormalizada")
+                        .IsUnique();
+
+                    b.ToTable("sugestoes_recorrencia_ignoradas", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.SugestaoVinculoIgnorada", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1080,10 +1115,16 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("text")
                         .HasColumnName("perfil");
 
+                    b.Property<decimal?>("ReservaMinima")
+                        .HasColumnType("numeric");
+
                     b.Property<string>("SenhaHash")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("senha_hash");
+
+                    b.Property<string>("TipoPessoa")
+                        .HasColumnType("text");
 
                     b.Property<string>("UsuarioAtualizacao")
                         .HasColumnType("text")

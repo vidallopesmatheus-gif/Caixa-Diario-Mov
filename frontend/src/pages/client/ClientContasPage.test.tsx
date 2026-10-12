@@ -5,6 +5,7 @@ import * as AuthContextModule from '../../contexts/AuthContext'
 import * as useRegistrosHook from '../../hooks/useRegistros'
 import * as contasRecorrentesApi from '../../api/contasRecorrentes'
 import * as contasBancariasApi from '../../api/contasBancarias'
+import * as categoriasApi from '../../api/categorias'
 import { addDays, todayISO } from '../../utils/format'
 import type { ContaBancaria, Registro } from '../../types'
 
@@ -15,6 +16,7 @@ vi.mock('../../contexts/AuthContext', async (importOriginal) => {
 vi.mock('../../hooks/useRegistros')
 vi.mock('../../api/contasRecorrentes')
 vi.mock('../../api/contasBancarias')
+vi.mock('../../api/categorias')
 
 const mockUser = { usuarioId: 'u1', nomeUsuario: 'cli1', perfil: 'cliente' as const, nomeCompleto: 'Cliente Um', nomeEstabelecimento: '', token: 'tok' }
 
@@ -25,7 +27,9 @@ function mockHooks(registros: Registro[], overrides: Partial<ReturnType<typeof u
     logout: vi.fn(),
   })
   vi.mocked(contasRecorrentesApi.listarContasRecorrentes).mockResolvedValue([])
+  vi.mocked(contasRecorrentesApi.listarSugestoesRecorrencia).mockResolvedValue([])
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([])
+  vi.mocked(categoriasApi.listarCategorias).mockResolvedValue({ entradas: [], saidas: [] })
   vi.mocked(useRegistrosHook.useRegistros).mockReturnValue({
     registros,
     loading: false,

@@ -708,8 +708,8 @@ public class RegistroService : IRegistroService
             ClassificadoPeloCliente = s.ClassificadoPeloCliente,
             ParcelamentoId = s.ParcelamentoId, NumeroParcela = s.NumeroParcela, TotalParcelas = s.TotalParcelas,
         }).ToList(),
-        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ValorRealizado = s.ValorRealizado, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
-        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ValorRealizado = s.ValorRealizado, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId }).ToList(),
+        ContasReceber = r.ContasReceber.Select(s => new ContaProvisionadaDto { Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ValorRealizado = s.ValorRealizado, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId, OrigemFinanciamentoId = s.OrigemFinanciamentoId }).ToList(),
+        ContasPagar = r.ContasPagar.Select(s => new ContaProvisionadaDto { Id = s.Id, Descricao = s.Descricao, Valor = s.Valor, DataVencimento = s.DataVencimento, Pago = s.Pago, Categoria = s.Categoria, RecorrenciaId = s.RecorrenciaId, DataBaixa = s.DataBaixa, ValorRealizado = s.ValorRealizado, ContaBancariaId = s.ContaBancariaId, LancamentoVinculadoId = s.LancamentoVinculadoId, OrigemFinanciamentoId = s.OrigemFinanciamentoId }).ToList(),
         SaldoFinal = r.SaldoFinal,
         SalvoEm = r.SalvoEm
     };

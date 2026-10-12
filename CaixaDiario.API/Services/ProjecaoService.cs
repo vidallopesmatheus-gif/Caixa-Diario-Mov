@@ -5,37 +5,32 @@ namespace CaixaDiario.API.Services;
 
 public class ProjecaoService : IProjecaoService
 {
+    // Bloco 2 da rodada "Visão de Futuro", item 2: cenário "Conservador" aplica margem de
+    // segurança só nos valores que são ESTIMATIVA (recorrência projetada, despesa fixa não
+    // cadastrada) — nunca em provisionados/atrasados/fatura de cartão, que são compromissos
+    // reais já assumidos, não previsão.
+    private const decimal FatorReceitaConservador = 0.7m;
+    private const decimal FatorDespesaConservador = 1.15m;
+
     public ProjecaoDto Calcular(
         List<RegistroDiario> registros,
         List<ContaRecorrente> recorrentes,
         int dias,
-        Guid? contaBancariaId)
+        Guid? contaBancariaId,
+        ProjecaoOpcoes opcoes)
     {
         var hoje = DataLocalHelper.Hoje();
+        var consolidado = !contaBancariaId.HasValue || contaBancariaId.Value == Guid.Empty;
 
-        // Saldo atual: último SaldoFinal considerando filtro de conta
-        List<RegistroDiario> registrosFiltrados;
-        if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
-            registrosFiltrados = registros.Where(r => r.ContaBancariaId == contaBancariaId).ToList();
-        else
-            registrosFiltrados = registros;
+        var registrosFiltrados = consolidado
+            ? registros
+            : registros.Where(r => r.ContaBancariaId == contaBancariaId).ToList();
 
-        // Para "todas as contas", soma o último saldo de cada conta distinta
-        decimal saldoAtual;
-        if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
-        {
-            saldoAtual = registrosFiltrados
-                .OrderByDescending(r => r.Data)
-                .FirstOrDefault()?.SaldoFinal ?? 0m;
-        }
-        else
-        {
-            // Soma o último SaldoFinal de cada conta bancária
-            saldoAtual = registros
-                .Where(r => r.ContaBancariaId.HasValue)
-                .GroupBy(r => r.ContaBancariaId)
-                .Sum(g => g.OrderByDescending(r => r.Data).First().SaldoFinal);
-        }
+        var contasExcluidasDoSaldo = ObterContasExcluidasDoSaldo(consolidado, opcoes);
+        var saldoAtual = CalcularSaldoConsolidado(registros, registrosFiltrados, consolidado, contasExcluidasDoSaldo);
+
+        var fatorReceita = opcoes.Cenario == "Conservador" ? FatorReceitaConservador : 1m;
+        var fatorDespesa = opcoes.Cenario == "Conservador" ? FatorDespesaConservador : 1m;
 
         // Pendentes provisionados (apenas não pagos e com vencimento futuro)
         var receberPendentes = registrosFiltrados
@@ -62,7 +57,7 @@ public class ProjecaoService : IProjecaoService
         // ele sempre lança manualmente) também faziam a projeção parecer sempre subir. Mesma
         // lógica de OrcamentoDinamicoService (1.4): usa a DIFERENÇA entre a média histórica e o
         // que as recorrências já cobrem, nunca a soma (senão duplicaria a mesma despesa).
-        var despesaFixaNaoCadastrada = CalcularDespesaFixaNaoCadastrada(registros, recorrentesPagar, hoje);
+        var despesaFixaNaoCadastrada = CalcularDespesaFixaNaoCadastrada(registros, recorrentesPagar, hoje) * fatorDespesa;
 
         // Dedup: recorrências que já estão materializadas como ContaProvisionada não devem ser
         // contadas duas vezes. Identifica pares (RecorrenciaId, DataVencimento) já provisionados.
@@ -71,6 +66,13 @@ public class ProjecaoService : IProjecaoService
             .Where(c => c.RecorrenciaId.HasValue && c.DataVencimento.HasValue && c.DataVencimento.Value > hoje)
             .Select(c => (c.RecorrenciaId!.Value, c.DataVencimento!.Value))
             .ToHashSet();
+
+        // Item 4: faturas de cartão em aberto/fechadas (ainda não pagas) entram como saída
+        // projetada na data de vencimento — só no modo "todas as contas" (ver comentário em
+        // ObterContasExcluidasDoSaldo sobre por que o saldo do cartão fica de fora da soma inicial).
+        var faturasPorDia = consolidado
+            ? ObterFaturasPorDia(registros, opcoes.Contas, opcoes.PagamentosFatura, hoje, hoje.AddDays(dias))
+            : new Dictionary<DateOnly, List<ProjecaoItemDto>>();
 
         // Projeção dia a dia
         var saldoCorrendo = saldoAtual;
@@ -131,7 +133,7 @@ public class ProjecaoService : IProjecaoService
                     Descricao = rec.Descricao,
                     // Fase 1.6: ValorVariavel usa o previsto recalculado (média), nunca o Valor
                     // cadastrado cru — mesma fonte de verdade de RecorrenciaService/relatório 1.5.
-                    Valor     = RecorrenciaService.CalcularValorPrevisto(rec, registros),
+                    Valor     = RecorrenciaService.CalcularValorPrevisto(rec, registros) * fatorReceita,
                     Categoria = rec.Categoria,
                     Origem    = "Recorrente",
                 });
@@ -144,11 +146,14 @@ public class ProjecaoService : IProjecaoService
                 saidas.Add(new ProjecaoItemDto
                 {
                     Descricao = rec.Descricao,
-                    Valor     = RecorrenciaService.CalcularValorPrevisto(rec, registros),
+                    Valor     = RecorrenciaService.CalcularValorPrevisto(rec, registros) * fatorDespesa,
                     Categoria = rec.Categoria,
                     Origem    = "Recorrente",
                 });
             }
+
+            if (faturasPorDia.TryGetValue(dia, out var faturasDoDia))
+                saidas.AddRange(faturasDoDia);
 
             var totalEntradas = entradas.Sum(e => e.Valor);
             var totalSaidas   = saidas.Sum(s => s.Valor);
@@ -213,27 +218,35 @@ public class ProjecaoService : IProjecaoService
         List<ContaRecorrente> recorrentes,
         int mesesPassado,
         int mesesFuturo,
-        Guid? contaBancariaId)
+        Guid? contaBancariaId,
+        ProjecaoOpcoes opcoes)
     {
         var hoje = DataLocalHelper.Hoje();
-        var filtrarPorConta = contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty;
+        var consolidado = !contaBancariaId.HasValue || contaBancariaId.Value == Guid.Empty;
 
-        var registrosFiltrados = filtrarPorConta
-            ? registros.Where(r => r.ContaBancariaId == contaBancariaId).ToList()
-            : registros;
+        var registrosFiltrados = consolidado
+            ? registros
+            : registros.Where(r => r.ContaBancariaId == contaBancariaId).ToList();
 
+        var contasExcluidasDoSaldo = ObterContasExcluidasDoSaldo(consolidado, opcoes);
+
+        // Item 5: a exclusão de reserva/cartão vale pro histórico TAMBÉM, não só pra projeção —
+        // senão o gráfico "pula" exatamente em "hoje", quando a projeção passa a ignorar um saldo
+        // que o histórico vinha contando até ali.
         decimal SaldoConsolidadoAte(DateOnly ateData)
         {
             var relevantes = registrosFiltrados.Where(r => r.Data <= ateData).ToList();
-            if (filtrarPorConta)
+            if (!consolidado)
                 return relevantes.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0m;
             return relevantes
-                .Where(r => r.ContaBancariaId.HasValue)
+                .Where(r => r.ContaBancariaId.HasValue && !contasExcluidasDoSaldo.Contains(r.ContaBancariaId.Value))
                 .GroupBy(r => r.ContaBancariaId)
                 .Sum(g => g.OrderByDescending(r => r.Data).First().SaldoFinal);
         }
 
         var saldoAtual = SaldoConsolidadoAte(hoje);
+        var fatorReceita = opcoes.Cenario == "Conservador" ? FatorReceitaConservador : 1m;
+        var fatorDespesa = opcoes.Cenario == "Conservador" ? FatorDespesaConservador : 1m;
 
         // ── Histórico: quantos meses de dado real existem de verdade (pode ser menos que o pedido) ──
         var primeiraData = registrosFiltrados.Select(r => r.Data).DefaultIfEmpty().Min();
@@ -273,21 +286,25 @@ public class ProjecaoService : IProjecaoService
         // Item 1.6: mesma correção de Calcular — atrasados e despesa fixa não cadastrada, senão a
         // trajetória projetada também parece sempre subir.
         var (receberAtrasados, pagarAtrasados) = ObterAtrasados(registrosFiltrados, hoje);
-        var despesaFixaNaoCadastrada = CalcularDespesaFixaNaoCadastrada(registros, recorrentesPagar, hoje);
+        var despesaFixaNaoCadastrada = CalcularDespesaFixaNaoCadastrada(registros, recorrentesPagar, hoje) * fatorDespesa;
+
+        var diasTotais = hoje.AddMonths(mesesFuturo).DayNumber - hoje.DayNumber;
+        var faturasPorDia = consolidado
+            ? ObterFaturasPorDia(registros, opcoes.Contas, opcoes.PagamentosFatura, hoje, hoje.AddDays(diasTotais))
+            : new Dictionary<DateOnly, List<ProjecaoItemDto>>();
 
         var projetado = new List<TrajetoriaPontoDto>();
         var saldoCorrendo = saldoAtual;
-        var diasTotais = hoje.AddMonths(mesesFuturo).DayNumber - hoje.DayNumber;
         var proximoMarco = 1;
         for (int d = 1; d <= diasTotais && proximoMarco <= mesesFuturo; d++)
         {
             var dia = hoje.AddDays(d);
             var totalEntradas = receberPendentes.Where(c => c.DataVencimento == dia).Sum(c => c.Valor)
                 + recorrentesReceber.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia)))
-                    .Sum(r => RecorrenciaService.CalcularValorPrevisto(r, registros));
+                    .Sum(r => RecorrenciaService.CalcularValorPrevisto(r, registros) * fatorReceita);
             var totalSaidas = pagarPendentes.Where(c => c.DataVencimento == dia).Sum(c => c.Valor)
                 + recorrentesPagar.Where(r => RecorrenciaService.OcorreEm(r, dia) && !jaMaterializados.Contains((r.Id, dia)))
-                    .Sum(r => RecorrenciaService.CalcularValorPrevisto(r, registros));
+                    .Sum(r => RecorrenciaService.CalcularValorPrevisto(r, registros) * fatorDespesa);
 
             if (d == 1)
             {
@@ -296,6 +313,8 @@ public class ProjecaoService : IProjecaoService
             }
             if (d % 30 == 0)
                 totalSaidas += despesaFixaNaoCadastrada;
+            if (faturasPorDia.TryGetValue(dia, out var faturasDoDia))
+                totalSaidas += faturasDoDia.Sum(f => f.Valor);
 
             saldoCorrendo += totalEntradas - totalSaidas;
 
@@ -316,6 +335,230 @@ public class ProjecaoService : IProjecaoService
             VariacaoRealizada = historico.Count > 0 ? saldoAtual - historico[0].Saldo : 0m,
             VariacaoProjetada = projetado.Count > 0 ? projetado[^1].Saldo - saldoAtual : 0m,
         };
+    }
+
+    // Item 3: despesas fixas recorrentes por categoria que o cliente nunca cadastrou como
+    // ContaRecorrente — mesma ideia de CalcularDespesaFixaNaoCadastrada, quebrada por categoria em
+    // vez de um único total, pra virar uma lista com botão "Transformar em conta a pagar" na tela.
+    // Pode não bater exatamente com a soma do valor agregado (ali a média/dedução é sobre o total;
+    // aqui é categoria por categoria) — são dois usos diferentes: o agregado alimenta a simulação
+    // dia a dia, esta lista é pra decisão do usuário.
+    public List<DespesaEstimadaCategoriaDto> CalcularDespesasEstimadasPorCategoria(
+        List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, DateOnly hoje)
+    {
+        var recorrentesPagar = recorrentes.Where(r => r.Tipo == "Pagar" && r.Ativo).ToList();
+
+        var porCategoriaPorMes = Enumerable.Range(1, 3)
+            .Select(i => hoje.AddMonths(-i))
+            .Select(m => registros
+                .Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
+                .SelectMany(r => r.Saidas)
+                .Where(s => s.TipoCusto == "CustoFixo")
+                .GroupBy(s => string.IsNullOrWhiteSpace(s.Categoria) ? "Não Classificado" : s.Categoria)
+                .ToDictionary(g => g.Key, g => g.Sum(s => s.Valor)))
+            .ToList();
+
+        var categorias = porCategoriaPorMes.SelectMany(m => m.Keys).Distinct().ToList();
+
+        var recorrentePorCategoriaEm30Dias = new Dictionary<string, decimal>();
+        for (var d = 1; d <= 30; d++)
+        {
+            var dia = hoje.AddDays(d);
+            foreach (var rec in recorrentesPagar.Where(r => RecorrenciaService.OcorreEm(r, dia)))
+            {
+                var cat = string.IsNullOrWhiteSpace(rec.Categoria) ? "Não Classificado" : rec.Categoria;
+                recorrentePorCategoriaEm30Dias[cat] = recorrentePorCategoriaEm30Dias.GetValueOrDefault(cat)
+                    + RecorrenciaService.CalcularValorPrevisto(rec, registros);
+            }
+        }
+
+        var resultado = new List<DespesaEstimadaCategoriaDto>();
+        foreach (var cat in categorias)
+        {
+            var valoresNosMeses = porCategoriaPorMes.Select(m => m.GetValueOrDefault(cat, 0m)).Where(v => v > 0).ToList();
+            if (valoresNosMeses.Count == 0) continue;
+            var media = valoresNosMeses.Average();
+            var jaCoberta = recorrentePorCategoriaEm30Dias.GetValueOrDefault(cat, 0m);
+            var estimativa = Math.Round(Math.Max(0m, media - jaCoberta), 2);
+            if (estimativa <= 0) continue;
+            resultado.Add(new DespesaEstimadaCategoriaDto { Categoria = cat, ValorEstimado = estimativa });
+        }
+
+        return resultado.OrderByDescending(r => r.ValorEstimado).ToList();
+    }
+
+    // Bloco 3 da rodada "Visão de Futuro": agrega a mesma simulação diária de Calcular em meses
+    // calendário — nenhuma lógica de simulação duplicada (atrasados, recorrências, despesa não
+    // cadastrada, fatura, cenário e reserva já vêm prontos de Calcular).
+    public MeuFuturoDto CalcularMeuFuturo(
+        List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, ProjecaoOpcoes opcoes,
+        decimal reservaMinima, decimal ajusteReceitaPercent = 0m, int atrasoRecebimentosDias = 0, int meses = 12)
+    {
+        var hoje = DataLocalHelper.Hoje();
+        // Mês 1 = mês calendário ATUAL (o resto dele, a partir de amanhã) — não "daqui a 1 mês".
+        // diasTotais cobre de amanhã até o ÚLTIMO dia do 12º mês calendário da tabela.
+        var ultimoMes = hoje.AddMonths(meses - 1);
+        var diasTotais = UltimoDiaDoMes(ultimoMes).DayNumber - hoje.DayNumber;
+        var projecao = Calcular(registros, recorrentes, diasTotais, null, opcoes);
+
+        var mesLabels = new string[meses];
+        var aReceberPorMes = new decimal[meses];
+        var aPagarPorMes = new decimal[meses];
+        for (var i = 0; i < meses; i++)
+        {
+            var mesRef = hoje.AddMonths(i);
+            var diasDoMes = projecao.Dias.Where(d => d.Data.Year == mesRef.Year && d.Data.Month == mesRef.Month).ToList();
+            mesLabels[i] = $"{mesRef.Year}-{mesRef.Month:D2}";
+            aReceberPorMes[i] = diasDoMes.Sum(d => d.TotalEntradas);
+            aPagarPorMes[i] = diasDoMes.Sum(d => d.TotalSaidas);
+        }
+
+        // Simulador "E se...?": pós-processamento sobre a tabela mensal já calculada (resolução
+        // mensal já é suficiente pra um horizonte de 12 meses) — nunca sobre o motor diário.
+        if (atrasoRecebimentosDias > 0)
+        {
+            var mesesDeAtraso = (int)Math.Ceiling(atrasoRecebimentosDias / 30.0);
+            if (mesesDeAtraso > 0)
+            {
+                for (var i = meses - 1; i >= 0; i--)
+                {
+                    var valor = aReceberPorMes[i];
+                    if (valor == 0) continue;
+                    aReceberPorMes[i] = 0m;
+                    var destino = i + mesesDeAtraso;
+                    // Se o destino cair fora da janela de 12 meses, o recebimento some do
+                    // horizonte visível — é exatamente o ponto de simular um atraso grande.
+                    if (destino < meses) aReceberPorMes[destino] += valor;
+                }
+            }
+        }
+        var fatorReceita = 1m + ajusteReceitaPercent / 100m;
+
+        var mesesResultado = new List<MeuFuturoMesDto>();
+        var saldoInicial = projecao.SaldoAtual;
+        for (var i = 0; i < meses; i++)
+        {
+            var aReceber = Math.Round(aReceberPorMes[i] * fatorReceita, 2);
+            var aPagar = Math.Round(aPagarPorMes[i], 2);
+            var saldoFinal = Math.Round(saldoInicial + aReceber - aPagar, 2);
+            var precisaReceber = Math.Round(Math.Max(0m, reservaMinima - saldoFinal), 2);
+            var status = saldoFinal < 0 ? "Risco" : saldoFinal < reservaMinima ? "Atencao" : "Tranquilo";
+
+            mesesResultado.Add(new MeuFuturoMesDto
+            {
+                Mes = mesLabels[i], SaldoInicial = Math.Round(saldoInicial, 2), AReceber = aReceber, APagar = aPagar,
+                SaldoFinal = saldoFinal, PrecisaReceber = precisaReceber, Status = status,
+            });
+            saldoInicial = saldoFinal;
+        }
+
+        return new MeuFuturoDto { Meses = mesesResultado, Conselhos = GerarConselhoFuturo(mesesResultado) };
+    }
+
+    // Regras fixas, nunca IA — no máximo 3 frases, prioridade: mês em risco > sequência longa fora
+    // de "Tranquilo" > tudo tranquilo > acompanhamento neutro (nunca retorna lista vazia).
+    private static List<string> GerarConselhoFuturo(List<MeuFuturoMesDto> meses)
+    {
+        var conselhos = new List<string>();
+
+        var primeiroRisco = meses.FirstOrDefault(m => m.Status == "Risco");
+        if (primeiroRisco != null)
+            conselhos.Add(
+                $"Atenção: a projeção mostra saldo negativo em {FormatarMes(primeiroRisco.Mes)} — considere " +
+                "renegociar prazos ou acelerar recebimentos antes dessa data.");
+
+        var maiorSequencia = MaiorSequenciaForaDeTranquilo(meses);
+        if (maiorSequencia >= 3)
+            conselhos.Add(
+                $"{maiorSequencia} meses seguidos projetam saldo abaixo da sua reserva mínima — vale revisar " +
+                "despesas fixas ou aumentar a reserva.");
+
+        if (conselhos.Count == 0 && meses.Count > 0 && meses.All(m => m.Status == "Tranquilo"))
+            conselhos.Add("Seu caixa deve seguir saudável nos próximos 12 meses, mantendo o ritmo atual.");
+
+        if (conselhos.Count == 0)
+            conselhos.Add("Fique de olho nos meses marcados como \"Atenção\" — nada crítico agora, mas vale acompanhar.");
+
+        return conselhos.Take(3).ToList();
+    }
+
+    private static int MaiorSequenciaForaDeTranquilo(List<MeuFuturoMesDto> meses)
+    {
+        var maior = 0;
+        var atual = 0;
+        foreach (var m in meses)
+        {
+            atual = m.Status != "Tranquilo" ? atual + 1 : 0;
+            maior = Math.Max(maior, atual);
+        }
+        return maior;
+    }
+
+    private static readonly string[] NomesMeses =
+        ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+    private static string FormatarMes(string mes)
+    {
+        var partes = mes.Split('-');
+        return $"{NomesMeses[int.Parse(partes[1]) - 1]}/{partes[0]}";
+    }
+
+    // Item 4/5: contas que ficam de fora da soma do saldo "em caixa" — Investimento (reserva, a
+    // menos que o usuário peça pra incluir) e CartaoCredito (dívida que entra como saída projetada
+    // na data de vencimento da fatura, não como saldo negativo já "congelado" hoje). Só se aplica
+    // no modo "todas as contas": selecionar uma conta específica é um recorte explícito.
+    private static HashSet<Guid> ObterContasExcluidasDoSaldo(bool consolidado, ProjecaoOpcoes opcoes)
+    {
+        if (!consolidado) return new HashSet<Guid>();
+        return opcoes.Contas
+            .Where(c => c.Tipo == "CartaoCredito" || (c.Tipo == "Investimento" && !opcoes.IncluirReserva))
+            .Select(c => c.Id)
+            .ToHashSet();
+    }
+
+    private static decimal CalcularSaldoConsolidado(
+        List<RegistroDiario> registros, List<RegistroDiario> registrosFiltrados, bool consolidado, HashSet<Guid> contasExcluidas)
+    {
+        if (!consolidado)
+            return registrosFiltrados.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0m;
+
+        return registros
+            .Where(r => r.ContaBancariaId.HasValue && !contasExcluidas.Contains(r.ContaBancariaId.Value))
+            .GroupBy(r => r.ContaBancariaId)
+            .Sum(g => g.OrderByDescending(r => r.Data).First().SaldoFinal);
+    }
+
+    // Item 4: faturas de cartão em aberto ou fechadas (ainda não totalmente pagas) de cada conta
+    // CartaoCredito do cliente, indexadas pela data de vencimento — mesmo cálculo de competência/
+    // ciclo usado na tela de Faturas (FaturaCartaoService.CalcularFaturas), só que sem os
+    // controles de acesso por requisição HTTP (a Projeção já recebeu tudo filtrado por cliente).
+    private static Dictionary<DateOnly, List<ProjecaoItemDto>> ObterFaturasPorDia(
+        List<RegistroDiario> registros, List<ContaBancaria> contas, List<PagamentoFatura> pagamentosFatura,
+        DateOnly hoje, DateOnly ate)
+    {
+        var resultado = new Dictionary<DateOnly, List<ProjecaoItemDto>>();
+        foreach (var cartao in contas.Where(c => c.Tipo == "CartaoCredito"))
+        {
+            var registrosDoCartao = registros.Where(r => r.ContaBancariaId == cartao.Id && !r.Excluido).ToList();
+            var pagamentosDoCartao = pagamentosFatura.Where(p => p.ContaCartaoId == cartao.Id).ToList();
+            var faturas = FaturaCartaoService.CalcularFaturas(cartao, registrosDoCartao, pagamentosDoCartao, hoje);
+
+            foreach (var fatura in faturas.Where(f => f.Status != "Paga" && f.DataVencimento > hoje && f.DataVencimento <= ate))
+            {
+                if (!resultado.TryGetValue(fatura.DataVencimento, out var lista))
+                {
+                    lista = new List<ProjecaoItemDto>();
+                    resultado[fatura.DataVencimento] = lista;
+                }
+                lista.Add(new ProjecaoItemDto
+                {
+                    Descricao = $"Fatura {cartao.Nome} ({fatura.Competencia})",
+                    Valor = fatura.SaldoDevedor,
+                    Origem = "Fatura",
+                });
+            }
+        }
+        return resultado;
     }
 
     private static DateOnly UltimoDiaDoMes(DateOnly qualquerDiaDoMes) =>

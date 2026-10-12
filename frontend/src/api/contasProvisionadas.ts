@@ -17,6 +17,7 @@ function mapContaProvisionada(raw: any): ContaProvisionada {
     valorRealizado: raw.valorRealizado ?? undefined,
     contaBancariaId: raw.contaBancariaId,
     lancamentoVinculadoId: raw.lancamentoVinculadoId ?? undefined,
+    origemFinanciamentoId: raw.origemFinanciamentoId ?? undefined,
   }
 }
 

@@ -10,5 +10,5 @@ public interface IFinanciamentoService
     Task<ParcelaFinanciamentoDto> BaixarParcelaAsync(Guid financiamentoId, Guid usuarioLogadoId, string perfil, BaixarParcelaFinanciamentoDto dto);
     Task EstornarParcelaAsync(Guid financiamentoId, Guid parcelaId, Guid usuarioLogadoId, string perfil);
     Task<AdiantamentoResultDto> AdiantarAsync(Guid financiamentoId, Guid usuarioLogadoId, string perfil, AdiantarFinanciamentoDto dto);
-    Task ExcluirAsync(Guid financiamentoId, Guid usuarioLogadoId, string perfil);
+    Task ExcluirAsync(Guid financiamentoId, Guid usuarioLogadoId, string perfil, bool removerAdiantamentos = true);
 }

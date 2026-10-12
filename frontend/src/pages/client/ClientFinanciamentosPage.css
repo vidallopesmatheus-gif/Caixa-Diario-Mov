@@ -51,6 +51,7 @@
 .financiamento-tabela th:nth-child(2), .financiamento-tabela td:nth-child(2) { text-align: left; }
 .financiamento-tabela tr.parcela-paga { color: var(--success); }
 .financiamento-tabela tr.parcela-atrasada { color: var(--danger); }
+.financiamento-tabela tr.parcela-adiantamento { color: var(--accent); font-weight: 600; background: var(--tag-in); }
 .parcela-paga-selo { font-size: 12px; color: var(--tx3); }
 .financiamento-link-btn {
   background: none; border: none; padding: 0; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer;
@@ -71,6 +72,12 @@
 }
 .adiantamento-simulacao > div { display: flex; justify-content: space-between; font-size: 13px; }
 .adiantamento-simulacao .economia { color: var(--success); }
+
+.financiamentos-checkbox {
+  display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--tx3);
+  margin-top: 12px; line-height: 1.4;
+}
+.financiamentos-checkbox input { margin-top: 2px; }
 
 @media (max-width: 540px) {
   .financiamento-barra-linha { grid-template-columns: 90px 1fr 70px; font-size: 12px; }

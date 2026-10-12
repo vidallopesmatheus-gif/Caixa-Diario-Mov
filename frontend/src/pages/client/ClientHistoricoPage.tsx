@@ -33,9 +33,13 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
   const mesAtualReal = todayISO().slice(0, 7)
   const [mesSelecionado, setMesSelecionado] = useState(mesAtualReal)
   const doMes = registros.filter(r => r.data.startsWith(mesSelecionado))
-  // Transferências entre contas e rendimento de investimento não são receita/despesa.
-  const totalEnt = doMes.reduce((s, r) => s + r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
-  const totalSai = doMes.reduce((s, r) => s + r.saidas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0), 0)
+  // Item 5 (rodada "Visão de Futuro"): Entradas/Saídas aqui são um extrato de caixa — precisam
+  // somar TUDO que moveu dinheiro (inclusive amortização de financiamento, baixa de parcela,
+  // pagamento de fatura), senão o total não reconcilia com a variação do saldo do dia/mês. Só o
+  // "lucro" (mais abaixo) continua sem transferência/rendimento/financiamento — esse sim é uma
+  // leitura de resultado, não de caixa.
+  const totalEnt = doMes.reduce((s, r) => s + r.entradas.reduce((a, x) => a + x.valor, 0), 0)
+  const totalSai = doMes.reduce((s, r) => s + r.saidas.reduce((a, x) => a + x.valor, 0), 0)
   // Soma do ÚLTIMO saldo de CADA conta no mês — nunca o primeiro registro da lista (que pode ser
   // de qualquer conta, em qualquer ordem, e não necessariamente o mais recente).
   const ultimoPorConta = new Map<string, { data: string; saldo: number }>()
@@ -87,7 +91,7 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
         <StatCard label="📅 Mês selecionado" value={monthLabel(mesSelecionado)} className="val-blue" />
         <StatCard label="📤 Total entradas" value={fmtBRL(totalEnt)} className="val-green" />
         <StatCard label="💸 Total saídas" value={fmtBRL(totalSai)} className="val-red" />
-        <StatCard label="💰 Último saldo" value={fmtBRL(ultimo)} className="val-green" />
+        <StatCard label="💰 Último saldo" value={fmtBRL(ultimo)} className={ultimo < 0 ? 'val-red' : 'val-green'} />
       </div>
 
       {doMes.length === 0 && (
@@ -98,11 +102,13 @@ export default function ClientHistoricoPage({ clienteIdOverride }: Props) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
         {doMes.map(r => {
-          // Idem: o "lucro" do dia não deve contar transferências/rendimento — a lista de
+          // ↑/↓ são o extrato de caixa do dia (tudo que moveu dinheiro); "lucro" é a leitura de
+          // resultado e por isso não conta transferência/rendimento/financiamento — a lista de
           // lançamentos abaixo (quando expandida) continua mostrando cada um individualmente.
-          const entTotal = r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0)
-          const saiTotal = r.saidas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0)
-          const lucro = entTotal - saiTotal
+          const entTotal = r.entradas.reduce((a, x) => a + x.valor, 0)
+          const saiTotal = r.saidas.reduce((a, x) => a + x.valor, 0)
+          const lucro = r.entradas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0)
+            - r.saidas.filter(ehOperacional).reduce((a, x) => a + x.valor, 0)
           const isOpen = openId === r.id
 
           return (

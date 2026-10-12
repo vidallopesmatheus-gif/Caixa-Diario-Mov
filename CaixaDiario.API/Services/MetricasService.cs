@@ -5,7 +5,9 @@ namespace CaixaDiario.API.Services;
 
 public class MetricasService : IMetricasService
 {
-    public MetricasPeriodoDto CalcularPeriodo(List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal saldoConsolidado, decimal multiplo = 3m)
+    public MetricasPeriodoDto CalcularPeriodo(
+        List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal saldoConsolidado,
+        decimal multiplo = 3m, IReadOnlyList<Categoria>? categorias = null)
     {
         var entradas = registrosDoPeriodo.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).ToList();
         var saidas = registrosDoPeriodo.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).ToList();
@@ -95,22 +97,20 @@ public class MetricasService : IMetricasService
             dto.Valuation = new ValuationDto { Valor = valuationValor, Semaforo = valuationSemaforo };
         }
 
-        // Runway — item 1.5: custo fixo médio mensal (só TipoCusto == CustoFixo), nunca "toda saída
-        // operacional" (que incluía custo variável e inflava o burn) — mesma fórmula usada em
-        // Indicadores > Fôlego de Caixa (CalcularFolegoCaixa), pra Dashboard e Indicadores nunca
-        // mais mostrarem números diferentes pro mesmo conceito.
-        var burnMedioMensal = ultimos3Meses
-            .Where(m => m.Count > 0)
-            .Select(m => m.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == "CustoFixo").Sum(s => s.Valor))
-            .DefaultIfEmpty(0)
-            .Average();
-        dto.BurnRate = burnMedioMensal > 0 ? Math.Round(burnMedioMensal, 2) : (decimal?)null;
-        var runwayMeses = burnMedioMensal > 0 ? Math.Round(saldoAtual / burnMedioMensal, 1) : 0;
+        // Runway — item 2 da rodada "Visão de Futuro": precisa dar o MESMO número que Indicadores >
+        // Fôlego de Caixa pro mesmo saldo. Antes, cada um calculava o "custo fixo médio" de um jeito
+        // (aqui: 3 meses, soma bruta por TipoCusto; lá: 6 meses só com atividade, DespesasFixas do
+        // DRE por categoria) — convergiam o saldo (PR #43) mas nunca o divisor. Agora os dois chamam
+        // CalcularCustoFixoMensal/CalcularFolegoCaixa — única fonte de verdade pro custo fixo médio.
+        var custoFixoMensalRunway = CalcularCustoFixoMensal(todosRegistros, categorias, DataLocalHelper.Hoje());
+        var folegoCaixaRunway = CalcularFolegoCaixa(saldoAtual, custoFixoMensalRunway);
+        dto.BurnRate = folegoCaixaRunway.CustoFixoMedioMensal;
+        var runwayMeses = folegoCaixaRunway.Meses ?? 0;
 
         dto.Runway = new RunwayDto
         {
             Meses = runwayMeses,
-            Semaforo = burnMedioMensal == 0 ? "cinza"
+            Semaforo = !folegoCaixaRunway.Disponivel ? "cinza"
                 : runwayMeses > 6 ? "verde"
                 : runwayMeses >= 3 ? "amarelo"
                 : "vermelho",
@@ -150,9 +150,9 @@ public class MetricasService : IMetricasService
         return dto;
     }
 
-    public List<EvolucaoMensalDto> CalcularEvolucao(List<RegistroDiario> registros, int meses)
+    public List<EvolucaoMensalDto> CalcularEvolucao(List<RegistroDiario> registros, int meses, DateOnly? ateMesReferencia = null)
     {
-        var hoje = DataLocalHelper.Hoje();
+        var hoje = ateMesReferencia ?? DataLocalHelper.Hoje();
         var resultado = new List<EvolucaoMensalDto>();
 
         for (int i = meses - 1; i >= 0; i--)
@@ -537,13 +537,19 @@ public class MetricasService : IMetricasService
     }
 
     public IndicadoresDecisaoDto CalcularIndicadores(
-        List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null, decimal saldoDisponivel = 0m)
+        List<RegistroDiario> registros, int mesesEvolucao = 13, IReadOnlyList<Categoria>? categorias = null,
+        decimal saldoDisponivel = 0m, DateOnly? mesReferencia = null)
     {
         var hoje = DataLocalHelper.Hoje();
-        var doMesAtual = registros.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month).ToList();
+        // mesRef é o mês REALMENTE exibido (o atual, ou o último com dados quando o front detecta
+        // que o atual está vazio — item 10 do Bloco 5). ehMesAtual gateia a extrapolação/comparação
+        // "mesmos N dias": só fazem sentido pra um mês em andamento, nunca pra um mês passado fechado.
+        var mesRef = mesReferencia ?? hoje;
+        var ehMesAtual = mesRef.Year == hoje.Year && mesRef.Month == hoje.Month;
+        var doMesAtual = registros.Where(r => r.Data.Year == mesRef.Year && r.Data.Month == mesRef.Month).ToList();
 
         var dre = CalcularDre(doMesAtual, categorias);
-        var evolucao = CalcularEvolucao(registros, mesesEvolucao);
+        var evolucao = CalcularEvolucao(registros, mesesEvolucao, mesRef);
 
         // Fixo x Variável x Não Classificado — sempre reconcilia com dre.TotalDespesas
         var saidasMes = doMesAtual.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).ToList();
@@ -561,18 +567,20 @@ public class MetricasService : IMetricasService
 
         var totalMesAtual = SomarSaidasPorCategoria(doMesAtual);
         var mesesAnteriores = Enumerable.Range(1, 3)
-            .Select(i => hoje.AddMonths(-i))
+            .Select(i => mesRef.AddMonths(-i))
             .Select(m => SomarSaidasPorCategoria(registros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)))
             .ToList();
 
-        var diasNoMes = DateTime.DaysInMonth(hoje.Year, hoje.Month);
+        var diasNoMes = DateTime.DaysInMonth(mesRef.Year, mesRef.Month);
         var ranking = totalMesAtual
             .Select(kv => (Grupo: mapaGrupoRanking.TryGetValue(kv.Key, out var g) ? g : "Outros", Nome: kv.Key, Total: kv.Value))
             .Select(c =>
             {
                 var mediasEncontradas = mesesAnteriores.Select(m => m.TryGetValue(c.Nome, out var v) ? v : 0m).ToList();
                 var media = mediasEncontradas.Any(v => v > 0) ? mediasEncontradas.Average() : (decimal?)null;
-                var extrapolado = hoje.Day > 0 ? c.Total / hoje.Day * diasNoMes : c.Total;
+                // Só extrapola quando mesRef é o mês em andamento de verdade — um mês de
+                // referência passado (fallback do item 10) já está fechado, com todos os dias.
+                var extrapolado = ehMesAtual && mesRef.Day > 0 ? c.Total / mesRef.Day * diasNoMes : c.Total;
                 return new CategoriaIndicadorDto
                 {
                     Nome = c.Nome,
@@ -593,20 +601,30 @@ public class MetricasService : IMetricasService
         if (evolucao.Count >= 2)
         {
             var atual = evolucao[^1];
-            // Item 5: evolucao[^1] é sempre o mês de "hoje" — em andamento, só com os primeiros
-            // N dias lançados. Comparar isso com o mês anterior INTEIRO (fechado) sempre mostra
-            // uma queda artificial, mesmo num mês bom. Recorta o mês anterior nos mesmos N dias
-            // (mesma ideia já usada no Dashboard — ver utils/periodo.ts no frontend, Item 1.7).
-            var mesAnteriorRef = hoje.AddMonths(-1);
-            var ateAnteriorMesmosDias = new DateOnly(mesAnteriorRef.Year, mesAnteriorRef.Month,
-                Math.Min(hoje.Day, DateTime.DaysInMonth(mesAnteriorRef.Year, mesAnteriorRef.Month)));
-            var receitaAnteriorMesmosDias = registros
-                .Where(r => r.Data.Year == mesAnteriorRef.Year && r.Data.Month == mesAnteriorRef.Month && r.Data <= ateAnteriorMesmosDias)
-                .SelectMany(r => r.Entradas)
-                .Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto))
-                .Sum(e => e.Valor);
-            if (receitaAnteriorMesmosDias > 0)
-                variacaoMoM = Math.Round((atual.Receita - receitaAnteriorMesmosDias) / receitaAnteriorMesmosDias * 100, 1);
+            decimal receitaAnteriorComparavel;
+            if (ehMesAtual)
+            {
+                // Item 5: o mês atual está em andamento, só com os primeiros N dias lançados.
+                // Comparar isso com o mês anterior INTEIRO (fechado) sempre mostra uma queda
+                // artificial, mesmo num mês bom. Recorta o mês anterior nos mesmos N dias (mesma
+                // ideia já usada no Dashboard — ver utils/periodo.ts no frontend, Item 1.7).
+                var mesAnteriorRef = mesRef.AddMonths(-1);
+                var ateAnteriorMesmosDias = new DateOnly(mesAnteriorRef.Year, mesAnteriorRef.Month,
+                    Math.Min(hoje.Day, DateTime.DaysInMonth(mesAnteriorRef.Year, mesAnteriorRef.Month)));
+                receitaAnteriorComparavel = registros
+                    .Where(r => r.Data.Year == mesAnteriorRef.Year && r.Data.Month == mesAnteriorRef.Month && r.Data <= ateAnteriorMesmosDias)
+                    .SelectMany(r => r.Entradas)
+                    .Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto))
+                    .Sum(e => e.Valor);
+            }
+            else
+            {
+                // mesRef já é um mês fechado (fallback do item 10) — os dois meses são comparáveis
+                // por inteiro, sem precisar recortar dias.
+                receitaAnteriorComparavel = evolucao[^2].Receita;
+            }
+            if (receitaAnteriorComparavel > 0)
+                variacaoMoM = Math.Round((atual.Receita - receitaAnteriorComparavel) / receitaAnteriorComparavel * 100, 1);
         }
         if (evolucao.Count >= 13)
         {
@@ -617,25 +635,12 @@ public class MetricasService : IMetricasService
         }
 
         // ── Indicadores de decisão ──────────────────────────────────────────
-        var pontoEquilibrio = CalcularPontoEquilibrio(dre.ReceitaBruta, dre.MargemContribuicao, dre.DespesasFixas.Total, hoje);
+        var pontoEquilibrio = CalcularPontoEquilibrio(dre.ReceitaBruta, dre.MargemContribuicao, dre.DespesasFixas.Total, mesRef);
 
         // Série mensal de Custo Fixo ÷ Receita (últimos 6 meses) — mesma DRE por mês, reaproveitada
-        // tanto pra tendência (item 4) quanto pro custo fixo médio do Fôlego de Caixa (item 2).
-        var custoFixoMensal = Enumerable.Range(0, 6)
-            .Select(i => hoje.AddMonths(-(5 - i)))
-            .Select(m =>
-            {
-                var doMes = registros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month).ToList();
-                var dreMes = CalcularDre(doMes, categorias);
-                return new CustoFixoMensalDto
-                {
-                    Mes = $"{m.Year}-{m.Month:D2}",
-                    Receita = dreMes.ReceitaBruta,
-                    CustoFixo = dreMes.DespesasFixas.Total,
-                    Percentual = dreMes.ReceitaBruta > 0 ? Math.Round(dreMes.DespesasFixas.Total / dreMes.ReceitaBruta * 100, 1) : null,
-                };
-            })
-            .ToList();
+        // tanto pra tendência (item 4) quanto pro custo fixo médio do Fôlego de Caixa (item 2) e do
+        // Runway do Dashboard (CalcularPeriodo) — única fonte de verdade pro custo fixo médio.
+        var custoFixoMensal = CalcularCustoFixoMensal(registros, categorias, mesRef);
 
         var folegoCaixa = CalcularFolegoCaixa(saldoDisponivel, custoFixoMensal);
         var prazoRecebimento = CalcularPrazoRecebimento(registros);
@@ -719,6 +724,29 @@ public class MetricasService : IMetricasService
                     ResultadoLiquido = dreMes.ResultadoLiquido,
                     ResultadoLiquidoPercentual = dreMes.ResultadoLiquidoPercentual,
                     TemDados = dreMes.ReceitaBruta > 0 || dreMes.TotalDespesas > 0,
+                };
+            })
+            .ToList();
+    }
+
+    // Série mensal (6 meses) de Receita/CustoFixo via DRE por categoria — única fonte de verdade
+    // do "custo fixo médio mensal", usada tanto pelo Fôlego de Caixa (Indicadores) quanto pelo
+    // Runway (Dashboard, CalcularPeriodo), pra nunca mais divergirem pro mesmo saldo.
+    private List<CustoFixoMensalDto> CalcularCustoFixoMensal(
+        List<RegistroDiario> registros, IReadOnlyList<Categoria>? categorias, DateOnly hoje)
+    {
+        return Enumerable.Range(0, 6)
+            .Select(i => hoje.AddMonths(-(5 - i)))
+            .Select(m =>
+            {
+                var doMes = registros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month).ToList();
+                var dreMes = CalcularDre(doMes, categorias);
+                return new CustoFixoMensalDto
+                {
+                    Mes = $"{m.Year}-{m.Month:D2}",
+                    Receita = dreMes.ReceitaBruta,
+                    CustoFixo = dreMes.DespesasFixas.Total,
+                    Percentual = dreMes.ReceitaBruta > 0 ? Math.Round(dreMes.DespesasFixas.Total / dreMes.ReceitaBruta * 100, 1) : null,
                 };
             })
             .ToList();

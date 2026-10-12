@@ -41,7 +41,8 @@ public class MetricasControllerTests
     {
         var clienteId = Guid.NewGuid();
         _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
-        _metricasMock.Setup(m => m.CalcularPeriodo(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), It.IsAny<decimal>()))
+        _metricasMock.Setup(m => m.CalcularPeriodo(
+                It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), It.IsAny<decimal>(), It.IsAny<decimal>(), It.IsAny<IReadOnlyList<Categoria>>()))
             .Returns(new MetricasPeriodoDto());
 
         var result = await CriarSut(Guid.NewGuid(), "admin")
@@ -67,7 +68,8 @@ public class MetricasControllerTests
         _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(registros);
         _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
             .ReturnsAsync(new List<ContaBancaria> { contaComRegistro, contaSemRegistro, contaInativa });
-        _metricasMock.Setup(m => m.CalcularPeriodo(It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), It.IsAny<decimal>(), It.IsAny<decimal>()))
+        _metricasMock.Setup(m => m.CalcularPeriodo(
+                It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), It.IsAny<decimal>(), It.IsAny<decimal>(), It.IsAny<IReadOnlyList<Categoria>>()))
             .Returns(new MetricasPeriodoDto());
 
         await CriarSut(Guid.NewGuid(), "admin")
@@ -75,7 +77,7 @@ public class MetricasControllerTests
 
         // 500 (conta com registro) + 200 (conta sem registro, usa SaldoInicial) — a inativa (9999) não entra.
         _metricasMock.Verify(m => m.CalcularPeriodo(
-            It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), 700m, It.IsAny<decimal>()), Times.Once);
+            It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), 700m, It.IsAny<decimal>(), It.IsAny<IReadOnlyList<Categoria>>()), Times.Once);
     }
 
     [Fact]

@@ -356,6 +356,63 @@ public class MetricasServiceTests
         Assert.Null(categoria.VariacaoPercentual);
     }
 
+    // ---- Item 10 do Bloco 5 ("Visão de Futuro"): mesReferencia (fallback de mês vazio) ----
+
+    [Fact]
+    public void CalcularIndicadores_ComMesReferenciaNoPassado_UsaOsDadosDesseMesEmVezDoAtual()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var mesPassado = hoje.AddMonths(-2);
+        var reg = CriarRegistro(mesPassado,
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new() { Item("Aluguel", 200m, "Aluguel", "CustoFixo") });
+        // "hoje" não tem nenhum lançamento — mês atual vazio; só o mesPassado tem dado.
+
+        var resultado = _sut.CalcularIndicadores(new() { reg }, mesReferencia: new DateOnly(mesPassado.Year, mesPassado.Month, 1));
+
+        Assert.Equal(1000m, resultado.Dre.ReceitaBruta);
+        var categoria = Assert.Single(resultado.RankingCategorias);
+        Assert.Equal(200m, categoria.Total);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_ComMesReferenciaNoPassado_NaoExtrapolaORanking()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var mesPassado = hoje.AddMonths(-2);
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(mesPassado, new(), new() { Item("Aluguel", 100m, "Aluguel", "CustoFixo") }),
+        };
+        for (int i = 1; i <= 3; i++)
+            registros.Add(CriarRegistro(mesPassado.AddMonths(-i), new(), new() { Item("Aluguel", 100m, "Aluguel", "CustoFixo") }));
+
+        var resultado = _sut.CalcularIndicadores(registros, mesReferencia: new DateOnly(mesPassado.Year, mesPassado.Month, 1));
+
+        // Se extrapolasse (como faz pro mês em andamento), 100 ÷ dia-do-mesRef(=1) × dias-do-mês
+        // infladaria o total muito acima dos 100 históricos — mesRef passado nunca extrapola.
+        var categoria = resultado.RankingCategorias.Single(c => c.Nome == "Aluguel");
+        Assert.Equal(100m, categoria.MediaMesesAnteriores);
+        Assert.Equal(0m, categoria.VariacaoPercentual);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_ComMesReferenciaNoPassado_ComparaReceitaDosMesesInteiros()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var mesPassado = hoje.AddMonths(-2);
+        var mesAnterior = mesPassado.AddMonths(-1);
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(mesPassado, new() { Item("Venda", 1000m, "Vendas", "Receita") }, new()),
+            CriarRegistro(mesAnterior, new() { Item("Venda", 500m, "Vendas", "Receita") }, new()),
+        };
+
+        var resultado = _sut.CalcularIndicadores(registros, mesReferencia: new DateOnly(mesPassado.Year, mesPassado.Month, 1));
+
+        Assert.Equal(100m, resultado.VariacaoReceitaMesAnterior); // 1000 vs 500 = +100%
+    }
+
     // ---- Ponto de Equilíbrio ----
 
     [Fact]
@@ -837,6 +894,36 @@ public class MetricasServiceTests
 
         Assert.Equal(1.0m, resultado.Runway!.Meses);
         Assert.Equal("vermelho", resultado.Runway.Semaforo);
+    }
+
+    // Bloco 2 da rodada "Visão de Futuro": Dashboard (Runway) e Indicadores (Fôlego de Caixa)
+    // precisam SEMPRE bater pro mesmo saldo — antes, Runway usava 3 meses (soma bruta por
+    // TipoCusto) e Fôlego de Caixa usava 6 meses só com atividade (DespesasFixas do DRE); com
+    // custo fixo crescendo mês a mês, essas duas janelas davam médias (e portanto Runway)
+    // diferentes pro mesmo cliente. Agora os dois usam exatamente o mesmo cálculo.
+    [Fact]
+    public void CalcularPeriodo_E_CalcularIndicadores_RunwayEFolegoDeCaixaBatemParaOMesmoSaldo()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var registros = new List<RegistroDiario>();
+        // 3 meses mais antigos com custo fixo baixo (200) e os 3 mais recentes com custo fixo
+        // alto (1000) — média dos últimos 3 meses (fórmula antiga do Runway) seria 1000; média
+        // dos 6 meses com atividade (fórmula do Fôlego de Caixa) é 600.
+        for (int i = 5; i >= 3; i--)
+            registros.Add(CriarRegistro(hoje.AddMonths(-i).AddDays(-1),
+                new(), new() { Item("Custo", 200m, "Aluguel", "CustoFixo") }));
+        for (int i = 2; i >= 0; i--)
+            registros.Add(CriarRegistro(hoje.AddMonths(-i).AddDays(-1),
+                new(), new() { Item("Custo", 1000m, "Aluguel", "CustoFixo") }));
+
+        var periodo = _sut.CalcularPeriodo(registros, registros, 6000m);
+        var indicadores = _sut.CalcularIndicadores(registros, saldoDisponivel: 6000m);
+
+        Assert.True(indicadores.FolegoCaixa.Disponivel);
+        Assert.Equal(600m, indicadores.FolegoCaixa.CustoFixoMedioMensal);
+        Assert.Equal(600m, periodo.BurnRate);
+        Assert.Equal(indicadores.FolegoCaixa.Meses, periodo.Runway!.Meses);
+        Assert.Equal(10.0m, periodo.Runway.Meses);
     }
 
     // ---- Semáforos: Liquidez ----

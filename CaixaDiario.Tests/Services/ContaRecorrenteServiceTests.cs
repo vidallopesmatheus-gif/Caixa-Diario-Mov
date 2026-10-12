@@ -69,7 +69,7 @@ public class ContaRecorrenteServiceTests
     {
         var dto = new CriarContaRecorrenteDto
         {
-            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 100m,
+            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 100m, Categoria = "Aluguel",
             Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1),
             // ContaBancariaId deliberadamente omitido (fica Guid.Empty).
         };
@@ -86,7 +86,7 @@ public class ContaRecorrenteServiceTests
         var contaDeOutroCliente = Guid.NewGuid();
         var dto = new CriarContaRecorrenteDto
         {
-            ClienteId = clienteId, Descricao = "Teste", Valor = 100m,
+            ClienteId = clienteId, Descricao = "Teste", Valor = 100m, Categoria = "Aluguel",
             Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1), ContaBancariaId = contaDeOutroCliente,
         };
         _contaBancariaRepoMock.Setup(c => c.ListarPorClienteAsync(clienteId))
@@ -99,12 +99,63 @@ public class ContaRecorrenteServiceTests
         Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
     }
 
+    // Item 1 do Bloco 4 ("Visão de Futuro"): categoria obrigatória em recorrência NOVA.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Criar_SemCategoria_LancaDadosInvalidos(string? categoria)
+    {
+        var dto = new CriarContaRecorrenteDto
+        {
+            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 100m, Categoria = categoria,
+            Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1),
+        };
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            CriarSut().CriarAsync(dto, dto.ClienteId, "cliente"));
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    // Item 1 do Bloco 4: já categorizada não pode ser "limpa" de volta pra sem-categoria.
+    [Fact]
+    public async Task Atualizar_ComCategoriaVazia_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        conta.Categoria = "Aluguel";
+        _repoMock.Setup(r => r.ObterPorIdAsync(clienteId, conta.Id)).ReturnsAsync(conta);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            CriarSut().AtualizarAsync(clienteId, conta.Id, new AtualizarContaRecorrenteDto { Categoria = "" }, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    // Recorrência antiga sem categoria pode ser atualizada SEM mandar Categoria (null = "não
+    // mudar") — essa regra nova nunca pode travar quem só quer editar outro campo.
+    [Fact]
+    public async Task Atualizar_RecorrenciaAntigaSemCategoria_SemEnviarCategoria_NaoLancaErro()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        conta.Categoria = null;
+        _repoMock.Setup(r => r.ObterPorIdAsync(clienteId, conta.Id)).ReturnsAsync(conta);
+
+        var resultado = await CriarSut().AtualizarAsync(
+            clienteId, conta.Id, new AtualizarContaRecorrenteDto { Valor = 1500m }, clienteId, "cliente");
+
+        Assert.Null(resultado.Categoria);
+        Assert.Equal(1500m, resultado.Valor);
+    }
+
     [Fact]
     public async Task Criar_TipoInvalido_LancaDadosInvalidos()
     {
         var dto = new CriarContaRecorrenteDto
         {
-            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 100m,
+            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 100m, Categoria = "Aluguel",
             Tipo = "Invalido", DataInicio = new DateOnly(2026, 1, 1),
         };
         var ex = await Assert.ThrowsAsync<ApiException>(() =>
@@ -117,7 +168,7 @@ public class ContaRecorrenteServiceTests
     {
         var dto = new CriarContaRecorrenteDto
         {
-            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 600m,
+            ClienteId = Guid.NewGuid(), Descricao = "Teste", Valor = 600m, Categoria = "Vendas",
             Tipo = "Receber", DataInicio = new DateOnly(2026, 1, 1),
             QuantidadeParcelas = 600,
         };
@@ -134,7 +185,7 @@ public class ContaRecorrenteServiceTests
         var contaBancariaId = Guid.NewGuid();
         var dto = new CriarContaRecorrenteDto
         {
-            ClienteId = clienteId, Descricao = "Aluguel", Valor = 1000m,
+            ClienteId = clienteId, Descricao = "Aluguel", Valor = 1000m, Categoria = "Aluguel",
             Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1), ContaBancariaId = contaBancariaId,
         };
         PermitirConta(clienteId, contaBancariaId);
@@ -155,7 +206,7 @@ public class ContaRecorrenteServiceTests
         var contaBancariaId = Guid.NewGuid();
         var dto = new CriarContaRecorrenteDto
         {
-            ClienteId = clienteId, Descricao = "Energia", Valor = 100m,
+            ClienteId = clienteId, Descricao = "Energia", Valor = 100m, Categoria = "Energia/Água/Internet",
             Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1), ContaBancariaId = contaBancariaId,
             ValorVariavel = true, DiaVencimento = 15,
         };
@@ -178,7 +229,7 @@ public class ContaRecorrenteServiceTests
         PermitirConta(clienteId, contaBancariaId);
         var dto = new CriarContaRecorrenteDto
         {
-            ClienteId = clienteId, Descricao = "Energia", Valor = 100m,
+            ClienteId = clienteId, Descricao = "Energia", Valor = 100m, Categoria = "Energia/Água/Internet",
             Tipo = "Pagar", DataInicio = new DateOnly(2026, 1, 1), ContaBancariaId = contaBancariaId,
             DiaVencimento = diaInvalido,
         };

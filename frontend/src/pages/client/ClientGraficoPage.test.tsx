@@ -163,5 +163,5 @@ test('clienteIdOverride é utilizado quando fornecido', async () => {
   mockHooks()
   render(<ClientGraficoPage clienteIdOverride="outro-id" />)
   await waitFor(() => expect(screen.getByText('Meu negócio dá lucro de verdade?')).toBeInTheDocument())
-  expect(vi.mocked(metricasApi.obterIndicadores)).toHaveBeenCalledWith('outro-id')
+  expect(vi.mocked(metricasApi.obterIndicadores)).toHaveBeenCalledWith('outro-id', 13, undefined)
 })

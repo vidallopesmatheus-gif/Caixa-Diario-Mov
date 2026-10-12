@@ -79,6 +79,9 @@ export interface ContaProvisionada {
   // Preenchido quando a baixa foi vinculada a um lançamento (Entrada/Saída) já existente,
   // em vez de gerar um novo — evita contar o mesmo dinheiro duas vezes no saldo.
   lancamentoVinculadoId?: string
+  // Rodada "Visão de Futuro" item 6: permite agrupar as parcelas de um mesmo contrato de
+  // financiamento na lista de Contas a Pagar, em vez de uma a uma.
+  origemFinanciamentoId?: string
 }
 
 export interface MetaVinculada {
@@ -211,7 +214,10 @@ export interface Financiamento {
 
 export interface ParcelaFinanciamento {
   id: string
-  numero: number
+  // "Adiantamento" é uma linha sintética (amortização extraordinária) inserida na posição
+  // cronológica certa — sem Numero, Juros/Encargos sempre 0, Pago sempre true.
+  tipo: 'Parcela' | 'Adiantamento'
+  numero: number | null
   vencimento: string
   valor: number
   juros: number

@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { useMetricas } from '../../hooks/useMetricas'
 import StatCard from '../../components/shared/StatCard'
-import { fmtBRL, fmtPct, todayISO } from '../../utils/format'
+import { fmtBRL, fmtPct, fmtNumDecimal, todayISO } from '../../utils/format'
 import { calcularJanelaPeriodo } from '../../utils/periodo'
 import type { PeriodoOpcao } from '../../utils/periodo'
 import { obterMeta, salvarMeta, listarMetas, excluirMeta, desfazerConquistaMeta } from '../../api/metas'
@@ -22,6 +22,7 @@ import ResumoMetricCards from './dashboard/ResumoMetricCards'
 import AtencaoCard from './dashboard/AtencaoCard'
 import SaudeNegocioBlock from './dashboard/SaudeNegocioBlock'
 import DividasCard from './dashboard/DividasCard'
+import MeuFuturoCard from './dashboard/MeuFuturoCard'
 import AtividadeRecente from './dashboard/AtividadeRecente'
 import type { ContaBancaria } from '../../types'
 import type { MetaAnual } from '../../types'
@@ -110,7 +111,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [projecao, setProjecao] = useState<Projecao | null>(null)
   useEffect(() => {
     if (!clienteId) return
-    obterProjecao(clienteId, 30, contaFiltro ?? undefined).then(setProjecao).catch(() => setProjecao(null))
+    obterProjecao(clienteId, 30, { contaBancariaId: contaFiltro ?? undefined }).then(setProjecao).catch(() => setProjecao(null))
   }, [clienteId, contaFiltro])
 
   const hoje = new Date()
@@ -334,7 +335,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         const remainingMonths = periodoMeses - idx
         const dre = dres[idx]
         const receitaReal = dre?.receitaBruta ?? 0
-        const lucroReal = dre?.resultadoLiquido ?? 0
+        // Item 4 (rodada "Visão de Futuro"): resultadoLiquido inclui Atividades de Financiamento —
+        // um adiantamento de empréstimo (amortização extraordinária) entrava como "prejuízo" na
+        // Meta de Lucro, mesmo sem ser despesa nenhuma. resultadoOperacional é a mesma régua que a
+        // própria tela de DRE usa pra separar "resultado do negócio" de financiamento/investimento.
+        const lucroReal = dre?.resultadoOperacional ?? 0
 
         const isPassado = ano < anoAtual || (ano === anoAtual && mes < mesAtual)
         const isAtual = ano === anoAtual && mes === mesAtual
@@ -650,6 +655,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       {/* Fase 6H: resumo de financiamentos/empréstimos/consórcios — some quando não há contrato ativo. */}
       {clienteId && <DividasCard clienteId={clienteId} />}
 
+      {/* Bloco 3 da rodada "Visão de Futuro": resumo de "Meu Futuro" (12 meses), linkando pra tela completa. */}
+      {clienteId && <MeuFuturoCard clienteId={clienteId} />}
+
       {/* ══ Camada 5: atividade recente ══ */}
       <AtividadeRecente registros={registros} contasBancarias={contasBancarias} />
 
@@ -701,15 +709,15 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           {metricas.runway && (
             <StatCard
               label={`⏳ Runway ${metricas.runway.semaforo === 'verde' ? '🟢' : metricas.runway.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
-              value={`${metricas.runway.meses.toFixed(1)} meses`}
+              value={`${fmtNumDecimal(metricas.runway.meses)} meses`}
               className={metricas.runway.semaforo === 'verde' ? 'val-green' : metricas.runway.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
-              title={`Fórmula: saldo disponível (contas correntes + Caixa, sem investimentos) ÷ custo fixo médio mensal (média das saídas dos últimos 3 meses).${metricas.burnRate ? ` Custo fixo médio mensal: ${fmtBRL(metricas.burnRate)}.` : ''}`}
+              title={`Fórmula: saldo disponível (contas correntes + Caixa, sem investimentos) ÷ despesas fixas médias dos últimos 6 meses com atividade (mesmo cálculo do Fôlego de Caixa em Indicadores).${metricas.burnRate ? ` Despesas fixas médias: ${fmtBRL(metricas.burnRate)}.` : ''}`}
             />
           )}
           {metricas.liquidez && (
             <StatCard
               label={`💧 Liquidez ${metricas.liquidez.semaforo === 'verde' ? '🟢' : metricas.liquidez.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
-              value={metricas.liquidez.altaLiquidez ? 'Alta liquidez' : `${metricas.liquidez.indice?.toFixed(2)}×`}
+              value={metricas.liquidez.altaLiquidez ? 'Alta liquidez' : `${fmtNumDecimal(metricas.liquidez.indice ?? 0, 2)}×`}
               className={metricas.liquidez.semaforo === 'verde' ? 'val-green' : metricas.liquidez.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
             />
           )}
@@ -810,11 +818,11 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         {/* ── Meu Sonho ── */}
         <div className="meta-sonho-block">
           <label className="meta-field-label">💭 Qual é o objetivo?</label>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               type="text"
               className="meta-sonho-input"
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 160 }}
               placeholder="Ex: Macbook, viagem, reserva de emergência..."
               value={editSonho}
               onChange={e => setEditSonho(e.target.value)}
@@ -871,7 +879,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               <div className="meta-metodo-field">
                 <label className="meta-field-label">Taxa retorno (% a.a.) <span style={{ color: 'var(--tx3)', fontSize: 11 }}>SELIC: {fmtPct(selic, 2)}</span></label>
                 <input type="text" inputMode="decimal" value={editTaxaRetorno}
-                  onChange={e => setEditTaxaRetorno(e.target.value)} placeholder={selic.toFixed(1)}
+                  onChange={e => setEditTaxaRetorno(e.target.value)} placeholder={fmtNumDecimal(selic)}
                   style={{ padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 8, color: 'var(--tx1)', fontSize: 14, width: '100%' }} />
               </div>
               <div className="meta-metodo-field">
@@ -990,7 +998,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
           <button className="btn-meta" onClick={handleSaveObjetivo} disabled={savingObjetivo}>
             {savingObjetivo ? 'Salvando...' : objetivoSelecionadoId ? '💾 Salvar objetivo' : '➕ Criar objetivo'}
           </button>
@@ -1124,7 +1132,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
           <button className="btn-meta" onClick={handleSaveMeta} disabled={savingMeta}>
             {savingMeta ? 'Salvando...' : '💾 Salvar metas'}
           </button>

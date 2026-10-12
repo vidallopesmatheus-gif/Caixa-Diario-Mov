@@ -26,6 +26,7 @@ public class AppDbContext : DbContext
     public DbSet<OcorrenciaRecorrenteDispensada> OcorrenciasRecorrentesDispensadas { get; set; }
     public DbSet<DuplicataDispensada> DuplicatasDispensadas { get; set; }
     public DbSet<SugestaoVinculoIgnorada> SugestoesVinculoIgnoradas { get; set; }
+    public DbSet<SugestaoRecorrenciaIgnorada> SugestoesRecorrenciaIgnoradas { get; set; }
     public DbSet<Financiamento> Financiamentos { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -197,6 +198,10 @@ public class AppDbContext : DbContext
             entity.Property(e => e.OrigemMetaId).HasColumnName("origem_meta_id");
             entity.Property(e => e.ValorAdiantado).HasColumnName("valor_adiantado").HasColumnType("decimal(18,2)").HasDefaultValue(0m);
             entity.Property(e => e.EconomiaJurosAcumulada).HasColumnName("economia_juros_acumulada").HasColumnType("decimal(18,2)").HasDefaultValue(0m);
+            entity.Property(e => e.Adiantamentos).HasColumnName("adiantamentos").HasColumnType("jsonb")
+                .HasConversion(
+                    v => JsonSerializer.Serialize(v, _jsonOptions),
+                    v => JsonSerializer.Deserialize<List<AdiantamentoFinanciamento>>(v, _jsonOptions) ?? new());
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em");
 
@@ -247,6 +252,18 @@ public class AppDbContext : DbContext
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
             // Mesmo par título×lançamento só pode ser ignorado uma vez.
             entity.HasIndex(e => new { e.ContaProvisionadaId, e.LancamentoId }).IsUnique();
+        });
+
+        modelBuilder.Entity<SugestaoRecorrenciaIgnorada>(entity =>
+        {
+            entity.ToTable("sugestoes_recorrencia_ignoradas");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ChaveNormalizada).HasColumnName("chave_normalizada");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            // Mesma chave (padrão detectado) só pode ser ignorada uma vez por cliente.
+            entity.HasIndex(e => new { e.ClienteId, e.ChaveNormalizada }).IsUnique();
         });
 
         modelBuilder.Entity<ContaBancaria>(entity =>

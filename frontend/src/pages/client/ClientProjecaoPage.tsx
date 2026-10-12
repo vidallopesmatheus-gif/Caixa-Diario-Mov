@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { obterProjecao, obterTrajetoria } from '../../api/projecao'
+import { obterProjecao, obterTrajetoria, obterDespesasEstimadas } from '../../api/projecao'
 import { listarContasBancarias } from '../../api/contasBancarias'
-import { fmtBRL } from '../../utils/format'
-import type { Projecao, ProjecaoDia, Trajetoria } from '../../api/projecao'
+import { criarContaProvisionada } from '../../api/contasProvisionadas'
+import { fmtBRL, todayISO, addDays } from '../../utils/format'
+import Modal from '../../components/shared/Modal'
+import type { Projecao, ProjecaoDia, Trajetoria, Cenario, DespesaEstimadaCategoria } from '../../api/projecao'
 import type { ContaBancaria } from '../../types'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -62,21 +64,30 @@ export default function ClientProjecaoPage() {
   const [erro, setErro] = useState('')
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({})
 
+  // Bloco 2 da rodada "Visão de Futuro": cenário e reserva de investimento valem pra qualquer
+  // janela (30/60/90 ou trajetória) — por isso ficam fora do tipo Janela, como filtros à parte.
+  const [cenario, setCenario] = useState<Cenario>('Provavel')
+  const [incluirReserva, setIncluirReserva] = useState(false)
+  const [despesasEstimadas, setDespesasEstimadas] = useState<DespesaEstimadaCategoria[]>([])
+  const [transformarAlvo, setTransformarAlvo] = useState<DespesaEstimadaCategoria | null>(null)
+
   useEffect(() => {
     if (!clienteId) return
     listarContasBancarias(clienteId)
       .then(cs => setContas(cs.filter(c => c.ativa)))
       .catch(() => {})
+    obterDespesasEstimadas(clienteId).then(setDespesasEstimadas).catch(() => {})
   }, [clienteId])
 
   const carregar = useCallback(async () => {
     if (!clienteId) return
     setLoading(true); setErro('')
     try {
+      const opcoes = { contaBancariaId: contaFiltro || undefined, cenario, incluirReserva }
       if (janela === 'trajetoria') {
-        setTrajetoria(await obterTrajetoria(clienteId, 6, 6, contaFiltro || undefined))
+        setTrajetoria(await obterTrajetoria(clienteId, 6, 6, opcoes))
       } else {
-        const data = await obterProjecao(clienteId, janela, contaFiltro || undefined)
+        const data = await obterProjecao(clienteId, janela, opcoes)
         setProjecao(data)
         setExpandidos({})
       }
@@ -85,9 +96,22 @@ export default function ClientProjecaoPage() {
     } finally {
       setLoading(false)
     }
-  }, [clienteId, janela, contaFiltro])
+  }, [clienteId, janela, contaFiltro, cenario, incluirReserva])
 
   useEffect(() => { carregar() }, [carregar])
+
+  async function confirmarTransformarEmContaAPagar() {
+    if (!transformarAlvo || !clienteId) return
+    const contaPadrao = contas.find(c => c.tipo === 'Caixa') ?? contas[0]
+    if (!contaPadrao) return
+    await criarContaProvisionada({
+      clienteId, contaBancariaId: contaPadrao.id, tipo: 'Pagar',
+      descricao: transformarAlvo.categoria, valor: transformarAlvo.valorEstimado,
+      dataVencimento: addDays(todayISO(), 30), categoria: transformarAlvo.categoria,
+    })
+    setDespesasEstimadas(prev => prev.filter(d => d.categoria !== transformarAlvo.categoria))
+    setTransformarAlvo(null)
+  }
 
   // Dados para o gráfico — amostrar a cada N dias para não sobrecarregar
   const dadosGrafico = useMemo(() => {
@@ -181,8 +205,54 @@ export default function ClientProjecaoPage() {
         )}
       </div>
 
+      {/* Bloco 2 da rodada "Visão de Futuro": cenário e reserva de investimento — valem pra */}
+      {/* qualquer janela acima, por isso ficam numa linha de filtros à parte. */}
+      <div className="pj-controles">
+        <div className="pj-janela-tabs" title="Provável segue as médias históricas; Conservador reduz recebimentos estimados e aumenta despesas estimadas, pra simular um cenário mais apertado.">
+          {(['Provavel', 'Conservador'] as Cenario[]).map(c => (
+            <button
+              key={c}
+              className={`pj-janela-btn${cenario === c ? ' active' : ''}`}
+              onClick={() => setCenario(c)}
+            >
+              {c === 'Provavel' ? 'Provável' : 'Conservador'}
+            </button>
+          ))}
+        </div>
+        <label
+          className="pj-reserva-toggle"
+          title={contaFiltro ? 'Só se aplica no modo "Todas as contas"' : 'Por padrão, contas de Investimento ficam de fora do saldo (reserva, não dinheiro disponível pro dia a dia).'}
+        >
+          <input
+            type="checkbox"
+            checked={incluirReserva}
+            disabled={!!contaFiltro}
+            onChange={e => setIncluirReserva(e.target.checked)}
+          />
+          Incluir reserva de investimento
+        </label>
+      </div>
+
       {loading && <p className="pj-loading">Calculando projeção...</p>}
       {erro    && <p className="pj-erro">{erro}</p>}
+
+      {despesasEstimadas.length > 0 && (
+        <div className="pj-despesas-estimadas">
+          <h3 className="pj-lista-titulo">Despesas fixas estimadas (não cadastradas)</h3>
+          <p className="pj-despesas-estimadas-dica">
+            Categorias com gasto fixo recorrente nos últimos meses, mas sem conta recorrente cadastrada.
+          </p>
+          {despesasEstimadas.map(d => (
+            <div key={d.categoria} className="pj-despesa-estimada-item">
+              <span className="pj-despesa-estimada-cat">{d.categoria}</span>
+              <span className="pj-despesa-estimada-valor">{fmtBRL(d.valorEstimado)}/mês</span>
+              <button className="pj-despesa-estimada-btn" onClick={() => setTransformarAlvo(d)}>
+                Transformar em conta a pagar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {janela === 'trajetoria' && trajetoria && !loading && (
         <>
@@ -389,6 +459,25 @@ export default function ClientProjecaoPage() {
           )}
         </>
       )}
+
+      <Modal
+        open={!!transformarAlvo}
+        title="Transformar em conta a pagar"
+        onClose={() => setTransformarAlvo(null)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setTransformarAlvo(null)}>Cancelar</button>
+            <button className="btn-confirm" onClick={confirmarTransformarEmContaAPagar}>Confirmar</button>
+          </>
+        }
+      >
+        {transformarAlvo && (
+          <p style={{ color: 'var(--tx3)' }}>
+            Criar uma conta a pagar de <strong>{fmtBRL(transformarAlvo.valorEstimado)}</strong> para{' '}
+            <strong>{transformarAlvo.categoria}</strong>, com vencimento em {addDays(todayISO(), 30).split('-').reverse().join('/')}?
+          </p>
+        )}
+      </Modal>
     </>
   )
 }
@@ -397,6 +486,7 @@ function origemIcone(origem: string): string {
   if (origem === 'Recorrente') return '↺'
   if (origem === 'Atrasado') return '⚠️'
   if (origem === 'Estimativa') return '≈'
+  if (origem === 'Fatura') return '💳'
   return '📋'
 }
 

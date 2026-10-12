@@ -24,7 +24,8 @@ function mapFinanciamento(raw: any): Financiamento {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapParcela(raw: any): ParcelaFinanciamento {
   return {
-    id: raw.id, numero: raw.numero, vencimento: raw.vencimento, valor: raw.valor,
+    id: raw.id, tipo: raw.tipo === 'Adiantamento' ? 'Adiantamento' : 'Parcela',
+    numero: raw.numero ?? null, vencimento: raw.vencimento, valor: raw.valor,
     juros: raw.juros, amortizacao: raw.amortizacao, encargos: raw.encargos,
     saldoDevedor: raw.saldoDevedor, pago: raw.pago, dataBaixa: raw.dataBaixa ?? undefined,
     atrasada: raw.atrasada,
@@ -102,6 +103,8 @@ export const adiantarFinanciamento = async (
   return res.dados
 }
 
-export const excluirFinanciamento = async (financiamentoId: string): Promise<void> => {
-  await apiFetch<ApiResponse<null>>(`/api/financiamentos/${financiamentoId}`, { method: 'DELETE' })
+export const excluirFinanciamento = async (financiamentoId: string, removerAdiantamentos = true): Promise<void> => {
+  await apiFetch<ApiResponse<null>>(
+    `/api/financiamentos/${financiamentoId}?removerAdiantamentos=${removerAdiantamentos}`, { method: 'DELETE' },
+  )
 }

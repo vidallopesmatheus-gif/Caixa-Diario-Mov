@@ -265,3 +265,73 @@
   min-width: 90px;
   text-align: right;
 }
+
+/* Bloco 2 "Visão de Futuro": reserva de investimento + despesas estimadas por categoria */
+.pj-reserva-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--tx3);
+  cursor: pointer;
+}
+.pj-reserva-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+.pj-reserva-toggle input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.pj-despesas-estimadas {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+
+.pj-despesas-estimadas-dica {
+  font-size: 12px;
+  color: var(--tx3);
+  margin: -4px 0 10px;
+}
+
+.pj-despesa-estimada-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--bd);
+  flex-wrap: wrap;
+}
+.pj-despesa-estimada-item:first-of-type {
+  border-top: none;
+}
+
+.pj-despesa-estimada-cat {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx1);
+  min-width: 140px;
+}
+
+.pj-despesa-estimada-valor {
+  font-size: 13px;
+  color: var(--tx3);
+}
+
+.pj-despesa-estimada-btn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pj-despesa-estimada-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}

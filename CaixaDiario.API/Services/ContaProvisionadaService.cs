@@ -257,5 +257,6 @@ public class ContaProvisionadaService : IContaProvisionadaService
         Id = c.Id, Descricao = c.Descricao, Valor = c.Valor, DataVencimento = c.DataVencimento, Pago = c.Pago,
         Categoria = c.Categoria, RecorrenciaId = c.RecorrenciaId, DataBaixa = c.DataBaixa,
         ValorRealizado = c.ValorRealizado, ContaBancariaId = c.ContaBancariaId, LancamentoVinculadoId = c.LancamentoVinculadoId,
+        OrigemFinanciamentoId = c.OrigemFinanciamentoId,
     };
 }

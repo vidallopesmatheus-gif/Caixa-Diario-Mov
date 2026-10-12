@@ -5,7 +5,7 @@ export interface ProjecaoItem {
   descricao: string
   valor: number
   categoria?: string
-  origem: 'Provisionado' | 'Recorrente' | 'Atrasado' | 'Estimativa'
+  origem: 'Provisionado' | 'Recorrente' | 'Atrasado' | 'Estimativa' | 'Fatura'
 }
 
 export interface ProjecaoDia {
@@ -25,13 +25,32 @@ export interface Projecao {
   dias: ProjecaoDia[]
 }
 
+// Bloco 2 da rodada "Visão de Futuro" — opções combináveis com qualquer janela (30/60/90 dias ou
+// trajetória): "Provavel" segue as médias históricas sem ajuste; "Conservador" aplica uma margem
+// de segurança (recebimentos estimados reduzidos, despesas estimadas aumentadas). incluirReserva
+// soma de volta as contas tipo Investimento (de fora por padrão, mesma regra do Dashboard).
+export type Cenario = 'Provavel' | 'Conservador'
+export interface OpcoesProjecao {
+  contaBancariaId?: string
+  cenario?: Cenario
+  incluirReserva?: boolean
+}
+
+function montarParams(opcoes?: OpcoesProjecao): URLSearchParams {
+  const params = new URLSearchParams()
+  if (opcoes?.contaBancariaId) params.set('contaBancariaId', opcoes.contaBancariaId)
+  if (opcoes?.cenario) params.set('cenario', opcoes.cenario)
+  if (opcoes?.incluirReserva) params.set('incluirReserva', 'true')
+  return params
+}
+
 export async function obterProjecao(
   clienteId: string,
   dias: 30 | 60 | 90,
-  contaBancariaId?: string,
+  opcoes?: OpcoesProjecao,
 ): Promise<Projecao> {
-  const params = new URLSearchParams({ dias: String(dias) })
-  if (contaBancariaId) params.set('contaBancariaId', contaBancariaId)
+  const params = montarParams(opcoes)
+  params.set('dias', String(dias))
   const res = await apiFetch<ApiResponse<Projecao>>(
     `/api/projecao/${clienteId}?${params}`,
   )
@@ -56,12 +75,59 @@ export async function obterTrajetoria(
   clienteId: string,
   mesesPassado = 6,
   mesesFuturo = 6,
-  contaBancariaId?: string,
+  opcoes?: OpcoesProjecao,
 ): Promise<Trajetoria> {
-  const params = new URLSearchParams({ mesesPassado: String(mesesPassado), mesesFuturo: String(mesesFuturo) })
-  if (contaBancariaId) params.set('contaBancariaId', contaBancariaId)
+  const params = montarParams(opcoes)
+  params.set('mesesPassado', String(mesesPassado))
+  params.set('mesesFuturo', String(mesesFuturo))
   const res = await apiFetch<ApiResponse<Trajetoria>>(
     `/api/projecao/${clienteId}/trajetoria?${params}`,
   )
+  return res.dados
+}
+
+// Item 3 da rodada "Visão de Futuro": despesas fixas estimadas por categoria, não cadastradas
+// como recorrência — cada uma pronta pra "Transformar em conta a pagar".
+export interface DespesaEstimadaCategoria {
+  categoria: string
+  valorEstimado: number
+}
+
+export async function obterDespesasEstimadas(clienteId: string): Promise<DespesaEstimadaCategoria[]> {
+  const res = await apiFetch<ApiResponse<DespesaEstimadaCategoria[]>>(
+    `/api/projecao/${clienteId}/despesas-estimadas`,
+  )
+  return res.dados ?? []
+}
+
+// Bloco 3 da rodada "Visão de Futuro": tela "Meu Futuro" — 12 meses + conselho em regras.
+export interface MeuFuturoMes {
+  mes: string // "yyyy-MM"
+  saldoInicial: number
+  aReceber: number
+  aPagar: number
+  saldoFinal: number
+  precisaReceber: number
+  status: 'Tranquilo' | 'Atencao' | 'Risco'
+}
+
+export interface MeuFuturo {
+  meses: MeuFuturoMes[]
+  conselhos: string[]
+}
+
+export interface OpcoesMeuFuturo extends OpcoesProjecao {
+  reservaMinima?: number
+  // Simulador "E se...?": variação % na receita estimada e atraso (em dias) nos recebimentos.
+  ajusteReceitaPercent?: number
+  atrasoRecebimentosDias?: number
+}
+
+export async function obterMeuFuturo(clienteId: string, opcoes?: OpcoesMeuFuturo): Promise<MeuFuturo> {
+  const params = montarParams(opcoes)
+  if (opcoes?.reservaMinima) params.set('reservaMinima', String(opcoes.reservaMinima))
+  if (opcoes?.ajusteReceitaPercent) params.set('ajusteReceitaPercent', String(opcoes.ajusteReceitaPercent))
+  if (opcoes?.atrasoRecebimentosDias) params.set('atrasoRecebimentosDias', String(opcoes.atrasoRecebimentosDias))
+  const res = await apiFetch<ApiResponse<MeuFuturo>>(`/api/projecao/${clienteId}/meu-futuro?${params}`)
   return res.dados
 }

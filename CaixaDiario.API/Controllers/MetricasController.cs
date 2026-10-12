@@ -59,7 +59,8 @@ public class MetricasController : ControllerBase
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
         var doPeriodo = todos.Where(r => r.Data >= de && r.Data <= ate).ToList();
         var saldoConsolidado = await CalcularSaldoConsolidadoAsync(clienteId, todos);
-        var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo, saldoConsolidado, multiplo);
+        var categorias = await _categoriaRepo.ListarTodasAsync();
+        var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo, saldoConsolidado, multiplo, categorias);
         return Ok(new ApiResponse<MetricasPeriodoDto> { Dados = resultado });
     }
 
@@ -101,15 +102,25 @@ public class MetricasController : ControllerBase
         return Ok(new ApiResponse<DreDto> { Dados = resultado });
     }
 
+    // Item 10 do Bloco 5 ("Visão de Futuro"): mesReferencia opcional ("yyyy-MM") — o front manda
+    // isso quando detecta que o mês atual está vazio e já achou o último mês com dados (mesma
+    // lógica do Item 1.11 da DRE).
     [HttpGet("{clienteId:guid}/indicadores")]
-    public async Task<IActionResult> ObterIndicadores(Guid clienteId, [FromQuery] int mesesEvolucao = 13)
+    public async Task<IActionResult> ObterIndicadores(Guid clienteId, [FromQuery] int mesesEvolucao = 13, [FromQuery] string? mesReferencia = null)
     {
         VerificarAcesso(clienteId);
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
         var registros = todos.Where(r => !r.Excluido).ToList();
         var categorias = await _categoriaRepo.ListarTodasAsync();
         var saldoConsolidado = await CalcularSaldoConsolidadoAsync(clienteId, todos);
-        var resultado = _metricasService.CalcularIndicadores(registros, mesesEvolucao, categorias, saldoConsolidado);
+        DateOnly? mesRef = null;
+        if (!string.IsNullOrWhiteSpace(mesReferencia))
+        {
+            var partes = mesReferencia.Split('-');
+            if (partes.Length == 2 && int.TryParse(partes[0], out var ano) && int.TryParse(partes[1], out var mes))
+                mesRef = new DateOnly(ano, mes, 1);
+        }
+        var resultado = _metricasService.CalcularIndicadores(registros, mesesEvolucao, categorias, saldoConsolidado, mesRef);
         return Ok(new ApiResponse<IndicadoresDecisaoDto> { Dados = resultado });
     }
 }

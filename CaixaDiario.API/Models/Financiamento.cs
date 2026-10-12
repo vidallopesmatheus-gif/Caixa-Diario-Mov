@@ -27,14 +27,28 @@ public class Financiamento
     // "Ativo" | "Quitado"
     public string Status { get; set; } = "Ativo";
     public Guid? OrigemMetaId { get; set; }
-    // Totais acumulados de amortização extraordinária (Fase 6.5) — não guarda o histórico evento a
-    // evento, só a soma; o extrato (ContaProvisionada com OrigemFinanciamentoId) já é o registro
-    // de quais parcelas sofreram adiantamento.
+    // Totais acumulados de amortização extraordinária (Fase 6.5) — soma rápida pra exibição; o
+    // histórico evento a evento mora em Adiantamentos (abaixo), usado pra "tabela de parcelas"
+    // ter uma linha por adiantamento com o saldo devedor correto a partir dali.
     public decimal ValorAdiantado { get; set; }
     public decimal EconomiaJurosAcumulada { get; set; }
+    // Rodada "Visão de Futuro" item 1: sem isso, ListarParcelasAsync não tinha como saber QUANDO
+    // o saldo caiu por fora da tabela de parcelas — a última linha nunca zerava (ficava no valor
+    // do adiantamento, ex.: R$ 5.000,00 em vez de 0,00).
+    public List<AdiantamentoFinanciamento> Adiantamentos { get; set; } = new();
     public DateTime CriadoEm { get; set; }
     public DateTime AtualizadoEm { get; set; }
 
     public Usuario Cliente { get; set; } = null!;
     public ContaBancaria ContaBancaria { get; set; } = null!;
+}
+
+/// <summary>Um evento de amortização extraordinária — item jsonb embutido em Financiamento.
+/// Nunca editado depois de criado (estornar um adiantamento não é suportado nesta rodada).</summary>
+public class AdiantamentoFinanciamento
+{
+    public Guid Id { get; set; }
+    public DateOnly Data { get; set; }
+    public decimal Valor { get; set; }
+    public decimal EconomiaJuros { get; set; }
 }

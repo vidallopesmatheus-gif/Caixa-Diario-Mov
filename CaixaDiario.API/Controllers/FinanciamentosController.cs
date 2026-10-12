@@ -61,9 +61,9 @@ public class FinanciamentosController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Excluir(Guid id)
+    public async Task<IActionResult> Excluir(Guid id, [FromQuery] bool removerAdiantamentos = true)
     {
-        await _service.ExcluirAsync(id, ObterUsuarioId(), ObterPerfil());
+        await _service.ExcluirAsync(id, ObterUsuarioId(), ObterPerfil(), removerAdiantamentos);
         return Ok(new ApiResponse<object> { Dados = null });
     }
 }

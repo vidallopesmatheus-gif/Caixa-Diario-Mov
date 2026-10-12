@@ -226,9 +226,13 @@ export interface IndicadoresDecisao {
   prazoRecebimento: PrazoRecebimento
 }
 
-export async function obterIndicadores(clienteId: string, mesesEvolucao = 13): Promise<IndicadoresDecisao> {
+// Item 10 do Bloco 5 ("Visão de Futuro"): mesReferencia opcional ("yyyy-MM") — quando o mês atual
+// está vazio, o front cai pro último mês com dados (mesma lógica já usada na DRE).
+export async function obterIndicadores(clienteId: string, mesesEvolucao = 13, mesReferencia?: string): Promise<IndicadoresDecisao> {
+  const params = new URLSearchParams({ mesesEvolucao: String(mesesEvolucao) })
+  if (mesReferencia) params.set('mesReferencia', mesReferencia)
   const res = await apiFetch<ApiResponse<IndicadoresDecisao>>(
-    `/api/metricas/${clienteId}/indicadores?mesesEvolucao=${mesesEvolucao}`,
+    `/api/metricas/${clienteId}/indicadores?${params}`,
   )
   return res.dados
 }
