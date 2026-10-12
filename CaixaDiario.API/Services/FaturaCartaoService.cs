@@ -349,18 +349,25 @@ public class FaturaCartaoService : IFaturaCartaoService
 
     private async Task<List<FaturaCartaoDto>> ListarFaturasInternoAsync(ContaBancaria contaCartao)
     {
-        var registros = (await _registroRepo.ListarPorContaAsync(contaCartao.Id)).Where(r => !r.Excluido);
+        var registros = (await _registroRepo.ListarPorContaAsync(contaCartao.Id)).Where(r => !r.Excluido).ToList();
         var pagamentos = await _pagamentoRepo.ListarPorContaCartaoAsync(contaCartao.Id);
-        var hoje = DataLocalHelper.Hoje();
+        return CalcularFaturas(contaCartao, registros, pagamentos, DataLocalHelper.Hoje());
+    }
 
-        var comprasPorCompetencia = registros
+    // Extraído de ListarFaturasInternoAsync pra reuso fora deste service (item 4 da rodada "Visão
+    // de Futuro": a Projeção precisa das mesmas faturas, sem repetir o cálculo de competência/ciclo
+    // nem depender deste service inteiro, que faz checagem de acesso por requisição HTTP).
+    public static List<FaturaCartaoDto> CalcularFaturas(
+        ContaBancaria contaCartao, List<RegistroDiario> registrosDaConta, List<PagamentoFatura> pagamentosDaConta, DateOnly hoje)
+    {
+        var comprasPorCompetencia = registrosDaConta
             .SelectMany(r => r.Saidas
                 .Where(s => s.TipoCusto != LancamentoFiltro.TipoPagamentoFatura)
                 .Select(s => (Competencia: ObterCompetencia(r.Data, contaCartao.DiaFechamento), s.Valor)))
             .GroupBy(x => x.Competencia)
             .ToDictionary(g => g.Key, g => (Total: g.Sum(x => x.Valor), Qtd: g.Count()));
 
-        var pagoPorCompetencia = pagamentos
+        var pagoPorCompetencia = pagamentosDaConta
             .GroupBy(p => p.Competencia)
             .ToDictionary(g => g.Key, g => g.Sum(p => p.ValorPago));
 

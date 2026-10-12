@@ -7,6 +7,10 @@ public class ProjecaoServiceTests
 {
     private readonly ProjecaoService _sut = new();
     private static readonly DateOnly Hoje = DataLocalHelper.Hoje();
+    // Bloco 2 da rodada "Visão de Futuro": cenário Provável (sem ajuste) e sem contas/faturas de
+    // cartão — equivalente ao comportamento de antes do bloco, pros testes que não testam
+    // especificamente cenário/reserva/fatura.
+    private static readonly ProjecaoOpcoes OpcoesPadrao = new(new List<ContaBancaria>(), new List<PagamentoFatura>());
 
     private static RegistroDiario CriarRegistro(Guid contaId, DateOnly data, decimal saldoFinal) => new()
     {
@@ -32,7 +36,7 @@ public class ProjecaoServiceTests
             CriarRegistro(contaB, Hoje.AddDays(-2), 500m),  // única/mais recente da conta B
         };
 
-        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 5, null);
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 5, null, OpcoesPadrao);
 
         Assert.Equal(1500m, resultado.SaldoAtual);
         Assert.Equal(5, resultado.TotalDias);
@@ -50,7 +54,7 @@ public class ProjecaoServiceTests
             CriarRegistro(contaB, Hoje.AddDays(-1), 500m),
         };
 
-        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 5, contaA);
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 5, contaA, OpcoesPadrao);
 
         Assert.Equal(1000m, resultado.SaldoAtual);
     }
@@ -61,7 +65,7 @@ public class ProjecaoServiceTests
         var contaA = Guid.NewGuid();
         var registros = new List<RegistroDiario> { CriarRegistro(contaA, Hoje.AddDays(-1), 1000m) };
 
-        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 3, Guid.Empty);
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 3, Guid.Empty, OpcoesPadrao);
 
         Assert.Equal(1000m, resultado.SaldoAtual);
     }
@@ -80,7 +84,7 @@ public class ProjecaoServiceTests
             Descricao = "Fornecedor Y", Valor = 100m, Categoria = "Insumos", Pago = false, DataVencimento = Hoje.AddDays(3),
         });
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null, OpcoesPadrao);
 
         var diaMovimento = resultado.Dias.Single(d => d.Data == Hoje.AddDays(3));
         Assert.Equal(300m, diaMovimento.TotalEntradas);
@@ -101,7 +105,7 @@ public class ProjecaoServiceTests
             Descricao = "Fornecedor", Valor = 500m, Pago = false, DataVencimento = Hoje.AddDays(2),
         });
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null, OpcoesPadrao);
 
         var dia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(2));
         Assert.True(dia.SaldoNegativo);
@@ -117,7 +121,7 @@ public class ProjecaoServiceTests
             Tipo = "Pagar", Ativo = true, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(4), CriadoEm = DateTime.UtcNow,
         };
 
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente> { recorrencia }, 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente> { recorrencia }, 5, null, OpcoesPadrao);
 
         var dia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(4));
         Assert.Equal(200m, dia.TotalSaidas);
@@ -143,7 +147,7 @@ public class ProjecaoServiceTests
             Descricao = "Aluguel", Valor = 200m, Pago = false, DataVencimento = dataOcorrencia, RecorrenciaId = recorrenciaId,
         });
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente> { recorrencia }, 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente> { recorrencia }, 5, null, OpcoesPadrao);
 
         var dia = resultado.Dias.Single(d => d.Data == dataOcorrencia);
         // Apenas o provisionado manual deve contar; a recorrência já materializada é ignorada.
@@ -174,7 +178,7 @@ public class ProjecaoServiceTests
             new ContaProvisionada { RecorrenciaId = recorrenciaId, Valor = 120m, Pago = true, DataBaixa = Hoje.AddMonths(-1) },
         });
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { historico }, new List<ContaRecorrente> { recorrencia }, 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario> { historico }, new List<ContaRecorrente> { recorrencia }, 5, null, OpcoesPadrao);
 
         var dia = resultado.Dias.Single(d => d.Data == dataOcorrencia);
         // Média das 3 últimas pagas (100+110+120)/3 = 110, não o Valor cadastrado (100).
@@ -185,7 +189,7 @@ public class ProjecaoServiceTests
     [Fact]
     public void Calcular_RetornaTodosOsDiasMesmoSemMovimento()
     {
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente>(), 15, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente>(), 15, null, OpcoesPadrao);
 
         Assert.Equal(15, resultado.Dias.Count);
         for (int d = 1; d <= 15; d++)
@@ -201,7 +205,7 @@ public class ProjecaoServiceTests
             Tipo = "Pagar", Ativo = false, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(2), CriadoEm = DateTime.UtcNow,
         };
 
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente> { recorrencia }, 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente> { recorrencia }, 5, null, OpcoesPadrao);
 
         Assert.All(resultado.Dias, d => Assert.Equal(0m, d.TotalSaidas));
     }
@@ -216,7 +220,7 @@ public class ProjecaoServiceTests
             Descricao = "Fornecedor atrasado", Valor = 300m, Pago = false, DataVencimento = Hoje.AddDays(-5),
         });
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null, OpcoesPadrao);
 
         var primeiroDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(1));
         var item = Assert.Single(primeiroDia.Saidas);
@@ -235,7 +239,7 @@ public class ProjecaoServiceTests
             Descricao = "Cliente atrasado", Valor = 150m, Pago = false, DataVencimento = Hoje.AddDays(-1),
         });
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null, OpcoesPadrao);
 
         var primeiroDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(1));
         var item = Assert.Single(primeiroDia.Entradas);
@@ -253,7 +257,7 @@ public class ProjecaoServiceTests
             Descricao = "Já paga", Valor = 300m, Pago = true, DataVencimento = Hoje.AddDays(-5),
         });
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null);
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, null, OpcoesPadrao);
 
         var primeiroDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(1));
         Assert.Empty(primeiroDia.Saidas);
@@ -271,7 +275,7 @@ public class ProjecaoServiceTests
             historico.Add(reg);
         }
 
-        var resultado = _sut.Calcular(historico, new List<ContaRecorrente>(), 30, null);
+        var resultado = _sut.Calcular(historico, new List<ContaRecorrente>(), 30, null, OpcoesPadrao);
 
         var ultimoDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(30));
         var item = Assert.Single(ultimoDia.Saidas);
@@ -297,7 +301,7 @@ public class ProjecaoServiceTests
             historico.Add(reg);
         }
 
-        var resultado = _sut.Calcular(historico, new List<ContaRecorrente> { recorrencia }, 30, null);
+        var resultado = _sut.Calcular(historico, new List<ContaRecorrente> { recorrencia }, 30, null, OpcoesPadrao);
 
         // A recorrência "Aluguel" já cobre os 400 de despesa fixa histórica — nada extra deve
         // ser adicionado (senão contaria a mesma despesa duas vezes).
@@ -320,7 +324,7 @@ public class ProjecaoServiceTests
             CriarRegistro(contaB, Hoje.AddMonths(-3), 600m), // B não mexe mais depois disso — carrega pro resto
         };
 
-        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, null);
+        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, null, OpcoesPadrao);
 
         // Mês corrente: A=1200 (mais recente) + B=600 (carregado do último mês em que teve atividade)
         var mesAtual = resultado.Historico.Last();
@@ -339,7 +343,7 @@ public class ProjecaoServiceTests
             CriarRegistro(contaB, Hoje.AddDays(-1), 999m),
         };
 
-        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, contaA);
+        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, contaA, OpcoesPadrao);
 
         Assert.Equal(1200m, resultado.SaldoAtual);
     }
@@ -354,7 +358,7 @@ public class ProjecaoServiceTests
             CriarRegistro(contaA, Hoje.AddDays(-1), 800m),
         };
 
-        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, contaA);
+        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 6, contaA, OpcoesPadrao);
 
         // Só 2 meses de dado real (mês passado + mês corrente), mesmo pedindo 6.
         Assert.Equal(2, resultado.MesesHistoricoDisponiveis);
@@ -364,7 +368,7 @@ public class ProjecaoServiceTests
     [Fact]
     public void CalcularTrajetoria_SemNenhumRegistro_HistoricoVazio()
     {
-        var resultado = _sut.CalcularTrajetoria(new List<RegistroDiario>(), new List<ContaRecorrente>(), 6, 6, null);
+        var resultado = _sut.CalcularTrajetoria(new List<RegistroDiario>(), new List<ContaRecorrente>(), 6, 6, null, OpcoesPadrao);
 
         Assert.Equal(0, resultado.MesesHistoricoDisponiveis);
         Assert.Empty(resultado.Historico);
@@ -381,7 +385,7 @@ public class ProjecaoServiceTests
             Tipo = "Pagar", Ativo = true, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(5), CriadoEm = DateTime.UtcNow,
         };
 
-        var resultado = _sut.CalcularTrajetoria(new List<RegistroDiario> { registro }, new List<ContaRecorrente> { recorrencia }, 6, 3, null);
+        var resultado = _sut.CalcularTrajetoria(new List<RegistroDiario> { registro }, new List<ContaRecorrente> { recorrencia }, 6, 3, null, OpcoesPadrao);
 
         Assert.Equal(3, resultado.Projetado.Count);
         // Depois de 1 mês, já pagou 1 aluguel; depois de 3 meses, já pagou 3.
@@ -403,9 +407,236 @@ public class ProjecaoServiceTests
             Descricao = "Cliente", Valor = 300m, Pago = false, DataVencimento = Hoje.AddDays(10),
         });
 
-        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 1, contaA);
+        var resultado = _sut.CalcularTrajetoria(registros, new List<ContaRecorrente>(), 6, 1, contaA, OpcoesPadrao);
 
         Assert.Equal(500m, resultado.VariacaoRealizada); // 1000 (atual) - 500 (mês anterior)
         Assert.Equal(300m, resultado.VariacaoProjetada); // 1300 (daqui a 1 mês) - 1000 (atual)
+    }
+
+    // ── Bloco 2 da rodada "Visão de Futuro": cenário, reserva de investimento, fatura de cartão ──
+
+    [Fact]
+    public void Calcular_CenarioConservador_AplicaFatorNaReceitaRecorrenteEstimada()
+    {
+        var recorrencia = new ContaRecorrente
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Descricao = "Cliente recorrente", Valor = 1000m,
+            Tipo = "Receber", Ativo = true, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(3), CriadoEm = DateTime.UtcNow,
+        };
+        var opcoes = new ProjecaoOpcoes(new List<ContaBancaria>(), new List<PagamentoFatura>(), "Conservador");
+
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente> { recorrencia }, 5, null, opcoes);
+
+        var dia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(3));
+        Assert.Equal(700m, dia.TotalEntradas); // 1000 × 0,7 (fator conservador de receita)
+    }
+
+    [Fact]
+    public void Calcular_CenarioConservador_AplicaFatorNaDespesaRecorrenteEstimada()
+    {
+        var recorrencia = new ContaRecorrente
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Descricao = "Aluguel", Valor = 1000m,
+            Tipo = "Pagar", Ativo = true, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(3), CriadoEm = DateTime.UtcNow,
+        };
+        var opcoes = new ProjecaoOpcoes(new List<ContaBancaria>(), new List<PagamentoFatura>(), "Conservador");
+
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<ContaRecorrente> { recorrencia }, 5, null, opcoes);
+
+        var dia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(3));
+        Assert.Equal(1150m, dia.TotalSaidas); // 1000 × 1,15 (fator conservador de despesa)
+    }
+
+    [Fact]
+    public void Calcular_CenarioConservador_AplicaFatorNaDespesaFixaNaoCadastrada()
+    {
+        var contaA = Guid.NewGuid();
+        var historico = new List<RegistroDiario>();
+        for (int i = 1; i <= 3; i++)
+        {
+            var reg = CriarRegistro(contaA, Hoje.AddMonths(-i), 1000m);
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aluguel manual", Valor = 400m, TipoCusto = "CustoFixo" });
+            historico.Add(reg);
+        }
+        var opcoes = new ProjecaoOpcoes(new List<ContaBancaria>(), new List<PagamentoFatura>(), "Conservador");
+
+        var resultado = _sut.Calcular(historico, new List<ContaRecorrente>(), 30, null, opcoes);
+
+        var ultimoDia = resultado.Dias.Single(d => d.Data == Hoje.AddDays(30));
+        var item = Assert.Single(ultimoDia.Saidas);
+        Assert.Equal(460m, item.Valor); // 400 × 1,15
+    }
+
+    [Fact]
+    public void Calcular_ContaInvestimento_FicaDeForaDoSaldoPorPadrao()
+    {
+        var contaCorrente = Guid.NewGuid();
+        var contaInvestimento = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(contaCorrente, Hoje.AddDays(-1), 1000m),
+            CriarRegistro(contaInvestimento, Hoje.AddDays(-1), 5000m),
+        };
+        var contas = new List<ContaBancaria>
+        {
+            new() { Id = contaCorrente, Tipo = "ContaCorrente", Ativa = true },
+            new() { Id = contaInvestimento, Tipo = "Investimento", Ativa = true },
+        };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 5, null, opcoes);
+
+        Assert.Equal(1000m, resultado.SaldoAtual);
+    }
+
+    [Fact]
+    public void Calcular_ComIncluirReserva_SomaContaInvestimentoTambem()
+    {
+        var contaCorrente = Guid.NewGuid();
+        var contaInvestimento = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(contaCorrente, Hoje.AddDays(-1), 1000m),
+            CriarRegistro(contaInvestimento, Hoje.AddDays(-1), 5000m),
+        };
+        var contas = new List<ContaBancaria>
+        {
+            new() { Id = contaCorrente, Tipo = "ContaCorrente", Ativa = true },
+            new() { Id = contaInvestimento, Tipo = "Investimento", Ativa = true },
+        };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>(), IncluirReserva: true);
+
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 5, null, opcoes);
+
+        Assert.Equal(6000m, resultado.SaldoAtual);
+    }
+
+    [Fact]
+    public void Calcular_ContaEspecificaDeInvestimento_IgnoraExclusaoEUsaSaldoDaPropriaConta()
+    {
+        // Selecionar uma conta específica é um recorte explícito do usuário — a exclusão de
+        // Investimento do saldo só vale pro modo "todas as contas".
+        var contaInvestimento = Guid.NewGuid();
+        var registro = CriarRegistro(contaInvestimento, Hoje.AddDays(-1), 5000m);
+        var contas = new List<ContaBancaria> { new() { Id = contaInvestimento, Tipo = "Investimento", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), 5, contaInvestimento, opcoes);
+
+        Assert.Equal(5000m, resultado.SaldoAtual);
+    }
+
+    [Fact]
+    public void Calcular_ContaCartaoCredito_FicaDeForaDoSaldo()
+    {
+        var contaCorrente = Guid.NewGuid();
+        var contaCartao = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(contaCorrente, Hoje.AddDays(-1), 1000m),
+            CriarRegistro(contaCartao, Hoje.AddDays(-1), -300m), // dívida do cartão
+        };
+        var contas = new List<ContaBancaria>
+        {
+            new() { Id = contaCorrente, Tipo = "ContaCorrente", Ativa = true },
+            new() { Id = contaCartao, Tipo = "CartaoCredito", Ativa = true },
+        };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 5, null, opcoes);
+
+        Assert.Equal(1000m, resultado.SaldoAtual); // -300 do cartão não entra
+    }
+
+    [Fact]
+    public void Calcular_ComFaturaDeCartaoEmAberto_EntraComoSaidaProjetadaNoVencimento()
+    {
+        // DiaFechamento/DiaVencimento deixados em branco (null) de propósito: assim o fechamento
+        // cai sempre no ÚLTIMO dia do mês corrente (sempre ainda não passou) e o vencimento sempre
+        // no mês SEGUINTE (sempre no futuro) — o teste nunca depende de em que dia do mês ele roda.
+        var contaCartao = new ContaBancaria { Id = Guid.NewGuid(), Nome = "Cartão", Tipo = "CartaoCredito", Ativa = true };
+        var registroCompra = CriarRegistro(contaCartao.Id, Hoje, 0m);
+        registroCompra.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Compra", Valor = 300m, TipoCusto = "CustoVariavel" });
+
+        var faturaEsperada = FaturaCartaoService.CalcularFaturas(
+            contaCartao, new List<RegistroDiario> { registroCompra }, new List<PagamentoFatura>(), Hoje)
+            .Single(f => f.Status != "Paga");
+        Assert.True(faturaEsperada.DataVencimento > Hoje); // garantia da escolha de datas acima
+
+        var contaCorrente = Guid.NewGuid();
+        var registroCorrente = CriarRegistro(contaCorrente, Hoje.AddDays(-1), 1000m);
+        var registros = new List<RegistroDiario> { registroCompra, registroCorrente };
+        var contas = new List<ContaBancaria> { contaCartao, new() { Id = contaCorrente, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var dias = (int)(faturaEsperada.DataVencimento.DayNumber - Hoje.DayNumber) + 5;
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), dias, null, opcoes);
+
+        var diaFatura = resultado.Dias.Single(d => d.Data == faturaEsperada.DataVencimento);
+        var item = Assert.Single(diaFatura.Saidas, s => s.Origem == "Fatura");
+        Assert.Equal(faturaEsperada.SaldoDevedor, item.Valor);
+        Assert.Equal(700m, diaFatura.SaldoFim); // 1000 (corrente) − 0 (cartão não contava no saldo inicial) − 300 (fatura)
+    }
+
+    // Fatura de ciclo já encerrado há meses e totalmente paga — tem que ficar de fora tanto pelo
+    // filtro de data (vencimento no passado) quanto pelo status "Paga".
+    [Fact]
+    public void Calcular_ComFaturaDeCartaoAntigaJaPaga_NaoEntraComoSaidaProjetada()
+    {
+        var contaCartao = new ContaBancaria { Id = Guid.NewGuid(), Nome = "Cartão", Tipo = "CartaoCredito", Ativa = true };
+        var dataCompra = Hoje.AddMonths(-3);
+        var registroCompra = CriarRegistro(contaCartao.Id, dataCompra, 0m);
+        registroCompra.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Compra", Valor = 300m, TipoCusto = "CustoVariavel" });
+
+        var competencia = FaturaCartaoService.ObterCompetencia(dataCompra, contaCartao.DiaFechamento);
+        var pagamento = new PagamentoFatura { Id = Guid.NewGuid(), ContaCartaoId = contaCartao.Id, Competencia = competencia, ValorPago = 300m };
+
+        var contas = new List<ContaBancaria> { contaCartao };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura> { pagamento });
+
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registroCompra }, new List<ContaRecorrente>(), 90, null, opcoes);
+
+        Assert.DoesNotContain(resultado.Dias.SelectMany(d => d.Saidas), s => s.Origem == "Fatura");
+    }
+
+    [Fact]
+    public void CalcularDespesasEstimadasPorCategoria_ComCategoriaSemRecorrenciaCadastrada_RetornaMediaDosUltimos3Meses()
+    {
+        var contaA = Guid.NewGuid();
+        var historico = new List<RegistroDiario>();
+        for (int i = 1; i <= 3; i++)
+        {
+            var reg = CriarRegistro(contaA, Hoje.AddMonths(-i), 1000m);
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Internet", Valor = 100m + i * 10, Categoria = "Energia/Água/Internet", TipoCusto = "CustoFixo" });
+            historico.Add(reg);
+        }
+
+        var resultado = _sut.CalcularDespesasEstimadasPorCategoria(historico, new List<ContaRecorrente>(), Hoje);
+
+        var item = Assert.Single(resultado);
+        Assert.Equal("Energia/Água/Internet", item.Categoria);
+        Assert.Equal(120m, item.ValorEstimado); // média de 110, 120, 130
+    }
+
+    [Fact]
+    public void CalcularDespesasEstimadasPorCategoria_ComRecorrenciaJaCobrindoACategoria_NaoARetorna()
+    {
+        var contaA = Guid.NewGuid();
+        var recorrencia = new ContaRecorrente
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Descricao = "Internet", Valor = 200m, Categoria = "Energia/Água/Internet",
+            Tipo = "Pagar", Ativo = true, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(-40), CriadoEm = DateTime.UtcNow,
+        };
+        var historico = new List<RegistroDiario>();
+        for (int i = 1; i <= 3; i++)
+        {
+            var reg = CriarRegistro(contaA, Hoje.AddMonths(-i), 1000m);
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Internet", Valor = 100m, Categoria = "Energia/Água/Internet", TipoCusto = "CustoFixo" });
+            historico.Add(reg);
+        }
+
+        var resultado = _sut.CalcularDespesasEstimadasPorCategoria(historico, new List<ContaRecorrente> { recorrencia }, Hoje);
+
+        Assert.Empty(resultado);
     }
 }

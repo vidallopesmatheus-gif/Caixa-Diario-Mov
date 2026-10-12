@@ -5,7 +5,9 @@ namespace CaixaDiario.API.Services;
 
 public class MetricasService : IMetricasService
 {
-    public MetricasPeriodoDto CalcularPeriodo(List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal saldoConsolidado, decimal multiplo = 3m)
+    public MetricasPeriodoDto CalcularPeriodo(
+        List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal saldoConsolidado,
+        decimal multiplo = 3m, IReadOnlyList<Categoria>? categorias = null)
     {
         var entradas = registrosDoPeriodo.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).ToList();
         var saidas = registrosDoPeriodo.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).ToList();
@@ -95,22 +97,20 @@ public class MetricasService : IMetricasService
             dto.Valuation = new ValuationDto { Valor = valuationValor, Semaforo = valuationSemaforo };
         }
 
-        // Runway — item 1.5: custo fixo médio mensal (só TipoCusto == CustoFixo), nunca "toda saída
-        // operacional" (que incluía custo variável e inflava o burn) — mesma fórmula usada em
-        // Indicadores > Fôlego de Caixa (CalcularFolegoCaixa), pra Dashboard e Indicadores nunca
-        // mais mostrarem números diferentes pro mesmo conceito.
-        var burnMedioMensal = ultimos3Meses
-            .Where(m => m.Count > 0)
-            .Select(m => m.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == "CustoFixo").Sum(s => s.Valor))
-            .DefaultIfEmpty(0)
-            .Average();
-        dto.BurnRate = burnMedioMensal > 0 ? Math.Round(burnMedioMensal, 2) : (decimal?)null;
-        var runwayMeses = burnMedioMensal > 0 ? Math.Round(saldoAtual / burnMedioMensal, 1) : 0;
+        // Runway — item 2 da rodada "Visão de Futuro": precisa dar o MESMO número que Indicadores >
+        // Fôlego de Caixa pro mesmo saldo. Antes, cada um calculava o "custo fixo médio" de um jeito
+        // (aqui: 3 meses, soma bruta por TipoCusto; lá: 6 meses só com atividade, DespesasFixas do
+        // DRE por categoria) — convergiam o saldo (PR #43) mas nunca o divisor. Agora os dois chamam
+        // CalcularCustoFixoMensal/CalcularFolegoCaixa — única fonte de verdade pro custo fixo médio.
+        var custoFixoMensalRunway = CalcularCustoFixoMensal(todosRegistros, categorias, DataLocalHelper.Hoje());
+        var folegoCaixaRunway = CalcularFolegoCaixa(saldoAtual, custoFixoMensalRunway);
+        dto.BurnRate = folegoCaixaRunway.CustoFixoMedioMensal;
+        var runwayMeses = folegoCaixaRunway.Meses ?? 0;
 
         dto.Runway = new RunwayDto
         {
             Meses = runwayMeses,
-            Semaforo = burnMedioMensal == 0 ? "cinza"
+            Semaforo = !folegoCaixaRunway.Disponivel ? "cinza"
                 : runwayMeses > 6 ? "verde"
                 : runwayMeses >= 3 ? "amarelo"
                 : "vermelho",
@@ -620,22 +620,9 @@ public class MetricasService : IMetricasService
         var pontoEquilibrio = CalcularPontoEquilibrio(dre.ReceitaBruta, dre.MargemContribuicao, dre.DespesasFixas.Total, hoje);
 
         // Série mensal de Custo Fixo ÷ Receita (últimos 6 meses) — mesma DRE por mês, reaproveitada
-        // tanto pra tendência (item 4) quanto pro custo fixo médio do Fôlego de Caixa (item 2).
-        var custoFixoMensal = Enumerable.Range(0, 6)
-            .Select(i => hoje.AddMonths(-(5 - i)))
-            .Select(m =>
-            {
-                var doMes = registros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month).ToList();
-                var dreMes = CalcularDre(doMes, categorias);
-                return new CustoFixoMensalDto
-                {
-                    Mes = $"{m.Year}-{m.Month:D2}",
-                    Receita = dreMes.ReceitaBruta,
-                    CustoFixo = dreMes.DespesasFixas.Total,
-                    Percentual = dreMes.ReceitaBruta > 0 ? Math.Round(dreMes.DespesasFixas.Total / dreMes.ReceitaBruta * 100, 1) : null,
-                };
-            })
-            .ToList();
+        // tanto pra tendência (item 4) quanto pro custo fixo médio do Fôlego de Caixa (item 2) e do
+        // Runway do Dashboard (CalcularPeriodo) — única fonte de verdade pro custo fixo médio.
+        var custoFixoMensal = CalcularCustoFixoMensal(registros, categorias, hoje);
 
         var folegoCaixa = CalcularFolegoCaixa(saldoDisponivel, custoFixoMensal);
         var prazoRecebimento = CalcularPrazoRecebimento(registros);
@@ -719,6 +706,29 @@ public class MetricasService : IMetricasService
                     ResultadoLiquido = dreMes.ResultadoLiquido,
                     ResultadoLiquidoPercentual = dreMes.ResultadoLiquidoPercentual,
                     TemDados = dreMes.ReceitaBruta > 0 || dreMes.TotalDespesas > 0,
+                };
+            })
+            .ToList();
+    }
+
+    // Série mensal (6 meses) de Receita/CustoFixo via DRE por categoria — única fonte de verdade
+    // do "custo fixo médio mensal", usada tanto pelo Fôlego de Caixa (Indicadores) quanto pelo
+    // Runway (Dashboard, CalcularPeriodo), pra nunca mais divergirem pro mesmo saldo.
+    private List<CustoFixoMensalDto> CalcularCustoFixoMensal(
+        List<RegistroDiario> registros, IReadOnlyList<Categoria>? categorias, DateOnly hoje)
+    {
+        return Enumerable.Range(0, 6)
+            .Select(i => hoje.AddMonths(-(5 - i)))
+            .Select(m =>
+            {
+                var doMes = registros.Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month).ToList();
+                var dreMes = CalcularDre(doMes, categorias);
+                return new CustoFixoMensalDto
+                {
+                    Mes = $"{m.Year}-{m.Month:D2}",
+                    Receita = dreMes.ReceitaBruta,
+                    CustoFixo = dreMes.DespesasFixas.Total,
+                    Percentual = dreMes.ReceitaBruta > 0 ? Math.Round(dreMes.DespesasFixas.Total / dreMes.ReceitaBruta * 100, 1) : null,
                 };
             })
             .ToList();

@@ -27,3 +27,12 @@ public class ProjecaoDto
     public int TotalDias { get; set; }
     public List<ProjecaoDiaDto> Dias { get; set; } = new();
 }
+
+// Item 3 da rodada "Visão de Futuro": uma linha por categoria de despesa fixa recorrente que o
+// cliente nunca cadastrou como ContaRecorrente — cada uma pronta pra virar conta a pagar em 2
+// cliques (botão na tela + confirmar no modal).
+public class DespesaEstimadaCategoriaDto
+{
+    public string Categoria { get; set; } = string.Empty;
+    public decimal ValorEstimado { get; set; }
+}

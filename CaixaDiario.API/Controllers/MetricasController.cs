@@ -59,7 +59,8 @@ public class MetricasController : ControllerBase
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
         var doPeriodo = todos.Where(r => r.Data >= de && r.Data <= ate).ToList();
         var saldoConsolidado = await CalcularSaldoConsolidadoAsync(clienteId, todos);
-        var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo, saldoConsolidado, multiplo);
+        var categorias = await _categoriaRepo.ListarTodasAsync();
+        var resultado = _metricasService.CalcularPeriodo(todos, doPeriodo, saldoConsolidado, multiplo, categorias);
         return Ok(new ApiResponse<MetricasPeriodoDto> { Dados = resultado });
     }
 

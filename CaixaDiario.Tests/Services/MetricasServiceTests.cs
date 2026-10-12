@@ -839,6 +839,36 @@ public class MetricasServiceTests
         Assert.Equal("vermelho", resultado.Runway.Semaforo);
     }
 
+    // Bloco 2 da rodada "Visão de Futuro": Dashboard (Runway) e Indicadores (Fôlego de Caixa)
+    // precisam SEMPRE bater pro mesmo saldo — antes, Runway usava 3 meses (soma bruta por
+    // TipoCusto) e Fôlego de Caixa usava 6 meses só com atividade (DespesasFixas do DRE); com
+    // custo fixo crescendo mês a mês, essas duas janelas davam médias (e portanto Runway)
+    // diferentes pro mesmo cliente. Agora os dois usam exatamente o mesmo cálculo.
+    [Fact]
+    public void CalcularPeriodo_E_CalcularIndicadores_RunwayEFolegoDeCaixaBatemParaOMesmoSaldo()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var registros = new List<RegistroDiario>();
+        // 3 meses mais antigos com custo fixo baixo (200) e os 3 mais recentes com custo fixo
+        // alto (1000) — média dos últimos 3 meses (fórmula antiga do Runway) seria 1000; média
+        // dos 6 meses com atividade (fórmula do Fôlego de Caixa) é 600.
+        for (int i = 5; i >= 3; i--)
+            registros.Add(CriarRegistro(hoje.AddMonths(-i).AddDays(-1),
+                new(), new() { Item("Custo", 200m, "Aluguel", "CustoFixo") }));
+        for (int i = 2; i >= 0; i--)
+            registros.Add(CriarRegistro(hoje.AddMonths(-i).AddDays(-1),
+                new(), new() { Item("Custo", 1000m, "Aluguel", "CustoFixo") }));
+
+        var periodo = _sut.CalcularPeriodo(registros, registros, 6000m);
+        var indicadores = _sut.CalcularIndicadores(registros, saldoDisponivel: 6000m);
+
+        Assert.True(indicadores.FolegoCaixa.Disponivel);
+        Assert.Equal(600m, indicadores.FolegoCaixa.CustoFixoMedioMensal);
+        Assert.Equal(600m, periodo.BurnRate);
+        Assert.Equal(indicadores.FolegoCaixa.Meses, periodo.Runway!.Meses);
+        Assert.Equal(10.0m, periodo.Runway.Meses);
+    }
+
     // ---- Semáforos: Liquidez ----
 
     [Fact]

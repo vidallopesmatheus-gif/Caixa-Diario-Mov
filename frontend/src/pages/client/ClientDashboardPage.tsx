@@ -110,7 +110,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const [projecao, setProjecao] = useState<Projecao | null>(null)
   useEffect(() => {
     if (!clienteId) return
-    obterProjecao(clienteId, 30, contaFiltro ?? undefined).then(setProjecao).catch(() => setProjecao(null))
+    obterProjecao(clienteId, 30, { contaBancariaId: contaFiltro ?? undefined }).then(setProjecao).catch(() => setProjecao(null))
   }, [clienteId, contaFiltro])
 
   const hoje = new Date()
@@ -707,7 +707,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               label={`⏳ Runway ${metricas.runway.semaforo === 'verde' ? '🟢' : metricas.runway.semaforo === 'amarelo' ? '🟡' : '🔴'}`}
               value={`${metricas.runway.meses.toFixed(1)} meses`}
               className={metricas.runway.semaforo === 'verde' ? 'val-green' : metricas.runway.semaforo === 'amarelo' ? 'val-yellow' : 'val-red'}
-              title={`Fórmula: saldo disponível (contas correntes + Caixa, sem investimentos) ÷ custo fixo médio mensal (média das saídas dos últimos 3 meses).${metricas.burnRate ? ` Custo fixo médio mensal: ${fmtBRL(metricas.burnRate)}.` : ''}`}
+              title={`Fórmula: saldo disponível (contas correntes + Caixa, sem investimentos) ÷ despesas fixas médias dos últimos 6 meses com atividade (mesmo cálculo do Fôlego de Caixa em Indicadores).${metricas.burnRate ? ` Despesas fixas médias: ${fmtBRL(metricas.burnRate)}.` : ''}`}
             />
           )}
           {metricas.liquidez && (

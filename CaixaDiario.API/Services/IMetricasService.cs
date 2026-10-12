@@ -9,7 +9,9 @@ public interface IMetricasService
     // mesmo valor exibido em /banco) — nunca derivado de "o SaldoFinal do registro mais recente",
     // que reflete só UMA conta aleatória (a que por acaso tem o lançamento mais recente), não o
     // consolidado. Usado em SaldoProjetado, Runway e Liquidez.
-    MetricasPeriodoDto CalcularPeriodo(List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal saldoConsolidado, decimal multiplo = 3m);
+    MetricasPeriodoDto CalcularPeriodo(
+        List<RegistroDiario> todosRegistros, List<RegistroDiario> registrosDoPeriodo, decimal saldoConsolidado,
+        decimal multiplo = 3m, IReadOnlyList<Categoria>? categorias = null);
     List<EvolucaoMensalDto> CalcularEvolucao(List<RegistroDiario> registros, int meses);
     DreDto CalcularDre(List<RegistroDiario> registros, IReadOnlyList<Categoria>? categorias = null);
     IndicadoresDecisaoDto CalcularIndicadores(
