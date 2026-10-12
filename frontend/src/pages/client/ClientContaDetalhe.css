@@ -119,6 +119,7 @@
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
+  align-items: center;
   margin-bottom: 14px;
   font-size: 13px;
   color: var(--tx3);
@@ -128,40 +129,122 @@
   margin-left: 6px;
 }
 
+.cd-toggle-saldo-linha {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.cd-toggle-saldo-linha input {
+  margin: 0;
+}
+
+/* ── Agrupamento por dia (Money Vision — Bloco 1, item 4) ── */
+
+.cd-extrato-grupo-dia {
+  margin-bottom: 18px;
+}
+
+.cd-extrato-dia-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 8px;
+  margin-bottom: 2px;
+  background: var(--bg-hover);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.cd-extrato-dia-data {
+  font-weight: 700;
+  color: var(--tx1);
+}
+
+.cd-extrato-dia-resumo {
+  display: flex;
+  gap: 12px;
+  color: var(--tx3);
+  flex-wrap: wrap;
+}
+
+/* ── Linhas do extrato — desktop/tablet (≥768px); ações à esquerda, nunca texto embutido na
+   descrição (Bloco 1, item 1) ── */
+
 .cd-extrato-lista {
   display: flex;
   flex-direction: column;
 }
 
-.cd-extrato-cabecalho,
 .cd-extrato-linha {
   display: grid;
-  grid-template-columns: 90px 1fr 140px 120px 120px;
+  grid-template-columns: 96px 1fr 180px 110px;
   gap: 8px;
   align-items: center;
   padding: 10px 8px;
-}
-
-.cd-extrato-cabecalho {
-  font-size: 11px;
-  color: var(--tx3);
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--bd);
-}
-
-.cd-extrato-linha {
   font-size: 13px;
   color: var(--tx1);
   border-bottom: 1px solid var(--bd);
+}
+
+.cd-extrato-lista.cd-extrato-lista--com-saldo .cd-extrato-linha {
+  grid-template-columns: 96px 1fr 180px 110px 110px;
 }
 
 .cd-extrato-linha:last-child {
   border-bottom: none;
 }
 
-.cd-categoria {
+.cd-acoes-linha {
+  display: flex;
+  gap: 4px;
+}
+
+.cd-acao-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  background: var(--bg-card);
+  color: var(--tx2);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}
+
+.cd-acao-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cd-acao-excluir:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.cd-extrato-desc {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cd-extrato-desc-titulo {
+  color: var(--tx1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-extrato-desc-subtitulo {
+  font-size: 11px;
   color: var(--tx3);
-  font-size: 12px;
 }
 
 .cd-col-valor {
@@ -169,6 +252,144 @@
   font-weight: 600;
 }
 
+.cd-col-saldo-linha {
+  color: var(--tx3);
+  font-weight: 500;
+}
+
+/* ── Chip de categoria (Bloco 1, itens 2 e 5) — clicável, abre o combobox no lugar ── */
+
+.cd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-chip:disabled {
+  cursor: default;
+}
+
+.cd-chip-receita       { background: var(--success-soft); color: var(--success); }
+.cd-chip-despesa       { background: var(--danger-soft);  color: var(--danger); }
+.cd-chip-transferencia { background: var(--mv-blue-soft); color: var(--mv-blue); }
+.cd-chip-investimento  { background: rgba(77,163,255,.16); color: var(--mv-blue-light); }
+.cd-chip-sem-categoria { background: rgba(217,119,6,.14);  color: var(--warning); }
+
+.cd-chip-combobox {
+  min-width: 180px;
+}
+
 .cd-vazio {
   padding: 24px 0;
+}
+
+/* ── Mobile (<768px, Bloco 1 item 9): cards em vez de grid, sem scroll horizontal — ações saem
+   na bottom sheet, nunca ficam espremidas na linha. ── */
+
+.cd-extrato-cards {
+  display: none;
+}
+
+.cd-extrato-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 8px;
+  border: none;
+  border-bottom: 1px solid var(--bd);
+  background: none;
+  color: var(--tx1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cd-extrato-card:last-child {
+  border-bottom: none;
+}
+
+.cd-extrato-card-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cd-extrato-card-desc .cd-chip {
+  align-self: flex-start;
+  cursor: default;
+}
+
+@media (max-width: 767px) {
+  .cd-extrato-lista { display: none; }
+  .cd-extrato-cards { display: flex; flex-direction: column; }
+  .cd-extrato-dia-resumo { width: 100%; justify-content: space-between; }
+}
+
+/* ── Bottom sheet de ações (mobile) ── */
+
+.cd-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 200;
+}
+
+.cd-sheet {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-card);
+  border-radius: 16px 16px 0 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cd-sheet-desc {
+  font-size: 13px;
+  color: var(--tx3);
+  padding: 0 4px 8px;
+  border-bottom: 1px solid var(--bd);
+  margin-bottom: 4px;
+}
+
+.cd-sheet-acao {
+  padding: 12px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  background: var(--bg-hover);
+  color: var(--tx1);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cd-sheet-acao-excluir {
+  color: var(--danger);
+}
+
+.cd-sheet-cancelar {
+  padding: 12px;
+  border: none;
+  background: none;
+  color: var(--tx3);
+  font-size: 14px;
+  cursor: pointer;
 }
