@@ -387,6 +387,122 @@ public class ProjecaoService : IProjecaoService
         return resultado.OrderByDescending(r => r.ValorEstimado).ToList();
     }
 
+    // Bloco 3 da rodada "Visão de Futuro": agrega a mesma simulação diária de Calcular em meses
+    // calendário — nenhuma lógica de simulação duplicada (atrasados, recorrências, despesa não
+    // cadastrada, fatura, cenário e reserva já vêm prontos de Calcular).
+    public MeuFuturoDto CalcularMeuFuturo(
+        List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, ProjecaoOpcoes opcoes,
+        decimal reservaMinima, decimal ajusteReceitaPercent = 0m, int atrasoRecebimentosDias = 0, int meses = 12)
+    {
+        var hoje = DataLocalHelper.Hoje();
+        // Mês 1 = mês calendário ATUAL (o resto dele, a partir de amanhã) — não "daqui a 1 mês".
+        // diasTotais cobre de amanhã até o ÚLTIMO dia do 12º mês calendário da tabela.
+        var ultimoMes = hoje.AddMonths(meses - 1);
+        var diasTotais = UltimoDiaDoMes(ultimoMes).DayNumber - hoje.DayNumber;
+        var projecao = Calcular(registros, recorrentes, diasTotais, null, opcoes);
+
+        var mesLabels = new string[meses];
+        var aReceberPorMes = new decimal[meses];
+        var aPagarPorMes = new decimal[meses];
+        for (var i = 0; i < meses; i++)
+        {
+            var mesRef = hoje.AddMonths(i);
+            var diasDoMes = projecao.Dias.Where(d => d.Data.Year == mesRef.Year && d.Data.Month == mesRef.Month).ToList();
+            mesLabels[i] = $"{mesRef.Year}-{mesRef.Month:D2}";
+            aReceberPorMes[i] = diasDoMes.Sum(d => d.TotalEntradas);
+            aPagarPorMes[i] = diasDoMes.Sum(d => d.TotalSaidas);
+        }
+
+        // Simulador "E se...?": pós-processamento sobre a tabela mensal já calculada (resolução
+        // mensal já é suficiente pra um horizonte de 12 meses) — nunca sobre o motor diário.
+        if (atrasoRecebimentosDias > 0)
+        {
+            var mesesDeAtraso = (int)Math.Ceiling(atrasoRecebimentosDias / 30.0);
+            if (mesesDeAtraso > 0)
+            {
+                for (var i = meses - 1; i >= 0; i--)
+                {
+                    var valor = aReceberPorMes[i];
+                    if (valor == 0) continue;
+                    aReceberPorMes[i] = 0m;
+                    var destino = i + mesesDeAtraso;
+                    // Se o destino cair fora da janela de 12 meses, o recebimento some do
+                    // horizonte visível — é exatamente o ponto de simular um atraso grande.
+                    if (destino < meses) aReceberPorMes[destino] += valor;
+                }
+            }
+        }
+        var fatorReceita = 1m + ajusteReceitaPercent / 100m;
+
+        var mesesResultado = new List<MeuFuturoMesDto>();
+        var saldoInicial = projecao.SaldoAtual;
+        for (var i = 0; i < meses; i++)
+        {
+            var aReceber = Math.Round(aReceberPorMes[i] * fatorReceita, 2);
+            var aPagar = Math.Round(aPagarPorMes[i], 2);
+            var saldoFinal = Math.Round(saldoInicial + aReceber - aPagar, 2);
+            var precisaReceber = Math.Round(Math.Max(0m, reservaMinima - saldoFinal), 2);
+            var status = saldoFinal < 0 ? "Risco" : saldoFinal < reservaMinima ? "Atencao" : "Tranquilo";
+
+            mesesResultado.Add(new MeuFuturoMesDto
+            {
+                Mes = mesLabels[i], SaldoInicial = Math.Round(saldoInicial, 2), AReceber = aReceber, APagar = aPagar,
+                SaldoFinal = saldoFinal, PrecisaReceber = precisaReceber, Status = status,
+            });
+            saldoInicial = saldoFinal;
+        }
+
+        return new MeuFuturoDto { Meses = mesesResultado, Conselhos = GerarConselhoFuturo(mesesResultado) };
+    }
+
+    // Regras fixas, nunca IA — no máximo 3 frases, prioridade: mês em risco > sequência longa fora
+    // de "Tranquilo" > tudo tranquilo > acompanhamento neutro (nunca retorna lista vazia).
+    private static List<string> GerarConselhoFuturo(List<MeuFuturoMesDto> meses)
+    {
+        var conselhos = new List<string>();
+
+        var primeiroRisco = meses.FirstOrDefault(m => m.Status == "Risco");
+        if (primeiroRisco != null)
+            conselhos.Add(
+                $"Atenção: a projeção mostra saldo negativo em {FormatarMes(primeiroRisco.Mes)} — considere " +
+                "renegociar prazos ou acelerar recebimentos antes dessa data.");
+
+        var maiorSequencia = MaiorSequenciaForaDeTranquilo(meses);
+        if (maiorSequencia >= 3)
+            conselhos.Add(
+                $"{maiorSequencia} meses seguidos projetam saldo abaixo da sua reserva mínima — vale revisar " +
+                "despesas fixas ou aumentar a reserva.");
+
+        if (conselhos.Count == 0 && meses.Count > 0 && meses.All(m => m.Status == "Tranquilo"))
+            conselhos.Add("Seu caixa deve seguir saudável nos próximos 12 meses, mantendo o ritmo atual.");
+
+        if (conselhos.Count == 0)
+            conselhos.Add("Fique de olho nos meses marcados como \"Atenção\" — nada crítico agora, mas vale acompanhar.");
+
+        return conselhos.Take(3).ToList();
+    }
+
+    private static int MaiorSequenciaForaDeTranquilo(List<MeuFuturoMesDto> meses)
+    {
+        var maior = 0;
+        var atual = 0;
+        foreach (var m in meses)
+        {
+            atual = m.Status != "Tranquilo" ? atual + 1 : 0;
+            maior = Math.Max(maior, atual);
+        }
+        return maior;
+    }
+
+    private static readonly string[] NomesMeses =
+        ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+    private static string FormatarMes(string mes)
+    {
+        var partes = mes.Split('-');
+        return $"{NomesMeses[int.Parse(partes[1]) - 1]}/{partes[0]}";
+    }
+
     // Item 4/5: contas que ficam de fora da soma do saldo "em caixa" — Investimento (reserva, a
     // menos que o usuário peça pra incluir) e CartaoCredito (dívida que entra como saída projetada
     // na data de vencimento da fatura, não como saldo negativo já "congelado" hoje). Só se aplica

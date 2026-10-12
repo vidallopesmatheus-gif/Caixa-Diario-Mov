@@ -111,4 +111,27 @@ public class ProjecaoController : ControllerBase
         var resultado = _projecaoService.CalcularDespesasEstimadasPorCategoria(registros, recorrentes, DataLocalHelper.Hoje());
         return Ok(new ApiResponse<List<DespesaEstimadaCategoriaDto>> { Dados = resultado });
     }
+
+    // Bloco 3 da rodada "Visão de Futuro": tela "Meu Futuro" — 12 meses + conselho em regras.
+    // ajusteReceitaPercent/atrasoRecebimentosDias são o simulador "E se...?" (0 = sem ajuste).
+    [HttpGet("{clienteId:guid}/meu-futuro")]
+    public async Task<IActionResult> ObterMeuFuturo(
+        Guid clienteId,
+        [FromQuery] decimal reservaMinima = 0m,
+        [FromQuery] string cenario = "Provavel",
+        [FromQuery] bool incluirReserva = false,
+        [FromQuery] decimal ajusteReceitaPercent = 0m,
+        [FromQuery] int atrasoRecebimentosDias = 0)
+    {
+        if (ObterPerfil() == "cliente" && ObterUsuarioId() != clienteId)
+            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
+
+        var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
+        var recorrentes = await _recorrenteRepo.ListarAtivasPorClienteAsync(clienteId);
+        var opcoes = await MontarOpcoesAsync(clienteId, cenario, incluirReserva);
+
+        var resultado = _projecaoService.CalcularMeuFuturo(
+            registros, recorrentes, opcoes, reservaMinima, ajusteReceitaPercent, atrasoRecebimentosDias);
+        return Ok(new ApiResponse<MeuFuturoDto> { Dados = resultado });
+    }
 }

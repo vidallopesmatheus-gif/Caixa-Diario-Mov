@@ -36,3 +36,24 @@ public class DespesaEstimadaCategoriaDto
     public string Categoria { get; set; } = string.Empty;
     public decimal ValorEstimado { get; set; }
 }
+
+// Bloco 3 da rodada "Visão de Futuro": uma linha por mês da tela "Meu Futuro".
+public class MeuFuturoMesDto
+{
+    public string Mes { get; set; } = string.Empty; // "yyyy-MM"
+    public decimal SaldoInicial { get; set; }
+    public decimal AReceber { get; set; }
+    public decimal APagar { get; set; }
+    public decimal SaldoFinal { get; set; }
+    // Quanto falta receber, ALÉM do que já está projetado, pra não ficar abaixo da reserva mínima.
+    public decimal PrecisaReceber { get; set; }
+    /// <summary>"Tranquilo" (≥ reserva mínima) | "Atencao" (0 ≤ saldo &lt; reserva) | "Risco" (saldo &lt; 0)</summary>
+    public string Status { get; set; } = "Tranquilo";
+}
+
+public class MeuFuturoDto
+{
+    public List<MeuFuturoMesDto> Meses { get; set; } = new();
+    // Regra-based, nunca IA — no máximo 3 frases (ver ProjecaoService.GerarConselhoFuturo).
+    public List<string> Conselhos { get; set; } = new();
+}

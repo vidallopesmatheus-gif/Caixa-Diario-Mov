@@ -13,6 +13,13 @@ public class Usuario
     public DateTime? AtualizadoEm { get; set; }
     public string? UsuarioAtualizacao { get; set; }
 
+    // Bloco 3 da rodada "Visão de Futuro": preferências da tela "Meu Futuro" — nunca usadas em
+    // nenhum cálculo financeiro em si, só pra customizar o alerta/linguagem daquela tela
+    // (ver ProjecaoController/PreferenciasFuturoController). Null = ainda não configurado.
+    public decimal? ReservaMinima { get; set; }
+    // "PF" | "PJ" — null trata como "PJ" (linguagem padrão do app, já orientada a negócio).
+    public string? TipoPessoa { get; set; }
+
     public ICollection<RegistroDiario> Registros { get; set; } = new List<RegistroDiario>();
     public List<MetaAnual> MetasAnuais { get; set; } = new();
     public ICollection<ContaRecorrente> ContasRecorrentes { get; set; } = new List<ContaRecorrente>();

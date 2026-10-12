@@ -42,4 +42,11 @@ public interface IProjecaoService
     // vez de um único valor agregado usado internamente na simulação dia a dia.
     List<DespesaEstimadaCategoriaDto> CalcularDespesasEstimadasPorCategoria(
         List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, DateOnly hoje);
+
+    // Bloco 3 da rodada "Visão de Futuro": tela "Meu Futuro" — agrega a mesma simulação de
+    // Calcular em 12 meses (Saldo inicial/A receber/A pagar/Saldo final/Precisa receber/Status) +
+    // conselho em regras. ajusteReceitaPercent/atrasoRecebimentosDias são o simulador "E se...?".
+    MeuFuturoDto CalcularMeuFuturo(
+        List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, ProjecaoOpcoes opcoes,
+        decimal reservaMinima, decimal ajusteReceitaPercent = 0m, int atrasoRecebimentosDias = 0, int meses = 12);
 }

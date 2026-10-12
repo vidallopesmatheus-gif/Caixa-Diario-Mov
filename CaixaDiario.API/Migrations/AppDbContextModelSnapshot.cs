@@ -1085,10 +1085,16 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("text")
                         .HasColumnName("perfil");
 
+                    b.Property<decimal?>("ReservaMinima")
+                        .HasColumnType("numeric");
+
                     b.Property<string>("SenhaHash")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("senha_hash");
+
+                    b.Property<string>("TipoPessoa")
+                        .HasColumnType("text");
 
                     b.Property<string>("UsuarioAtualizacao")
                         .HasColumnType("text")

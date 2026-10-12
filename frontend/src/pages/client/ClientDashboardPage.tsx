@@ -22,6 +22,7 @@ import ResumoMetricCards from './dashboard/ResumoMetricCards'
 import AtencaoCard from './dashboard/AtencaoCard'
 import SaudeNegocioBlock from './dashboard/SaudeNegocioBlock'
 import DividasCard from './dashboard/DividasCard'
+import MeuFuturoCard from './dashboard/MeuFuturoCard'
 import AtividadeRecente from './dashboard/AtividadeRecente'
 import type { ContaBancaria } from '../../types'
 import type { MetaAnual } from '../../types'
@@ -653,6 +654,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
       {/* Fase 6H: resumo de financiamentos/empréstimos/consórcios — some quando não há contrato ativo. */}
       {clienteId && <DividasCard clienteId={clienteId} />}
+
+      {/* Bloco 3 da rodada "Visão de Futuro": resumo de "Meu Futuro" (12 meses), linkando pra tela completa. */}
+      {clienteId && <MeuFuturoCard clienteId={clienteId} />}
 
       {/* ══ Camada 5: atividade recente ══ */}
       <AtividadeRecente registros={registros} contasBancarias={contasBancarias} />

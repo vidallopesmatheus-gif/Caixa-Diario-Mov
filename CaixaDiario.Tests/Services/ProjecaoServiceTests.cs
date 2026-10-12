@@ -11,6 +11,10 @@ public class ProjecaoServiceTests
     // cartão — equivalente ao comportamento de antes do bloco, pros testes que não testam
     // especificamente cenário/reserva/fatura.
     private static readonly ProjecaoOpcoes OpcoesPadrao = new(new List<ContaBancaria>(), new List<PagamentoFatura>());
+    // Índice (0-based) do mês calendário de `data` na tabela de 12 meses de CalcularMeuFuturo
+    // (mês 0 = mês calendário atual) — calculado, nunca hardcoded, pra testes não dependerem de em
+    // que dia do mês real eles rodam.
+    private static int MesIndexDe(DateOnly data) => (data.Year - Hoje.Year) * 12 + (data.Month - Hoje.Month);
 
     private static RegistroDiario CriarRegistro(Guid contaId, DateOnly data, decimal saldoFinal) => new()
     {
@@ -638,5 +642,138 @@ public class ProjecaoServiceTests
         var resultado = _sut.CalcularDespesasEstimadasPorCategoria(historico, new List<ContaRecorrente> { recorrencia }, Hoje);
 
         Assert.Empty(resultado);
+    }
+
+    // ── Bloco 3 da rodada "Visão de Futuro": CalcularMeuFuturo ───────────────────────────────────
+
+    [Fact]
+    public void CalcularMeuFuturo_Retorna12MesesComSaldoInicialDoPrimeiroMesIgualAoSaldoAtual()
+    {
+        var contaA = Guid.NewGuid();
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 1000m);
+        var contas = new List<ContaBancaria> { new() { Id = contaA, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.CalcularMeuFuturo(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), opcoes, reservaMinima: 0m);
+
+        Assert.Equal(12, resultado.Meses.Count);
+        Assert.Equal(1000m, resultado.Meses[0].SaldoInicial);
+    }
+
+    [Fact]
+    public void CalcularMeuFuturo_ComContaAPagarFutura_ReduzSaldoDoMesCorrespondenteEDosSeguintes()
+    {
+        var contaA = Guid.NewGuid();
+        var vencimento = Hoje.AddDays(45);
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 5000m);
+        registro.ContasPagar.Add(new ContaProvisionada { Descricao = "Fornecedor", Valor = 1000m, Pago = false, DataVencimento = vencimento });
+        var contas = new List<ContaBancaria> { new() { Id = contaA, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.CalcularMeuFuturo(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), opcoes, reservaMinima: 0m);
+
+        var idx = MesIndexDe(vencimento);
+        Assert.Equal(1000m, resultado.Meses[idx].APagar);
+        Assert.Equal(4000m, resultado.Meses[idx].SaldoFinal);
+        Assert.Equal(4000m, resultado.Meses[^1].SaldoFinal); // carrega até o fim; nada mais muda depois
+    }
+
+    [Fact]
+    public void CalcularMeuFuturo_SaldoAbaixoDaReservaMinima_MarcaAtencaoEPrecisaReceber()
+    {
+        var contaA = Guid.NewGuid();
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 500m);
+        var contas = new List<ContaBancaria> { new() { Id = contaA, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.CalcularMeuFuturo(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), opcoes, reservaMinima: 2000m);
+
+        Assert.Equal("Atencao", resultado.Meses[0].Status);
+        Assert.Equal(1500m, resultado.Meses[0].PrecisaReceber);
+    }
+
+    [Fact]
+    public void CalcularMeuFuturo_ComContaAPagarMaiorQueOSaldo_MarcaMesComoRisco()
+    {
+        var contaA = Guid.NewGuid();
+        var vencimento = Hoje.AddDays(3);
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 500m);
+        registro.ContasPagar.Add(new ContaProvisionada { Descricao = "Fornecedor", Valor = 800m, Pago = false, DataVencimento = vencimento });
+        var contas = new List<ContaBancaria> { new() { Id = contaA, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.CalcularMeuFuturo(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), opcoes, reservaMinima: 0m);
+
+        var idx = MesIndexDe(vencimento);
+        Assert.Equal("Risco", resultado.Meses[idx].Status);
+        Assert.Equal(-300m, resultado.Meses[idx].SaldoFinal);
+    }
+
+    // "E se...?": os dois ajustes são pós-processamento sobre a tabela mensal (item 3 do plano).
+
+    [Fact]
+    public void CalcularMeuFuturo_ComAjusteReceitaPercent_EscalaAReceberDoMes()
+    {
+        var contaA = Guid.NewGuid();
+        var recebimento = Hoje.AddDays(2);
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 0m);
+        registro.ContasReceber.Add(new ContaProvisionada { Descricao = "Cliente", Valor = 1000m, Pago = false, DataVencimento = recebimento });
+        var contas = new List<ContaBancaria> { new() { Id = contaA, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.CalcularMeuFuturo(
+            new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), opcoes, reservaMinima: 0m, ajusteReceitaPercent: -20m);
+
+        var idx = MesIndexDe(recebimento);
+        Assert.Equal(800m, resultado.Meses[idx].AReceber); // 1000 × 0,8
+    }
+
+    [Fact]
+    public void CalcularMeuFuturo_ComAtrasoDe30Dias_DeslocaAReceberParaOMesSeguinte()
+    {
+        var contaA = Guid.NewGuid();
+        var recebimento = Hoje.AddDays(2);
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 0m);
+        registro.ContasReceber.Add(new ContaProvisionada { Descricao = "Cliente", Valor = 1000m, Pago = false, DataVencimento = recebimento });
+        var contas = new List<ContaBancaria> { new() { Id = contaA, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.CalcularMeuFuturo(
+            new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), opcoes, reservaMinima: 0m, atrasoRecebimentosDias: 30);
+
+        var idx = MesIndexDe(recebimento);
+        Assert.Equal(0m, resultado.Meses[idx].AReceber);
+        Assert.Equal(1000m, resultado.Meses[idx + 1].AReceber);
+    }
+
+    [Fact]
+    public void CalcularMeuFuturo_ComMesEmRisco_GeraConselhoCitandoSaldoNegativo()
+    {
+        var contaA = Guid.NewGuid();
+        var vencimento = Hoje.AddDays(3);
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 100m);
+        registro.ContasPagar.Add(new ContaProvisionada { Descricao = "Fornecedor", Valor = 500m, Pago = false, DataVencimento = vencimento });
+        var contas = new List<ContaBancaria> { new() { Id = contaA, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.CalcularMeuFuturo(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), opcoes, reservaMinima: 0m);
+
+        Assert.InRange(resultado.Conselhos.Count, 1, 3);
+        Assert.Contains(resultado.Conselhos, c => c.Contains("saldo negativo"));
+    }
+
+    [Fact]
+    public void CalcularMeuFuturo_Com12MesesTranquilos_GeraUmUnicoConselhoPositivo()
+    {
+        var contaA = Guid.NewGuid();
+        var registro = CriarRegistro(contaA, Hoje.AddDays(-1), 100000m);
+        var contas = new List<ContaBancaria> { new() { Id = contaA, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.CalcularMeuFuturo(new List<RegistroDiario> { registro }, new List<ContaRecorrente>(), opcoes, reservaMinima: 0m);
+
+        Assert.All(resultado.Meses, m => Assert.Equal("Tranquilo", m.Status));
+        var conselho = Assert.Single(resultado.Conselhos);
+        Assert.Contains("saudável", conselho);
     }
 }

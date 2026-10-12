@@ -99,3 +99,35 @@ export async function obterDespesasEstimadas(clienteId: string): Promise<Despesa
   )
   return res.dados ?? []
 }
+
+// Bloco 3 da rodada "Visão de Futuro": tela "Meu Futuro" — 12 meses + conselho em regras.
+export interface MeuFuturoMes {
+  mes: string // "yyyy-MM"
+  saldoInicial: number
+  aReceber: number
+  aPagar: number
+  saldoFinal: number
+  precisaReceber: number
+  status: 'Tranquilo' | 'Atencao' | 'Risco'
+}
+
+export interface MeuFuturo {
+  meses: MeuFuturoMes[]
+  conselhos: string[]
+}
+
+export interface OpcoesMeuFuturo extends OpcoesProjecao {
+  reservaMinima?: number
+  // Simulador "E se...?": variação % na receita estimada e atraso (em dias) nos recebimentos.
+  ajusteReceitaPercent?: number
+  atrasoRecebimentosDias?: number
+}
+
+export async function obterMeuFuturo(clienteId: string, opcoes?: OpcoesMeuFuturo): Promise<MeuFuturo> {
+  const params = montarParams(opcoes)
+  if (opcoes?.reservaMinima) params.set('reservaMinima', String(opcoes.reservaMinima))
+  if (opcoes?.ajusteReceitaPercent) params.set('ajusteReceitaPercent', String(opcoes.ajusteReceitaPercent))
+  if (opcoes?.atrasoRecebimentosDias) params.set('atrasoRecebimentosDias', String(opcoes.atrasoRecebimentosDias))
+  const res = await apiFetch<ApiResponse<MeuFuturo>>(`/api/projecao/${clienteId}/meu-futuro?${params}`)
+  return res.dados
+}
