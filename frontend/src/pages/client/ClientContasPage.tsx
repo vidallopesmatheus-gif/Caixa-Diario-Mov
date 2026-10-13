@@ -575,7 +575,17 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     try {
       if (excluirView.conta.id) {
         await excluirContaProvisionada(clienteId, excluirView.conta.id)
-        await recarregar()
+        const atualizados = await recarregar()
+        // Parte 2 (integridade de dados): a exclusão de uma ocorrência de recorrência "funcionava"
+        // sem erro, mas a ocorrência "voltava" no próximo refetch (com outro Id) — o backend já
+        // foi corrigido pra dispensar de verdade, mas essa checagem é um alarme caso regrida.
+        const recorrenciaId = excluirView.conta.recorrenciaId
+        const vencimento = excluirView.conta.dataVencimento
+        if (recorrenciaId && vencimento) {
+          const voltou = atualizados.some(r =>
+            [...r.contasAReceber, ...r.contasAPagar].some(c => c.recorrenciaId === recorrenciaId && c.dataVencimento === vencimento))
+          if (voltou) throw new Error('A conta foi excluída, mas reapareceu ao recarregar — avise o suporte, isso não deveria acontecer.')
+        }
       } else {
         await persistirListas(excluirView, contas => contas.filter((_, i) => i !== excluirView.index))
       }

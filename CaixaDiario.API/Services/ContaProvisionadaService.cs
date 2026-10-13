@@ -15,11 +15,14 @@ public class ContaProvisionadaService : IContaProvisionadaService
 {
     private readonly IRegistroRepository _registroRepo;
     private readonly IContaBancariaRepository _contaBancariaRepo;
+    private readonly IRecorrenciaService _recorrenciaService;
 
-    public ContaProvisionadaService(IRegistroRepository registroRepo, IContaBancariaRepository contaBancariaRepo)
+    public ContaProvisionadaService(
+        IRegistroRepository registroRepo, IContaBancariaRepository contaBancariaRepo, IRecorrenciaService recorrenciaService)
     {
         _registroRepo = registroRepo;
         _contaBancariaRepo = contaBancariaRepo;
+        _recorrenciaService = recorrenciaService;
     }
 
     public async Task<ContaProvisionadaDto> CriarAsync(CriarContaProvisionadaDto dto, Guid usuarioLogadoId, string perfil, Guid? origemMetaId = null)
@@ -119,6 +122,12 @@ public class ContaProvisionadaService : IContaProvisionadaService
         else registro.ContasPagar = registro.ContasPagar.Where(c => c.Id != id).ToList();
         registro.SalvoEm = DateTime.UtcNow;
         await _registroRepo.AtualizarAsync(registro);
+
+        // Parte 2 (integridade de dados): sem isso, a próxima materialização (criação/edição da
+        // recorrente, ou o job diário) recria esta mesma ocorrência — "não existe nos registros
+        // atuais" era tratado como "ainda não foi gerada", nunca como "foi excluída de propósito".
+        if (item.RecorrenciaId.HasValue && item.DataVencimento.HasValue)
+            await _recorrenciaService.DispensarOcorrenciaAsync(clienteId, item.RecorrenciaId.Value, item.DataVencimento.Value);
     }
 
     // Sempre resulta num lançamento real: cria uma Entrada/Saída na conta+data do pagamento, ou

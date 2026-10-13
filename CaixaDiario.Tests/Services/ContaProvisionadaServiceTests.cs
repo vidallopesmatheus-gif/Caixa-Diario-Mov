@@ -12,13 +12,14 @@ public class ContaProvisionadaServiceTests
 {
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
     private readonly Mock<IContaBancariaRepository> _contaBancariaRepoMock = new();
+    private readonly Mock<IRecorrenciaService> _recorrenciaServiceMock = new();
     private readonly ContaProvisionadaService _sut;
 
     public ContaProvisionadaServiceTests()
     {
         _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
         _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
-        _sut = new ContaProvisionadaService(_registroRepoMock.Object, _contaBancariaRepoMock.Object);
+        _sut = new ContaProvisionadaService(_registroRepoMock.Object, _contaBancariaRepoMock.Object, _recorrenciaServiceMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid clienteId, decimal saldoInicial = 0m) =>
@@ -340,6 +341,50 @@ public class ContaProvisionadaServiceTests
         await _sut.ExcluirAsync(clienteId, itemId, clienteId, "cliente");
 
         _registroRepoMock.Verify(r => r.AtualizarAsync(It.Is<RegistroDiario>(reg => reg.ContasPagar.Count == 0)), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExcluirAsync_OcorrenciaDeRecorrencia_DispensaParaNaoSerRecriada()
+    {
+        // Parte 2 (integridade de dados): sem dispensar, a próxima materialização recria esta
+        // mesma ocorrência — "excluir" parecia funcionar, mas ela "voltava" no próximo refetch.
+        var clienteId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var recorrenciaId = Guid.NewGuid();
+        var vencimento = new DateOnly(2026, 10, 11);
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = vencimento,
+            Entradas = new(), Saidas = new(), ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada>
+            {
+                new() { Id = itemId, Descricao = "x", Valor = 10m, Pago = false, RecorrenciaId = recorrenciaId, DataVencimento = vencimento },
+            },
+        };
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        await _sut.ExcluirAsync(clienteId, itemId, clienteId, "cliente");
+
+        _recorrenciaServiceMock.Verify(r => r.DispensarOcorrenciaAsync(clienteId, recorrenciaId, vencimento), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExcluirAsync_ItemAvulsoSemRecorrencia_NaoDispensaNada()
+    {
+        var clienteId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = new DateOnly(2026, 10, 10),
+            Entradas = new(), Saidas = new(), ContasReceber = new(),
+            ContasPagar = new List<ContaProvisionada> { new() { Id = itemId, Descricao = "x", Valor = 10m, Pago = false } },
+        };
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        await _sut.ExcluirAsync(clienteId, itemId, clienteId, "cliente");
+
+        _recorrenciaServiceMock.Verify(r => r.DispensarOcorrenciaAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateOnly>()), Times.Never);
     }
 
     [Fact]

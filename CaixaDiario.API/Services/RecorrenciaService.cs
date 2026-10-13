@@ -129,7 +129,7 @@ public class RecorrenciaService : IRecorrenciaService
             : conta.Valor;
     }
 
-    public async Task MaterializarMesAtualAsync(Guid clienteId)
+    public async Task MaterializarMesAtualAsync(Guid clienteId, int diasHorizonteFuturo = 0)
     {
         var hoje = DataLocalHelper.Hoje();
 
@@ -144,7 +144,12 @@ public class RecorrenciaService : IRecorrenciaService
         // há muito tempo) quando ele abrir a app depois de um tempo parado.
         var mesAnteriorRef = hoje.AddMonths(-1);
         var primeiroDia = new DateOnly(mesAnteriorRef.Year, mesAnteriorRef.Month, 1);
-        var ultimoDia = new DateOnly(hoje.Year, hoje.Month, 1).AddMonths(1).AddDays(-1);
+        var fimDoMesAtual = new DateOnly(hoje.Year, hoje.Month, 1).AddMonths(1).AddDays(-1);
+        // Parte 2 (integridade de dados): o job diário materializa com um horizonte de verdade pra
+        // frente (90 dias), não só até o fim do mês em andamento — chamadas pontuais (criar/editar
+        // recorrência) continuam com diasHorizonteFuturo=0, que preserva exatamente o limite antigo.
+        var horizonteFuturo = hoje.AddDays(diasHorizonteFuturo);
+        var ultimoDia = horizonteFuturo > fimDoMesAtual ? horizonteFuturo : fimDoMesAtual;
 
         var ativas = await _contaRepo.ListarAtivasPorClienteAsync(clienteId);
         if (ativas.Count == 0) return;
