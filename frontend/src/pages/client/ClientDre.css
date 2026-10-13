@@ -117,26 +117,6 @@
   flex: 1 1 620px;
 }
 
-.dre-corpo-comparativo {
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-.dre-cmp-cabecalho {
-  display: grid;
-  gap: 8px;
-  padding: 0 0 8px;
-  border-bottom: 1px solid var(--bd);
-  margin-bottom: 4px;
-}
-
-.dre-cmp-cabecalho-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--tx3);
-  text-align: right;
-}
-
 /* Tabela de 3 colunas: descrição | valor | percentual. Larguras fixas nas colunas numéricas
    (não "auto") pra que os números fiquem alinhados de linha em linha, como numa tabela real —
    cada .dre-linha é um grid independente, então só alinha se todas usarem os mesmos tamanhos. */
@@ -146,12 +126,6 @@
   column-gap: 12px;
   align-items: baseline;
   padding: 7px 0;
-}
-
-.dre-linha-cmp {
-  display: grid;
-  gap: 8px;
-  align-items: center;
 }
 
 .dre-linha-label {
@@ -265,10 +239,8 @@
 /* Flex em vez do grid de 3 colunas de .dre-linha (herdado só pelo padding/gap): rótulo à
    esquerda, valor+percentual agrupados à direita em .dre-linha-valor-wrap. Sem isso, o valor
    (coluna de largura fixa) sobrepunha o percentual quando tinha muitos dígitos ou a tela
-   era estreita — ver .dre-linha-valor-wrap logo abaixo, que é quem realmente quebra a linha.
-   :not(.dre-linha-cmp) exclui o modo comparativo, que continua usando o grid dinâmico de
-   .dre-linha-cmp (uma coluna por período, largura calculada por periodosComDre.length). */
-.dre-linha-subtotal:not(.dre-linha-cmp) {
+   era estreita — ver .dre-linha-valor-wrap logo abaixo, que é quem realmente quebra a linha. */
+.dre-linha-subtotal {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -284,8 +256,7 @@
   letter-spacing: .4px;
 }
 
-.dre-linha-subtotal .dre-linha-valor,
-.dre-linha-subtotal .dre-cmp-cel-valor {
+.dre-linha-subtotal .dre-linha-valor {
   font-size: 15px;
   font-weight: 700;
   color: var(--tx1);
@@ -311,8 +282,7 @@
   color: var(--tx1);
 }
 
-.dre-linha-final .dre-linha-valor,
-.dre-linha-final .dre-cmp-cel-valor {
+.dre-linha-final .dre-linha-valor {
   font-size: clamp(18px, 5vw, 24px);
   font-weight: 800;
 }
@@ -343,24 +313,6 @@
 
 .dre-expand-bloco {
   padding: 6px 0 4px;
-}
-
-.dre-expand-periodo + .dre-expand-periodo {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--bd);
-}
-
-.dre-expand-periodo {
-  flex: 1;
-  min-width: 200px;
-}
-
-.dre-expand-periodo-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--tx3);
-  margin-bottom: 4px;
 }
 
 .dre-cat-btn {
@@ -401,25 +353,6 @@
   color: var(--tx3);
   min-width: 50px;
   text-align: right;
-}
-
-.dre-cmp-cel {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  line-height: 1.3;
-}
-
-.dre-cmp-cel-valor {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--tx1);
-}
-
-.dre-cmp-cel-pct {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--accent);
 }
 
 .dre-vazio-inline {
@@ -501,4 +434,151 @@
 @media (max-width: 600px) {
   .dre-corpo { padding: 16px; }
   .dre-expand-bloco { padding-left: 12px; }
+}
+
+/* ── Parte 1 (Money Vision): "Comparar períodos" como tabela única ────────────────────────────
+   Bloco → Grupo → Categoria em linhas, um período por coluna, + Variação + Média. A 1ª coluna
+   (nomes) fica fixa (sticky) e só a área de valores rola horizontalmente — por isso o scroll
+   fica no wrapper (.dre-tabela-scroll), não em cada linha, senão as linhas saem de sincronia. */
+.dre-tabela-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.dre-tabela-nav {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dre-tabela-nav-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg);
+  color: var(--tx1);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.dre-tabela-nav-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.dre-tabela-nav-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx2);
+}
+
+.dre-tabela-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.dre-tabela-cabecalho,
+.dre-tabela-linha {
+  display: grid;
+  column-gap: 10px;
+  align-items: center;
+}
+
+.dre-tabela-cabecalho {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--bd);
+  margin-bottom: 2px;
+}
+
+.dre-tabela-th {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tx3);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dre-tabela-linha {
+  padding: 7px 0;
+  border-radius: 6px;
+}
+
+.dre-tabela-zebra { background: var(--bg); }
+
+.dre-tabela-vazia { opacity: .55; }
+
+/* Coluna de nomes fixa: continua visível enquanto a área de valores rola horizontalmente. O
+   fundo precisa ser opaco e igual ao da linha (zebra inclusa), senão o conteúdo que passa por
+   baixo aparece por cima durante o scroll. */
+.dre-tabela-label-cel,
+.dre-tabela-cabecalho > .dre-tabela-label-cel {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 6px;
+  min-height: 1px;
+}
+
+.dre-tabela-zebra .dre-tabela-label-cel { background: var(--bg); }
+
+.dre-tabela-nivel-0 .dre-tabela-nome {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.dre-tabela-nivel-1 .dre-tabela-label-cel { padding-left: 22px; }
+.dre-tabela-nivel-1 .dre-tabela-nome { font-size: 13px; font-weight: 600; color: var(--tx1); }
+
+.dre-tabela-nivel-2 .dre-tabela-label-cel { padding-left: 42px; }
+.dre-tabela-nivel-2 .dre-tabela-nome { font-size: 12px; color: var(--tx3); }
+
+.dre-tabela-final { border: 2px solid var(--bd-str); margin-top: 6px; }
+.dre-tabela-final .dre-tabela-nome { font-size: 14px; font-weight: 800; color: var(--tx1); }
+
+.dre-tabela-cel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.3;
+}
+
+.dre-tabela-cel-clicavel { cursor: pointer; }
+.dre-tabela-cel-clicavel:hover .dre-tabela-cel-valor { text-decoration: underline; }
+
+.dre-tabela-cel-valor {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dre-tabela-cel-pct {
+  font-size: 11px;
+  color: var(--tx3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dre-tabela-var-col,
+.dre-tabela-media-col {
+  border-left: 1px dashed var(--bd);
+  padding-left: 10px;
+}
+
+@media (max-width: 480px) {
+  .dre-tabela-wrap { padding: 14px 10px; }
+  .dre-tabela-nav { display: flex; }
+  .dre-tabela-var-col,
+  .dre-tabela-media-col {
+    display: none;
+  }
 }

@@ -149,6 +149,56 @@ function valorEPercentualSubtotal(dre: Dre, key: string): { total: number; perce
   return { total: dre.resultadoLiquido, percentual: dre.resultadoLiquidoPercentual }
 }
 
+// ── Parte 1 (Money Vision): "Comparar períodos" como uma tabela única ──────────────────────────
+// Antes, cada bloco expandido empilhava um bloco de grupos/categorias por período (Ago, depois
+// Set, depois Out), impossível de comparar lado a lado. Agora cada grupo/categoria é UMA linha
+// com uma célula por período, igual Bloco já fazia no topo.
+interface ValorPeriodo { total: number; percentual: number | null }
+interface LinhaTabelaDre {
+  key: string
+  nivel: 0 | 1 | 2
+  label: string
+  cor?: string
+  final?: boolean
+  expandavel: boolean
+  expandido: boolean
+  vazio: boolean
+  destaqueAlerta?: boolean
+  onToggle?: () => void
+  onClickCelula?: (periodoIdx: number) => void
+  valores: ValorPeriodo[]
+}
+
+/** Nomes únicos preservando a ordem do período mais recente primeiro, com os nomes que só
+ * existem em períodos mais antigos aparecendo no final — assim uma categoria que saiu de uso
+ * recentemente não "pula" pro topo da lista. */
+function unionNomes(listas: { nome: string }[][]): string[] {
+  const vistos = new Set<string>()
+  const ordem: string[] = []
+  for (let i = listas.length - 1; i >= 0; i--) {
+    for (const item of listas[i]) {
+      if (!vistos.has(item.nome)) { vistos.add(item.nome); ordem.push(item.nome) }
+    }
+  }
+  return ordem
+}
+
+function mediaValores(valores: ValorPeriodo[]): ValorPeriodo {
+  const total = valores.reduce((s, v) => s + v.total, 0) / valores.length
+  const comPct = valores.filter(v => v.percentual !== null)
+  const percentual = comPct.length > 0 ? comPct.reduce((s, v) => s + (v.percentual ?? 0), 0) / comPct.length : null
+  return { total, percentual }
+}
+
+function variacaoValores(valores: ValorPeriodo[]): { rs: number; pct: number | null } | null {
+  if (valores.length < 2) return null
+  const atual = valores[valores.length - 1].total
+  const anterior = valores[valores.length - 2].total
+  const rs = atual - anterior
+  const pct = anterior !== 0 ? (rs / Math.abs(anterior)) * 100 : null
+  return { rs, pct }
+}
+
 export default function ClientDrePage() {
   const { user } = useAuth()
   const clienteId = user?.usuarioId ?? ''
@@ -401,6 +451,99 @@ export default function ClientDrePage() {
     return dre.blocos.find(b => b.bloco === bloco) ?? { bloco, total: 0, percentual: 0, grupos: [] }
   }
 
+  // Monta a tabela comparativa: uma linha por Bloco/Subtotal/Vertical/Grupo/Categoria, com uma
+  // célula de valor por período — só processa quando "Comparar períodos" está marcado.
+  const linhasTabelaComparativa = useMemo<LinhaTabelaDre[]>(() => {
+    if (!modoComparativo || !todasCarregadas) return []
+    const linhas: LinhaTabelaDre[] = []
+
+    for (const l of LINHAS) {
+      if (l.tipo === 'subtotal') {
+        const valores = periodosComDre.map(p => valorEPercentualSubtotal(p.dre, l.key))
+        linhas.push({ key: l.key, nivel: 0, label: l.label, expandavel: false, expandido: false, vazio: false, valores, final: l.final })
+        continue
+      }
+
+      if (l.tipo === 'vertical') {
+        const vKey = l.verticalKey!
+        const linhasPorPeriodo = periodosComDre.map(p => p.dre[vKey])
+        const vazio = linhasPorPeriodo.every(x => x.categorias.length === 0)
+        const chaveExpand = `vertical::${vKey}`
+        const expandido = gruposExpandidos.has(chaveExpand)
+        linhas.push({
+          key: l.key, nivel: 0, label: `${VERTICAL_PREFIXO[vKey]}${l.label.toUpperCase()}`, cor: VERTICAL_COR[vKey],
+          expandavel: !vazio, expandido, vazio, onToggle: () => toggleGrupo(chaveExpand),
+          valores: linhasPorPeriodo.map(x => ({ total: x.total, percentual: x.percentual })),
+        })
+        if (expandido && !vazio) {
+          for (const nome of unionNomes(linhasPorPeriodo.map(x => x.categorias))) {
+            const valores = linhasPorPeriodo.map(lp => {
+              const cat = lp.categorias.find(c => c.nome === nome)
+              return cat ? { total: cat.total, percentual: cat.percentual } : { total: 0, percentual: null }
+            })
+            linhas.push({
+              key: `${l.key}::${nome}`, nivel: 2, label: nome, expandavel: false, expandido: false, vazio: false,
+              destaqueAlerta: nome === 'Não Classificado', valores,
+              onClickCelula: idx => abrirLancamentos(periodosComDre[idx].periodo, nome),
+            })
+          }
+        }
+        continue
+      }
+
+      const bloco = l.bloco!
+      const blocosPorPeriodo = periodosComDre.map(p => encontrarBloco(p.dre, bloco))
+      const vazio = blocosPorPeriodo.every(b => b.grupos.length === 0)
+      const expandido = blocosExpandidos.has(bloco)
+      linhas.push({
+        key: l.key, nivel: 0, label: `${BLOCO_PREFIXO[bloco]}${l.label.toUpperCase()}`, cor: BLOCO_COR[bloco],
+        expandavel: !vazio, expandido, vazio, onToggle: () => toggleBloco(bloco),
+        valores: blocosPorPeriodo.map(b => ({ total: b.total, percentual: b.percentual })),
+      })
+      if (!expandido || vazio) continue
+
+      for (const nomeGrupo of unionNomes(blocosPorPeriodo.map(b => b.grupos))) {
+        const gruposPorPeriodo = blocosPorPeriodo.map(b => b.grupos.find(g => g.nome === nomeGrupo))
+        const chaveGrupo = `${bloco}::${nomeGrupo}`
+        const grupoExpandido = gruposExpandidos.has(chaveGrupo)
+        linhas.push({
+          key: chaveGrupo, nivel: 1, label: nomeGrupo, cor: BLOCO_COR[bloco],
+          expandavel: true, expandido: grupoExpandido, vazio: false, onToggle: () => toggleGrupo(chaveGrupo),
+          valores: gruposPorPeriodo.map(g => g ? { total: g.total, percentual: g.percentual } : { total: 0, percentual: null }),
+        })
+        if (!grupoExpandido) continue
+
+        for (const nomeCat of unionNomes(gruposPorPeriodo.map(g => g?.categorias ?? []))) {
+          const valores = gruposPorPeriodo.map(g => {
+            const cat = g?.categorias.find(c => c.nome === nomeCat)
+            return cat ? { total: cat.total, percentual: cat.percentual } : { total: 0, percentual: null }
+          })
+          linhas.push({
+            key: `${chaveGrupo}::${nomeCat}`, nivel: 2, label: nomeCat, expandavel: false, expandido: false, vazio: false,
+            destaqueAlerta: nomeCat === 'Não Classificado', valores,
+            onClickCelula: idx => abrirLancamentos(periodosComDre[idx].periodo, nomeCat),
+          })
+        }
+      }
+    }
+    return linhas
+  }, [modoComparativo, todasCarregadas, periodosComDre, blocosExpandidos, gruposExpandidos])
+
+  // Mobile (item 3): só 2 períodos de cada vez, com setas pra navegar — a tabela inteira (todas
+  // as colunas) continua existindo, só a JANELA visível de colunas muda.
+  const [janelaMobile, setJanelaMobile] = useState(0)
+  const [telaEstreita, setTelaEstreita] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 480px)').matches)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const mq = window.matchMedia('(max-width: 480px)')
+    const handler = () => setTelaEstreita(mq.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  const usaJanelaMobile = telaEstreita && modoComparativo && periodosComDre.length > 2
+  const janelaInicio = usaJanelaMobile ? Math.min(janelaMobile, periodosComDre.length - 2) : 0
+  const indicesVisiveis = usaJanelaMobile ? [janelaInicio, janelaInicio + 1] : periodosComDre.map((_, i) => i)
+
   const naoClassificadoTotal = todasCarregadas
     ? periodosComDre.reduce((acc, p) => {
         const soma = p.dre.blocos
@@ -485,44 +628,113 @@ export default function ClientDrePage() {
         </div>
       )}
 
-      {todasCarregadas && !loading && (
-      <div className={modoComparativo ? undefined : 'dre-layout'}>
-        <div className={`dre-corpo${modoComparativo ? ' dre-corpo-comparativo' : ''}`}>
-          {modoComparativo && (
-            <div
-              className="dre-cmp-cabecalho"
-              style={{ gridTemplateColumns: `minmax(200px,1.6fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` }}
-            >
-              <span />
-              {periodosComDre.map(p => <span key={p.periodo.chave} className="dre-cmp-cabecalho-label">{p.periodo.label}</span>)}
+      {todasCarregadas && !loading && modoComparativo && (() => {
+        const colTemplate = `minmax(190px,1.6fr) repeat(${indicesVisiveis.length}, minmax(100px,1fr))${telaEstreita ? '' : ' minmax(100px,1fr) minmax(100px,1fr)'}`
+        return (
+        <div className="dre-tabela-wrap">
+          {usaJanelaMobile && (
+            <div className="dre-tabela-nav">
+              <button
+                type="button" className="dre-tabela-nav-btn"
+                disabled={janelaInicio === 0}
+                onClick={() => setJanelaMobile(Math.max(0, janelaInicio - 1))}
+              >‹</button>
+              <span className="dre-tabela-nav-label">
+                {indicesVisiveis.map(i => periodosComDre[i].periodo.label).join(' · ')}
+              </span>
+              <button
+                type="button" className="dre-tabela-nav-btn"
+                disabled={janelaInicio >= periodosComDre.length - 2}
+                onClick={() => setJanelaMobile(Math.min(periodosComDre.length - 2, janelaInicio + 1))}
+              >›</button>
             </div>
           )}
+          <div className="dre-tabela-scroll">
+            <div className="dre-tabela-cabecalho" style={{ gridTemplateColumns: colTemplate }}>
+              <span className="dre-tabela-label-cel" />
+              {indicesVisiveis.map(i => <span key={periodosComDre[i].periodo.chave} className="dre-tabela-th">{periodosComDre[i].periodo.label}</span>)}
+              {!telaEstreita && <span className="dre-tabela-th dre-tabela-var-col">Variação</span>}
+              {!telaEstreita && <span className="dre-tabela-th dre-tabela-media-col">Média</span>}
+            </div>
 
-          {LINHAS.map(linha => {
-            if (linha.tipo === 'subtotal') {
-              const valores = periodosComDre.map(p => valorEPercentualSubtotal(p.dre, linha.key))
-              const principal = valores[0]
-              const corPositivoNegativo = principal.total >= 0 ? 'var(--success)' : 'var(--danger)'
+            {linhasTabelaComparativa.map((linha, idx) => {
+              const variacao = variacaoValores(linha.valores)
+              const media = mediaValores(linha.valores)
+              const zebra = linha.nivel > 0 && idx % 2 === 1
+              const corTexto = linha.nivel === 0 ? linha.cor : undefined
               return (
                 <div
                   key={linha.key}
-                  className={`dre-linha dre-linha-subtotal${linha.final ? ' dre-linha-final' : ''}${modoComparativo ? ' dre-linha-cmp' : ''}`}
-                  style={modoComparativo ? { gridTemplateColumns: `minmax(200px,1.6fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` } : undefined}
+                  className={`dre-tabela-linha dre-tabela-nivel-${linha.nivel}${linha.final ? ' dre-tabela-final' : ''}${zebra ? ' dre-tabela-zebra' : ''}${linha.vazio ? ' dre-tabela-vazia' : ''}`}
+                  style={{ gridTemplateColumns: colTemplate }}
                 >
-                  <span className="dre-linha-label">{linha.label}</span>
-                  {!modoComparativo ? (
-                    <span className="dre-linha-valor-wrap">
-                      <span className="dre-linha-valor" style={linha.final ? { color: corPositivoNegativo } : undefined}>{fmtBRL(principal.total)}</span>
-                      <span className="dre-linha-pct">{fmtPctOuTraco(principal.percentual)}</span>
+                  <span
+                    className="dre-tabela-label-cel"
+                    style={linha.nivel === 0 ? { borderLeft: `4px solid ${linha.cor ?? 'transparent'}` } : undefined}
+                    onClick={linha.expandavel ? linha.onToggle : undefined}
+                    role={linha.expandavel ? 'button' : undefined}
+                  >
+                    {linha.expandavel && <span className="dre-expand">{linha.expandido ? '▾' : '▸'}</span>}
+                    <span
+                      className="dre-tabela-nome"
+                      style={{ color: linha.destaqueAlerta ? 'var(--warning)' : corTexto }}
+                    >
+                      {linha.label}
                     </span>
-                  ) : (
-                    valores.map((v, i) => (
-                      <span key={periodosComDre[i].periodo.chave} className="dre-cmp-cel">
-                        <span className="dre-cmp-cel-valor" style={linha.final ? { color: v.total >= 0 ? 'var(--success)' : 'var(--danger)' } : undefined}>{fmtBRL(v.total)}</span>
-                        <span className="dre-cmp-cel-pct">{fmtPctOuTraco(v.percentual)}</span>
+                  </span>
+                  {indicesVisiveis.map(i => {
+                    const v = linha.valores[i]
+                    const clicavel = !!linha.onClickCelula
+                    return (
+                      <span
+                        key={periodosComDre[i].periodo.chave}
+                        className={`dre-tabela-cel${clicavel ? ' dre-tabela-cel-clicavel' : ''}`}
+                        onClick={clicavel ? () => linha.onClickCelula!(i) : undefined}
+                        role={clicavel ? 'button' : undefined}
+                      >
+                        <span className="dre-tabela-cel-valor" style={linha.final ? { color: v.total >= 0 ? 'var(--success)' : 'var(--danger)' } : undefined}>{fmtBRL(v.total)}</span>
+                        <span className="dre-tabela-cel-pct">{fmtPctOuTraco(v.percentual)}</span>
                       </span>
-                    ))
+                    )
+                  })}
+                  {!telaEstreita && (
+                    <span className="dre-tabela-cel dre-tabela-var-col">
+                      {variacao ? (
+                        <>
+                          <span className="dre-tabela-cel-valor" style={{ color: variacao.rs >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(variacao.rs)}</span>
+                          <span className="dre-tabela-cel-pct" style={{ color: variacao.rs >= 0 ? 'var(--success)' : 'var(--danger)' }}>{variacao.pct === null ? '—' : fmtPct(variacao.pct)}</span>
+                        </>
+                      ) : <span className="dre-tabela-cel-pct">—</span>}
+                    </span>
                   )}
+                  {!telaEstreita && (
+                    <span className="dre-tabela-cel dre-tabela-media-col">
+                      <span className="dre-tabela-cel-valor">{fmtBRL(media.total)}</span>
+                      <span className="dre-tabela-cel-pct">{fmtPctOuTraco(media.percentual)}</span>
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        )
+      })()}
+
+      {todasCarregadas && !loading && !modoComparativo && (
+      <div className="dre-layout">
+        <div className="dre-corpo">
+          {LINHAS.map(linha => {
+            if (linha.tipo === 'subtotal') {
+              const { total, percentual } = valorEPercentualSubtotal(periodosComDre[0].dre, linha.key)
+              const corPositivoNegativo = total >= 0 ? 'var(--success)' : 'var(--danger)'
+              return (
+                <div key={linha.key} className={`dre-linha dre-linha-subtotal${linha.final ? ' dre-linha-final' : ''}`}>
+                  <span className="dre-linha-label">{linha.label}</span>
+                  <span className="dre-linha-valor-wrap">
+                    <span className="dre-linha-valor" style={linha.final ? { color: corPositivoNegativo } : undefined}>{fmtBRL(total)}</span>
+                    <span className="dre-linha-pct">{fmtPctOuTraco(percentual)}</span>
+                  </span>
                 </div>
               )
             }
@@ -530,20 +742,16 @@ export default function ClientDrePage() {
             if (linha.tipo === 'vertical') {
               const vKey = linha.verticalKey!
               const cor = VERTICAL_COR[vKey]
-              const linhasPorPeriodo = periodosComDre.map(p => p.dre[vKey])
-              const principal = linhasPorPeriodo[0]
+              const l = periodosComDre[0].dre[vKey]
               const chaveExpand = `vertical::${vKey}`
               const expandido = gruposExpandidos.has(chaveExpand)
-              const vazio = linhasPorPeriodo.every(l => l.categorias.length === 0)
+              const vazio = l.categorias.length === 0
 
               return (
                 <div key={linha.key} className="dre-bloco-wrap">
                   <div
-                    className={`dre-linha dre-linha-bloco${modoComparativo ? ' dre-linha-cmp' : ''}${vazio ? ' dre-linha-vazia' : ''}`}
-                    style={{
-                      borderLeft: `4px solid ${cor}`,
-                      ...(modoComparativo ? { gridTemplateColumns: `minmax(200px,1.6fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` } : {}),
-                    }}
+                    className={`dre-linha dre-linha-bloco${vazio ? ' dre-linha-vazia' : ''}`}
+                    style={{ borderLeft: `4px solid ${cor}` }}
                     onClick={vazio ? undefined : () => toggleGrupo(chaveExpand)}
                     role={vazio ? undefined : 'button'}
                   >
@@ -551,35 +759,79 @@ export default function ClientDrePage() {
                       {!vazio && <span className="dre-expand">{expandido ? '▾' : '▸'}</span>}
                       <span className="dre-bloco-nome" style={{ color: cor }}>{VERTICAL_PREFIXO[vKey]}{linha.label.toUpperCase()}</span>
                     </span>
-                    {!modoComparativo ? (
-                      <>
-                        <span className="dre-linha-valor">{fmtBRL(principal.total)}</span>
-                        <span className="dre-linha-pct">{fmtPctOuTraco(principal.percentual)}</span>
-                      </>
-                    ) : (
-                      linhasPorPeriodo.map((l, i) => (
-                        <span key={periodosComDre[i].periodo.chave} className="dre-cmp-cel">
-                          <span className="dre-cmp-cel-valor">{fmtBRL(l.total)}</span>
-                          <span className="dre-cmp-cel-pct">{fmtPctOuTraco(l.percentual)}</span>
-                        </span>
-                      ))
-                    )}
+                    <span className="dre-linha-valor">{fmtBRL(l.total)}</span>
+                    <span className="dre-linha-pct">{fmtPctOuTraco(l.percentual)}</span>
                   </div>
 
                   {expandido && !vazio && (
                     <div className="dre-expand-bloco">
-                      {linhasPorPeriodo.map((l, pIdx) => (
-                        <div key={periodosComDre[pIdx].periodo.chave} className="dre-expand-periodo">
-                          {modoComparativo && <div className="dre-expand-periodo-label">{periodosComDre[pIdx].periodo.label}</div>}
-                          {l.categorias.length === 0 ? (
-                            <div className="dre-vazio-inline">Nenhum lançamento nesta linha.</div>
-                          ) : (
+                      <div className="dre-cat-lista">
+                        {l.categorias.map(cat => (
+                          <button
+                            key={cat.nome}
+                            className={`dre-cat-btn${cat.nome === 'Não Classificado' ? ' dre-cat-btn-alerta' : ''}`}
+                            onClick={() => abrirLancamentos(periodosComDre[0].periodo, cat.nome)}
+                          >
+                            <span className="dre-cat-nome">{cat.nome}</span>
+                            <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
+                            <span className="dre-cat-pct">{fmtPctOuTraco(cat.percentual)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            }
+
+            const bloco = linha.bloco!
+            const cor = BLOCO_COR[bloco]
+            const b = encontrarBloco(periodosComDre[0].dre, bloco)
+            const expandido = blocosExpandidos.has(bloco)
+            const vazio = b.grupos.length === 0
+
+            return (
+              <div key={linha.key} className="dre-bloco-wrap">
+                <div
+                  className={`dre-linha dre-linha-bloco${vazio ? ' dre-linha-vazia' : ''}`}
+                  style={{ borderLeft: `4px solid ${cor}` }}
+                  onClick={vazio ? undefined : () => toggleBloco(bloco)}
+                  role={vazio ? undefined : 'button'}
+                >
+                  <span className="dre-linha-label">
+                    {!vazio && <span className="dre-expand">{expandido ? '▾' : '▸'}</span>}
+                    <span className="dre-bloco-nome" style={{ color: cor }}>{BLOCO_PREFIXO[bloco]}{linha.label.toUpperCase()}</span>
+                  </span>
+                  <span className="dre-linha-valor">{fmtBRL(b.total)}</span>
+                  <span className="dre-linha-pct">{fmtPctOuTraco(b.percentual)}</span>
+                </div>
+                <div className="dre-barra-trilho">
+                  <div className="dre-barra-preenchida" style={{ width: `${larguraBarra(b.percentual)}%`, background: cor }} />
+                </div>
+
+                {expandido && !vazio && (
+                  <div className="dre-expand-bloco">
+                    {b.grupos.map(grupo => {
+                      const chaveGrupo = `${bloco}::${grupo.nome}`
+                      const grupoAberto = gruposExpandidos.has(chaveGrupo)
+                      return (
+                        <div key={grupo.nome} className="dre-grupo-wrap">
+                          <button type="button" className="dre-grupo-linha" onClick={() => toggleGrupo(chaveGrupo)}>
+                            <span className="dre-expand dre-expand-grupo">{grupoAberto ? '▾' : '▸'}</span>
+                            <span className="dre-grupo-nome">{grupo.nome}</span>
+                            <span className="dre-grupo-valor">{fmtBRL(grupo.total)}</span>
+                            <span className="dre-grupo-pct">{fmtPctOuTraco(grupo.percentual)}</span>
+                          </button>
+                          <div className="dre-barra-trilho dre-barra-trilho-grupo">
+                            <div className="dre-barra-preenchida" style={{ width: `${larguraBarra(grupo.percentual)}%`, background: cor, opacity: 0.6 }} />
+                          </div>
+                          {grupoAberto && (
                             <div className="dre-cat-lista">
-                              {l.categorias.map(cat => (
+                              {grupo.categorias.map(cat => (
                                 <button
                                   key={cat.nome}
                                   className={`dre-cat-btn${cat.nome === 'Não Classificado' ? ' dre-cat-btn-alerta' : ''}`}
-                                  onClick={() => abrirLancamentos(periodosComDre[pIdx].periodo, cat.nome)}
+                                  onClick={() => abrirLancamentos(periodosComDre[0].periodo, cat.nome)}
                                 >
                                   <span className="dre-cat-nome">{cat.nome}</span>
                                   <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
@@ -589,96 +841,8 @@ export default function ClientDrePage() {
                             </div>
                           )}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            }
-
-            const bloco = linha.bloco!
-            const cor = BLOCO_COR[bloco]
-            const blocosPorPeriodo = periodosComDre.map(p => encontrarBloco(p.dre, bloco))
-            const principal = blocosPorPeriodo[0]
-            const expandido = blocosExpandidos.has(bloco)
-            const vazio = blocosPorPeriodo.every(b => b.grupos.length === 0)
-
-            return (
-              <div key={linha.key} className="dre-bloco-wrap">
-                <div
-                  className={`dre-linha dre-linha-bloco${modoComparativo ? ' dre-linha-cmp' : ''}${vazio ? ' dre-linha-vazia' : ''}`}
-                  style={{
-                    borderLeft: `4px solid ${cor}`,
-                    ...(modoComparativo ? { gridTemplateColumns: `minmax(200px,1.6fr) repeat(${periodosComDre.length}, minmax(110px,1fr))` } : {}),
-                  }}
-                  onClick={vazio ? undefined : () => toggleBloco(bloco)}
-                  role={vazio ? undefined : 'button'}
-                >
-                  <span className="dre-linha-label">
-                    {!vazio && <span className="dre-expand">{expandido ? '▾' : '▸'}</span>}
-                    <span className="dre-bloco-nome" style={{ color: cor }}>{BLOCO_PREFIXO[bloco]}{linha.label.toUpperCase()}</span>
-                  </span>
-                  {!modoComparativo ? (
-                    <>
-                      <span className="dre-linha-valor">{fmtBRL(principal.total)}</span>
-                      <span className="dre-linha-pct">{fmtPctOuTraco(principal.percentual)}</span>
-                    </>
-                  ) : (
-                    blocosPorPeriodo.map((b, i) => (
-                      <span key={periodosComDre[i].periodo.chave} className="dre-cmp-cel">
-                        <span className="dre-cmp-cel-valor">{fmtBRL(b.total)}</span>
-                        <span className="dre-cmp-cel-pct">{fmtPctOuTraco(b.percentual)}</span>
-                      </span>
-                    ))
-                  )}
-                </div>
-                <div className="dre-barra-trilho">
-                  <div className="dre-barra-preenchida" style={{ width: `${larguraBarra(principal.percentual)}%`, background: cor }} />
-                </div>
-
-                {expandido && !vazio && (
-                  <div className="dre-expand-bloco">
-                    {blocosPorPeriodo.map((b, pIdx) => (
-                      <div key={periodosComDre[pIdx].periodo.chave} className="dre-expand-periodo">
-                        {modoComparativo && <div className="dre-expand-periodo-label">{periodosComDre[pIdx].periodo.label}</div>}
-                        {b.grupos.length === 0 ? (
-                          <div className="dre-vazio-inline">Nenhum lançamento neste bloco.</div>
-                        ) : (
-                          b.grupos.map(grupo => {
-                            const chaveGrupo = `${bloco}::${grupo.nome}`
-                            const grupoAberto = gruposExpandidos.has(chaveGrupo)
-                            return (
-                              <div key={grupo.nome} className="dre-grupo-wrap">
-                                <button type="button" className="dre-grupo-linha" onClick={() => toggleGrupo(chaveGrupo)}>
-                                  <span className="dre-expand dre-expand-grupo">{grupoAberto ? '▾' : '▸'}</span>
-                                  <span className="dre-grupo-nome">{grupo.nome}</span>
-                                  <span className="dre-grupo-valor">{fmtBRL(grupo.total)}</span>
-                                  <span className="dre-grupo-pct">{fmtPctOuTraco(grupo.percentual)}</span>
-                                </button>
-                                <div className="dre-barra-trilho dre-barra-trilho-grupo">
-                                  <div className="dre-barra-preenchida" style={{ width: `${larguraBarra(grupo.percentual)}%`, background: cor, opacity: 0.6 }} />
-                                </div>
-                                {grupoAberto && (
-                                  <div className="dre-cat-lista">
-                                    {grupo.categorias.map(cat => (
-                                      <button
-                                        key={cat.nome}
-                                        className={`dre-cat-btn${cat.nome === 'Não Classificado' ? ' dre-cat-btn-alerta' : ''}`}
-                                        onClick={() => abrirLancamentos(periodosComDre[pIdx].periodo, cat.nome)}
-                                      >
-                                        <span className="dre-cat-nome">{cat.nome}</span>
-                                        <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
-                                        <span className="dre-cat-pct">{fmtPctOuTraco(cat.percentual)}</span>
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          })
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -686,19 +850,14 @@ export default function ClientDrePage() {
           })}
         </div>
 
-        {/* Painel de KPIs só faz sentido pra um período por vez — no modo comparativo (várias
-            colunas lado a lado) "o resultado do período" fica ambíguo, então ele some e a DRE
-            volta a ocupar a largura toda, como já era antes. */}
-        {!modoComparativo && (
-          <DreKpisPanel
-            dre={periodosComDre[0].dre}
-            tipoPeriodo={tipo}
-            registros={registros}
-            de={periodosComDre[0].periodo.de}
-            ate={periodosComDre[0].periodo.ate}
-            contaFiltro={contaFiltro}
-          />
-        )}
+        <DreKpisPanel
+          dre={periodosComDre[0].dre}
+          tipoPeriodo={tipo}
+          registros={registros}
+          de={periodosComDre[0].periodo.de}
+          ate={periodosComDre[0].periodo.ate}
+          contaFiltro={contaFiltro}
+        />
       </div>
       )}
 
