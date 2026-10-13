@@ -193,6 +193,26 @@ public class RecorrenciaServiceTests
     }
 
     [Fact]
+    public async Task MaterializarMesAtual_ComHorizonteFuturo_EstendeAJanelaParaAlemDoMesAtual()
+    {
+        // Parte 2 (integridade de dados): o job diário chama com diasHorizonteFuturo=90 — a janela
+        // tem que ir além do fim do mês atual, não só até lá como no caso padrão (0).
+        var clienteId = Guid.NewGuid();
+        var hoje = DataLocalHelper.Hoje();
+        var (primeiroDia, _) = JanelaMaterializacao(hoje);
+        var ultimoDiaEsperado = hoje.AddDays(90);
+        var conta = CriarConta(clienteId);
+        _contaRepoMock.Setup(r => r.ListarAtivasPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaRecorrente> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorPeriodoAsync(clienteId, primeiroDia, ultimoDiaEsperado))
+            .ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
+
+        await _sut.MaterializarMesAtualAsync(clienteId, 90);
+
+        _registroRepoMock.Verify(r => r.ListarPorPeriodoAsync(clienteId, primeiroDia, ultimoDiaEsperado), Times.Once);
+    }
+
+    [Fact]
     public async Task MaterializarMesAtual_ContaJaMaterializada_NaoCriaDuplicata()
     {
         var clienteId = Guid.NewGuid();

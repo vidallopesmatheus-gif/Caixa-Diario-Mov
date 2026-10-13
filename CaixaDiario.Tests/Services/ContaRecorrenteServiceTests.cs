@@ -14,8 +14,9 @@ public class ContaRecorrenteServiceTests
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
     private readonly Mock<IContaBancariaRepository> _contaBancariaRepoMock = new();
     private readonly Mock<IAuditService> _auditMock = new();
+    private readonly Mock<IRecorrenciaService> _recorrenciaServiceMock = new();
     private ContaRecorrenteService CriarSut() =>
-        new(_repoMock.Object, _registroRepoMock.Object, _contaBancariaRepoMock.Object, _auditMock.Object);
+        new(_repoMock.Object, _registroRepoMock.Object, _contaBancariaRepoMock.Object, _auditMock.Object, _recorrenciaServiceMock.Object);
 
     // Cadastra uma conta bancária ativa pertencente ao cliente, pra ValidarContaVinculadaAsync
     // não rejeitar o contaBancariaId usado no teste.
@@ -197,6 +198,9 @@ public class ContaRecorrenteServiceTests
         Assert.Equal("Aluguel", resultado.Descricao);
         Assert.True(resultado.Ativo);
         Assert.Equal(contaBancariaId, resultado.ContaBancariaId);
+        // Parte 2 (integridade de dados): materializa na criação — não depende mais de um GET
+        // nem de esperar o job diário pra a primeira ocorrência aparecer.
+        _recorrenciaServiceMock.Verify(r => r.MaterializarMesAtualAsync(clienteId, 0), Times.Once);
     }
 
     [Fact]
@@ -399,6 +403,7 @@ public class ContaRecorrenteServiceTests
         Assert.Equal(novaContaBancariaId, resultado.ContaBancariaId);
         _auditMock.Verify(a => a.LogAsync(clienteId, clienteId, "ContaRecorrente", "Edicao",
             conta.Id.ToString(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+        _recorrenciaServiceMock.Verify(r => r.MaterializarMesAtualAsync(clienteId, 0), Times.Once);
     }
 
     [Fact]

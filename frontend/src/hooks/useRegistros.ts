@@ -8,14 +8,17 @@ export function useRegistros(clienteId: string | null) {
   const [erro, setErro] = useState('')
 
   const carregar = useCallback(async () => {
-    if (!clienteId) return
+    if (!clienteId) return []
     setErro('')
     setLoading(true)
     try {
       const res = await listarRegistros(clienteId)
-      setRegistros(res.dados ?? [])
+      const dados = res.dados ?? []
+      setRegistros(dados)
+      return dados
     } catch (e: any) {
       setErro(e.message)
+      return []
     } finally {
       setLoading(false)
     }

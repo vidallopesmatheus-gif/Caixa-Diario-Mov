@@ -75,6 +75,15 @@ test('excluir não faz nada quando clienteId é null', async () => {
   expect(api.excluirRegistro).not.toHaveBeenCalled()
 })
 
+test('recarregar retorna a lista recém-carregada (Parte 2, integridade de dados)', async () => {
+  vi.mocked(api.listarRegistros).mockResolvedValue({ dados: mockRegistros, codigoRetorno: 'OK', mensagem: '' })
+  const { result } = renderHook(() => useRegistros('c1'))
+  await waitFor(() => expect(result.current.loading).toBe(false))
+
+  const retornados = await result.current.recarregar()
+  expect(retornados).toEqual(mockRegistros)
+})
+
 test('expõe erro quando listarRegistros falha', async () => {
   vi.mocked(api.listarRegistros).mockRejectedValue(new Error('Falha de API'))
   const { result } = renderHook(() => useRegistros('c1'))

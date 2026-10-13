@@ -124,6 +124,9 @@ builder.Services.AddScoped<IPrevistoRealizadoService, PrevistoRealizadoService>(
 builder.Services.AddScoped<IDuplicataExtratoService, DuplicataExtratoService>();
 builder.Services.AddScoped<IFinanciamentoRepository, FinanciamentoRepository>();
 builder.Services.AddScoped<IFinanciamentoService, FinanciamentoService>();
+// Parte 2 (integridade de dados): materialização de ocorrências recorrentes sai do GET e passa a
+// rodar aqui (uma vez ao subir + a cada 24h), além de na criação/edição da recorrente.
+builder.Services.AddHostedService<MaterializacaoRecorrenciaJob>();
 
 // Chat IA
 var groqApiKey = builder.Configuration["Groq:ApiKey"]

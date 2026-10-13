@@ -16,15 +16,18 @@ public class ContaRecorrenteService : IContaRecorrenteService
     private readonly IRegistroRepository _registroRepo;
     private readonly IContaBancariaRepository _contaBancariaRepo;
     private readonly IAuditService _auditService;
+    private readonly IRecorrenciaService _recorrenciaService;
 
     public ContaRecorrenteService(
         IContaRecorrenteRepository repo, IRegistroRepository registroRepo,
-        IContaBancariaRepository contaBancariaRepo, IAuditService auditService)
+        IContaBancariaRepository contaBancariaRepo, IAuditService auditService,
+        IRecorrenciaService recorrenciaService)
     {
         _repo = repo;
         _registroRepo = registroRepo;
         _contaBancariaRepo = contaBancariaRepo;
         _auditService = auditService;
+        _recorrenciaService = recorrenciaService;
     }
 
     // Mesma checagem de RegistroService.ValidarContaVinculada — sem ela, um payload adulterado
@@ -103,6 +106,11 @@ public class ContaRecorrenteService : IContaRecorrenteService
         await _auditService.LogAsync(salva.ClienteId, usuarioLogadoId, "ContaRecorrente", "Criacao",
             salva.Id.ToString(), null, JsonSerializer.Serialize(MapToDto(salva)));
 
+        // Parte 2 (integridade de dados): a materialização não roda mais em nenhum GET — acontece
+        // aqui (criação) e na edição, além do job diário (MaterializacaoRecorrenciaJob), nunca como
+        // efeito colateral de uma leitura.
+        await _recorrenciaService.MaterializarMesAtualAsync(salva.ClienteId);
+
         return MapToDto(salva);
     }
 
@@ -152,6 +160,8 @@ public class ContaRecorrenteService : IContaRecorrenteService
 
         await _auditService.LogAsync(clienteId, usuarioLogadoId, "ContaRecorrente", "Edicao",
             id.ToString(), antes, JsonSerializer.Serialize(MapToDto(atualizada)));
+
+        await _recorrenciaService.MaterializarMesAtualAsync(clienteId);
 
         return MapToDto(atualizada);
     }

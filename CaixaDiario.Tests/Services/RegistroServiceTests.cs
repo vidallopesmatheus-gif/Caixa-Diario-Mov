@@ -29,8 +29,6 @@ public class RegistroServiceTests
         _auditMock.Setup(a => a.LogAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(Task.CompletedTask);
-        _recorrenciaMock.Setup(r => r.MaterializarMesAtualAsync(It.IsAny<Guid>()))
-            .Returns(Task.CompletedTask);
         // Fallback padrão pros testes que não passam ContaBancariaId no dto (a maioria) — sem isso,
         // ResolverContaPadraoAsync não tem nenhuma conta pra cair de volta. Testes que querem cenários
         // específicos de resolução de conta (ver região "ResolverContaPadraoAsync") sobrescrevem isso.
@@ -492,14 +490,16 @@ public class RegistroServiceTests
     }
 
     [Fact]
-    public async Task ListarPorClienteAsync_ChamaRecorrencia()
+    public async Task ListarPorClienteAsync_NuncaMaterializaRecorrencia()
     {
+        // Parte 2 (integridade de dados): "nenhum GET pode criar ou alterar dados" — a
+        // materialização saiu daqui e passou pra criação/edição da recorrente + job diário.
         var clienteId = Guid.NewGuid();
         _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
 
         await _sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
 
-        _recorrenciaMock.Verify(r => r.MaterializarMesAtualAsync(clienteId), Times.Once);
+        _recorrenciaMock.Verify(r => r.MaterializarMesAtualAsync(It.IsAny<Guid>(), It.IsAny<int>()), Times.Never);
     }
 
     [Fact]

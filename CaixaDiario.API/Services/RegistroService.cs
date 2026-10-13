@@ -37,7 +37,9 @@ public class RegistroService : IRegistroService
         if (perfil == "cliente" && usuarioLogadoId != clienteId)
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
 
-        await _recorrenciaService.MaterializarMesAtualAsync(clienteId);
+        // Parte 2 (integridade de dados): nenhum GET pode criar/alterar dados — a materialização
+        // de ocorrências recorrentes agora só acontece na criação/edição da recorrente
+        // (ContaRecorrenteService) e no job diário (MaterializacaoRecorrenciaJob).
         var registros = await _registroRepository.ListarPorClienteAsync(clienteId);
         return registros.Select(MapToDto).ToList();
     }
