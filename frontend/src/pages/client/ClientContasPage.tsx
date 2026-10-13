@@ -12,10 +12,14 @@ import { listarSugestoesVinculo, ignorarSugestaoVinculo, type SugestaoVinculo } 
 import { listarCategorias } from '../../api/categorias'
 import Modal from '../../components/shared/Modal'
 import type { ContaProvisionada, ContaRecorrente, ContaBancaria, Categorias } from '../../types'
+import { mesAtualISO, deslocarMes, labelMes, calcularDiasAtraso, dataReferencia, estaNoMes } from '../../utils/contasPagarReceber'
 import './ClientContas.css'
 import './ClientContasBancarias.css'
 
 interface Props { clienteIdOverride?: string }
+
+type AbaContas = 'receber' | 'pagar' | 'pagas' | 'recorrentes'
+type ModoLista = 'mes' | 'atrasadas' | 'tudo'
 
 interface ContaView {
   registroData: string
@@ -324,36 +328,74 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     })
   }, [registros])
 
-  // Item 2.5: filtro por período (vencimento, ou data de lançamento quando não tem vencimento) e
-  // por conta bancária — '' em cada um significa "sem filtro" (mostra tudo).
+  // Item 2.5: filtro por conta bancária — '' significa "sem filtro" (mostra tudo).
   const [filtroContaId, setFiltroContaId] = useState('')
-  const [filtroDe, setFiltroDe] = useState('')
-  const [filtroAte, setFiltroAte] = useState('')
 
   const contasFiltradas = useMemo(() => todasContas.filter(view => {
     if (filtroContaId && view.conta.contaBancariaId !== filtroContaId) return false
-    const dataRef = view.conta.dataVencimento ?? view.registroData
-    if (filtroDe && dataRef < filtroDe) return false
-    if (filtroAte && dataRef > filtroAte) return false
     return true
-  }), [todasContas, filtroContaId, filtroDe, filtroAte])
+  }), [todasContas, filtroContaId])
 
   const pendentesReceber = contasFiltradas.filter(c => c.tipo === 'receber' && !c.conta.pago)
   const recebidasList = contasFiltradas.filter(c => c.tipo === 'receber' && c.conta.pago)
   const pendentesPagar = contasFiltradas.filter(c => c.tipo === 'pagar' && !c.conta.pago)
   const pagasList = contasFiltradas.filter(c => c.tipo === 'pagar' && c.conta.pago)
-  const totalPendenteReceber = pendentesReceber.reduce((s, v) => s + v.conta.valor, 0)
-  const totalPendentePagar = pendentesPagar.reduce((s, v) => s + v.conta.valor, 0)
   const contaSelecionada = contasBancarias.find(c => c.id === contaSelecionadaId)
 
-  // Item 6 do bundle "Visão de Futuro": a lista de A Pagar some embaixo de dezenas de parcelas de
-  // financiamento — por padrão mostra só os próximos 90 dias, e agrupa parcelas do mesmo contrato
-  // (origemFinanciamentoId) numa linha recolhível em vez de uma a uma.
-  const [pagarMostrarTudo, setPagarMostrarTudo] = useState(false)
-  const limite90Dias = addDays(todayISO(), 90)
-  const pendentesPagarVisiveis = pagarMostrarTudo
-    ? pendentesPagar
-    : pendentesPagar.filter(v => (v.conta.dataVencimento ?? v.registroData) <= limite90Dias)
+  // ── Parte 3 (Money Vision): a tela não para de crescer — seletor de mês + abas + "atrasadas"
+  // sempre visíveis no topo, em vez de listar tudo desde sempre. ──────────────────────────────
+  const [abaAtiva, setAbaAtiva] = useState<AbaContas>('receber')
+  const [mesSelecionado, setMesSelecionado] = useState(mesAtualISO())
+  const [modoLista, setModoLista] = useState<ModoLista>('mes')
+
+  function irParaMes(delta: number) {
+    setMesSelecionado(m => deslocarMes(m, delta))
+    setModoLista('mes')
+  }
+
+  const vencida = (v: ContaView) => calcularDiasAtraso(v.conta.dataVencimento, v.conta.pago) > 0
+  const atrasadasReceber = pendentesReceber.filter(vencida)
+  const atrasadasPagar = pendentesPagar.filter(vencida)
+  const totalAtrasadoReceber = atrasadasReceber.reduce((s, v) => s + v.conta.valor, 0)
+  const totalAtrasadoPagar = atrasadasPagar.reduce((s, v) => s + v.conta.valor, 0)
+
+  function filtrarPorModo(lista: ContaView[]) {
+    if (modoLista === 'tudo') return lista.filter(v => !vencida(v))
+    if (modoLista === 'atrasadas') return lista.filter(vencida)
+    return lista.filter(v => !vencida(v) && estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
+  }
+
+  const pendentesReceberVisiveis = filtrarPorModo(pendentesReceber)
+  const pendentesPagarVisiveis = filtrarPorModo(pendentesPagar)
+  // Cards de total (item 6): sempre o mês selecionado, independente do modo escolhido na lista.
+  const totalMesReceber = pendentesReceber
+    .filter(v => !vencida(v) && estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
+    .reduce((s, v) => s + v.conta.valor, 0)
+  const totalMesPagar = pendentesPagar
+    .filter(v => !vencida(v) && estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
+    .reduce((s, v) => s + v.conta.valor, 0)
+
+  // Item 4: recolhidas por padrão — expande mostrando só o mês selecionado.
+  const [pagasAberta, setPagasAberta] = useState<'receber' | 'pagar' | null>(null)
+  // Item 3: "Ver histórico completo" — paginado (20/página) + busca, sem filtro de mês.
+  const [historicoAberto, setHistoricoAberto] = useState<'receber' | 'pagar' | null>(null)
+  const [historicoBusca, setHistoricoBusca] = useState('')
+  const [historicoPagina, setHistoricoPagina] = useState(1)
+  const HISTORICO_POR_PAGINA = 20
+
+  const recebidasDoMes = recebidasList.filter(v => estaNoMes(v.conta.dataBaixa ?? v.registroData, mesSelecionado))
+  const pagasDoMes = pagasList.filter(v => estaNoMes(v.conta.dataBaixa ?? v.registroData, mesSelecionado))
+
+  function listaHistorico(tipo: 'receber' | 'pagar') {
+    const base = (tipo === 'receber' ? recebidasList : pagasList)
+      .filter(v => !historicoBusca.trim() || v.conta.descricao.toLowerCase().includes(historicoBusca.trim().toLowerCase()))
+      .sort((a, b) => (b.conta.dataBaixa ?? b.registroData).localeCompare(a.conta.dataBaixa ?? a.registroData))
+    const totalPaginas = Math.max(1, Math.ceil(base.length / HISTORICO_POR_PAGINA))
+    const pagina = Math.min(historicoPagina, totalPaginas)
+    const inicio = (pagina - 1) * HISTORICO_POR_PAGINA
+    return { itens: base.slice(inicio, inicio + HISTORICO_POR_PAGINA), total: base.length, totalPaginas, pagina }
+  }
+
 
   const [gruposPagarAbertos, setGruposPagarAbertos] = useState<Set<string>>(new Set())
   function toggleGrupoPagar(id: string) {
@@ -936,15 +978,40 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         </div>
       )}
 
-      {/* Item 2.5: totais pendentes no topo + filtro por período/conta — afeta as listas abaixo. */}
+      {/* Item 2 (Parte 3): atrasadas sempre no topo, num bloco próprio, até serem resolvidas —
+          independente do mês selecionado ou da aba aberta. */}
+      {(atrasadasReceber.length + atrasadasPagar.length) > 0 && (
+        <button type="button" className="contas-atrasadas-aviso" onClick={() => { setModoLista('atrasadas'); setAbaAtiva(atrasadasPagar.length >= atrasadasReceber.length ? 'pagar' : 'receber') }}>
+          ⚠️ {atrasadasReceber.length + atrasadasPagar.length} conta(s) atrasada(s) · {fmtBRL(totalAtrasadoReceber + totalAtrasadoPagar)}
+        </button>
+      )}
+
+      {/* Item 1 (Parte 3): seletor de mês + atalhos — filtra os pendentes do mês nas abas abaixo. */}
+      <div className="contas-mes-seletor">
+        <button type="button" className="contas-mes-seta" onClick={() => irParaMes(-1)}>‹</button>
+        <span className="contas-mes-label">{labelMes(mesSelecionado)}</span>
+        <button type="button" className="contas-mes-seta" onClick={() => irParaMes(1)}>›</button>
+        <div className="contas-mes-atalhos">
+          <button type="button" className={modoLista === 'mes' && mesSelecionado === mesAtualISO() ? 'ativo' : ''}
+            onClick={() => { setMesSelecionado(mesAtualISO()); setModoLista('mes') }}>Este mês</button>
+          <button type="button" className={modoLista === 'mes' && mesSelecionado === deslocarMes(mesAtualISO(), 1) ? 'ativo' : ''}
+            onClick={() => { setMesSelecionado(deslocarMes(mesAtualISO(), 1)); setModoLista('mes') }}>Próximo mês</button>
+          <button type="button" className={modoLista === 'atrasadas' ? 'ativo' : ''} onClick={() => setModoLista('atrasadas')}>Atrasadas</button>
+          <button type="button" className={modoLista === 'tudo' ? 'ativo' : ''} onClick={() => setModoLista('tudo')}>Tudo</button>
+        </div>
+      </div>
+
+      {/* Item 6: cards de total sempre do mês selecionado + "atrasado: R$ X". */}
       <div className="contas-totais">
         <div className="contas-total-card receber">
-          <span className="contas-total-label">A receber</span>
-          <span className="contas-total-valor">{fmtBRL(totalPendenteReceber)}</span>
+          <span className="contas-total-label">A receber em {labelMes(mesSelecionado)}</span>
+          <span className="contas-total-valor">{fmtBRL(totalMesReceber)}</span>
+          {totalAtrasadoReceber > 0 && <span className="contas-total-atrasado">atrasado: {fmtBRL(totalAtrasadoReceber)}</span>}
         </div>
         <div className="contas-total-card pagar">
-          <span className="contas-total-label">A pagar</span>
-          <span className="contas-total-valor">{fmtBRL(totalPendentePagar)}</span>
+          <span className="contas-total-label">A pagar em {labelMes(mesSelecionado)}</span>
+          <span className="contas-total-valor">{fmtBRL(totalMesPagar)}</span>
+          {totalAtrasadoPagar > 0 && <span className="contas-total-atrasado">atrasado: {fmtBRL(totalAtrasadoPagar)}</span>}
         </div>
       </div>
 
@@ -956,72 +1023,107 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
             {contasBancarias.filter(c => c.ativa).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </div>
-        <div className="conta-field" style={{ flex: '0 1 150px' }}>
-          <label className="conta-field-label" htmlFor="filtro-de">De</label>
-          <input id="filtro-de" type="date" value={filtroDe} onChange={e => setFiltroDe(e.target.value)} />
-        </div>
-        <div className="conta-field" style={{ flex: '0 1 150px' }}>
-          <label className="conta-field-label" htmlFor="filtro-ate">Até</label>
-          <input id="filtro-ate" type="date" value={filtroAte} onChange={e => setFiltroAte(e.target.value)} />
-        </div>
-        {(filtroContaId || filtroDe || filtroAte) && (
-          <button type="button" className="btn-cancel" style={{ alignSelf: 'flex-end' }}
-            onClick={() => { setFiltroContaId(''); setFiltroDe(''); setFiltroAte('') }}>
-            Limpar filtros
+        {filtroContaId && (
+          <button type="button" className="btn-cancel" style={{ alignSelf: 'flex-end' }} onClick={() => setFiltroContaId('')}>
+            Limpar filtro
           </button>
         )}
       </div>
 
-      <div className="contas-section">
-        <h3>📥 A Receber ({pendentesReceber.length})</h3>
-        {pendentesReceber.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma pendente.</p>}
-        {pendentesReceber.map(renderConta)}
+      {/* Item 5 (Parte 3): abas no topo, cada uma com o total do mês. */}
+      <div className="contas-abas">
+        <button type="button" className={`contas-aba ${abaAtiva === 'receber' ? 'ativa' : ''}`} onClick={() => setAbaAtiva('receber')}>
+          📥 A Receber <span className="contas-aba-total">{fmtBRL(totalMesReceber)}</span>
+        </button>
+        <button type="button" className={`contas-aba ${abaAtiva === 'pagar' ? 'ativa' : ''}`} onClick={() => setAbaAtiva('pagar')}>
+          📤 A Pagar <span className="contas-aba-total">{fmtBRL(totalMesPagar)}</span>
+        </button>
+        <button type="button" className={`contas-aba ${abaAtiva === 'pagas' ? 'ativa' : ''}`} onClick={() => setAbaAtiva('pagas')}>
+          ✅ Pagas/Recebidas
+        </button>
+        <button type="button" className={`contas-aba ${abaAtiva === 'recorrentes' ? 'ativa' : ''}`} onClick={() => setAbaAtiva('recorrentes')}>
+          🔁 Recorrentes {recorrentes.length > 0 && `(${recorrentes.length})`}
+        </button>
       </div>
 
-      <div className="contas-section">
-        <h3>
-          📤 A Pagar ({pendentesPagarVisiveis.length}
-          {!pagarMostrarTudo && pendentesPagar.length !== pendentesPagarVisiveis.length ? ` de ${pendentesPagar.length}` : ''})
-        </h3>
-        <div className="contas-pagar-periodo">
-          <button type="button" className={!pagarMostrarTudo ? 'ativo' : ''} onClick={() => setPagarMostrarTudo(false)}>Próximos 90 dias</button>
-          <button type="button" className={pagarMostrarTudo ? 'ativo' : ''} onClick={() => setPagarMostrarTudo(true)}>Tudo</button>
-        </div>
-        {pendentesPagarVisiveis.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma pendente.</p>}
-        {[...pagarAgrupado.grupos.entries()].map(([financiamentoId, views]) => {
-          const ordenado = [...views].sort((a, b) =>
-            (a.conta.dataVencimento ?? a.registroData).localeCompare(b.conta.dataVencimento ?? b.registroData))
-          const proxima = ordenado[0]
-          const nomeContrato = proxima.conta.descricao.replace(/\s*\(\d+\/\d+\)$/, '')
-          const totalGrupo = views.reduce((s, v) => s + v.conta.valor, 0)
-          const aberto = gruposPagarAbertos.has(financiamentoId)
-          return (
-            <div key={financiamentoId} className="conta-grupo-financiamento">
-              <button type="button" className="conta-grupo-header" onClick={() => toggleGrupoPagar(financiamentoId)}>
-                <span>
-                  {aberto ? '▾' : '▸'} {nomeContrato}: {views.length} parcela{views.length > 1 ? 's' : ''} · próxima{' '}
-                  {fmtDate(proxima.conta.dataVencimento ?? proxima.registroData)} · {fmtBRL(proxima.conta.valor)}
-                </span>
-                <strong>{fmtBRL(totalGrupo)}</strong>
-              </button>
-              {aberto && ordenado.map(renderConta)}
-            </div>
-          )
-        })}
-        {pagarAgrupado.semGrupo.map(renderConta)}
-      </div>
-
-      {recebidasList.length > 0 && (
+      {abaAtiva === 'receber' && (
         <div className="contas-section">
-          <h3>✅ Já Recebidas</h3>
-          {recebidasList.map(renderConta)}
+          {pendentesReceberVisiveis.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma pendente.</p>}
+          {pendentesReceberVisiveis.map(renderConta)}
         </div>
       )}
 
-      {pagasList.length > 0 && (
+      {abaAtiva === 'pagar' && (
         <div className="contas-section">
-          <h3>✅ Já Pagas</h3>
-          {pagasList.map(renderConta)}
+          {pendentesPagarVisiveis.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma pendente.</p>}
+          {[...pagarAgrupado.grupos.entries()].map(([financiamentoId, views]) => {
+            const ordenado = [...views].sort((a, b) =>
+              (a.conta.dataVencimento ?? a.registroData).localeCompare(b.conta.dataVencimento ?? b.registroData))
+            const proxima = ordenado[0]
+            const nomeContrato = proxima.conta.descricao.replace(/\s*\(\d+\/\d+\)$/, '')
+            const totalGrupo = views.reduce((s, v) => s + v.conta.valor, 0)
+            const aberto = gruposPagarAbertos.has(financiamentoId)
+            return (
+              <div key={financiamentoId} className="conta-grupo-financiamento">
+                <button type="button" className="conta-grupo-header" onClick={() => toggleGrupoPagar(financiamentoId)}>
+                  <span>
+                    {aberto ? '▾' : '▸'} {nomeContrato}: {views.length} parcela{views.length > 1 ? 's' : ''} · próxima{' '}
+                    {fmtDate(proxima.conta.dataVencimento ?? proxima.registroData)} · {fmtBRL(proxima.conta.valor)}
+                  </span>
+                  <strong>{fmtBRL(totalGrupo)}</strong>
+                </button>
+                {aberto && ordenado.map(renderConta)}
+              </div>
+            )
+          })}
+          {pagarAgrupado.semGrupo.map(renderConta)}
+        </div>
+      )}
+
+      {abaAtiva === 'pagas' && (
+        <div className="contas-section">
+          {([['receber', recebidasDoMes, recebidasList], ['pagar', pagasDoMes, pagasList]] as const).map(([t, doMes, todas]) => (
+            <div key={t} className="contas-pagas-bloco">
+              <button type="button" className="contas-pagas-resumo" onClick={() => setPagasAberta(a => a === t ? null : t)}>
+                ✅ {doMes.length} {t === 'receber' ? 'recebida(s)' : 'paga(s)'} em {labelMes(mesSelecionado)} · {fmtBRL(doMes.reduce((s, v) => s + v.conta.valor, 0))} {pagasAberta === t ? '▾' : '▸'}
+              </button>
+              {pagasAberta === t && (
+                <>
+                  {doMes.length === 0 ? (
+                    <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma {t === 'receber' ? 'recebida' : 'paga'} em {labelMes(mesSelecionado)}.</p>
+                  ) : doMes.map(renderConta)}
+                  {todas.length > 0 && (
+                    <button type="button" className="contas-ver-historico"
+                      onClick={() => { setHistoricoAberto(a => a === t ? null : t); setHistoricoBusca(''); setHistoricoPagina(1) }}>
+                      {historicoAberto === t ? 'Fechar histórico completo' : 'Ver histórico completo'}
+                    </button>
+                  )}
+                  {historicoAberto === t && (() => {
+                    const { itens, total, totalPaginas, pagina } = listaHistorico(t)
+                    return (
+                      <div className="contas-historico">
+                        <input
+                          type="text" placeholder="Buscar por descrição..." value={historicoBusca}
+                          onChange={e => { setHistoricoBusca(e.target.value); setHistoricoPagina(1) }}
+                          className="contas-historico-busca"
+                        />
+                        {itens.length === 0 ? (
+                          <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhum resultado.</p>
+                        ) : itens.map(renderConta)}
+                        {totalPaginas > 1 && (
+                          <div className="contas-historico-paginacao">
+                            <button type="button" disabled={pagina <= 1} onClick={() => setHistoricoPagina(pagina - 1)}>‹ Anterior</button>
+                            <span>Página {pagina} de {totalPaginas} ({total} no total)</span>
+                            <button type="button" disabled={pagina >= totalPaginas} onClick={() => setHistoricoPagina(pagina + 1)}>Próxima ›</button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -1219,7 +1321,13 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         )}
       </Modal>
 
-      {recorrentes.length > 0 && (
+      {abaAtiva === 'recorrentes' && recorrentes.length === 0 && (
+        <div className="contas-section">
+          <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma recorrência ativa.</p>
+        </div>
+      )}
+
+      {abaAtiva === 'recorrentes' && recorrentes.length > 0 && (
         <div className="contas-section">
           <h3>🔁 Recorrentes Ativas ({recorrentes.length})</h3>
           {recorrentes.some(r => !r.categoria) && (

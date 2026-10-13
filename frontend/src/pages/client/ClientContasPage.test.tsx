@@ -1,5 +1,5 @@
 // frontend/src/pages/client/ClientContasPage.test.tsx
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import ClientContasPage from './ClientContasPage'
 import * as AuthContextModule from '../../contexts/AuthContext'
 import * as useRegistrosHook from '../../hooks/useRegistros'
@@ -60,17 +60,23 @@ function criarRegistro(overrides: Partial<Registro>): Registro {
   }
 }
 
+function irParaAbaPagar() {
+  fireEvent.click(screen.getByRole('button', { name: /A Pagar/ }))
+}
+
 test('exclui a conta certa quando dois registros compartilham a mesma data sem conta bancária vinculada', async () => {
   // Reproduz o bug relatado: dois RegistroDiario distintos (ids diferentes) na MESMA data, ambos
   // sem contaBancariaId (registros legados) — identificar o registro de origem por (data,
-  // contaBancariaId) é ambíguo aqui; só o id do registro resolve sem ambiguidade.
+  // contaBancariaId) é ambíguo aqui; só o id do registro resolve sem ambiguidade. Vencimento hoje
+  // (não atrasado) pra aparecer na aba "A Receber" sem precisar trocar o modo da lista.
+  const hoje = todayISO()
   const registroA = criarRegistro({
-    id: 'reg-A', data: '2026-09-10', saldoInicio: 100,
-    contasAReceber: [{ descricao: 'Pollye', valor: 600, dataVencimento: '2026-09-10', pago: false }],
+    id: 'reg-A', data: hoje, saldoInicio: 100,
+    contasAReceber: [{ descricao: 'Pollye', valor: 600, dataVencimento: hoje, pago: false }],
   })
   const registroB = criarRegistro({
-    id: 'reg-B', data: '2026-09-10', saldoInicio: 200,
-    contasAReceber: [{ descricao: 'Outro Cliente', valor: 999, dataVencimento: '2026-09-10', pago: false }],
+    id: 'reg-B', data: hoje, saldoInicio: 200,
+    contasAReceber: [{ descricao: 'Outro Cliente', valor: 999, dataVencimento: hoje, pago: false }],
   })
   const salvar = vi.fn().mockResolvedValue({})
   mockHooks([registroA, registroB], { salvar })
@@ -81,8 +87,8 @@ test('exclui a conta certa quando dois registros compartilham a mesma data sem c
   // apenas (data, contaBancariaId) encontraria sempre o PRIMEIRO registro que bate (registroA, via
   // Array.find), já que ambos têm a mesma data e contaBancariaId undefined. Esse é o caso que expõe
   // o bug: a exclusão "funcionava" sem erro, mas mexia no registro errado (A), deixando B intacto.
-  const linhaOutroCliente = screen.getByText('Outro Cliente').closest('.conta-item')!
-  fireEvent.click(linhaOutroCliente.querySelector('.cb-btn-inativar')!)
+  const linhaOutroCliente = await screen.findByText('Outro Cliente')
+  fireEvent.click(linhaOutroCliente.closest('.conta-item')!.querySelector('.cb-btn-inativar')!)
 
   // Confirma no modal — o botão "Excluir" do modal é o último da tela (renderizado por último)
   const botoesExcluir = screen.getAllByRole('button', { name: 'Excluir' })
@@ -117,6 +123,10 @@ test('conta a pagar vencida aparece destacada com "atrasada há X dias"', async 
   mockHooks([registro])
 
   render(<ClientContasPage />)
+  irParaAbaPagar()
+  // Vencida: só aparece no modo "Atrasadas" (o modo "mês" tira as atrasadas pra não duplicar
+  // com o aviso vermelho do topo — Parte 3, item 2).
+  fireEvent.click(screen.getByRole('button', { name: 'Atrasadas' }))
 
   const linha = await screen.findByText('Fornecedor atrasado')
   const item = linha.closest('.conta-item')!
@@ -131,12 +141,13 @@ test('conta pendente com vencimento hoje não é marcada como atrasada', async (
   mockHooks([registro])
 
   render(<ClientContasPage />)
+  irParaAbaPagar()
 
   const linha = await screen.findByText('Vence hoje')
   expect(linha.closest('.conta-item')).not.toHaveClass('vencida')
 })
 
-test('mostra os totais pendentes a receber e a pagar no topo', async () => {
+test('mostra os totais pendentes do mês a receber e a pagar no topo', async () => {
   const registro = criarRegistro({
     contasAReceber: [
       { descricao: 'Cliente A', valor: 500, dataVencimento: todayISO(), pago: false },
@@ -149,10 +160,10 @@ test('mostra os totais pendentes a receber e a pagar no topo', async () => {
   render(<ClientContasPage />)
 
   await screen.findByText('Cliente A')
-  const totalReceber = screen.getByText('A receber').closest('.contas-total-card')!
-  const totalPagar = screen.getByText('A pagar').closest('.contas-total-card')!
-  expect(totalReceber).toHaveTextContent('R$ 750,00') // 500 + 250
-  expect(totalPagar).toHaveTextContent('R$ 300,00')
+  const totalReceber = screen.getByText(/A receber em/).closest('.contas-total-card') as HTMLElement
+  const totalPagar = screen.getByText(/A pagar em/).closest('.contas-total-card') as HTMLElement
+  expect(within(totalReceber).getByText('R$ 750,00')).toBeInTheDocument() // 500 + 250
+  expect(within(totalPagar).getByText('R$ 300,00')).toBeInTheDocument()
 })
 
 test('filtro por conta esconde pendências de outras contas', async () => {
@@ -168,6 +179,7 @@ test('filtro por conta esconde pendências de outras contas', async () => {
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaA, contaB])
 
   render(<ClientContasPage />)
+  irParaAbaPagar()
   await screen.findByText('Da conta A')
   expect(screen.getByText('Da conta B')).toBeInTheDocument()
 
@@ -175,4 +187,70 @@ test('filtro por conta esconde pendências de outras contas', async () => {
 
   expect(screen.getByText('Da conta A')).toBeInTheDocument()
   expect(screen.queryByText('Da conta B')).not.toBeInTheDocument()
+})
+
+// ── Parte 3 (Money Vision): seletor de mês, atrasadas sempre no topo, pagas/recebidas recolhidas ──
+
+test('atrasada some da lista do mês e aparece só no aviso do topo e no modo "Atrasadas"', async () => {
+  const registro = criarRegistro({
+    contasAPagar: [{ descricao: 'Conta velha', valor: 400, dataVencimento: addDays(todayISO(), -10), pago: false }],
+  })
+  mockHooks([registro])
+
+  render(<ClientContasPage />)
+  irParaAbaPagar()
+
+  expect(await screen.findByText(/1 conta\(s\) atrasada\(s\) · R\$ 400,00/)).toBeInTheDocument()
+  expect(screen.getByText('Nenhuma pendente.')).toBeInTheDocument()
+  expect(screen.queryByText('Conta velha')).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Atrasadas' }))
+  expect(await screen.findByText('Conta velha')).toBeInTheDocument()
+})
+
+test('pendente de um mês futuro não aparece no modo "mês atual", mas aparece em "Tudo"', async () => {
+  const dataFutura = addDays(todayISO(), 60) // ~2 meses adiante, não vencida
+  const registro = criarRegistro({
+    contasAPagar: [{ descricao: 'Pagamento futuro distante', valor: 200, dataVencimento: dataFutura, pago: false }],
+  })
+  mockHooks([registro])
+
+  render(<ClientContasPage />)
+  irParaAbaPagar()
+  expect(await screen.findByText('Nenhuma pendente.')).toBeInTheDocument()
+  expect(screen.queryByText('Pagamento futuro distante')).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Tudo' }))
+  expect(await screen.findByText('Pagamento futuro distante')).toBeInTheDocument()
+})
+
+test('aba "Pagas/Recebidas" mostra resumo recolhido por padrão e expande ao clicar', async () => {
+  const registro = criarRegistro({
+    contasAReceber: [{ descricao: 'Recebido este mês', valor: 150, dataVencimento: todayISO(), pago: true, dataBaixa: todayISO() }],
+  })
+  mockHooks([registro])
+
+  render(<ClientContasPage />)
+  fireEvent.click(screen.getByRole('button', { name: /Pagas\/Recebidas/ }))
+
+  expect(await screen.findByText(/1 recebida\(s\) em/)).toBeInTheDocument()
+  expect(screen.queryByText('Recebido este mês')).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByText(/1 recebida\(s\) em/))
+  expect(await screen.findByText('Recebido este mês')).toBeInTheDocument()
+})
+
+test('aba "Recorrentes" mostra as recorrências ativas separadas das pendências avulsas', async () => {
+  mockHooks([criarRegistro({})])
+  vi.mocked(contasRecorrentesApi.listarContasRecorrentes).mockResolvedValue([{
+    id: 'rec-1', clienteId: 'u1', descricao: 'Aluguel', valor: 1000, tipo: 'Pagar',
+    periodicidade: 'Mensal', dataInicio: '2026-01-01', categoria: 'Aluguel', ativo: true,
+    contaBancariaId: 'conta-1', valorVariavel: false, criadoEm: '2026-01-01T00:00:00Z',
+  }])
+
+  render(<ClientContasPage />)
+  expect(screen.queryByText('Aluguel')).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: /Recorrentes/ }))
+  expect(await screen.findByText('Aluguel')).toBeInTheDocument()
 })

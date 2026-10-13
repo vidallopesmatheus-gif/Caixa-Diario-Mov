@@ -26,6 +26,7 @@ import { listarMetas, salvarMeta } from '../../api/metas'
 import { listarCategorias } from '../../api/categorias'
 import { fmtBRL, fmtPct, fmtDate, todayISO, addDays } from '../../utils/format'
 import { limparDescricao } from '../../utils/descricaoExibicao'
+import { mesAtualISO, deslocarMes, labelMes, calcularDiasAtraso, estaNoMes } from '../../utils/contasPagarReceber'
 import Modal from '../../components/shared/Modal'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao, Categorias, CategoriaAdmin } from '../../types'
@@ -61,6 +62,20 @@ export default function ClientContaDetalhePage() {
   const [recebiveis, setRecebiveis] = useState<ContaProvisionada[]>([])
   const [pagamentos, setPagamentos] = useState<ContaProvisionada[]>([])
   const [loadingPendencias, setLoadingPendencias] = useState(true)
+
+  // Item 7 (Parte 3, Money Vision): mesmo padrão de seletor de mês das Abas Recebíveis/Pagamentos
+  // da tela de Contas a pagar/receber — sem vencimento sempre aparece (nenhum mês pra filtrar).
+  const [mesPendenciasSelecionado, setMesPendenciasSelecionado] = useState(mesAtualISO())
+  const [modoPendencias, setModoPendencias] = useState<'mes' | 'atrasadas' | 'tudo'>('mes')
+  function filtrarPendenciasPorModo(lista: ContaProvisionada[]) {
+    const pendenciaVencida = (p: ContaProvisionada) => calcularDiasAtraso(p.dataVencimento, p.pago) > 0
+    if (modoPendencias === 'tudo') return lista.filter(p => !pendenciaVencida(p))
+    if (modoPendencias === 'atrasadas') return lista.filter(pendenciaVencida)
+    return lista.filter(p => !pendenciaVencida(p) && (!p.dataVencimento || estaNoMes(p.dataVencimento, mesPendenciasSelecionado)))
+  }
+  const recebiveisVisiveis = filtrarPendenciasPorModo(recebiveis)
+  const pagamentosVisiveis = filtrarPendenciasPorModo(pagamentos)
+  const atrasadosPendencias = [...recebiveis, ...pagamentos].filter(p => calcularDiasAtraso(p.dataVencimento, p.pago) > 0)
 
   // ── Importação de extrato: escolhe arquivo + intervalo, vê resumo, confirma tudo de uma vez ──
   // (Sem seleção linha a linha — a deduplicação por FITID/heurística roda automaticamente.)
@@ -906,18 +921,22 @@ export default function ClientContaDetalhePage() {
     )
   }
 
-  const renderPendencia = (item: ContaProvisionada, tipo: 'receber' | 'pagar') => (
-    <div key={`${item.descricao}-${item.dataVencimento}-${item.valor}`} className="conta-item">
-      <div className="conta-info">
-        <div className="conta-desc">{item.descricao}</div>
-        <div className="conta-meta">
-          {item.dataVencimento ? `Vence: ${fmtDate(item.dataVencimento)}` : 'Sem vencimento'}
-          {item.categoria ? ` · ${item.categoria}` : ''}
+  const renderPendencia = (item: ContaProvisionada, tipo: 'receber' | 'pagar') => {
+    const diasAtraso = calcularDiasAtraso(item.dataVencimento, item.pago)
+    return (
+      <div key={`${item.descricao}-${item.dataVencimento}-${item.valor}`} className={`conta-item ${diasAtraso > 0 ? 'vencida' : ''}`}>
+        <div className="conta-info">
+          <div className="conta-desc">{item.descricao}</div>
+          <div className="conta-meta">
+            {item.dataVencimento ? `Vence: ${fmtDate(item.dataVencimento)}` : 'Sem vencimento'}
+            {item.categoria ? ` · ${item.categoria}` : ''}
+            {diasAtraso > 0 && <span className="conta-atrasada"> · atrasada há {diasAtraso} dia{diasAtraso > 1 ? 's' : ''}</span>}
+          </div>
         </div>
+        <div className={`conta-valor ${tipo}`}>{fmtBRL(item.valor)}</div>
       </div>
-      <div className={`conta-valor ${tipo}`}>{fmtBRL(item.valor)}</div>
-    </div>
-  )
+    )
+  }
 
   if (loadingConta) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
@@ -1315,16 +1334,39 @@ export default function ClientContaDetalhePage() {
         </>
       )}
 
+      {(aba === 'recebiveis' || aba === 'pagamentos') && !loadingPendencias && (
+        <>
+          {atrasadosPendencias.length > 0 && (
+            <button type="button" className="contas-atrasadas-aviso" onClick={() => setModoPendencias('atrasadas')}>
+              ⚠️ {atrasadosPendencias.length} pendência(s) atrasada(s) · {fmtBRL(atrasadosPendencias.reduce((s, p) => s + p.valor, 0))}
+            </button>
+          )}
+          <div className="contas-mes-seletor">
+            <button type="button" className="contas-mes-seta" onClick={() => { setMesPendenciasSelecionado(m => deslocarMes(m, -1)); setModoPendencias('mes') }}>‹</button>
+            <span className="contas-mes-label">{labelMes(mesPendenciasSelecionado)}</span>
+            <button type="button" className="contas-mes-seta" onClick={() => { setMesPendenciasSelecionado(m => deslocarMes(m, 1)); setModoPendencias('mes') }}>›</button>
+            <div className="contas-mes-atalhos">
+              <button type="button" className={modoPendencias === 'mes' && mesPendenciasSelecionado === mesAtualISO() ? 'ativo' : ''}
+                onClick={() => { setMesPendenciasSelecionado(mesAtualISO()); setModoPendencias('mes') }}>Este mês</button>
+              <button type="button" className={modoPendencias === 'mes' && mesPendenciasSelecionado === deslocarMes(mesAtualISO(), 1) ? 'ativo' : ''}
+                onClick={() => { setMesPendenciasSelecionado(deslocarMes(mesAtualISO(), 1)); setModoPendencias('mes') }}>Próximo mês</button>
+              <button type="button" className={modoPendencias === 'atrasadas' ? 'ativo' : ''} onClick={() => setModoPendencias('atrasadas')}>Atrasadas</button>
+              <button type="button" className={modoPendencias === 'tudo' ? 'ativo' : ''} onClick={() => setModoPendencias('tudo')}>Tudo</button>
+            </div>
+          </div>
+        </>
+      )}
+
       {aba === 'recebiveis' && (
         loadingPendencias ? <p style={{ color: 'var(--tx3)' }}>Carregando...</p> :
-        recebiveis.length === 0 ? <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhum recebível pendente vinculado a esta conta.</p> :
-        <div className="contas-section">{recebiveis.map(r => renderPendencia(r, 'receber'))}</div>
+        recebiveisVisiveis.length === 0 ? <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhum recebível pendente nesse período.</p> :
+        <div className="contas-section">{recebiveisVisiveis.map(r => renderPendencia(r, 'receber'))}</div>
       )}
 
       {aba === 'pagamentos' && (
         loadingPendencias ? <p style={{ color: 'var(--tx3)' }}>Carregando...</p> :
-        pagamentos.length === 0 ? <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhum pagamento pendente vinculado a esta conta.</p> :
-        <div className="contas-section">{pagamentos.map(p => renderPendencia(p, 'pagar'))}</div>
+        pagamentosVisiveis.length === 0 ? <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhum pagamento pendente nesse período.</p> :
+        <div className="contas-section">{pagamentosVisiveis.map(p => renderPendencia(p, 'pagar'))}</div>
       )}
 
       <Modal

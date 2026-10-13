@@ -8,7 +8,8 @@ import * as categoriasApi from '../../api/categorias'
 import * as importacaoApi from '../../api/importacao'
 import * as regrasApi from '../../api/regras'
 import * as transferenciasApi from '../../api/transferencias'
-import type { ContaBancaria, LancamentoExtrato, Categorias } from '../../types'
+import type { ContaBancaria, LancamentoExtrato, Categorias, ContaProvisionada } from '../../types'
+import { addDays, todayISO } from '../../utils/format'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
   const actual = await importOriginal<typeof AuthContextModule>()
@@ -352,4 +353,39 @@ test('"Atualizar saldo" com diferença negativa usa a descrição "Ajuste negati
   await waitFor(() => expect(contasBancariasApi.registrarRendimento).toHaveBeenCalledWith('conta-1', expect.objectContaining({
     valor: expect.closeTo(-46.68, 2), descricao: 'Ajuste negativo (IR/IOF/oscilação)',
   })))
+})
+
+// ── Parte 3 (Money Vision): seletor de mês nas abas Recebíveis/Pagamentos ──────────────────────
+
+function pendencia(overrides: Partial<ContaProvisionada>): ContaProvisionada {
+  return { descricao: 'Pendência', valor: 100, pago: false, ...overrides }
+}
+
+test('pendência atrasada some da aba no modo "mês" e aparece no aviso e no modo "Atrasadas"', async () => {
+  vi.mocked(contasBancariasApi.obterPendenciasConta).mockResolvedValue({
+    recebiveis: [],
+    pagamentos: [pendencia({ descricao: 'Fornecedor atrasado', valor: 500, dataVencimento: addDays(todayISO(), -10) })],
+  })
+  const user = userEvent.setup()
+  renderPagina()
+
+  await user.click(await screen.findByRole('button', { name: /Pagamentos/ }))
+  expect(await screen.findByText(/1 pendência\(s\) atrasada\(s\) · R\$ 500,00/)).toBeInTheDocument()
+  expect(screen.queryByText('Fornecedor atrasado')).not.toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Atrasadas' }))
+  expect(await screen.findByText('Fornecedor atrasado')).toBeInTheDocument()
+  expect(screen.getByText(/atrasada há 10 dias/)).toBeInTheDocument()
+})
+
+test('recebível com vencimento no mês atual aparece na aba Recebíveis sem precisar trocar o modo', async () => {
+  vi.mocked(contasBancariasApi.obterPendenciasConta).mockResolvedValue({
+    recebiveis: [pendencia({ descricao: 'Cliente do mês', valor: 250, dataVencimento: todayISO() })],
+    pagamentos: [],
+  })
+  const user = userEvent.setup()
+  renderPagina()
+
+  await user.click(await screen.findByRole('button', { name: /Recebíveis/ }))
+  expect(await screen.findByText('Cliente do mês')).toBeInTheDocument()
 })
