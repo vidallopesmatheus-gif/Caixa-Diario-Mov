@@ -11,8 +11,9 @@ import ConquistarMetaModal from './dashboard/ConquistarMetaModal'
 import { calcularRitmoMeta } from '../../utils/metaRitmo'
 import { obterSelicAtual } from '../../api/selic'
 import { listarContasBancarias } from '../../api/contasBancarias'
-import { obterDre } from '../../api/metricas'
-import type { Dre } from '../../api/metricas'
+import { obterDre, obterParaOndeFoiMeuDinheiro } from '../../api/metricas'
+import type { Dre, ParaOndeFoiMeuDinheiro } from '../../api/metricas'
+import ParaOndeFoiMeuDinheiroCard from '../../components/shared/ParaOndeFoiMeuDinheiroCard'
 import { obterProjecao } from '../../api/projecao'
 import type { Projecao } from '../../api/projecao'
 import OrcamentoDinamicoCard from './OrcamentoDinamicoCard'
@@ -72,6 +73,13 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   useEffect(() => {
     if (!clienteId) return
     listarContasBancarias(clienteId).then(setContasBancarias).catch(console.error)
+  }, [clienteId])
+
+  // Bloco 5 (Money Vision): card "Para onde foi meu dinheiro" do mês atual, também no Dashboard.
+  const [paraOndeFoi, setParaOndeFoi] = useState<ParaOndeFoiMeuDinheiro | null>(null)
+  useEffect(() => {
+    if (!clienteId) return
+    obterParaOndeFoiMeuDinheiro(clienteId).then(setParaOndeFoi).catch(() => {})
   }, [clienteId])
 
   // registros filtrados por conta quando há filtro ativo
@@ -613,6 +621,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
       {/* Item 1.12: reaproveita o objetivos/objetivosLoading já carregados acima — antes o bloco
           buscava a mesma lista de metas de novo, duplicando a chamada a /api/metas. */}
       {clienteId && <MetasResumoBlock clienteId={clienteId} metas={objetivos} loading={objetivosLoading} />}
+
+      {/* Bloco 5 (Money Vision), item 2: por que o saldo em conta parece baixo mesmo com receita boa. */}
+      {paraOndeFoi && <ParaOndeFoiMeuDinheiroCard dados={paraOndeFoi} />}
 
       {/* ══ Camada 1: status — saldo consolidado + seletor de período/conta ══ */}
       <ResumoStatusBar

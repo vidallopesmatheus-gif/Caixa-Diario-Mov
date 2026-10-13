@@ -237,3 +237,20 @@ export async function obterIndicadores(clienteId: string, mesesEvolucao = 13, me
   )
   return res.dados
 }
+
+/** Money Vision — Bloco 5: card "Para onde foi meu dinheiro" (Banco + Dashboard). */
+export interface ParaOndeFoiMeuDinheiro {
+  entrou: number
+  gastou: number
+  guardou: number
+  ficou: number
+  taxaPoupancaPercentual: number | null
+}
+
+export async function obterParaOndeFoiMeuDinheiro(clienteId: string, mes?: string): Promise<ParaOndeFoiMeuDinheiro> {
+  const params = mes ? `?mes=${mes}` : ''
+  const res = await apiFetch<ApiResponse<ParaOndeFoiMeuDinheiro>>(
+    `/api/metricas/${clienteId}/para-onde-foi-meu-dinheiro${params}`,
+  )
+  return res.dados
+}

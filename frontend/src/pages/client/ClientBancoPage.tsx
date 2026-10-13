@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { listarSugestoesTransferenciaSemPar } from '../../api/transferencias'
+import { obterParaOndeFoiMeuDinheiro } from '../../api/metricas'
+import type { ParaOndeFoiMeuDinheiro } from '../../api/metricas'
+import ParaOndeFoiMeuDinheiroCard from '../../components/shared/ParaOndeFoiMeuDinheiroCard'
 import { fmtBRL } from '../../utils/format'
 import type { ContaBancaria } from '../../types'
 import './ClientContasBancarias.css'
@@ -30,6 +33,7 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [loading, setLoading] = useState(true)
   const [qtdSemPar, setQtdSemPar] = useState(0)
+  const [paraOndeFoi, setParaOndeFoi] = useState<ParaOndeFoiMeuDinheiro | null>(null)
 
   const carregar = useCallback(() => {
     if (!clienteId) return
@@ -46,14 +50,25 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
     if (!clienteId) return
     listarSugestoesTransferenciaSemPar(clienteId).then(s => setQtdSemPar(s.length)).catch(() => {})
   }, [clienteId])
+  // Bloco 5 (Money Vision): card "Para onde foi meu dinheiro" do mês atual.
+  useEffect(() => {
+    if (!clienteId) return
+    obterParaOndeFoiMeuDinheiro(clienteId).then(setParaOndeFoi).catch(() => {})
+  }, [clienteId])
 
   const ativas = contas.filter(c => c.ativa)
   const inativas = contas.filter(c => !c.ativa)
-  // Cartão de crédito é dívida, não dinheiro disponível — não entra no saldo consolidado.
+  // Cartão de crédito é dívida, não dinheiro disponível — não entra em nenhum dos 3 cards abaixo.
   // Ver card "A pagar em cartões" à parte, com a soma dos saldos devedores.
-  const contasDisponiveis = ativas.filter(c => c.tipo !== 'CartaoCredito')
   const cartoes = ativas.filter(c => c.tipo === 'CartaoCredito')
-  const saldoConsolidado = contasDisponiveis.reduce((s, c) => s + c.saldoAtual, 0)
+  // Bloco 5, item 1 (Money Vision): "Disponível" deixou de somar investimento junto com conta
+  // corrente — era exatamente isso que dava a falsa impressão de "sem dinheiro" quando na
+  // verdade o saldo só estava guardado, não gasto. Agora são 3 cards: disponível, investido, patrimônio.
+  const contasDisponiveis = ativas.filter(c => c.tipo === 'ContaCorrente' || c.tipo === 'Caixa')
+  const contasInvestimento = ativas.filter(c => c.tipo === 'Investimento')
+  const saldoDisponivel = contasDisponiveis.reduce((s, c) => s + c.saldoAtual, 0)
+  const saldoInvestido = contasInvestimento.reduce((s, c) => s + c.saldoAtual, 0)
+  const patrimonioTotal = saldoDisponivel + saldoInvestido
   const totalAPagarCartoes = cartoes.reduce((s, c) => s + (c.saldoDevedor ?? 0), 0)
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
@@ -66,8 +81,18 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
           <span className="cb-resumo-val">{ativas.length}</span>
         </div>
         <div className="cb-resumo-item">
-          <span className="cb-resumo-label">Disponível</span>
-          <span className={`cb-resumo-val ${saldoConsolidado < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(saldoConsolidado)}</span>
+          <span className="cb-resumo-label">Disponível para usar</span>
+          <span className={`cb-resumo-val ${saldoDisponivel < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(saldoDisponivel)}</span>
+        </div>
+        {contasInvestimento.length > 0 && (
+          <div className="cb-resumo-item">
+            <span className="cb-resumo-label">Investido / Reserva</span>
+            <span className="cb-resumo-val" style={{ color: 'var(--mv-blue-light)' }}>{fmtBRL(saldoInvestido)}</span>
+          </div>
+        )}
+        <div className="cb-resumo-item">
+          <span className="cb-resumo-label">Patrimônio total</span>
+          <span className="cb-resumo-val">{fmtBRL(patrimonioTotal)}</span>
         </div>
         {cartoes.length > 0 && (
           <div className="cb-resumo-item">
@@ -76,6 +101,8 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
           </div>
         )}
       </div>
+
+      {paraOndeFoi && <ParaOndeFoiMeuDinheiroCard dados={paraOndeFoi} />}
 
       {qtdSemPar > 0 && (
         <div

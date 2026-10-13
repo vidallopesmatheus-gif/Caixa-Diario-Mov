@@ -21,6 +21,19 @@ public class ContaBancariaDto
     public List<MetaVinculadaDto>? MetasVinculadas { get; set; }
     public decimal? ProgressoCombinadoPercentual { get; set; }
 
+    // Money Vision — Bloco 5, item 3 da Parte 3: resumo do MÊS (aportes/resgates/aporte líquido/
+    // rendimento) e rentabilidade mês/ano — diferente de TotalAportado/RendimentoAcumulado acima,
+    // que são desde o início da conta. Também só preenchidos quando Tipo == "Investimento".
+    public decimal? AporteMesAtual { get; set; }
+    public decimal? ResgateMesAtual { get; set; }
+    public decimal? AporteLiquidoMesAtual { get; set; }
+    public decimal? RendimentoMesAtual { get; set; }
+    public decimal? RentabilidadeMesAtualPercentual { get; set; }
+    public decimal? RentabilidadeAnoAtualPercentual { get; set; }
+    // Data do lançamento de Rendimento mais recente — null quando nunca foi atualizado. O front
+    // usa isso pro lembrete "atualize o saldo" quando passar de 30 dias.
+    public DateOnly? UltimaAtualizacaoRendimento { get; set; }
+
     // Só preenchidos quando Tipo == "CartaoCredito". SaldoDevedor é sempre >= 0 (valor absoluto da
     // dívida) mesmo que SaldoAtual seja negativo — mais fácil de exibir direto no card.
     public decimal? Limite { get; set; }
@@ -36,4 +49,7 @@ public class MetaVinculadaDto
     public int Ano { get; set; }
     public string? Sonho { get; set; }
     public decimal ValorSonho { get; set; }
+    // Money Vision — Bloco 5, item 5 da Parte 3: "no seu ritmo de aporte você chega lá em
+    // <mês/ano>" — null quando não há ritmo de aporte positivo pra projetar (parado ou resgatando).
+    public string? PrevisaoAtingimentoMesAno { get; set; }
 }

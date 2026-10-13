@@ -22,4 +22,10 @@ public interface IMetricasService
         decimal saldoDisponivel = 0m, DateOnly? mesReferencia = null);
     PontoEquilibrioDetalhadoDto CalcularPontoEquilibrio(decimal receitaBruta, decimal margemContribuicao, decimal despesasFixasTotal, DateOnly diaReferencia);
     List<ResultadoLiquidoMensalDto> CalcularResultadoLiquidoMensal(List<RegistroDiario> registros, DateOnly ateMesReferencia, IReadOnlyList<Categoria>? categorias, int meses = 6);
+
+    // Money Vision — Bloco 5, item 2 da Parte 3: "Para onde foi meu dinheiro" (Entrou → Gastou →
+    // Guardou → Ficou). `registrosDoMes` já vem filtrado pro mês desejado; `contasInvestimentoIds`
+    // identifica quais linhas de Transferencia contam como "guardado" (aplicação/resgate em
+    // investimento), não qualquer transferência entre contas.
+    ParaOndeFoiMeuDinheiroDto CalcularParaOndeFoiMeuDinheiro(List<RegistroDiario> registrosDoMes, HashSet<Guid> contasInvestimentoIds);
 }

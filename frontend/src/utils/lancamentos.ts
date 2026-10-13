@@ -9,7 +9,7 @@
  * função (Dashboard, Histórico, Admin Overview); e PagamentoFatura nem existia aqui, fazendo
  * fatura de cartão duplicar gastos nos rankings de "Maiores Favorecidos" do DRE.
  */
-const TIPOS_NAO_OPERACIONAIS = new Set(['Transferencia', 'Rendimento', 'Investimento', 'Financiamento', 'PagamentoFatura'])
+const TIPOS_NAO_OPERACIONAIS = new Set(['Transferencia', 'Rendimento', 'Investimento', 'Financiamento', 'PagamentoFatura', 'AjusteSaldo'])
 
 export function ehOperacional(item: { tipoCusto?: string }): boolean {
   return !item.tipoCusto || !TIPOS_NAO_OPERACIONAIS.has(item.tipoCusto)

@@ -104,6 +104,14 @@ public class ContasBancariasController : ControllerBase
         return Ok(new ApiResponse<ContaBancariaDto> { Dados = conta });
     }
 
+    // Money Vision — Bloco 5, item 3: gráfico "saldo mês a mês" da conta de investimento.
+    [HttpGet("{contaId:guid}/historico-saldo-mensal")]
+    public async Task<IActionResult> ObterHistoricoSaldoMensal(Guid contaId, [FromQuery] int meses = 12)
+    {
+        var historico = await _service.ObterHistoricoSaldoMensalAsync(contaId, ObterUsuarioId(), ObterPerfil(), meses);
+        return Ok(new ApiResponse<List<SaldoMensalDto>> { Dados = historico });
+    }
+
     // ── Importação de extrato ──────────────────────────────────────────────────
 
     [HttpPost("{contaId:guid}/preview-extrato")]

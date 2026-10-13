@@ -854,4 +854,31 @@ public class MetricasService : IMetricasService
         return dict;
     }
 
+    public ParaOndeFoiMeuDinheiroDto CalcularParaOndeFoiMeuDinheiro(List<RegistroDiario> registrosDoMes, HashSet<Guid> contasInvestimentoIds)
+    {
+        // Mesmo filtro EhOperacional do resto do DRE — nunca conta transferência, rendimento,
+        // investimento ou pagamento de fatura como "entrou"/"gastou" de verdade.
+        var entrou = registrosDoMes.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);
+        var gastou = registrosDoMes.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
+
+        // "Guardou" é só o movimento de Transferencia que caiu numa conta de Investimento —
+        // aplicação (entrada lá) soma, resgate (saída lá) subtrai. Transferência entre duas contas
+        // "comuns" (ex.: corrente pra corrente) não é "guardar", por isso o filtro por conta.
+        var guardou = registrosDoMes
+            .Where(r => r.ContaBancariaId.HasValue && contasInvestimentoIds.Contains(r.ContaBancariaId.Value))
+            .Sum(r =>
+                r.Entradas.Where(e => e.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(e => e.Valor)
+                - r.Saidas.Where(s => s.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(s => s.Valor));
+
+        var ficou = entrou - gastou - guardou;
+
+        return new ParaOndeFoiMeuDinheiroDto
+        {
+            Entrou = entrou,
+            Gastou = gastou,
+            Guardou = guardou,
+            Ficou = ficou,
+            TaxaPoupancaPercentual = entrou > 0 ? Math.Round(guardou / entrou * 100, 1) : null,
+        };
+    }
 }

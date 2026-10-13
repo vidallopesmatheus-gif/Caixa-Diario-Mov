@@ -31,6 +31,18 @@ const conta: ContaBancaria = {
   ativa: true, dataCriacao: '2026-01-01',
 }
 
+const contaInvestimento: ContaBancaria = {
+  id: 'conta-1', clienteId: 'cliente-1', nome: 'Nubank Investimento', tipo: 'Investimento',
+  saldoInicial: 0, saldoAtual: 4046.68, entradasMes: 0, saidasMes: 0, pendentesCategorizacao: 0,
+  ativa: true, dataCriacao: '2026-01-01',
+  totalAportado: 4000, rendimentoAcumulado: 46.68, rentabilidadePercentual: 1.17,
+  aporteMesAtual: 1300, resgateMesAtual: 0, aporteLiquidoMesAtual: 1300, rendimentoMesAtual: 20,
+  rentabilidadeMesAtualPercentual: 0.5, rentabilidadeAnoAtualPercentual: 1.17,
+  ultimaAtualizacaoRendimento: '2026-10-01',
+  metasVinculadas: [{ id: 'meta-1', ano: 2027, sonho: 'Carro novo', valorSonho: 10000, previsaoAtingimentoMesAno: 'mar/2027' }],
+  progressoCombinadoPercentual: 40.5,
+}
+
 const categorias: Categorias = {
   entradas: [{ nome: 'Vendas', tipoCusto: 'Receita' }],
   saidas: [{ nome: 'Aluguel', tipoCusto: 'CustoFixo' }, { nome: 'Rendimentos', tipoCusto: 'Investimento' }],
@@ -64,6 +76,7 @@ beforeEach(() => {
   vi.mocked(categoriasApi.listarCategorias).mockResolvedValue(categorias)
   vi.mocked(regrasApi.contarCorrespondencias).mockResolvedValue(0)
   vi.mocked(transferenciasApi.listarTransferencias).mockResolvedValue([])
+  vi.mocked(contasBancariasApi.obterHistoricoSaldoMensal).mockResolvedValue([])
 })
 
 test('agrupa lançamentos por dia com entradas, saídas e saldo do dia no cabeçalho', async () => {
@@ -284,4 +297,59 @@ test('chip de transferência mostra "⇄ {outra conta}" em vez do literal "Trans
 
   const chip = await screen.findByRole('button', { name: '⇄ Nubank Investimento' })
   expect(chip.className).toContain('cd-chip-transferencia')
+})
+
+// ── Bloco 5: conta de investimento — resumo do mês, meta com previsão, "Atualizar saldo" ───────
+
+test('conta de investimento mostra o resumo do mês e a previsão de atingimento da meta', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaInvestimento])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+  renderPagina()
+
+  const cardAportes = (await screen.findByText('Aportes')).closest('.cb-resumo-item') as HTMLElement
+  expect(within(cardAportes).getByText('R$ 1.300,00')).toBeInTheDocument()
+  const cardRendimento = screen.getByText('Rendimento do mês').closest('.cb-resumo-item') as HTMLElement
+  expect(within(cardRendimento).getByText('R$ 20,00')).toBeInTheDocument()
+  expect(screen.getByText('Última atualização: 01/10/2026')).toBeInTheDocument()
+  expect(screen.getByText(/No seu ritmo de aporte \(média dos últimos 3 meses\) você chega lá em mar\/2027/)).toBeInTheDocument()
+})
+
+test('"Atualizar saldo" no modo padrão calcula a diferença e lança como rendimento', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaInvestimento])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+  vi.mocked(contasBancariasApi.registrarRendimento).mockResolvedValue(contaInvestimento)
+  const user = userEvent.setup()
+  renderPagina()
+
+  await user.click(await screen.findByRole('button', { name: '📈 Atualizar saldo' }))
+  const grupoSaldo = (await screen.findByText('Saldo atual no app do banco')).closest('.inp-group') as HTMLElement
+  await user.type(within(grupoSaldo).getByPlaceholderText('0,00'), '4100')
+
+  expect(await screen.findByText(/Rendimento de R\$ 53,32 a lançar/)).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+  await waitFor(() => expect(contasBancariasApi.registrarRendimento).toHaveBeenCalledWith('conta-1', expect.objectContaining({
+    valor: expect.closeTo(53.32, 2),
+  })))
+})
+
+test('"Atualizar saldo" com diferença negativa usa a descrição "Ajuste negativo"', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaInvestimento])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+  vi.mocked(contasBancariasApi.registrarRendimento).mockResolvedValue(contaInvestimento)
+  const user = userEvent.setup()
+  renderPagina()
+
+  await user.click(await screen.findByRole('button', { name: '📈 Atualizar saldo' }))
+  const grupoSaldo = (await screen.findByText('Saldo atual no app do banco')).closest('.inp-group') as HTMLElement
+  await user.type(within(grupoSaldo).getByPlaceholderText('0,00'), '4000')
+
+  expect(await screen.findByText(/Ajuste negativo de R\$ 46,68/)).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+  await waitFor(() => expect(contasBancariasApi.registrarRendimento).toHaveBeenCalledWith('conta-1', expect.objectContaining({
+    valor: expect.closeTo(-46.68, 2), descricao: 'Ajuste negativo (IR/IOF/oscilação)',
+  })))
 })

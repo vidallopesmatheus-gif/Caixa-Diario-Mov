@@ -93,6 +93,8 @@ export interface MetaVinculada {
   ano: number
   sonho?: string
   valorSonho: number
+  // Money Vision — Bloco 5: "faltam R$X; no seu ritmo de aporte você chega lá em <mês/ano>".
+  previsaoAtingimentoMesAno?: string | null
 }
 
 export interface ContaBancaria {
@@ -113,6 +115,15 @@ export interface ContaBancaria {
   rentabilidadePercentual?: number | null
   metasVinculadas?: MetaVinculada[]
   progressoCombinadoPercentual?: number | null
+  // Money Vision — Bloco 5: resumo do MÊS (diferente de totalAportado/rendimentoAcumulado acima,
+  // que são desde o início da conta) e rentabilidade mês/ano.
+  aporteMesAtual?: number
+  resgateMesAtual?: number
+  aporteLiquidoMesAtual?: number
+  rendimentoMesAtual?: number
+  rentabilidadeMesAtualPercentual?: number | null
+  rentabilidadeAnoAtualPercentual?: number | null
+  ultimaAtualizacaoRendimento?: string | null
   // Só vêm preenchidos quando tipo === 'CartaoCredito'. saldoDevedor é sempre >= 0 (valor
   // absoluto da dívida), mesmo que saldoAtual seja negativo.
   limite?: number | null

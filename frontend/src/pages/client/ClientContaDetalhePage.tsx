@@ -10,9 +10,11 @@ import {
   desvincularMeta,
   listarDuplicatas,
   manterDuplicata,
+  obterHistoricoSaldoMensal,
 } from '../../api/contasBancarias'
 import { previewExtrato, importarExtrato, categorizarPendentes, excluirLancamento } from '../../api/importacao'
-import type { DuplicataProvavel } from '../../api/contasBancarias'
+import type { DuplicataProvavel, SaldoMensal } from '../../api/contasBancarias'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import type { ResolucaoDuplicata } from '../../api/importacao'
 import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia, listarTransferencias } from '../../api/transferencias'
 import type { Transferencia } from '../../api/transferencias'
@@ -84,12 +86,19 @@ export default function ClientContaDetalhePage() {
 
   // ── Investimento: rendimento e vínculo com meta ──────────────────────────
   const [modalRendimento, setModalRendimento] = useState(false)
+  // Bloco 5 (Money Vision): "Atualizar saldo" — digita o saldo que aparece no banco, o app
+  // calcula a diferença e lança como Rendimento; "modoSaldo=false" preserva o fluxo antigo
+  // (digitar o valor do rendimento direto), pra quem já usava assim.
+  const [modoSaldo, setModoSaldo] = useState(true)
+  const [saldoBancoDisplay, setSaldoBancoDisplay] = useState('')
+  const [saldoBanco, setSaldoBanco] = useState(0)
   const [rendValorDisplay, setRendValorDisplay] = useState('')
   const [rendValor, setRendValor] = useState(0)
   const [rendPositivo, setRendPositivo] = useState(true)
   const [rendData, setRendData] = useState(todayISO())
   const [rendDescricao, setRendDescricao] = useState('')
   const [salvandoRendimento, setSalvandoRendimento] = useState(false)
+  const [historicoSaldo, setHistoricoSaldo] = useState<SaldoMensal[]>([])
 
   // ── Reclassificar lançamento como Transferência (fato permutativo) ──────────
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
@@ -177,6 +186,11 @@ export default function ClientContaDetalhePage() {
 
   useEffect(() => { if (clienteId) listarCategorias(clienteId).then(setCategorias).catch(() => {}) }, [clienteId])
   useEffect(() => { if (clienteId) listarTransferencias(clienteId).then(setTransferencias).catch(() => {}) }, [clienteId])
+  // Bloco 5 (Money Vision): gráfico "saldo mês a mês" só pra conta de investimento.
+  useEffect(() => {
+    if (!contaId || conta?.tipo !== 'Investimento') { setHistoricoSaldo([]); return }
+    obterHistoricoSaldoMensal(contaId, 12).then(setHistoricoSaldo).catch(() => {})
+  }, [contaId, conta?.tipo])
 
   const carregarPendencias = useCallback(() => {
     if (!contaId) return
@@ -538,18 +552,26 @@ export default function ClientContaDetalhePage() {
   }
 
   function abrirModalRendimento() {
+    setModoSaldo(true)
+    setSaldoBancoDisplay(''); setSaldoBanco(0)
     setRendValorDisplay(''); setRendValor(0); setRendPositivo(true); setRendData(todayISO()); setRendDescricao('')
     setModalRendimento(true)
   }
 
+  // Bloco 5 (Money Vision): no modo "saldo", a diferença entre o que o cliente digitou e o saldo
+  // atual É o rendimento (ou perda) — o cliente nunca precisa calcular isso de cabeça.
+  const diferencaSaldo = modoSaldo ? saldoBanco - (conta?.saldoAtual ?? 0) : null
+
   async function handleSalvarRendimento() {
-    if (!contaId || rendValor <= 0) return
+    if (!contaId) return
+    const valorFinal = modoSaldo ? diferencaSaldo! : (rendPositivo ? rendValor : -rendValor)
+    if (!valorFinal) return
     setSalvandoRendimento(true)
     try {
       await registrarRendimento(contaId, {
         data: rendData,
-        valor: rendPositivo ? rendValor : -rendValor,
-        descricao: rendDescricao || undefined,
+        valor: valorFinal,
+        descricao: rendDescricao || (valorFinal < 0 ? 'Ajuste negativo (IR/IOF/oscilação)' : undefined),
       })
       setModalRendimento(false)
       carregarConta()
@@ -611,6 +633,11 @@ export default function ClientContaDetalhePage() {
       setMsg(e instanceof Error ? e.message : 'Erro ao desvincular meta.')
     }
   }
+
+  // Bloco 5 (Money Vision): dias desde a última atualização de saldo — vira aviso quando > 30.
+  const diasDesdeUltimaAtualizacao = conta?.ultimaAtualizacaoRendimento
+    ? Math.floor((new Date(todayISO()).getTime() - new Date(conta.ultimaAtualizacaoRendimento).getTime()) / 86400000)
+    : null
 
   // Tipo de categoria (Receita/CustoFixo/CustoVariavel/.../Investimento) por nome — pra colorir o
   // chip do extrato sem duplicar a classificação que o backend já devolve em `categorias`.
@@ -943,7 +970,7 @@ export default function ClientContaDetalhePage() {
         </button>
         {conta.tipo === 'Investimento' && (
           <button className="cd-btn-importar" onClick={abrirModalRendimento}>
-            📈 Registrar rendimento
+            📈 Atualizar saldo
           </button>
         )}
         {conta.tipo === 'CartaoCredito' && (
@@ -1040,6 +1067,67 @@ export default function ClientContaDetalhePage() {
         </div>
       )}
 
+      {/* Bloco 5 (Money Vision), item 3: resumo do MÊS + "última atualização" + lembrete de 30 dias. */}
+      {conta.tipo === 'Investimento' && (
+        <div className="contas-section">
+          <h3>📅 Este mês</h3>
+          <div className="stats-grid" style={{ marginBottom: 10 }}>
+            <div className="cb-resumo-item">
+              <span className="cb-resumo-label">Aportes</span>
+              <span className="cb-resumo-val val-green">{fmtBRL(conta.aporteMesAtual ?? 0)}</span>
+            </div>
+            <div className="cb-resumo-item">
+              <span className="cb-resumo-label">Resgates</span>
+              <span className="cb-resumo-val val-red">{fmtBRL(conta.resgateMesAtual ?? 0)}</span>
+            </div>
+            <div className="cb-resumo-item">
+              <span className="cb-resumo-label">Aporte líquido</span>
+              <span className={`cb-resumo-val ${(conta.aporteLiquidoMesAtual ?? 0) >= 0 ? 'val-green' : 'val-red'}`}>
+                {fmtBRL(conta.aporteLiquidoMesAtual ?? 0)}
+              </span>
+            </div>
+            <div className="cb-resumo-item">
+              <span className="cb-resumo-label">Rendimento do mês</span>
+              <span className={`cb-resumo-val ${(conta.rendimentoMesAtual ?? 0) >= 0 ? 'val-green' : 'val-red'}`}>
+                {fmtBRL(conta.rendimentoMesAtual ?? 0)}
+              </span>
+            </div>
+            <div className="cb-resumo-item">
+              <span className="cb-resumo-label">Rentabilidade do mês</span>
+              <span className={`cb-resumo-val ${(conta.rentabilidadeMesAtualPercentual ?? 0) >= 0 ? 'val-green' : 'val-red'}`}>
+                {conta.rentabilidadeMesAtualPercentual != null ? fmtPct(conta.rentabilidadeMesAtualPercentual) : '—'}
+              </span>
+            </div>
+            <div className="cb-resumo-item">
+              <span className="cb-resumo-label">Rentabilidade no ano</span>
+              <span className={`cb-resumo-val ${(conta.rentabilidadeAnoAtualPercentual ?? 0) >= 0 ? 'val-green' : 'val-red'}`}>
+                {conta.rentabilidadeAnoAtualPercentual != null ? fmtPct(conta.rentabilidadeAnoAtualPercentual) : '—'}
+              </span>
+            </div>
+          </div>
+          <p style={{ fontSize: 12, color: diasDesdeUltimaAtualizacao != null && diasDesdeUltimaAtualizacao > 30 ? 'var(--warning)' : 'var(--tx3)' }}>
+            {conta.ultimaAtualizacaoRendimento
+              ? `Última atualização: ${fmtDate(conta.ultimaAtualizacaoRendimento)}`
+              : 'Ainda não foi atualizado — clique em "Atualizar saldo" acima.'}
+            {diasDesdeUltimaAtualizacao != null && diasDesdeUltimaAtualizacao > 30 && ' — já passou de 30 dias, vale atualizar.'}
+          </p>
+
+          {historicoSaldo.length > 0 && (
+            <div style={{ height: 180, marginTop: 12 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={historicoSaldo.map(h => ({ mes: h.mes.slice(5) + '/' + h.mes.slice(2, 4), saldo: h.saldo }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
+                  <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="var(--tx3)" tick={{ fontSize: 11 }} tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip formatter={(v) => typeof v === 'number' ? fmtBRL(v) : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
+                  <Line type="monotone" dataKey="saldo" stroke="var(--mv-blue-light)" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )}
+
       {conta.tipo === 'Investimento' && (
         <div className="contas-section">
           <h3>🎯 Meta(s) vinculada(s)</h3>
@@ -1054,7 +1142,12 @@ export default function ClientContaDetalhePage() {
                 <div key={m.id} className="conta-item">
                   <div className="conta-info">
                     <div className="conta-desc">{m.sonho || `Meta ${m.ano}`}</div>
-                    <div className="conta-meta">Ano {m.ano} · Alvo: {fmtBRL(m.valorSonho)}</div>
+                    <div className="conta-meta">
+                      Ano {m.ano} · Alvo: {fmtBRL(m.valorSonho)}
+                      {m.previsaoAtingimentoMesAno && (
+                        <> · Faltam {fmtBRL(Math.max(0, m.valorSonho - conta.saldoAtual))}. No seu ritmo de aporte (média dos últimos 3 meses) você chega lá em {m.previsaoAtingimentoMesAno}.</>
+                      )}
+                    </div>
                   </div>
                   <button className="cb-btn-inativar" onClick={() => handleDesvincular(m.id)}>Desvincular</button>
                 </div>
@@ -1236,56 +1329,95 @@ export default function ClientContaDetalhePage() {
 
       <Modal
         open={modalRendimento}
-        title="📈 Registrar rendimento"
+        title="📈 Atualizar saldo"
         onClose={() => setModalRendimento(false)}
         footer={
           <>
             <button className="btn-cancel" onClick={() => setModalRendimento(false)}>Cancelar</button>
-            <button className="btn-confirm" onClick={handleSalvarRendimento} disabled={rendValor <= 0 || salvandoRendimento}>
-              {salvandoRendimento ? 'Salvando...' : 'Registrar'}
+            <button
+              className="btn-confirm"
+              onClick={handleSalvarRendimento}
+              disabled={salvandoRendimento || (modoSaldo ? !diferencaSaldo : rendValor <= 0)}
+            >
+              {salvandoRendimento ? 'Salvando...' : 'Confirmar'}
             </button>
           </>
         }
       >
-        <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => setRendPositivo(true)}
-            style={{
-              padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
-              border: rendPositivo ? '1px solid var(--accent)' : '1px solid var(--bd)',
-              background: rendPositivo ? 'var(--accent)' : 'var(--bg-card)',
-              color: rendPositivo ? '#fff' : 'var(--tx1)',
-            }}>
-            Ganho
-          </button>
-          <button
-            type="button"
-            onClick={() => setRendPositivo(false)}
-            style={{
-              padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
-              border: !rendPositivo ? '1px solid var(--accent)' : '1px solid var(--bd)',
-              background: !rendPositivo ? 'var(--accent)' : 'var(--bg-card)',
-              color: !rendPositivo ? '#fff' : 'var(--tx1)',
-            }}>
-            Perda
-          </button>
-        </div>
-        <div className="inp-group">
-          <label>Valor</label>
-          <div className="val-input-wrap">
-            <span className="val-prefix">R$</span>
-            <input
-              type="text" inputMode="decimal" placeholder="0,00"
-              value={rendValorDisplay}
-              onChange={e => {
-                const raw = e.target.value.replace(/[^\d,]/g, '')
-                setRendValorDisplay(raw)
-                setRendValor(parseFloat(raw.replace(',', '.')) || 0)
-              }}
-            />
+        <button
+          type="button"
+          onClick={() => setModoSaldo(!modoSaldo)}
+          style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit', textDecoration: 'underline', marginBottom: 12, display: 'block' }}
+        >
+          {modoSaldo ? 'Ou lançar o valor do rendimento direto' : 'Ou digitar o saldo atual no banco'}
+        </button>
+
+        {modoSaldo ? (
+          <div className="inp-group">
+            <label>Saldo atual no app do banco</label>
+            <div className="val-input-wrap">
+              <span className="val-prefix">R$</span>
+              <input
+                type="text" inputMode="decimal" placeholder="0,00"
+                value={saldoBancoDisplay}
+                onChange={e => {
+                  const raw = e.target.value.replace(/[^\d,]/g, '')
+                  setSaldoBancoDisplay(raw)
+                  setSaldoBanco(parseFloat(raw.replace(',', '.')) || 0)
+                }}
+              />
+            </div>
+            {saldoBancoDisplay && diferencaSaldo != null && (
+              <p style={{ fontSize: 12, marginTop: 6, color: diferencaSaldo >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                {diferencaSaldo >= 0
+                  ? `Rendimento de ${fmtBRL(diferencaSaldo)} a lançar.`
+                  : `Ajuste negativo de ${fmtBRL(-diferencaSaldo)} (IR/IOF/oscilação).`}
+              </p>
+            )}
           </div>
-        </div>
+        ) : (
+          <>
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setRendPositivo(true)}
+                style={{
+                  padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+                  border: rendPositivo ? '1px solid var(--accent)' : '1px solid var(--bd)',
+                  background: rendPositivo ? 'var(--accent)' : 'var(--bg-card)',
+                  color: rendPositivo ? '#fff' : 'var(--tx1)',
+                }}>
+                Ganho
+              </button>
+              <button
+                type="button"
+                onClick={() => setRendPositivo(false)}
+                style={{
+                  padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+                  border: !rendPositivo ? '1px solid var(--accent)' : '1px solid var(--bd)',
+                  background: !rendPositivo ? 'var(--accent)' : 'var(--bg-card)',
+                  color: !rendPositivo ? '#fff' : 'var(--tx1)',
+                }}>
+                Perda
+              </button>
+            </div>
+            <div className="inp-group">
+              <label>Valor</label>
+              <div className="val-input-wrap">
+                <span className="val-prefix">R$</span>
+                <input
+                  type="text" inputMode="decimal" placeholder="0,00"
+                  value={rendValorDisplay}
+                  onChange={e => {
+                    const raw = e.target.value.replace(/[^\d,]/g, '')
+                    setRendValorDisplay(raw)
+                    setRendValor(parseFloat(raw.replace(',', '.')) || 0)
+                  }}
+                />
+              </div>
+            </div>
+          </>
+        )}
         <div className="inp-group">
           <label>Data</label>
           <input type="date" value={rendData} max={todayISO()} onChange={e => setRendData(e.target.value)} />

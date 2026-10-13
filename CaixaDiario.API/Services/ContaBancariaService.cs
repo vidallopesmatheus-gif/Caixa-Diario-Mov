@@ -349,6 +349,34 @@ public class ContaBancariaService : IContaBancariaService
         return MapToDto(conta, registros, metasAtualizadas);
     }
 
+    public async Task<List<SaldoMensalDto>> ObterHistoricoSaldoMensalAsync(Guid contaId, Guid usuarioLogadoId, string perfil, int meses = 12)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+
+        var registros = (await _registroRepo.ListarPorContaAsync(contaId))
+            .Where(r => !r.Excluido)
+            .OrderBy(r => r.Data)
+            .ToList();
+
+        var hoje = DataLocalHelper.Hoje();
+        var inicioMesAtual = new DateOnly(hoje.Year, hoje.Month, 1);
+        var resultado = new List<SaldoMensalDto>();
+
+        for (var i = meses - 1; i >= 0; i--)
+        {
+            var mesRef = inicioMesAtual.AddMonths(-i);
+            // Saldo de "fim do mês" = SaldoFinal do último registro até (e incluindo) o último dia
+            // do mês — não precisa existir lançamento NESSE mês específico, só o mais recente até ali.
+            var fimDoMes = mesRef.AddMonths(1).AddDays(-1);
+            var saldo = registros.Where(r => r.Data <= fimDoMes).Select(r => r.SaldoFinal).DefaultIfEmpty(conta.SaldoInicial).Last();
+            resultado.Add(new SaldoMensalDto { Mes = $"{mesRef.Year:D4}-{mesRef.Month:D2}", Saldo = saldo });
+        }
+
+        return resultado;
+    }
+
     private static ContaProvisionadaDto MapProvisionadaToDto(ContaProvisionada c) => new()
     {
         Descricao = c.Descricao,
@@ -373,6 +401,21 @@ public class ContaBancariaService : IContaBancariaService
             .Where(r => r.ContaBancariaId == conta.Id && !r.Excluido)
             .OrderByDescending(r => r.Data)
             .FirstOrDefault()?.SaldoFinal ?? conta.SaldoInicial;
+
+    private static readonly string[] MesesAbreviados =
+        { "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez" };
+
+    // Money Vision — Bloco 5, item 5: null quando a meta já foi atingida (nada a prever) OU quando
+    // o ritmo de aporte dos últimos 3 meses não é positivo (parado ou resgatando — projetar um
+    // "nunca" ou uma data no passado só confundiria, melhor não mostrar nada).
+    private static string? CalcularPrevisaoAtingimento(decimal valorSonho, decimal saldoAtualConta, decimal mediaAporteMensal, DateOnly inicioMesAtual)
+    {
+        var faltam = valorSonho - saldoAtualConta;
+        if (faltam <= 0 || mediaAporteMensal <= 0) return null;
+        var mesesNecessarios = (int)Math.Ceiling(faltam / mediaAporteMensal);
+        var dataAlvo = inicioMesAtual.AddMonths(mesesNecessarios);
+        return $"{MesesAbreviados[dataAlvo.Month - 1]}/{dataAlvo.Year}";
+    }
 
     private static ContaBancariaDto MapToDto(ContaBancaria c, IEnumerable<RegistroDiario> registros, IEnumerable<MetaAnual> metasDoCliente)
     {
@@ -421,9 +464,57 @@ public class ContaBancariaService : IContaBancariaService
                 ? Math.Round(dto.RendimentoAcumulado.Value / dto.TotalAportado.Value * 100, 2)
                 : null;
 
+            // ── Bloco 5, item 3 (Money Vision): resumo do MÊS e rentabilidade mês/ano — diferente
+            // do acumulado desde o início acima. ──
+            var regsDoMesAtual = regsOrdenados.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month).ToList();
+            var aporteMes = regsDoMesAtual.SelectMany(r => r.Entradas).Where(e => e.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(e => e.Valor);
+            var resgateMes = regsDoMesAtual.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(s => s.Valor);
+            dto.AporteMesAtual = aporteMes;
+            dto.ResgateMesAtual = resgateMes;
+            dto.AporteLiquidoMesAtual = aporteMes - resgateMes;
+
+            var rendimentoInMes = regsDoMesAtual.SelectMany(r => r.Entradas).Where(e => e.TipoCusto == LancamentoFiltro.TipoRendimento).Sum(e => e.Valor);
+            var rendimentoOutMes = regsDoMesAtual.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == LancamentoFiltro.TipoRendimento).Sum(s => s.Valor);
+            dto.RendimentoMesAtual = rendimentoInMes - rendimentoOutMes;
+
+            var inicioMesAtual = new DateOnly(hoje.Year, hoje.Month, 1);
+            var saldoInicioMes = regsOrdenados.Where(r => r.Data < inicioMesAtual).OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? c.SaldoInicial;
+            dto.RentabilidadeMesAtualPercentual = saldoInicioMes > 0 ? Math.Round(dto.RendimentoMesAtual.Value / saldoInicioMes * 100, 2) : null;
+
+            var inicioAnoAtual = new DateOnly(hoje.Year, 1, 1);
+            var saldoInicioAno = regsOrdenados.Where(r => r.Data < inicioAnoAtual).OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? c.SaldoInicial;
+            var rendimentoAnoAtual = regsOrdenados.Where(r => r.Data.Year == hoje.Year)
+                .Sum(r => r.Entradas.Where(e => e.TipoCusto == LancamentoFiltro.TipoRendimento).Sum(e => e.Valor)
+                    - r.Saidas.Where(s => s.TipoCusto == LancamentoFiltro.TipoRendimento).Sum(s => s.Valor));
+            dto.RentabilidadeAnoAtualPercentual = saldoInicioAno > 0 ? Math.Round(rendimentoAnoAtual / saldoInicioAno * 100, 2) : null;
+
+            var datasComRendimento = regsOrdenados
+                .Where(r => r.Entradas.Any(e => e.TipoCusto == LancamentoFiltro.TipoRendimento) || r.Saidas.Any(s => s.TipoCusto == LancamentoFiltro.TipoRendimento))
+                .Select(r => r.Data)
+                .ToList();
+            dto.UltimaAtualizacaoRendimento = datasComRendimento.Count > 0 ? datasComRendimento.Max() : null;
+
+            // ── Bloco 5, item 5: "no seu ritmo de aporte você chega lá em <mês/ano>" — ritmo é a
+            // média do aporte líquido (aportes - resgates) dos 3 meses anteriores ao atual
+            // (meses completos, não o mês em andamento, que ainda não terminou). ──
+            var mediaAporte3Meses = Enumerable.Range(1, 3)
+                .Select(i => inicioMesAtual.AddMonths(-i))
+                .Select(mesRef =>
+                {
+                    var regsDoMesRef = regsOrdenados.Where(r => r.Data.Year == mesRef.Year && r.Data.Month == mesRef.Month);
+                    var inRef = regsDoMesRef.SelectMany(r => r.Entradas).Where(e => e.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(e => e.Valor);
+                    var outRef = regsDoMesRef.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(s => s.Valor);
+                    return inRef - outRef;
+                })
+                .Average();
+
             var metasVinculadas = metasDoCliente.Where(m => m.ContaInvestimentoId == c.Id).ToList();
             dto.MetasVinculadas = metasVinculadas
-                .Select(m => new MetaVinculadaDto { Id = m.Id, Ano = m.Ano, Sonho = m.Sonho, ValorSonho = m.ValorSonho })
+                .Select(m => new MetaVinculadaDto
+                {
+                    Id = m.Id, Ano = m.Ano, Sonho = m.Sonho, ValorSonho = m.ValorSonho,
+                    PrevisaoAtingimentoMesAno = CalcularPrevisaoAtingimento(m.ValorSonho, saldoAtual, mediaAporte3Meses, inicioMesAtual),
+                })
                 .ToList();
 
             var somaMetas = metasVinculadas.Sum(m => m.ValorSonho);
