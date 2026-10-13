@@ -1,0 +1,54 @@
+.pofmd-card {
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.pofmd-titulo {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tx1);
+  margin-bottom: 12px;
+}
+
+.pofmd-fluxo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pofmd-passo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pofmd-rotulo {
+  font-size: 11px;
+  color: var(--tx3);
+}
+
+.pofmd-seta {
+  color: var(--tx3);
+  font-size: 16px;
+}
+
+.pofmd-frase {
+  font-size: 13px;
+  color: var(--tx2);
+  margin: 0 0 8px;
+}
+
+.pofmd-taxa {
+  font-size: 12px;
+  color: var(--tx3);
+}
+
+@media (max-width: 480px) {
+  .pofmd-fluxo { flex-direction: column; align-items: flex-start; }
+  .pofmd-seta { transform: rotate(90deg); margin-left: 4px; }
+}

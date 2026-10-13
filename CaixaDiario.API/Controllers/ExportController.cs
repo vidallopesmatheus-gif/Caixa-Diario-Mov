@@ -298,26 +298,45 @@ public class ExportController : ControllerBase
                 {
                     col.Spacing(12);
 
+                    // Item 6 (Parte 1, Money Vision): o PDF usa o mesmo layout de colunas da tela —
+                    // mês atual, mês anterior e variação lado a lado em CADA linha (bloco e grupo),
+                    // em vez de uma tabela separada só com Receita Bruta/Resultado Líquido.
+                    var anteriorPorBlocoGrupo = dreAnterior.Blocos.ToDictionary(
+                        b => b.Bloco, b => b.Grupos.ToDictionary(g => g.Nome, g => g.Total));
+
+                    decimal? VariacaoPct(decimal atual, decimal anterior) =>
+                        anterior != 0 ? Math.Round((atual - anterior) / Math.Abs(anterior) * 100, 1) : null;
+
                     col.Item().Text("Demonstrativo por bloco").Bold().FontSize(11).FontColor(MvNavy);
                     col.Item().Table(table =>
                     {
-                        table.ColumnsDefinition(c => { c.RelativeColumn(3); c.RelativeColumn(); c.RelativeColumn(); });
+                        table.ColumnsDefinition(c => { c.RelativeColumn(3); c.RelativeColumn(); c.RelativeColumn(); c.RelativeColumn(); c.RelativeColumn(); });
                         table.Header(h =>
                         {
-                            h.Cell().Text("Bloco").Bold();
-                            h.Cell().AlignRight().Text("Total").Bold();
+                            h.Cell().Text("Bloco / Grupo").Bold();
+                            h.Cell().AlignRight().Text(nomeMes).Bold();
                             h.Cell().AlignRight().Text("%").Bold();
+                            h.Cell().AlignRight().Text(refAnterior.ToString("MMM/yyyy", new System.Globalization.CultureInfo("pt-BR"))).Bold();
+                            h.Cell().AlignRight().Text("Var.").Bold();
                         });
                         foreach (var bloco in dre.Blocos)
                         {
+                            var totalAnteriorBloco = anteriorPorBlocoGrupo.TryGetValue(bloco.Bloco, out var gruposAnt) ? gruposAnt.Values.Sum() : 0m;
+                            var varBloco = VariacaoPct(bloco.Total, totalAnteriorBloco);
                             table.Cell().Text(BlocoLabel.GetValueOrDefault(bloco.Bloco, bloco.Bloco));
                             table.Cell().AlignRight().Text($"R$ {bloco.Total:N2}");
                             table.Cell().AlignRight().Text(bloco.Percentual.HasValue ? $"{bloco.Percentual:N1}%" : "—");
+                            table.Cell().AlignRight().Text($"R$ {totalAnteriorBloco:N2}");
+                            table.Cell().AlignRight().Text(varBloco.HasValue ? $"{varBloco:N1}%" : "—");
                             foreach (var grupo in bloco.Grupos)
                             {
+                                var totalAnteriorGrupo = gruposAnt != null && gruposAnt.TryGetValue(grupo.Nome, out var ta) ? ta : 0m;
+                                var varGrupo = VariacaoPct(grupo.Total, totalAnteriorGrupo);
                                 table.Cell().PaddingLeft(10).Text(grupo.Nome).FontColor(Colors.Grey.Darken1).FontSize(8);
                                 table.Cell().AlignRight().Text($"R$ {grupo.Total:N2}").FontColor(Colors.Grey.Darken1).FontSize(8);
                                 table.Cell().AlignRight().Text(grupo.Percentual.HasValue ? $"{grupo.Percentual:N1}%" : "—").FontColor(Colors.Grey.Darken1).FontSize(8);
+                                table.Cell().AlignRight().Text($"R$ {totalAnteriorGrupo:N2}").FontColor(Colors.Grey.Darken1).FontSize(8);
+                                table.Cell().AlignRight().Text(varGrupo.HasValue ? $"{varGrupo:N1}%" : "—").FontColor(Colors.Grey.Darken1).FontSize(8);
                             }
                         }
                     });
@@ -341,27 +360,8 @@ public class ExportController : ControllerBase
                         Linha("Margem líquida", dre.ResultadoLiquidoPercentual.HasValue ? $"{dre.ResultadoLiquidoPercentual:N1}%" : "—");
                         Linha("Despesas fixas (% da receita)", dre.DespesasFixas.Percentual.HasValue ? $"{dre.DespesasFixas.Percentual:N1}%" : "—");
                         Linha("Ponto de equilíbrio (mensal)", pontoEquilibrio.Disponivel && pontoEquilibrio.ValorMensal.HasValue ? $"R$ {pontoEquilibrio.ValorMensal:N2}" : "Não disponível");
-                    });
-
-                    col.Item().Text($"Comparação com {refAnterior:MMMM/yyyy}").Bold().FontSize(11).FontColor(MvNavy);
-                    col.Item().Table(table =>
-                    {
-                        table.ColumnsDefinition(c => { c.RelativeColumn(2); c.RelativeColumn(); c.RelativeColumn(); c.RelativeColumn(); });
-                        table.Header(h =>
-                        {
-                            h.Cell().Text("");
-                            h.Cell().AlignRight().Text(nomeMes).Bold();
-                            h.Cell().AlignRight().Text(refAnterior.ToString("MMMM/yyyy", new System.Globalization.CultureInfo("pt-BR"))).Bold();
-                            h.Cell().AlignRight().Text("Var.").Bold();
-                        });
-                        table.Cell().Text("Receita Bruta");
-                        table.Cell().AlignRight().Text($"R$ {dre.ReceitaBruta:N2}");
-                        table.Cell().AlignRight().Text($"R$ {dreAnterior.ReceitaBruta:N2}");
-                        table.Cell().AlignRight().Text(variacaoReceita.HasValue ? $"{variacaoReceita:N1}%" : "—");
-                        table.Cell().Text("Resultado Líquido");
-                        table.Cell().AlignRight().Text($"R$ {dre.ResultadoLiquido:N2}");
-                        table.Cell().AlignRight().Text($"R$ {dreAnterior.ResultadoLiquido:N2}");
-                        table.Cell().AlignRight().Text(variacaoResultado.HasValue ? $"{variacaoResultado:N1}%" : "—");
+                        Linha("Receita Bruta vs. mês anterior", variacaoReceita.HasValue ? $"{variacaoReceita:N1}%" : "—");
+                        Linha("Resultado Líquido vs. mês anterior", variacaoResultado.HasValue ? $"{variacaoResultado:N1}%" : "—");
                     });
 
                     col.Item().Text("💳 Dívidas").Bold().FontSize(11).FontColor(MvNavy);

@@ -7,10 +7,11 @@ public class MetricasServiceTests
 {
     private readonly MetricasService _sut = new();
 
-    private static RegistroDiario CriarRegistro(DateOnly data, List<ItemFinanceiro> entradas, List<ItemFinanceiro> saidas, decimal saldoFinal = 0) =>
+    private static RegistroDiario CriarRegistro(
+        DateOnly data, List<ItemFinanceiro> entradas, List<ItemFinanceiro> saidas, decimal saldoFinal = 0, Guid? contaBancariaId = null) =>
         new()
         {
-            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Data = data, Entradas = entradas,
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Data = data, Entradas = entradas, ContaBancariaId = contaBancariaId,
             Saidas = saidas.Select(s => new ItemFinanceiroSaida { Descricao = s.Descricao, Valor = s.Valor, Categoria = s.Categoria ?? "", TipoCusto = s.TipoCusto }).ToList(),
             SaldoFinal = saldoFinal
         };
@@ -322,6 +323,25 @@ public class MetricasServiceTests
         Assert.Equal("Aluguel", categoria.Nome);
         Assert.Equal(200m, categoria.Total);
         Assert.Equal(20.0m, categoria.PercentualReceita);
+    }
+
+    [Fact]
+    public void CalcularIndicadores_CategoriaCartaoDeCredito_NaoEntraNoRanking()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var reg = CriarRegistro(hoje,
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Pagamento de fatura", 2000m, "Cartão de crédito", "CustoVariavel"),
+                Item("Aluguel", 200m, "Aluguel", "CustoFixo"),
+            });
+
+        var resultado = _sut.CalcularIndicadores(new() { reg });
+
+        Assert.DoesNotContain(resultado.RankingCategorias, c => c.Nome == "Cartão de crédito");
+        var categoria = Assert.Single(resultado.RankingCategorias);
+        Assert.Equal("Aluguel", categoria.Nome);
     }
 
     [Fact]
@@ -1416,5 +1436,59 @@ public class MetricasServiceTests
         var resultado = _sut.CalcularResultadoLiquidoMensal(new(), new DateOnly(2026, 8, 31), null);
 
         Assert.All(resultado, m => Assert.False(m.TemDados));
+    }
+
+    // ── Bloco 5 (Money Vision): "Para onde foi meu dinheiro" ───────────────────────────────────
+
+    [Fact]
+    public void CalcularParaOndeFoiMeuDinheiro_SeparaEntrouGastouGuardouEFicou()
+    {
+        var contaCorrenteId = Guid.NewGuid();
+        var contaInvestimentoId = Guid.NewGuid();
+
+        var regCorrente = CriarRegistro(new DateOnly(2026, 10, 5),
+            new() { Item("Venda", 10000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Aluguel", 2000m, "Aluguel", "CustoFixo"),
+                Item("Aplicação RDB", 1300m, "Transferência", "Transferencia"), // sai da corrente pro investimento
+            },
+            contaBancariaId: contaCorrenteId);
+
+        var regInvestimento = CriarRegistro(new DateOnly(2026, 10, 5),
+            new() { Item("Aplicação RDB", 1300m, "Transferência", "Transferencia") }, // entra no investimento
+            new(),
+            contaBancariaId: contaInvestimentoId);
+
+        var resultado = _sut.CalcularParaOndeFoiMeuDinheiro(
+            new() { regCorrente, regInvestimento }, new HashSet<Guid> { contaInvestimentoId });
+
+        Assert.Equal(10000m, resultado.Entrou); // transferência nunca conta como "entrou"
+        Assert.Equal(2000m, resultado.Gastou); // idem "gastou"
+        Assert.Equal(1300m, resultado.Guardou); // só a perna que caiu na conta de investimento
+        Assert.Equal(6700m, resultado.Ficou); // 10000 - 2000 - 1300
+        Assert.Equal(13.0m, resultado.TaxaPoupancaPercentual); // 1300 / 10000
+    }
+
+    [Fact]
+    public void CalcularParaOndeFoiMeuDinheiro_ResgateReduzOGuardado()
+    {
+        var contaInvestimentoId = Guid.NewGuid();
+        var reg = CriarRegistro(new DateOnly(2026, 10, 5),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new() { Item("Resgate", 300m, "Transferência", "Transferencia") },
+            contaBancariaId: contaInvestimentoId);
+
+        var resultado = _sut.CalcularParaOndeFoiMeuDinheiro(new() { reg }, new HashSet<Guid> { contaInvestimentoId });
+
+        Assert.Equal(-300m, resultado.Guardou); // resgate é "guardado" negativo
+    }
+
+    [Fact]
+    public void CalcularParaOndeFoiMeuDinheiro_SemReceita_TaxaDePoupancaFicaNull()
+    {
+        var resultado = _sut.CalcularParaOndeFoiMeuDinheiro(new(), new HashSet<Guid>());
+
+        Assert.Null(resultado.TaxaPoupancaPercentual);
     }
 }

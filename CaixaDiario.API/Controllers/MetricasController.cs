@@ -123,4 +123,27 @@ public class MetricasController : ControllerBase
         var resultado = _metricasService.CalcularIndicadores(registros, mesesEvolucao, categorias, saldoConsolidado, mesRef);
         return Ok(new ApiResponse<IndicadoresDecisaoDto> { Dados = resultado });
     }
+
+    // Money Vision — Bloco 5, item 2 da Parte 3: card "Para onde foi meu dinheiro" (Banco + Dashboard).
+    [HttpGet("{clienteId:guid}/para-onde-foi-meu-dinheiro")]
+    public async Task<IActionResult> ObterParaOndeFoiMeuDinheiro(Guid clienteId, [FromQuery] string? mes = null)
+    {
+        VerificarAcesso(clienteId);
+        var hoje = DataLocalHelper.Hoje();
+        var mesRef = hoje;
+        if (!string.IsNullOrWhiteSpace(mes))
+        {
+            var partes = mes.Split('-');
+            if (partes.Length == 2 && int.TryParse(partes[0], out var ano) && int.TryParse(partes[1], out var mesNum))
+                mesRef = new DateOnly(ano, mesNum, 1);
+        }
+
+        var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
+        var registrosDoMes = todos.Where(r => !r.Excluido && r.Data.Year == mesRef.Year && r.Data.Month == mesRef.Month).ToList();
+        var contasInvestimentoIds = (await _contaBancariaRepo.ListarPorClienteAsync(clienteId))
+            .Where(c => c.Tipo == "Investimento").Select(c => c.Id).ToHashSet();
+
+        var resultado = _metricasService.CalcularParaOndeFoiMeuDinheiro(registrosDoMes, contasInvestimentoIds);
+        return Ok(new ApiResponse<ParaOndeFoiMeuDinheiroDto> { Dados = resultado });
+    }
 }

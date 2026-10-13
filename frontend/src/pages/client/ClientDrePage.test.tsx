@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import ClientDrePage from './ClientDrePage'
 import * as AuthContextModule from '../../contexts/AuthContext'
 import * as metricasApi from '../../api/metricas'
 import * as contasBancariasApi from '../../api/contasBancarias'
 import * as useRegistrosModule from '../../hooks/useRegistros'
-import type { Dre } from '../../api/metricas'
+import type { Dre, DreBloco } from '../../api/metricas'
 import type { Registro } from '../../types'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
@@ -55,6 +56,10 @@ function mockDre(receitaBruta: number): Dre {
     pontoEquilibrio: null,
     evolucaoResultadoLiquido: null,
   }
+}
+
+function mockDreComBloco(receitaBruta: number, bloco: DreBloco): Dre {
+  return { ...mockDre(receitaBruta), blocos: [bloco] }
 }
 
 function registro(data: string): Registro {
@@ -111,4 +116,51 @@ test('mes atual com lançamento: permanece no mes atual', async () => {
     expect(screen.getByText(new RegExp(`${anoAtual}`))).toBeInTheDocument()
   })
   expect(vi.mocked(metricasApi.obterDre)).toHaveBeenCalledWith('u1', hojeIso, expect.stringContaining(`${anoAtual}-${String(mesAtual).padStart(2, '0')}`), undefined)
+})
+
+// ── Parte 1 (Money Vision): "Comparar períodos" como tabela única ──────────────────────────────
+
+test('Comparar períodos: grupo e categoria aparecem UMA vez, com um valor por período na mesma linha', async () => {
+  mockHooks([registro('2026-10-01')])
+  const blocoSet: DreBloco = {
+    bloco: 'DESPESAS OPERACIONAIS', total: -1000, percentual: -10,
+    grupos: [{ nome: 'Aluguel e Ocupação', total: -1000, percentual: -10, categorias: [{ nome: 'Aluguel', total: -1000, percentual: -10 }] }],
+  }
+  const blocoOut: DreBloco = {
+    bloco: 'DESPESAS OPERACIONAIS', total: -1200, percentual: -12,
+    grupos: [{ nome: 'Aluguel e Ocupação', total: -1200, percentual: -12, categorias: [{ nome: 'Aluguel', total: -1200, percentual: -12 }] }],
+  }
+  vi.mocked(metricasApi.obterDre).mockImplementation(async (_clienteId, de) =>
+    mockDreComBloco(10000, de.startsWith('2026-09') ? blocoSet : blocoOut),
+  )
+
+  const user = userEvent.setup()
+  render(<ClientDrePage />)
+
+  await user.click(await screen.findByLabelText('Comparar períodos'))
+  await user.selectOptions(screen.getByDisplayValue('Últimos 3'), 'Últimos 2')
+
+  await user.click(await screen.findByText(/DESPESAS OPERACIONAIS/))
+  const linhaGrupo = (await screen.findByText('Aluguel e Ocupação')).closest('.dre-tabela-linha') as HTMLElement
+  expect(screen.getAllByText('Aluguel e Ocupação')).toHaveLength(1)
+
+  await user.click(within(linhaGrupo).getByText('Aluguel e Ocupação'))
+  const linhasCategoria = screen.getAllByText('Aluguel')
+  expect(linhasCategoria).toHaveLength(1)
+  const linhaCategoria = linhasCategoria[0].closest('.dre-tabela-linha') as HTMLElement
+
+  // Os dois períodos (Set e Out) aparecem como células NA MESMA linha — não empilhados.
+  expect(within(linhaCategoria).getByText('-R$ 1.000,00')).toBeInTheDocument()
+  expect(within(linhaCategoria).getByText('-R$ 1.200,00')).toBeInTheDocument()
+})
+
+test('Comparar períodos: mostra colunas de Variação e Média', async () => {
+  mockHooks([registro('2026-10-01')])
+  const user = userEvent.setup()
+  render(<ClientDrePage />)
+
+  await user.click(await screen.findByLabelText('Comparar períodos'))
+
+  expect(await screen.findByText('Variação')).toBeInTheDocument()
+  expect(screen.getByText('Média')).toBeInTheDocument()
 })

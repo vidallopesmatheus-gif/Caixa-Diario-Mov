@@ -21,8 +21,16 @@ function mapConta(raw: any): ContaBancaria {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     metasVinculadas: raw.metasVinculadas?.map((m: any) => ({
       id: m.id, ano: m.ano, sonho: m.sonho ?? undefined, valorSonho: m.valorSonho ?? 0,
+      previsaoAtingimentoMesAno: m.previsaoAtingimentoMesAno ?? undefined,
     })),
     progressoCombinadoPercentual: raw.progressoCombinadoPercentual ?? undefined,
+    aporteMesAtual: raw.aporteMesAtual ?? undefined,
+    resgateMesAtual: raw.resgateMesAtual ?? undefined,
+    aporteLiquidoMesAtual: raw.aporteLiquidoMesAtual ?? undefined,
+    rendimentoMesAtual: raw.rendimentoMesAtual ?? undefined,
+    rentabilidadeMesAtualPercentual: raw.rentabilidadeMesAtualPercentual ?? undefined,
+    rentabilidadeAnoAtualPercentual: raw.rentabilidadeAnoAtualPercentual ?? undefined,
+    ultimaAtualizacaoRendimento: raw.ultimaAtualizacaoRendimento ?? undefined,
     limite: raw.limite ?? undefined,
     diaFechamento: raw.diaFechamento ?? undefined,
     diaVencimento: raw.diaVencimento ?? undefined,
@@ -194,4 +202,16 @@ export const desvincularMeta = async (contaId: string, metaId: string): Promise<
     method: 'POST',
   })
   return mapConta(res.dados)
+}
+
+/** Money Vision — Bloco 5: gráfico "saldo mês a mês" da conta de investimento. */
+export interface SaldoMensal {
+  mes: string // "yyyy-MM"
+  saldo: number
+}
+
+export const obterHistoricoSaldoMensal = async (contaId: string, meses = 12): Promise<SaldoMensal[]> => {
+  const res = await apiFetch<ApiResponse<unknown[]>>(`/api/contas-bancarias/${contaId}/historico-saldo-mensal?meses=${meses}`)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (res.dados ?? []).map((raw: any) => ({ mes: raw.mes, saldo: raw.saldo ?? 0 }))
 }

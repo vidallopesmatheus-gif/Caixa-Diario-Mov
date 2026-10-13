@@ -1,0 +1,60 @@
+import { render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import ClientBancoPage from './ClientBancoPage'
+import * as AuthContextModule from '../../contexts/AuthContext'
+import * as contasBancariasApi from '../../api/contasBancarias'
+import * as transferenciasApi from '../../api/transferencias'
+import * as metricasApi from '../../api/metricas'
+import type { ContaBancaria } from '../../types'
+
+vi.mock('../../contexts/AuthContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof AuthContextModule>()
+  return { ...actual, useAuth: vi.fn() }
+})
+vi.mock('../../api/contasBancarias')
+vi.mock('../../api/transferencias')
+vi.mock('../../api/metricas')
+
+const mockUser = { usuarioId: 'cliente-1', nomeUsuario: 'cli1', perfil: 'cliente' as const, nomeCompleto: 'C', nomeEstabelecimento: '', token: 'tok' }
+
+function conta(overrides: Partial<ContaBancaria>): ContaBancaria {
+  return {
+    id: 'c1', clienteId: 'cliente-1', nome: 'Conta', tipo: 'ContaCorrente',
+    saldoInicial: 0, saldoAtual: 0, entradasMes: 0, saidasMes: 0, pendentesCategorizacao: 0,
+    ativa: true, dataCriacao: '2026-01-01',
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(AuthContextModule.useAuth).mockReturnValue({ user: mockUser, login: vi.fn(), logout: vi.fn() } as never)
+  vi.mocked(transferenciasApi.listarSugestoesTransferenciaSemPar).mockResolvedValue([])
+  vi.mocked(metricasApi.obterParaOndeFoiMeuDinheiro).mockResolvedValue({ entrou: 0, gastou: 0, guardou: 0, ficou: 0, taxaPoupancaPercentual: null })
+})
+
+test('Bloco 5: Disponível, Investido e Patrimônio aparecem separados — investimento não soma no disponível', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([
+    conta({ id: 'corrente', nome: 'Nubank', tipo: 'ContaCorrente', saldoAtual: 8939.80 }),
+    conta({ id: 'invest', nome: 'Nubank Investimento', tipo: 'Investimento', saldoAtual: 4046.68 }),
+  ])
+
+  render(<MemoryRouter><ClientBancoPage /></MemoryRouter>)
+
+  await screen.findByText('Disponível para usar')
+  const resumo = document.querySelector('.cb-resumo') as HTMLElement
+  expect(within(resumo).getByText('R$ 8.939,80')).toBeInTheDocument() // Disponível para usar
+  expect(within(resumo).getByText('R$ 4.046,68')).toBeInTheDocument() // Investido / Reserva
+  expect(within(resumo).getByText('R$ 12.986,48')).toBeInTheDocument() // Patrimônio total (soma)
+})
+
+test('sem conta de investimento, o card "Investido / Reserva" não aparece', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([
+    conta({ id: 'corrente', nome: 'Nubank', tipo: 'ContaCorrente', saldoAtual: 1000 }),
+  ])
+
+  render(<MemoryRouter><ClientBancoPage /></MemoryRouter>)
+
+  await screen.findByText('Disponível para usar')
+  expect(screen.queryByText('Investido / Reserva')).not.toBeInTheDocument()
+})

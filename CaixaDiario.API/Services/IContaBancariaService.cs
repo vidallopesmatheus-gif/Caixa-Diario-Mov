@@ -14,4 +14,7 @@ public interface IContaBancariaService
     Task<ContaBancariaDto> RegistrarRendimentoAsync(Guid contaId, RegistrarRendimentoDto dto, Guid usuarioLogadoId, string perfil);
     Task<ContaBancariaDto> VincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil);
     Task<ContaBancariaDto> DesvincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil);
+
+    // Money Vision — Bloco 5, item 3 da Parte 3: gráfico "saldo mês a mês" da conta de investimento.
+    Task<List<SaldoMensalDto>> ObterHistoricoSaldoMensalAsync(Guid contaId, Guid usuarioLogadoId, string perfil, int meses = 12);
 }

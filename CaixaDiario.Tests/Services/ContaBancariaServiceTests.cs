@@ -863,6 +863,166 @@ public class ContaBancariaServiceTests
         Assert.Null(dto.RentabilidadePercentual);
     }
 
+    // ── Bloco 5 (Money Vision): resumo do mês, rentabilidade do mês/ano e "ritmo de aporte" ──────
+
+    [Fact]
+    public async Task ListarPorClienteAsync_ContaInvestimento_SeparaAporteResgateERendimentoDoMesAtual()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 0m);
+        conta.Tipo = "Investimento";
+        var hoje = DataLocalHelper.Hoje();
+        var inicioMes = new DateOnly(hoje.Year, hoje.Month, 1);
+
+        var regMesPassado = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = inicioMes.AddMonths(-2),
+            Entradas = new() { new() { Descricao = "Aporte antigo", Valor = 5000m, Categoria = "Transferência", TipoCusto = "Transferencia" } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 5000m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        var regMesAtual = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = inicioMes,
+            Entradas = new() { new() { Descricao = "Aporte", Valor = 1300m, Categoria = "Transferência", TipoCusto = "Transferencia" } },
+            Saidas = new() { new() { Descricao = "Resgate", Valor = 300m, Categoria = "Transferência", TipoCusto = "Transferencia" } },
+            ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 6000m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { regMesPassado, regMesAtual });
+        _metaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual>());
+
+        var contas = await _sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
+
+        var dto = Assert.Single(contas);
+        Assert.Equal(1300m, dto.AporteMesAtual);
+        Assert.Equal(300m, dto.ResgateMesAtual);
+        Assert.Equal(1000m, dto.AporteLiquidoMesAtual);
+        // O mês de 2 meses atrás não entra no mês atual nem conta como rendimento.
+        Assert.Equal(0m, dto.RendimentoMesAtual);
+    }
+
+    [Fact]
+    public async Task ListarPorClienteAsync_MetaVinculada_ComRitmoDeAportePositivo_PreveDataDeAtingimento()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 0m);
+        conta.Tipo = "Investimento";
+        var hoje = DataLocalHelper.Hoje();
+        var inicioMes = new DateOnly(hoje.Year, hoje.Month, 1);
+        // Meta de 10.000, saldo atual 4.000, faltam 6.000 — aportando 1.000/mês (média dos 3
+        // meses anteriores), são necessários 6 meses.
+        var meta = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, Ano = hoje.Year, ValorSonho = 10000m, ContaInvestimentoId = conta.Id };
+
+        var registros = Enumerable.Range(1, 3)
+            .Select(i => new RegistroDiario
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = inicioMes.AddMonths(-i),
+                Entradas = new() { new() { Descricao = "Aporte", Valor = 1000m, Categoria = "Transferência", TipoCusto = "Transferencia" } },
+                Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+                SaldoFinal = 4000m - (2 - i) * 1000m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+            })
+            .ToList();
+        // Saldo final do registro mais recente (o de -1 mês) é o que conta como saldo atual.
+        registros.OrderBy(r => r.Data).Last().SaldoFinal = 4000m;
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(registros);
+        _metaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual> { meta });
+
+        var contas = await _sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
+
+        var dto = Assert.Single(contas);
+        var metaDto = Assert.Single(dto.MetasVinculadas!);
+        var esperado = inicioMes.AddMonths(6);
+        var mesesAbrev = new[] { "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez" };
+        Assert.Equal($"{mesesAbrev[esperado.Month - 1]}/{esperado.Year}", metaDto.PrevisaoAtingimentoMesAno);
+    }
+
+    [Fact]
+    public async Task ListarPorClienteAsync_MetaJaAtingida_NaoPreveData()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 5000m);
+        conta.Tipo = "Investimento";
+        var meta = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, Ano = DataLocalHelper.Hoje().Year, ValorSonho = 1000m, ContaInvestimentoId = conta.Id };
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario>());
+        _metaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual> { meta });
+
+        var contas = await _sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
+
+        var dto = Assert.Single(contas);
+        Assert.Null(Assert.Single(dto.MetasVinculadas!).PrevisaoAtingimentoMesAno);
+    }
+
+    [Fact]
+    public async Task ListarPorClienteAsync_MetaNaoAtingida_ComRitmoDeAporteZeroOuNegativo_NaoPreveData()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 0m);
+        conta.Tipo = "Investimento";
+        var hoje = DataLocalHelper.Hoje();
+        var inicioMes = new DateOnly(hoje.Year, hoje.Month, 1);
+        // Meta ainda não atingida (faltam > 0), mas os últimos 3 meses tiveram resgate líquido
+        // (ritmo <= 0) — não há base pra projetar uma data de chegada.
+        var meta = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, Ano = hoje.Year, ValorSonho = 10000m, ContaInvestimentoId = conta.Id };
+
+        var registros = Enumerable.Range(1, 3)
+            .Select(i => new RegistroDiario
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = inicioMes.AddMonths(-i),
+                Entradas = new(),
+                Saidas = new() { new() { Descricao = "Resgate", Valor = 200m, Categoria = "Transferência", TipoCusto = "Transferencia" } },
+                ContasReceber = new(), ContasPagar = new(),
+                SaldoFinal = 4000m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+            })
+            .ToList();
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(registros);
+        _metaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual> { meta });
+
+        var contas = await _sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
+
+        var dto = Assert.Single(contas);
+        Assert.Null(Assert.Single(dto.MetasVinculadas!).PrevisaoAtingimentoMesAno);
+    }
+
+    [Fact]
+    public async Task ObterHistoricoSaldoMensalAsync_RetornaSaldoDeFimDeCadaMes()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 100m);
+        conta.Tipo = "Investimento";
+        var hoje = DataLocalHelper.Hoje();
+        var inicioMes = new DateOnly(hoje.Year, hoje.Month, 1);
+
+        var regMesAnterior = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = inicioMes.AddMonths(-1),
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            SaldoFinal = 500m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario> { regMesAnterior });
+
+        var historico = await _sut.ObterHistoricoSaldoMensalAsync(conta.Id, clienteId, "cliente", meses: 3);
+
+        Assert.Equal(3, historico.Count);
+        // Mês atual e o seguinte (não existe, mas "meses" é retroativo então não aparece) — os 3
+        // meses retornados são [atual-2, atual-1, atual]. atual-1 já tem o registro (500), os
+        // outros dois caem no saldo inicial (100) por não ter nenhum lançamento até ali.
+        Assert.Equal(100m, historico[0].Saldo); // atual - 2 meses, antes de qualquer lançamento
+        Assert.Equal(500m, historico[1].Saldo); // atual - 1 mês, já tem o registro
+        Assert.Equal(500m, historico[2].Saldo); // mês atual, nenhum lançamento novo, mantém o último saldo
+        Assert.Equal($"{inicioMes.Year:D4}-{inicioMes.Month:D2}", historico[2].Mes);
+    }
+
     [Fact]
     public async Task ListarPorClienteAsync_ContaComTransferenciaERendimentoNoMes_NaoEntramEmEntradasMesOuSaidasMes()
     {
