@@ -160,6 +160,45 @@ test('clique na categoria expande os lançamentos do mês', async () => {
   await waitFor(() => expect(screen.getByText('Aluguel do escritório')).toBeInTheDocument())
 })
 
+// ── Parte 2 (Money Vision): ranking de categorias — badge de tendência e "Outras (N)" ──────────
+
+test('mostra badge de tendência: alta vermelha, baixa verde, estável e novo', async () => {
+  mockHooks({
+    ...mockIndicadores,
+    rankingCategorias: [
+      { nome: 'Marketing', grupo: 'Despesas', total: 800, percentualReceita: 80, mediaMesesAnteriores: 122, variacaoPercentual: 556.7 },
+      { nome: 'Aluguel', grupo: 'Despesas', total: 400, percentualReceita: 40, mediaMesesAnteriores: 563, variacaoPercentual: -29 },
+      { nome: 'Internet', grupo: 'Despesas', total: 100, percentualReceita: 10, mediaMesesAnteriores: 98, variacaoPercentual: 2 },
+      { nome: 'Software', grupo: 'Despesas', total: 80, percentualReceita: 8, mediaMesesAnteriores: null, variacaoPercentual: null },
+    ],
+  })
+  render(<ClientGraficoPage />)
+
+  expect(await screen.findByText('▲ 556,7%')).toBeInTheDocument()
+  expect(screen.getByText('▼ 29,0%')).toBeInTheDocument()
+  expect(screen.getByText('estável')).toBeInTheDocument()
+  expect(screen.getByText('novo')).toBeInTheDocument()
+  expect(screen.queryByText(/sem histórico anterior/)).not.toBeInTheDocument()
+})
+
+test('ranking com mais de 10 categorias agrupa o resto em "Outras (N)" e expande ao clicar', async () => {
+  const categorias = Array.from({ length: 13 }, (_, i) => ({
+    nome: `Categoria ${i + 1}`, grupo: 'Despesas', total: 1000 - i * 10, percentualReceita: 10, mediaMesesAnteriores: null, variacaoPercentual: null,
+  }))
+  mockHooks({ ...mockIndicadores, rankingCategorias: categorias })
+  render(<ClientGraficoPage />)
+
+  await screen.findByText('Categoria 1')
+  expect(screen.queryByText('Categoria 11')).not.toBeInTheDocument()
+  const resumoOutras = await screen.findByText('▸ Outras (3)')
+  expect(screen.queryByText('Categoria 13')).not.toBeInTheDocument()
+
+  fireEvent.click(resumoOutras)
+  expect(await screen.findByText('Categoria 11')).toBeInTheDocument()
+  expect(screen.getByText('Categoria 13')).toBeInTheDocument()
+  expect(screen.getByText('▾ Outras (3)')).toBeInTheDocument()
+})
+
 test('clienteIdOverride é utilizado quando fornecido', async () => {
   mockHooks()
   render(<ClientGraficoPage clienteIdOverride="outro-id" />)

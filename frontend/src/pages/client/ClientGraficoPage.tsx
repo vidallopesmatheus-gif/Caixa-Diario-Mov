@@ -47,6 +47,8 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [categoriaAberta, setCategoriaAberta] = useState<string | null>(null)
+  // Item 4 (Parte 2, Money Vision): limita o ranking a 10 itens, o resto some em "Outras (N)".
+  const [outrasAberta, setOutrasAberta] = useState(false)
   const { registros } = useRegistros(clienteId)
 
   // Item 10 do Bloco 5 ("Visão de Futuro"): mesmo fallback já usado na DRE (Item 1.11) — se o mês
@@ -144,6 +146,12 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
     leituraCategorias = 'Nenhuma despesa lançada neste mês ainda.'
   }
 
+  const rankingTop10 = indicadores.rankingCategorias.slice(0, 10)
+  const rankingOutras = indicadores.rankingCategorias.slice(10)
+  const outrasTotal = rankingOutras.reduce((s, c) => s + c.total, 0)
+  const outrasPercentualReceita = dre.receitaBruta > 0 ? Math.round((outrasTotal / dre.receitaBruta) * 1000) / 10 : null
+  const maiorValorRanking = Math.max(...indicadores.rankingCategorias.map(c => c.total), 0)
+
   const historicoSuficiente = indicadores.mesesComAtividade >= 3
   // Item 1.8: igual ao Bloco 6 (custoFixoSerieAtiva) — um mês sem nenhum lançamento ainda (não
   // "faturamento zero" de verdade) entrava na série como um mergulho a zero, distorcendo a
@@ -211,18 +219,13 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
     setCategoriaAberta(prev => (prev === nome ? null : nome))
   }
 
-  function classeVariacao(c: CategoriaIndicador): string {
-    if (c.variacaoPercentual === null) return ''
-    if (c.variacaoPercentual > 15) return 'val-red'
-    if (c.variacaoPercentual < -15) return 'val-green'
-    return ''
-  }
-
-  function textoVariacao(c: CategoriaIndicador): string {
-    if (c.variacaoPercentual === null) return 'sem histórico anterior'
-    if (c.variacaoPercentual > 15) return `↑ subiu ${fmtPct(c.variacaoPercentual)} vs. meses anteriores`
-    if (c.variacaoPercentual < -15) return `↓ caiu ${fmtPct(Math.abs(c.variacaoPercentual))} vs. meses anteriores`
-    return 'estável vs. meses anteriores'
+  // Item 2 (Parte 2, Money Vision): badge de tendência em vez de frase solta — mesmo limiar de
+  // ±15% já usado antes, só muda a apresentação (seta + %, "estável" ou "novo").
+  function badgeVariacao(c: CategoriaIndicador): { texto: string; classe: string } {
+    if (c.variacaoPercentual === null) return { texto: 'novo', classe: 'ind-badge-novo' }
+    if (c.variacaoPercentual > 15) return { texto: `▲ ${fmtPct(c.variacaoPercentual)}`, classe: 'ind-badge-alta' }
+    if (c.variacaoPercentual < -15) return { texto: `▼ ${fmtPct(Math.abs(c.variacaoPercentual))}`, classe: 'ind-badge-baixa' }
+    return { texto: 'estável', classe: 'ind-badge-estavel' }
   }
 
   return (
@@ -294,16 +297,70 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
           <p className="ind-vazio">Sem despesas no período.</p>
         ) : (
           <div className="ind-ranking">
-            {indicadores.rankingCategorias.map(c => (
-              <div key={c.nome} className="ind-ranking-item">
-                <div className="ind-ranking-linha" onClick={() => toggleCategoria(c.nome)}>
-                  <span className="ind-ranking-nome">{c.nome}</span>
-                  <span className="ind-ranking-valor">{fmtBRL(c.total)}</span>
-                  <span className="ind-ranking-pct">{fmtPct(c.percentualReceita)} da receita</span>
-                  <span className={`ind-ranking-variacao ${classeVariacao(c)}`}>{textoVariacao(c)}</span>
+            <div className="ind-ranking-cabecalho">
+              <span>Categoria</span>
+              <span>Valor</span>
+              <span>% da receita</span>
+              <span>vs. média 3 meses</span>
+            </div>
+            {rankingTop10.map(c => {
+              const badge = badgeVariacao(c)
+              return (
+                <div key={c.nome} className="ind-ranking-item">
+                  <div className="ind-ranking-linha" onClick={() => toggleCategoria(c.nome)}>
+                    <span className="ind-ranking-nome">{c.nome}</span>
+                    <span className="ind-ranking-valor-cel">
+                      <span className="ind-ranking-barra" style={{ width: `${maiorValorRanking > 0 ? (c.total / maiorValorRanking) * 100 : 0}%` }} />
+                      <span className="ind-ranking-valor">{fmtBRL(c.total)}</span>
+                    </span>
+                    <span className="ind-ranking-pct">{fmtPct(c.percentualReceita)}</span>
+                    <span className={`ind-badge ${badge.classe}`}>{badge.texto}</span>
+                  </div>
+                  {categoriaAberta === c.nome && (
+                    <div className="ind-lancamentos">
+                      {(lancamentosPorCategoria[c.nome] ?? []).length === 0 ? (
+                        <p className="ind-vazio">Nenhum lançamento encontrado neste mês.</p>
+                      ) : (
+                        (lancamentosPorCategoria[c.nome] ?? []).map((l, i) => (
+                          <div key={i} className="ind-lancamento-item">
+                            <span>{l.data.slice(8, 10)}/{l.data.slice(5, 7)}</span>
+                            <span>{l.descricao}</span>
+                            <span>{fmtBRL(l.valor)}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
-                {categoriaAberta === c.nome && (
-                  <div className="ind-lancamentos">
+              )
+            })}
+            {rankingOutras.length > 0 && (
+              <div className="ind-ranking-item">
+                <div className="ind-ranking-linha" onClick={() => setOutrasAberta(a => !a)}>
+                  <span className="ind-ranking-nome">{outrasAberta ? '▾' : '▸'} Outras ({rankingOutras.length})</span>
+                  <span className="ind-ranking-valor-cel">
+                    <span className="ind-ranking-barra" style={{ width: `${maiorValorRanking > 0 ? (outrasTotal / maiorValorRanking) * 100 : 0}%` }} />
+                    <span className="ind-ranking-valor">{fmtBRL(outrasTotal)}</span>
+                  </span>
+                  <span className="ind-ranking-pct">{fmtPct(outrasPercentualReceita)}</span>
+                  <span className="ind-badge" />
+                </div>
+                {outrasAberta && rankingOutras.map(c => {
+                  const badge = badgeVariacao(c)
+                  return (
+                    <div key={c.nome} className="ind-ranking-linha ind-ranking-linha-outra" onClick={() => toggleCategoria(c.nome)}>
+                      <span className="ind-ranking-nome">{c.nome}</span>
+                      <span className="ind-ranking-valor-cel">
+                        <span className="ind-ranking-barra" style={{ width: `${maiorValorRanking > 0 ? (c.total / maiorValorRanking) * 100 : 0}%` }} />
+                        <span className="ind-ranking-valor">{fmtBRL(c.total)}</span>
+                      </span>
+                      <span className="ind-ranking-pct">{fmtPct(c.percentualReceita)}</span>
+                      <span className={`ind-badge ${badge.classe}`}>{badge.texto}</span>
+                    </div>
+                  )
+                })}
+                {outrasAberta && rankingOutras.map(c => categoriaAberta === c.nome && (
+                  <div key={`${c.nome}-lancamentos`} className="ind-lancamentos">
                     {(lancamentosPorCategoria[c.nome] ?? []).length === 0 ? (
                       <p className="ind-vazio">Nenhum lançamento encontrado neste mês.</p>
                     ) : (
@@ -316,9 +373,9 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
                       ))
                     )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
       </section>

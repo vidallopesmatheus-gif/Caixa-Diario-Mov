@@ -326,6 +326,25 @@ public class MetricasServiceTests
     }
 
     [Fact]
+    public void CalcularIndicadores_CategoriaCartaoDeCredito_NaoEntraNoRanking()
+    {
+        var hoje = DataLocalHelper.Hoje();
+        var reg = CriarRegistro(hoje,
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Pagamento de fatura", 2000m, "Cartão de crédito", "CustoVariavel"),
+                Item("Aluguel", 200m, "Aluguel", "CustoFixo"),
+            });
+
+        var resultado = _sut.CalcularIndicadores(new() { reg });
+
+        Assert.DoesNotContain(resultado.RankingCategorias, c => c.Nome == "Cartão de crédito");
+        var categoria = Assert.Single(resultado.RankingCategorias);
+        Assert.Equal("Aluguel", categoria.Nome);
+    }
+
+    [Fact]
     public void CalcularIndicadores_CategoriaComHistoricoAnterior_CalculaMediaEVariacaoPositiva()
     {
         var hoje = DataLocalHelper.Hoje();
