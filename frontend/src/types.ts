@@ -137,6 +137,9 @@ export interface LancamentoExtrato {
   // Preenchido quando a categoria veio de uma RegraCategorizacao aplicada na importação (ou
   // aplicação retroativa) — corrigir manualmente não muda isso, só marca a origem pra exibição.
   regraCategorizacaoId?: string
+  // Marcador de ItemFinanceiro/ItemFinanceiroSaida (ver LancamentoFiltro no backend) — "AjusteSaldo"
+  // é o único valor usado hoje no front (chip cinza/itálico "Ajuste de saldo", nunca editável).
+  tipoCusto?: string
 }
 
 export interface PendenciasConta {

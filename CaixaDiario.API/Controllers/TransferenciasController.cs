@@ -38,4 +38,19 @@ public class TransferenciasController : ControllerBase
         var criada = await _service.ConverterLancamentoAsync(dto, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<TransferenciaDto> { Dados = criada });
     }
+
+    // Bloco 4, item 4: "Transferências sem par" — sugestões da importação ainda não confirmadas.
+    [HttpGet("{clienteId:guid}/sugestoes-sem-par")]
+    public async Task<IActionResult> ListarSugestoesSemPar(Guid clienteId)
+    {
+        var sugestoes = await _service.ListarSugestoesSemParAsync(clienteId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<List<SugestaoTransferenciaSemParDto>> { Dados = sugestoes });
+    }
+
+    [HttpPost("descartar-sugestao")]
+    public async Task<IActionResult> DescartarSugestao([FromBody] DescartarSugestaoTransferenciaDto dto)
+    {
+        await _service.DescartarSugestaoAsync(dto, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
 }

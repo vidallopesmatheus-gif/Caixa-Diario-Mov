@@ -22,4 +22,12 @@ public interface ITransferenciaService
     Task<TransferenciaDto> CriarAsync(
         Guid clienteId, Guid contaOrigemId, Guid contaDestinoId, DateOnly data, decimal valor, string descricao,
         Guid usuarioLogadoId, string perfil);
+
+    // Money Vision — Bloco 4, item 4 da Parte 2: lançamentos que a importação já suspeita serem
+    // transferência (dicionário de palavras-chave) mas que ainda não foram confirmados — "sem par".
+    Task<List<SugestaoTransferenciaSemParDto>> ListarSugestoesSemParAsync(Guid clienteId, Guid usuarioLogadoId, string perfil);
+
+    // Remove a sugestão "Transferência" sem confirmar nada — o lançamento volta a ser um pendente
+    // comum, pronto pra ser categorizado manualmente como qualquer outro.
+    Task DescartarSugestaoAsync(DescartarSugestaoTransferenciaDto dto, Guid usuarioLogadoId, string perfil);
 }

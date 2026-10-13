@@ -969,6 +969,13 @@ public class ImportacaoService : IImportacaoService
         ("aplicacao cdb", "Transferência"),
         ("resgate rdb", "Transferência"),
         ("resgate cdb", "Transferência"),
+        // Money Vision — Bloco 4, item 2 da Parte 2: aplicação/resgate em "caixinhas" (contas
+        // digitais de reserva) e resgate genérico — mesma ideia das linhas de RDB/CDB acima, só
+        // com os nomes populares que os bancos usam pra isso.
+        ("caixinha", "Transferência"),
+        ("porquinho", "Transferência"),
+        ("guardar dinheiro", "Transferência"),
+        ("resgate", "Transferência"),
         ("posto", "Manutenção"),
         ("combust", "Manutenção"),
         ("gasolina", "Manutenção"),

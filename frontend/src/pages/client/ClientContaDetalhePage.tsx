@@ -14,7 +14,8 @@ import {
 import { previewExtrato, importarExtrato, categorizarPendentes, excluirLancamento } from '../../api/importacao'
 import type { DuplicataProvavel } from '../../api/contasBancarias'
 import type { ResolucaoDuplicata } from '../../api/importacao'
-import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia } from '../../api/transferencias'
+import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia, listarTransferencias } from '../../api/transferencias'
+import type { Transferencia } from '../../api/transferencias'
 import { listarSugestoesVinculo } from '../../api/conciliacao'
 import { atualizarContaProvisionada } from '../../api/contasProvisionadas'
 import { listarRegras, atualizarRegra, criarRegra, contarCorrespondencias, aplicarRegraRetroativamente } from '../../api/regras'
@@ -101,6 +102,9 @@ export default function ClientContaDetalhePage() {
   // ── Editar categoria de lançamento já classificado (reaproveita o mesmo endpoint da
   // categorização de pendentes — ele já localiza o item por Id e não depende de estar pendente) ──
   const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
+  // Bloco 4 (Money Vision): o chip de transferência mostra o nome da OUTRA conta ("⇄ Investimento
+  // Nubank"), não o literal "Transferência" — precisa das Transferencias do cliente pra achar qual é a outra ponta.
+  const [transferencias, setTransferencias] = useState<Transferencia[]>([])
   const [lancamentoParaEditar, setLancamentoParaEditar] = useState<LancamentoExtrato | null>(null)
   const [categoriaEdicao, setCategoriaEdicao] = useState('')
   const [salvandoEdicao, setSalvandoEdicao] = useState(false)
@@ -172,6 +176,7 @@ export default function ClientContaDetalhePage() {
   useEffect(() => { carregarExtrato() }, [carregarExtrato])
 
   useEffect(() => { if (clienteId) listarCategorias(clienteId).then(setCategorias).catch(() => {}) }, [clienteId])
+  useEffect(() => { if (clienteId) listarTransferencias(clienteId).then(setTransferencias).catch(() => {}) }, [clienteId])
 
   const carregarPendencias = useCallback(() => {
     if (!contaId) return
@@ -614,12 +619,37 @@ export default function ClientContaDetalhePage() {
     [categorias],
   )
 
-  type TipoChip = 'receita' | 'despesa' | 'transferencia' | 'investimento' | 'sem-categoria'
+  type TipoChip = 'receita' | 'despesa' | 'transferencia' | 'investimento' | 'sem-categoria' | 'ajuste'
   function classificarChip(l: LancamentoExtrato): TipoChip {
+    // Bloco 3: ajuste de saldo vem antes de tudo — mesmo categorizado (ex.: "Devoluções" por
+    // engano antes desta correção), nunca é receita/despesa/transferência de verdade.
+    if (l.tipoCusto === 'AjusteSaldo') return 'ajuste'
     if (l.pendenteCategorizacao || !l.categoria) return 'sem-categoria'
     if (l.categoria === 'Transferência') return 'transferencia'
     if (tipoPorCategoria.get(l.categoria) === 'Investimento') return 'investimento'
     return l.valor >= 0 ? 'receita' : 'despesa'
+  }
+
+  // Bloco 4, item 1: o chip de transferência mostra a OUTRA conta ("⇄ Investimento Nubank"), não
+  // o literal "Transferência" — olha nas Transferencias do cliente qual é a ponta que não é esta conta.
+  const nomeOutraContaPorTransferenciaId = useMemo(() => {
+    const mapa = new Map<string, string>()
+    if (!conta) return mapa
+    for (const t of transferencias) {
+      if (t.contaOrigemId === conta.id) mapa.set(t.id, t.contaDestinoNome)
+      else if (t.contaDestinoId === conta.id) mapa.set(t.id, t.contaOrigemNome)
+    }
+    return mapa
+  }, [transferencias, conta])
+
+  function rotuloChip(l: LancamentoExtrato, tipo: TipoChip): string {
+    if (tipo === 'ajuste') return 'Ajuste de saldo'
+    if (tipo === 'sem-categoria') return 'Sem categoria'
+    if (tipo === 'transferencia') {
+      const outraConta = l.transferenciaId ? nomeOutraContaPorTransferenciaId.get(l.transferenciaId) : undefined
+      return outraConta ? `⇄ ${outraConta}` : 'Transferência'
+    }
+    return l.categoria || '—'
   }
 
   // Barra de filtros (item 6, Bloco 2) — nomes únicos pro dropdown de categoria.
@@ -662,13 +692,18 @@ export default function ClientContaDetalhePage() {
       if (grupo) grupo.push(l)
       else porData.set(l.data, [l])
     }
-    return [...porData.entries()].map(([data, itens]) => ({
-      data,
-      itens,
-      entradas: itens.filter(l => l.valor >= 0).reduce((s, l) => s + l.valor, 0),
-      saidas: itens.filter(l => l.valor < 0).reduce((s, l) => s - l.valor, 0),
-      saldoDoDia: saldoPorDia.get(data) ?? itens[0].saldoAcumulado,
-    }))
+    return [...porData.entries()].map(([data, itens]) => {
+      // Ajuste de saldo não é uma transação de verdade — não conta no "Entradas +X · Saídas −Y"
+      // do dia (item 10, Bloco 3), mas o Saldo do dia continua o real (vem de saldoPorDia).
+      const itensReais = itens.filter(l => l.tipoCusto !== 'AjusteSaldo')
+      return {
+        data,
+        itens,
+        entradas: itensReais.filter(l => l.valor >= 0).reduce((s, l) => s + l.valor, 0),
+        saidas: itensReais.filter(l => l.valor < 0).reduce((s, l) => s - l.valor, 0),
+        saldoDoDia: saldoPorDia.get(data) ?? itens[0].saldoAcumulado,
+      }
+    })
   }, [lancamentosFiltrados, saldoPorDia])
 
   // Seleção em lote (item 7, Bloco 2).
@@ -761,14 +796,18 @@ export default function ClientContaDetalhePage() {
   function renderAcoesLinha(l: LancamentoExtrato) {
     if (!l.id) return <span className="cd-acoes-linha" aria-hidden="true" />
     const ehTransferencia = l.categoria === 'Transferência'
+    // Bloco 3: ajuste de saldo não é uma transação de verdade — não faz sentido trocar categoria
+    // nem virar transferência, só excluir (se foi lançado errado).
+    const ehAjuste = l.tipoCusto === 'AjusteSaldo'
     return (
       <span className="cd-acoes-linha">
         <button
           type="button"
           className="cd-acao-btn"
           aria-label={`Editar categoria de "${l.descricao}"`}
-          title="Editar categoria"
+          title={ehAjuste ? 'Ajuste de saldo não é reclassificável' : 'Editar categoria'}
           onClick={() => abrirModalEditarCategoria(l)}
+          disabled={ehAjuste}
         >
           ✏️
         </button>
@@ -787,8 +826,9 @@ export default function ClientContaDetalhePage() {
             type="button"
             className="cd-acao-btn"
             aria-label={`Marcar "${l.descricao}" como transferência`}
-            title="Marcar como transferência"
+            title={ehAjuste ? 'Ajuste de saldo não é reclassificável' : 'Marcar como transferência'}
             onClick={() => abrirModalTransferencia(l)}
+            disabled={ehAjuste}
           >
             ⇄
           </button>
@@ -825,15 +865,15 @@ export default function ClientContaDetalhePage() {
         </span>
       )
     }
-    const rotulo = tipo === 'sem-categoria' ? 'Sem categoria' : (l.categoria || '—')
+    const naoClicavel = tipo === 'transferencia' || tipo === 'ajuste'
     return (
       <button
         type="button"
         className={`cd-chip cd-chip-${tipo}`}
-        onClick={() => tipo !== 'transferencia' && setChipAbertoKey(chave)}
-        disabled={salvandoChip || tipo === 'transferencia'}
+        onClick={() => !naoClicavel && setChipAbertoKey(chave)}
+        disabled={salvandoChip || naoClicavel}
       >
-        {rotulo}
+        {rotuloChip(l, tipo)}
         {l.regraCategorizacaoId && <span title="Categorizado automaticamente por uma regra"> ⚙️</span>}
       </button>
     )
@@ -1165,7 +1205,7 @@ export default function ClientContaDetalhePage() {
                             <span className="cd-extrato-desc-titulo">{titulo}</span>
                             {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
                             <span className={`cd-chip cd-chip-${tipo}`}>
-                              {tipo === 'sem-categoria' ? 'Sem categoria' : (l.categoria || '—')}
+                              {rotuloChip(l, tipo)}
                             </span>
                           </span>
                           <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
@@ -1662,32 +1702,38 @@ export default function ClientContaDetalhePage() {
         <div className="cd-sheet-overlay" onClick={() => setAcaoMobileLancamento(null)}>
           <div className="cd-sheet" onClick={e => e.stopPropagation()}>
             <div className="cd-sheet-desc">{limparDescricao(acaoMobileLancamento.descricao).titulo}</div>
-            <button
-              type="button"
-              className="cd-sheet-acao"
-              onClick={() => { abrirModalEditarCategoria(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
-            >
-              ✏️ Editar categoria
-            </button>
-            {acaoMobileLancamento.categoria === 'Transferência' ? (
-              <button
-                type="button"
-                className="cd-sheet-acao"
-                onClick={() => {
-                  if (acaoMobileLancamento.transferenciaId) handleDesfazerTransferencia(acaoMobileLancamento.transferenciaId)
-                  setAcaoMobileLancamento(null)
-                }}
-              >
-                ↩ Desfazer transferência
-              </button>
+            {acaoMobileLancamento.tipoCusto === 'AjusteSaldo' ? (
+              <div className="cd-sheet-aviso">Ajuste de saldo — não é reclassificável, só pode ser excluído.</div>
             ) : (
-              <button
-                type="button"
-                className="cd-sheet-acao"
-                onClick={() => { abrirModalTransferencia(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
-              >
-                ⇄ Marcar como transferência
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="cd-sheet-acao"
+                  onClick={() => { abrirModalEditarCategoria(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
+                >
+                  ✏️ Editar categoria
+                </button>
+                {acaoMobileLancamento.categoria === 'Transferência' ? (
+                  <button
+                    type="button"
+                    className="cd-sheet-acao"
+                    onClick={() => {
+                      if (acaoMobileLancamento.transferenciaId) handleDesfazerTransferencia(acaoMobileLancamento.transferenciaId)
+                      setAcaoMobileLancamento(null)
+                    }}
+                  >
+                    ↩ Desfazer transferência
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="cd-sheet-acao"
+                    onClick={() => { abrirModalTransferencia(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
+                  >
+                    ⇄ Marcar como transferência
+                  </button>
+                )}
+              </>
             )}
             <button
               type="button"

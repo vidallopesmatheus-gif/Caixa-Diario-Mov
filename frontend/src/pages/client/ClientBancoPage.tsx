@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { listarContasBancarias } from '../../api/contasBancarias'
+import { listarSugestoesTransferenciaSemPar } from '../../api/transferencias'
 import { fmtBRL } from '../../utils/format'
 import type { ContaBancaria } from '../../types'
 import './ClientContasBancarias.css'
@@ -28,6 +29,7 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
 
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [loading, setLoading] = useState(true)
+  const [qtdSemPar, setQtdSemPar] = useState(0)
 
   const carregar = useCallback(() => {
     if (!clienteId) return
@@ -39,6 +41,11 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
   }, [clienteId])
 
   useEffect(() => { carregar() }, [carregar])
+  // Bloco 4, item 4 (Money Vision): avisa quantas sugestões de transferência estão sem par.
+  useEffect(() => {
+    if (!clienteId) return
+    listarSugestoesTransferenciaSemPar(clienteId).then(s => setQtdSemPar(s.length)).catch(() => {})
+  }, [clienteId])
 
   const ativas = contas.filter(c => c.ativa)
   const inativas = contas.filter(c => !c.ativa)
@@ -69,6 +76,23 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
           </div>
         )}
       </div>
+
+      {qtdSemPar > 0 && (
+        <div
+          className="cb-conta-item cb-conta-clicavel"
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate('/banco/transferencias-sem-par')}
+          onKeyDown={e => { if (e.key === 'Enter') navigate('/banco/transferencias-sem-par') }}
+          style={{ marginBottom: 16 }}
+        >
+          <div className="cb-conta-info">
+            <div className="cb-conta-nome">🔁 Transferências sem par</div>
+            <div className="cb-conta-meta">Lançamentos que parecem transferência, ainda não confirmados</div>
+          </div>
+          <div className="cb-conta-saldo" style={{ color: 'var(--warning)' }}>{qtdSemPar}</div>
+        </div>
+      )}
 
       <div className="contas-section">
         <h3>🏦 Contas Ativas ({ativas.length})</h3>

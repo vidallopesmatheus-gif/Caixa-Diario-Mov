@@ -406,4 +406,118 @@ public class TransferenciaServiceTests
 
         Assert.Equal(CodigoRetorno.CONTA_INATIVA, ex.Codigo);
     }
+
+    // ── Bloco 4, item 4: "Transferências sem par" ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task ListarSugestoesSemParAsync_PegaSoLancamentosSugeridosComoTransferenciaAindaPendentes()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = CriarConta(clienteId, "Nubank", "ContaCorrente");
+        var data = new DateOnly(2026, 10, 8);
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 1000m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 700m,
+            Saidas = new()
+            {
+                // Sugerida pelo dicionário de palavras-chave, ainda pendente — é a "sem par" de verdade.
+                new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Aplicação RDB", Valor = 300m, Categoria = "Transferência", CategoriaSugerida = true, PendenteCategorizacao = true },
+                // Já confirmada (não pendente) — não deve aparecer.
+                new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Transf confirmada", Valor = 50m, Categoria = "Transferência", CategoriaSugerida = false, PendenteCategorizacao = false },
+                // Categoria normal sugerida, não é transferência — não deve aparecer.
+                new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Uber", Valor = 20m, Categoria = "Frete e entrega", CategoriaSugerida = true, PendenteCategorizacao = true },
+            },
+        };
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { contaCorrente });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var sugestoes = await _sut.ListarSugestoesSemParAsync(clienteId, clienteId, "cliente");
+
+        var unica = Assert.Single(sugestoes);
+        Assert.Equal("Aplicação RDB", unica.Descricao);
+        Assert.Equal(-300m, unica.Valor);
+        Assert.Equal("Saida", unica.Tipo);
+        Assert.Equal(contaCorrente.Id, unica.ContaBancariaId);
+    }
+
+    [Fact]
+    public async Task ListarSugestoesSemParAsync_ComUmaUnicaContaDeInvestimentoAtiva_SugereElaComoDestino()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = CriarConta(clienteId, "Nubank", "ContaCorrente");
+        var contaInvestimento = CriarConta(clienteId, "Nubank Investimento", "Investimento");
+        var data = new DateOnly(2026, 10, 8);
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 1000m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 700m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Aplicação RDB", Valor = 300m, Categoria = "Transferência", CategoriaSugerida = true, PendenteCategorizacao = true } },
+        };
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { contaCorrente, contaInvestimento });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var sugestoes = await _sut.ListarSugestoesSemParAsync(clienteId, clienteId, "cliente");
+
+        var unica = Assert.Single(sugestoes);
+        Assert.Equal(contaInvestimento.Id, unica.ContaDestinoSugeridaId);
+        Assert.Equal("Nubank Investimento", unica.ContaDestinoSugeridaNome);
+    }
+
+    [Fact]
+    public async Task ListarSugestoesSemParAsync_ComDuasContasDeInvestimento_NaoArriscaUmaSugestao()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = CriarConta(clienteId, "Nubank", "ContaCorrente");
+        var investimentoA = CriarConta(clienteId, "Investimento A", "Investimento");
+        var investimentoB = CriarConta(clienteId, "Investimento B", "Investimento");
+        var data = new DateOnly(2026, 10, 8);
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 1000m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 700m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Aplicação RDB", Valor = 300m, Categoria = "Transferência", CategoriaSugerida = true, PendenteCategorizacao = true } },
+        };
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { contaCorrente, investimentoA, investimentoB });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var sugestoes = await _sut.ListarSugestoesSemParAsync(clienteId, clienteId, "cliente");
+
+        Assert.Null(Assert.Single(sugestoes).ContaDestinoSugeridaId);
+    }
+
+    [Fact]
+    public async Task DescartarSugestaoAsync_LimpaCategoriaMasMantemPendenteECategoriaSugeridaFalsa()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId, "Nubank", "ContaCorrente");
+        var data = new DateOnly(2026, 10, 8);
+        var itemId = Guid.NewGuid();
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data, Inicio = 1000m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 700m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = itemId, Descricao = "Aplicação RDB", Valor = 300m, Categoria = "Transferência", CategoriaSugerida = true, PendenteCategorizacao = true } },
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(registro);
+        RegistroDiario? atualizado = null;
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => atualizado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        await _sut.DescartarSugestaoAsync(new DescartarSugestaoTransferenciaDto { ContaId = conta.Id, LancamentoId = itemId, Data = data }, clienteId, "cliente");
+
+        var saida = Assert.Single(atualizado!.Saidas);
+        Assert.Equal(string.Empty, saida.Categoria);
+        Assert.False(saida.CategoriaSugerida);
+        Assert.True(saida.PendenteCategorizacao); // continua pendente — só deixou de sugerir Transferência
+    }
 }

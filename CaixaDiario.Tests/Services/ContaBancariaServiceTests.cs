@@ -248,6 +248,44 @@ public class ContaBancariaServiceTests
         Assert.True(extrato[0].PendenteCategorizacao);
     }
 
+    // Money Vision — Bloco 3: TipoCusto precisa chegar no DTO pro front saber que é um Ajuste de
+    // Saldo (chip cinza/itálico, sem editar categoria nem marcar transferência) — sem isso o front
+    // não tem como diferenciar essa linha de uma saída comum categorizada como "Devoluções".
+    [Fact]
+    public async Task ObterExtratoAsync_ComAjusteDeSaldo_PropagaTipoCustoNoDto()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(contaId, clienteId);
+        var dia = new DateOnly(2026, 9, 30);
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(),
+            ClienteId = clienteId,
+            ContaBancariaId = contaId,
+            Data = dia,
+            Inicio = 10000m,
+            Entradas = new(),
+            Saidas = new List<ItemFinanceiroSaida>
+            {
+                new() { Descricao = "saldo", Valor = 3895.76m, Categoria = "Devoluções", TipoCusto = "AjusteSaldo" },
+            },
+            ContasReceber = new(),
+            ContasPagar = new(),
+            SaldoFinal = 10000m - 3895.76m,
+            CriadoEm = DateTime.UtcNow,
+            SalvoEm = DateTime.UtcNow,
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var extrato = await _sut.ObterExtratoAsync(contaId, clienteId, "cliente", null, null);
+
+        Assert.Equal("AjusteSaldo", extrato[0].TipoCusto);
+    }
+
     [Fact]
     public async Task ObterExtratoAsync_ComFiltroDePeriodo_MantemSaldoAcumuladoDoHistoricoCompleto()
     {

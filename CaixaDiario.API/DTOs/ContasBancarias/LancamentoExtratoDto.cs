@@ -17,4 +17,7 @@ public class LancamentoExtratoDto
     // Preenchido quando a categoria veio de uma RegraCategorizacao (importação automática ou
     // aplicação retroativa) — corrigir manualmente não limpa isso, só marca a origem pra exibição.
     public Guid? RegraCategorizacaoId { get; set; }
+    // Marcador de ItemFinanceiro/ItemFinanceiroSaida (ver LancamentoFiltro) — "AjusteSaldo" é o
+    // único valor que o front usa hoje (rótulo cinza "Ajuste de saldo", nunca editável/transferível).
+    public string? TipoCusto { get; set; }
 }

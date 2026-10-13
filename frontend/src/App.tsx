@@ -11,6 +11,7 @@ import ClientBancoPage from './pages/client/ClientBancoPage'
 import ClientContaDetalhePage from './pages/client/ClientContaDetalhePage'
 import ClientFaturasCartaoPage from './pages/client/ClientFaturasCartaoPage'
 import ClientExtratoRevisaoPage from './pages/client/ClientExtratoRevisaoPage'
+import ClientTransferenciasSemParPage from './pages/client/ClientTransferenciasSemParPage'
 import ResultadosPage from './pages/client/ResultadosPage'
 import RelatoriosPage from './pages/client/RelatoriosPage'
 import ConfiguracoesPage from './pages/client/ConfiguracoesPage'
@@ -51,6 +52,7 @@ function ProtectedRoutes() {
 
         {/* Banco: operação (extrato, importação) — cadastro fica em Configurações */}
         <Route path="/banco" element={<ClientBancoPage />} />
+        <Route path="/banco/transferencias-sem-par" element={<ClientTransferenciasSemParPage />} />
         <Route path="/banco/:contaId" element={<ClientContaDetalhePage />} />
         <Route path="/banco/:contaId/faturas" element={<ClientFaturasCartaoPage />} />
         <Route path="/banco/extrato/:contaId" element={<ClientExtratoRevisaoPage />} />

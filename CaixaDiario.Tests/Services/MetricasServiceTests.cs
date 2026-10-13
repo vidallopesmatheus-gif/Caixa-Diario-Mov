@@ -1110,6 +1110,28 @@ public class MetricasServiceTests
         Assert.Equal(600m, dre.Resultado);
     }
 
+    // Money Vision — Bloco 3: linha de ajuste de saldo (ex.: descrição "saldo") fica fora do DRE
+    // mesmo tendo uma Categoria "normal" ("Devoluções") — é o TipoCusto "AjusteSaldo" que decide,
+    // não a categoria.
+    [Fact]
+    public void CalcularDre_AjusteDeSaldo_NaoEntraNoDreMesmoComCategoriaNormal()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 9, 30),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Aluguel", 400m, "Aluguel", "CustoFixo"),
+                Item("saldo", 3895.76m, "Devoluções", "AjusteSaldo"),
+            });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
+
+        Assert.Equal(400m, dre.TotalDespesas); // só o aluguel — o ajuste de saldo não conta
+        Assert.Equal(0m, dre.NaoClassificado.Total);
+        Assert.Equal(0m, dre.Deducoes.Total); // "Devoluções" normalmente cairia em Deduções, mas não aqui
+        Assert.Equal(600m, dre.Resultado);
+    }
+
     [Fact]
     public void CalcularDre_ComRendimento_MostraReceitaFinanceiraSeparadaEForaDaReceitaOperacional()
     {
