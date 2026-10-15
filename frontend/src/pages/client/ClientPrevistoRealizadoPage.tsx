@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { obterPrevistoRealizado } from '../../api/relatorios'
 import type { PrevistoRealizado } from '../../api/relatorios'
 import { fmtBRL } from '../../utils/format'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import './ClientProjecao.css'
 
 const MESES_ABREV = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
@@ -68,6 +69,24 @@ export default function ClientPrevistoRealizadoPage() {
 
   useEffect(() => { carregar() }, [carregar])
 
+  // Soma previsto/realizado de todas as linhas (tipo × categoria) por mês, pra um gráfico de
+  // linha único no topo — a tabela abaixo continua com o detalhe por categoria.
+  const dadosGrafico = useMemo(() => {
+    if (!dados) return []
+    const porMes = new Map<string, { mes: string; previsto: number; realizado: number }>()
+    for (const linha of dados.linhas) {
+      for (const ponto of linha.meses) {
+        const acumulado = porMes.get(ponto.mes) ?? { mes: ponto.mes, previsto: 0, realizado: 0 }
+        acumulado.previsto += ponto.previsto
+        acumulado.realizado += ponto.realizado
+        porMes.set(ponto.mes, acumulado)
+      }
+    }
+    return [...porMes.values()]
+      .sort((a, b) => a.mes.localeCompare(b.mes))
+      .map(p => ({ ...p, mes: mesLabel(p.mes) }))
+  }, [dados])
+
   return (
     <>
       <div className="pj-header">
@@ -103,6 +122,22 @@ export default function ClientPrevistoRealizadoPage() {
 
       {!loading && dados && dados.linhas.length === 0 && (
         <p className="pj-vazio">Nenhuma conta fixa recorrente com título gerado no período — não há o que comparar ainda.</p>
+      )}
+
+      {!loading && dados && dados.linhas.length > 0 && (
+        <div className="pj-grafico-container">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={dadosGrafico}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
+              <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 12 }} />
+              <YAxis stroke="var(--tx3)" tick={{ fontSize: 12 }} tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
+              <Tooltip formatter={v => typeof v === 'number' ? fmtBRL(v) : String(v)} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)' }} />
+              <Legend wrapperStyle={{ fontSize: 13 }} />
+              <Line type="monotone" dataKey="previsto" name="Previsto" stroke="var(--tx3)" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="realizado" name="Realizado" stroke="#0a84ff" strokeWidth={2} dot={{ fill: '#0a84ff', r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       )}
 
       {!loading && dados && dados.linhas.length > 0 && (
