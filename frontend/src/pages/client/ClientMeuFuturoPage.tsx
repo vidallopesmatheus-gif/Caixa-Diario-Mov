@@ -1,10 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { obterMeuFuturo } from '../../api/projecao'
 import { obterPreferenciasFuturo, atualizarPreferenciasFuturo } from '../../api/preferenciasFuturo'
-import { fmtBRL, monthLabel } from '../../utils/format'
-import type { MeuFuturo } from '../../api/projecao'
+import { fmtBRL, fmtBRLCompacto, fmtLidoEm, monthLabel } from '../../utils/format'
+import { MvPage, MvHero, MvSectionLabel, MvKpi, MvKpiGrid, MvInsight, MvDetails, prefereMovimentoReduzido } from '../../components/mv'
+import type { MeuFuturo, MeuFuturoMes } from '../../api/projecao'
 import type { PreferenciasFuturo } from '../../api/preferenciasFuturo'
+import {
+  ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+} from 'recharts'
 import './ClientMeuFuturo.css'
 
 function fmtNum(n: number) {
@@ -17,6 +21,8 @@ function parseBRL(s: string): number {
 
 const STATUS_LABEL: Record<string, string> = { Tranquilo: '🟢 Tranquilo', Atencao: '🟡 Atenção', Risco: '🔴 Risco' }
 const STATUS_CLASSE: Record<string, string> = { Tranquilo: 'mf-status-tranquilo', Atencao: 'mf-status-atencao', Risco: 'mf-status-risco' }
+const STATUS_ICONE: Record<string, string> = { Tranquilo: '🟢', Atencao: '🟡', Risco: '🔴' }
+const STATUS_TONE: Record<string, 'good' | 'warn' | 'bad'> = { Tranquilo: 'good', Atencao: 'warn', Risco: 'bad' }
 
 export default function ClientMeuFuturoPage() {
   const { user } = useAuth()
@@ -34,6 +40,9 @@ export default function ClientMeuFuturoPage() {
   const [meuFuturo, setMeuFuturo] = useState<MeuFuturo | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
+
+  // Redesign visual (Money Vision): mês selecionado na tira de pills, pra abrir o card de detalhe.
+  const [mesSelecionado, setMesSelecionado] = useState<string | null>(null)
 
   useEffect(() => {
     if (!clienteId) return
@@ -77,17 +86,92 @@ export default function ClientMeuFuturoPage() {
     }
   }
 
-  const ehPF = preferencias.tipoPessoa === 'PF'
-  const rotuloCaixa = ehPF ? 'sua renda' : 'seu negócio'
+  const piorMes = useMemo(() => {
+    if (!meuFuturo || meuFuturo.meses.length === 0) return undefined
+    return meuFuturo.meses.reduce((pior, m) => m.saldoFinal < pior.saldoFinal ? m : pior, meuFuturo.meses[0])
+  }, [meuFuturo])
+
+  const mesAnterior = useMemo(() => {
+    if (!meuFuturo || !piorMes) return undefined
+    const idx = meuFuturo.meses.findIndex(m => m.mes === piorMes.mes)
+    return idx > 0 ? meuFuturo.meses[idx - 1] : undefined
+  }, [meuFuturo, piorMes])
+
+  const maiorNecessidade = useMemo(() => {
+    if (!meuFuturo) return undefined
+    return meuFuturo.meses.reduce((maior, m) => m.precisaReceber > maior.precisaReceber ? m : maior, meuFuturo.meses[0])
+  }, [meuFuturo])
+
+  const qtdPorStatus = useMemo(() => {
+    const c = { Tranquilo: 0, Atencao: 0, Risco: 0 }
+    meuFuturo?.meses.forEach(m => { c[m.status]++ })
+    return c
+  }, [meuFuturo])
+
+  const dadosGrafico = useMemo(() => meuFuturo?.meses.map(m => ({
+    mes: monthLabel(m.mes),
+    aReceber: m.aReceber,
+    aPagar: -m.aPagar,
+    saldoFinal: m.saldoFinal,
+    precisaReceber: m.precisaReceber,
+    status: m.status,
+    mesRaw: m.mes,
+  })) ?? [], [meuFuturo])
+
+  function tooltipGrafico(props: { active?: boolean; payload?: readonly { payload?: (typeof dadosGrafico)[number] }[] }) {
+    const { active, payload } = props
+    if (!active || !payload || payload.length === 0) return null
+    const p = payload[0]?.payload
+    if (!p) return null
+    return (
+      <div className="mv-chart-tooltip">
+        <div className="mv-chart-tooltip-label">{p.mes} · {STATUS_LABEL[p.status]}</div>
+        <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-green)' }}>A receber</span><strong>+{fmtBRL(p.aReceber)}</strong></div>
+        <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-red)' }}>A pagar</span><strong>-{fmtBRL(Math.abs(p.aPagar))}</strong></div>
+        <div className="mv-chart-tooltip-row"><span>Saldo final</span><strong>{fmtBRL(p.saldoFinal)}</strong></div>
+        {p.precisaReceber > 0 && (
+          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-amber)' }}>Precisa receber</span><strong>{fmtBRL(p.precisaReceber)}</strong></div>
+        )}
+      </div>
+    )
+  }
+
+  function pontoLinha(props: { cx?: number; cy?: number; payload?: (typeof dadosGrafico)[number] }) {
+    const { cx, cy, payload } = props
+    if (cx === undefined || cy === undefined) return <circle cx={0} cy={0} r={0} />
+    if (payload?.status !== 'Risco') return <circle cx={cx} cy={cy} r={2.5} fill="var(--mv-blue)" />
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r={9} fill="var(--mv-red)" opacity={0.18} />
+        <circle cx={cx} cy={cy} r={4.5} fill="var(--mv-red)" stroke="var(--mv-navy)" strokeWidth={2} />
+        <text x={cx} y={cy - 14} textAnchor="middle" fontSize={10.5} fontWeight={700} fill="var(--mv-red)">
+          precisa de {fmtBRLCompacto(payload.precisaReceber)}
+        </text>
+      </g>
+    )
+  }
+
+  const mesDetalhe = meuFuturo?.meses.find(m => m.mes === mesSelecionado)
+  const semAnimacao = prefereMovimentoReduzido()
 
   return (
-    <div className="mf-page">
-      <div className="mf-header">
-        <div>
-          <h2 className="mf-titulo">🔮 Meu Futuro</h2>
-          <div className="mf-subtitulo">Como {rotuloCaixa} deve se comportar nos próximos 12 meses</div>
-        </div>
-      </div>
+    <MvPage>
+      {piorMes && (
+        <MvHero
+          eyebrow={`Pior momento projetado · ${monthLabel(piorMes.mes)}`}
+          value={piorMes.saldoFinal}
+          tone={piorMes.saldoFinal < 0 ? 'bad' : STATUS_TONE[piorMes.status]}
+          contraste={meuFuturo ? { valor: meuFuturo.meses[0].saldoInicial } : undefined}
+          caption={
+            piorMes.status === 'Tranquilo'
+              ? <>Seu dinheiro cobre todas as contas nos próximos 12 meses — nenhum mês fica apertado.</>
+              : piorMes.saldoFinal < 0
+                ? <>Seu dinheiro cobre suas contas {mesAnterior ? <>até <strong>{monthLabel(mesAnterior.mes)}</strong></> : 'só até o mês atual'}. Em <strong>{monthLabel(piorMes.mes)}</strong>, faltam <strong>{fmtBRL(piorMes.precisaReceber || Math.abs(piorMes.saldoFinal))}</strong>.</>
+                : <>Em <strong>{monthLabel(piorMes.mes)}</strong> o mês fica apertado — sobra pouco, mas não falta dinheiro.</>
+          }
+          footnote={fmtLidoEm('projeção de 12 meses')}
+        />
+      )}
 
       <div className="mf-preferencias">
         <label className="mf-pref-item">
@@ -129,40 +213,83 @@ export default function ClientMeuFuturoPage() {
 
       {meuFuturo && !loading && (
         <>
-          {meuFuturo.conselhos.length > 0 && (
-            <div className="mf-conselhos">
-              {meuFuturo.conselhos.map((c, i) => <p key={i}>💬 {c}</p>)}
+          <MvKpiGrid>
+            <MvKpi label="Meses tranquilos" value={qtdPorStatus.Tranquilo} formatter={n => `${n} mês${n === 1 ? '' : 'es'}`} tone="good" />
+            <MvKpi label="Meses em risco" value={qtdPorStatus.Risco} formatter={n => `${n} mês${n === 1 ? '' : 'es'}`} tone={qtdPorStatus.Risco > 0 ? 'bad' : 'good'} />
+            <MvKpi
+              label="Maior necessidade"
+              value={maiorNecessidade?.precisaReceber ?? 0}
+              tone={maiorNecessidade && maiorNecessidade.precisaReceber > 0 ? 'bad' : 'good'}
+              delta={maiorNecessidade && maiorNecessidade.precisaReceber > 0 ? monthLabel(maiorNecessidade.mes) : undefined}
+            />
+            <MvKpi
+              label="Saldo em 12 meses"
+              value={meuFuturo.meses.at(-1)?.saldoFinal ?? 0}
+              tone={(meuFuturo.meses.at(-1)?.saldoFinal ?? 0) >= 0 ? 'good' : 'bad'}
+            />
+          </MvKpiGrid>
+
+          {meuFuturo.conselhos.slice(0, 3).map((c, i) => (
+            <MvInsight key={i} icon="💬" text={c} tone="neutral" />
+          ))}
+
+          <MvSectionLabel>Entradas, saídas e saldo acumulado — 12 meses</MvSectionLabel>
+          <div className="mv-chart-card">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={dadosGrafico} margin={{ top: 24, right: 8, bottom: 0, left: 0 }}>
+                <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
+                <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
+                <Tooltip content={tooltipGrafico} cursor={{ fill: 'rgba(255,255,255,.04)' }} />
+                <Bar dataKey="aReceber" fill="var(--mv-blue-light)" radius={[4, 4, 0, 0]} isAnimationActive={!semAnimacao} />
+                <Bar dataKey="aPagar" fill="var(--mv-red)" radius={[0, 0, 4, 4]} isAnimationActive={!semAnimacao} />
+                <Line type="monotone" dataKey="saldoFinal" stroke="var(--mv-blue)" strokeWidth={2} dot={pontoLinha} activeDot={{ r: 5 }} isAnimationActive={!semAnimacao} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          <MvSectionLabel>Mês a mês</MvSectionLabel>
+          <div className="mv-pills-strip">
+            {meuFuturo.meses.map(m => (
+              <button
+                key={m.mes}
+                type="button"
+                className={`mv-pill-mes mv-tone-${STATUS_TONE[m.status]}${mesSelecionado === m.mes ? ' mv-pill-selecionada' : ''}`}
+                onClick={() => setMesSelecionado(prev => prev === m.mes ? null : m.mes)}
+              >
+                <span className="mv-pill-status">{STATUS_ICONE[m.status]}</span>
+                <span className="mv-pill-mes-label">{monthLabel(m.mes)}</span>
+                <span className="mv-pill-mes-valor">{fmtBRLCompacto(m.saldoFinal)}</span>
+              </button>
+            ))}
+          </div>
+
+          {mesDetalhe && (
+            <div className="mv-mes-detalhe">
+              <div className="mv-mes-detalhe-titulo">{STATUS_ICONE[mesDetalhe.status]} {monthLabel(mesDetalhe.mes)} — {STATUS_LABEL[mesDetalhe.status].replace(/^\S+\s/, '')}</div>
+              <div className="mv-mes-detalhe-grid">
+                <div className="mv-mes-detalhe-item">
+                  <span className="mv-mes-detalhe-label">Recebe</span>
+                  <span className="mv-mes-detalhe-valor" style={{ color: 'var(--mv-green)' }}>+{fmtBRL(mesDetalhe.aReceber)}</span>
+                </div>
+                <div className="mv-mes-detalhe-item">
+                  <span className="mv-mes-detalhe-label">Paga</span>
+                  <span className="mv-mes-detalhe-valor" style={{ color: 'var(--mv-red)' }}>-{fmtBRL(mesDetalhe.aPagar)}</span>
+                </div>
+                <div className="mv-mes-detalhe-item">
+                  <span className="mv-mes-detalhe-label">Sobra no mês</span>
+                  <span className="mv-mes-detalhe-valor" style={{ color: (mesDetalhe.aReceber - mesDetalhe.aPagar) >= 0 ? 'var(--mv-green)' : 'var(--mv-red)' }}>
+                    {fmtBRL(mesDetalhe.aReceber - mesDetalhe.aPagar)}
+                  </span>
+                </div>
+                <div className="mv-mes-detalhe-item">
+                  <span className="mv-mes-detalhe-label">Precisa receber</span>
+                  <span className="mv-mes-detalhe-valor" style={{ color: mesDetalhe.precisaReceber > 0 ? 'var(--mv-amber)' : 'var(--mv-tx2)' }}>
+                    {mesDetalhe.precisaReceber > 0 ? fmtBRL(mesDetalhe.precisaReceber) : '—'}
+                  </span>
+                </div>
+              </div>
             </div>
           )}
-
-          <div className="mf-tabela-container">
-            <table className="mf-tabela">
-              <thead>
-                <tr>
-                  <th>Mês</th>
-                  <th>Saldo inicial</th>
-                  <th>A receber</th>
-                  <th>A pagar</th>
-                  <th>Saldo final</th>
-                  <th>Precisa receber</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {meuFuturo.meses.map(m => (
-                  <tr key={m.mes} className={STATUS_CLASSE[m.status]}>
-                    <td>{monthLabel(m.mes)}</td>
-                    <td>{fmtBRL(m.saldoInicial)}</td>
-                    <td className="val-green">+{fmtBRL(m.aReceber)}</td>
-                    <td className="val-red">-{fmtBRL(m.aPagar)}</td>
-                    <td className={m.saldoFinal >= 0 ? 'val-green' : 'val-red'}>{fmtBRL(m.saldoFinal)}</td>
-                    <td>{m.precisaReceber > 0 ? fmtBRL(m.precisaReceber) : '—'}</td>
-                    <td>{STATUS_LABEL[m.status]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
 
           <div className="mf-simulador">
             <h3 className="mf-simulador-titulo">🎛️ E se...?</h3>
@@ -190,8 +317,39 @@ export default function ClientMeuFuturoPage() {
               )}
             </div>
           </div>
+
+          <MvDetails label="Ver tabela completa">
+            <div className="mf-tabela-container">
+              <table className="mf-tabela">
+                <thead>
+                  <tr>
+                    <th>Mês</th>
+                    <th>Saldo inicial</th>
+                    <th>A receber</th>
+                    <th>A pagar</th>
+                    <th>Saldo final</th>
+                    <th>Precisa receber</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {meuFuturo.meses.map((m: MeuFuturoMes) => (
+                    <tr key={m.mes} className={STATUS_CLASSE[m.status]}>
+                      <td>{monthLabel(m.mes)}</td>
+                      <td>{fmtBRL(m.saldoInicial)}</td>
+                      <td className="val-green">+{fmtBRL(m.aReceber)}</td>
+                      <td className="val-red">-{fmtBRL(m.aPagar)}</td>
+                      <td className={m.saldoFinal >= 0 ? 'val-green' : 'val-red'}>{fmtBRL(m.saldoFinal)}</td>
+                      <td>{m.precisaReceber > 0 ? fmtBRL(m.precisaReceber) : '—'}</td>
+                      <td>{STATUS_LABEL[m.status]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </MvDetails>
         </>
       )}
-    </div>
+    </MvPage>
   )
 }
