@@ -45,4 +45,8 @@ public class ItemFinanceiroSaida
     // (juros, amortização ou encargos) — estorno usa isso pra achar e remover os até 3 lançamentos
     // de uma mesma parcela, sem precisar vasculhar pelos Ids individuais guardados em ContaProvisionada.
     public Guid? OrigemFinanciamentoId { get; set; }
+    // Cartão (Bloco 1): liga a compra à Fatura real que a importou — substitui o agrupamento por
+    // competência inferida da data (ver Models/Fatura.cs). Só preenchido em compras de conta
+    // CartaoCredito; nunca em "Pagamento de fatura" (essas usam PagamentoFaturaId, não FaturaId).
+    public Guid? FaturaId { get; set; }
 }
