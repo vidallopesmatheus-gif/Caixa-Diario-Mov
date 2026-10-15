@@ -5,7 +5,7 @@ import { listarContasBancarias } from '../../api/contasBancarias'
 import { editarCategoriaLancamento } from '../../api/registros'
 import { listarCategorias } from '../../api/categorias'
 import { useRegistros } from '../../hooks/useRegistros'
-import { fmtBRL, fmtPct, fmtDate } from '../../utils/format'
+import { fmtBRL, fmtPct, fmtDate, todayISO } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
 import DreKpisPanel from './dre/DreKpisPanel'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
@@ -183,20 +183,48 @@ function unionNomes(listas: { nome: string }[][]): string[] {
   return ordem
 }
 
-function mediaValores(valores: ValorPeriodo[]): ValorPeriodo {
+// Item 3 da Parte 3 (Money Vision): média(valor) ÷ média(receita), não a média dos percentuais —
+// a média dos percentuais distorce quando a receita varia muito entre os períodos comparados (ex.:
+// um mês com receita baixa e despesa fixa alta pesa demais na média, mesmo a despesa em R$ sendo
+// estável). `receitas` é a Receita Bruta de cada período, na mesma ordem/tamanho de `valores`.
+function mediaValores(valores: ValorPeriodo[], receitas: number[]): ValorPeriodo {
   const total = valores.reduce((s, v) => s + v.total, 0) / valores.length
-  const comPct = valores.filter(v => v.percentual !== null)
-  const percentual = comPct.length > 0 ? comPct.reduce((s, v) => s + (v.percentual ?? 0), 0) / comPct.length : null
+  const mediaReceita = receitas.reduce((s, r) => s + r, 0) / receitas.length
+  const percentual = mediaReceita > 0 ? (total / mediaReceita) * 100 : null
   return { total, percentual }
 }
 
-function variacaoValores(valores: ValorPeriodo[]): { rs: number; pct: number | null } | null {
+function diasEntre(deIso: string, ateIso: string): number {
+  const de = new Date(deIso + 'T12:00:00')
+  const ate = new Date(ateIso + 'T12:00:00')
+  return Math.round((ate.getTime() - de.getTime()) / 86400000) + 1
+}
+
+// Item 2 da Parte 3 (Money Vision): quando o período mais recente comparado ainda está em
+// andamento (ex.: comparando até o mês atual, mas hoje é só dia 10), comparar o valor CHEIO dele
+// com o valor cheio do período anterior é injusto — sempre parece uma queda forte só por ter menos
+// dias corridos ainda. Em vez disso, poda o período anterior pros MESMOS N dias corridos
+// (proporcional, já que o DRE não guarda granularidade diária) e marca a variação como "parcial".
+function variacaoValores(
+  valores: ValorPeriodo[], periodosInfo: Periodo[], hoje: string,
+): { rs: number; pct: number | null; parcial: boolean } | null {
   if (valores.length < 2) return null
   const atual = valores[valores.length - 1].total
-  const anterior = valores[valores.length - 2].total
+  const anteriorCheio = valores[valores.length - 2].total
+
+  const periodoAtual = periodosInfo[periodosInfo.length - 1]
+  const periodoAnterior = periodosInfo[periodosInfo.length - 2]
+  const diasTotalAtual = diasEntre(periodoAtual.de, periodoAtual.ate)
+  const diasElapsed = Math.min(diasTotalAtual, Math.max(1, diasEntre(periodoAtual.de, hoje)))
+  const parcial = diasElapsed < diasTotalAtual
+
+  const anterior = parcial
+    ? anteriorCheio * (diasElapsed / diasEntre(periodoAnterior.de, periodoAnterior.ate))
+    : anteriorCheio
+
   const rs = atual - anterior
   const pct = anterior !== 0 ? (rs / Math.abs(anterior)) * 100 : null
-  return { rs, pct }
+  return { rs, pct, parcial }
 }
 
 export default function ClientDrePage() {
@@ -658,8 +686,8 @@ export default function ClientDrePage() {
             </div>
 
             {linhasTabelaComparativa.map((linha, idx) => {
-              const variacao = variacaoValores(linha.valores)
-              const media = mediaValores(linha.valores)
+              const variacao = variacaoValores(linha.valores, periodosComDre.map(p => p.periodo), todayISO())
+              const media = mediaValores(linha.valores, periodosComDre.map(p => p.dre.receitaBruta))
               const zebra = linha.nivel > 0 && idx % 2 === 1
               const corTexto = linha.nivel === 0 ? linha.cor : undefined
               return (
@@ -701,7 +729,14 @@ export default function ClientDrePage() {
                     <span className="dre-tabela-cel dre-tabela-var-col">
                       {variacao ? (
                         <>
-                          <span className="dre-tabela-cel-valor" style={{ color: variacao.rs >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(variacao.rs)}</span>
+                          <span className="dre-tabela-cel-valor" style={{ color: variacao.rs >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                            {fmtBRL(variacao.rs)}
+                            {variacao.parcial && (
+                              <span className="dre-tabela-selo-parcial" title="Período mais recente ainda em andamento — comparado com os mesmos dias do período anterior.">
+                                parcial
+                              </span>
+                            )}
+                          </span>
                           <span className="dre-tabela-cel-pct" style={{ color: variacao.rs >= 0 ? 'var(--success)' : 'var(--danger)' }}>{variacao.pct === null ? '—' : fmtPct(variacao.pct)}</span>
                         </>
                       ) : <span className="dre-tabela-cel-pct">—</span>}

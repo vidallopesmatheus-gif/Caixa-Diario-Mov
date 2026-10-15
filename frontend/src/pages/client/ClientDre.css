@@ -574,6 +574,20 @@
   padding-left: 10px;
 }
 
+/* Item 2 da Parte 3 (Money Vision): selo "parcial" na Variação — avisa que o período mais
+   recente ainda está em andamento e a comparação usa os mesmos dias do período anterior. */
+.dre-tabela-selo-parcial {
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--tx3);
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  padding: 1px 5px;
+  vertical-align: middle;
+}
+
 @media (max-width: 480px) {
   .dre-tabela-wrap { padding: 14px 10px; }
   .dre-tabela-nav { display: flex; }
