@@ -58,6 +58,13 @@ export const listarFaturasCartao = async (contaCartaoId: string): Promise<Fatura
   return (res.dados ?? []).map(mapFatura)
 }
 
+// Cartão (Bloco 2): bancos já usados por este cliente — alimenta o combobox editável da
+// importação ("Nubank, C6, Itaú..."; digitar um nome novo "cria" o emissor, sem cadastro à parte).
+export const listarBancosCartao = async (contaCartaoId: string): Promise<string[]> => {
+  const res = await apiFetch<ApiResponse<string[]>>(`/api/faturas-cartao/${contaCartaoId}/bancos`)
+  return res.dados ?? []
+}
+
 export const sugerirFaturaCartao = async (
   contaCartaoId: string, valor: number, data: string,
 ): Promise<FaturaCartao | null> => {

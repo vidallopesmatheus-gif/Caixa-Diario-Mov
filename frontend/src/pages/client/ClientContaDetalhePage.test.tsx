@@ -8,7 +8,8 @@ import * as categoriasApi from '../../api/categorias'
 import * as importacaoApi from '../../api/importacao'
 import * as regrasApi from '../../api/regras'
 import * as transferenciasApi from '../../api/transferencias'
-import type { ContaBancaria, LancamentoExtrato, Categorias, ContaProvisionada } from '../../types'
+import * as faturasCartaoApi from '../../api/faturasCartao'
+import type { ContaBancaria, LancamentoExtrato, Categorias, ContaProvisionada, ResumoImportacao } from '../../types'
 import { addDays, todayISO } from '../../utils/format'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
@@ -23,6 +24,7 @@ vi.mock('../../api/conciliacao')
 vi.mock('../../api/contasProvisionadas')
 vi.mock('../../api/regras')
 vi.mock('../../api/metas')
+vi.mock('../../api/faturasCartao')
 
 const mockUser = { usuarioId: 'cliente-1', nomeUsuario: 'cli1', perfil: 'cliente' as const, nomeCompleto: 'C', nomeEstabelecimento: '', token: 'tok' }
 
@@ -42,6 +44,12 @@ const contaInvestimento: ContaBancaria = {
   ultimaAtualizacaoRendimento: '2026-10-01',
   metasVinculadas: [{ id: 'meta-1', ano: 2027, sonho: 'Carro novo', valorSonho: 10000, previsaoAtingimentoMesAno: 'mar/2027' }],
   progressoCombinadoPercentual: 40.5,
+}
+
+const contaCartao: ContaBancaria = {
+  id: 'conta-1', clienteId: 'cliente-1', nome: 'Cartões', tipo: 'CartaoCredito',
+  saldoInicial: 0, saldoAtual: -500, entradasMes: 0, saidasMes: 0, pendentesCategorizacao: 0,
+  ativa: true, dataCriacao: '2026-01-01',
 }
 
 const categorias: Categorias = {
@@ -388,4 +396,98 @@ test('recebível com vencimento no mês atual aparece na aba Recebíveis sem pre
 
   await user.click(await screen.findByRole('button', { name: /Recebíveis/ }))
   expect(await screen.findByText('Cliente do mês')).toBeInTheDocument()
+})
+
+// ── Cartão (Bloco 2, Money Vision): importação de fatura ───────────────────────────────────────
+
+function mockResumoImportacao(overrides: Partial<ResumoImportacao> = {}): ResumoImportacao {
+  return {
+    totalEncontradas: 2, totalJaImportadas: 0, totalNovas: 2, totalEntradas: 0, totalSaidas: 150,
+    dataInicioArquivo: '2026-10-01', dataFimArquivo: '2026-10-05',
+    duplicatasManuais: [], duplicatasEntreArquivos: [],
+    ...overrides,
+  }
+}
+
+async function selecionarArquivo(arquivo: File) {
+  // O input fica escondido até a conta terminar de carregar — espera o botão "Importar extrato"
+  // aparecer antes de procurar o input, senão o querySelector roda contra a tela de loading.
+  await screen.findByRole('button', { name: /Importar extrato/ })
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement
+  await userEvent.setup().upload(input, arquivo)
+}
+
+test('conta Cartão de crédito: rótulo mostra "Cartão de crédito" em vez do tipo cru', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaCartao])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+
+  renderPagina()
+
+  expect(await screen.findByText('💳 Cartão de crédito')).toBeInTheDocument()
+  expect(screen.queryByText('CartaoCredito')).not.toBeInTheDocument()
+})
+
+test('conta Cartão de crédito: modal de importação exige banco e vencimento antes de liberar o botão', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaCartao])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+  vi.mocked(importacaoApi.previewExtrato).mockResolvedValue(mockResumoImportacao())
+  vi.mocked(faturasCartaoApi.listarBancosCartao).mockResolvedValue(['Nubank', 'C6'])
+  const user = userEvent.setup()
+  renderPagina()
+
+  const arquivo = new File(['conteudo'], 'fatura.csv', { type: 'text/csv' })
+  await selecionarArquivo(arquivo)
+
+  const btnImportar = await screen.findByRole('button', { name: /Importar 2 transação/ })
+  expect(btnImportar).toBeDisabled()
+
+  await user.type(screen.getByPlaceholderText('Ex.: Nubank'), 'Nubank')
+  expect(btnImportar).toBeDisabled() // falta o vencimento
+
+  const grupoVencimento = screen.getByText('Vencimento').closest('.inp-group') as HTMLElement
+  await user.type(within(grupoVencimento).getByDisplayValue(''), '2026-11-10')
+
+  expect(btnImportar).not.toBeDisabled()
+})
+
+test('conta Cartão de crédito: confirmar importação envia banco, vencimento e competência sugerida', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaCartao])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+  vi.mocked(importacaoApi.previewExtrato).mockResolvedValue(mockResumoImportacao())
+  vi.mocked(faturasCartaoApi.listarBancosCartao).mockResolvedValue([])
+  vi.mocked(importacaoApi.importarExtrato).mockResolvedValue({
+    totalImportadas: 2, totalPendentesCategorizacao: 2, totalCategorizadasPorRegra: 0,
+    totalConciliadasTransferencia: 0, totalAmbiguasTransferencia: 0, totalEntradas: 0, totalSaidas: 150,
+    totalMescladasComManual: 0, totalDuplicatasEntreArquivosSinalizadas: 0, totalDuplicatasEntreArquivosIgnoradas: 0,
+    totalSugestoesVinculo: 0, faturaId: 'fatura-1',
+  })
+  const user = userEvent.setup()
+  renderPagina()
+
+  const arquivo = new File(['conteudo'], 'fatura.csv', { type: 'text/csv' })
+  await selecionarArquivo(arquivo)
+
+  await user.type(await screen.findByPlaceholderText('Ex.: Nubank'), 'Nubank')
+  const grupoVencimento = screen.getByText('Vencimento').closest('.inp-group') as HTMLElement
+  await user.type(within(grupoVencimento).getByDisplayValue(''), '2026-11-10')
+
+  await user.click(screen.getByRole('button', { name: /Importar 2 transação/ }))
+
+  await waitFor(() => expect(importacaoApi.importarExtrato).toHaveBeenCalledWith('conta-1', arquivo, expect.objectContaining({
+    banco: 'Nubank',
+    dataVencimentoFatura: '2026-11-10',
+    competenciaFatura: '2026-11',
+  })))
+})
+
+test('conta ContaCorrente: modal de importação não pede campos de fatura', async () => {
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+  vi.mocked(importacaoApi.previewExtrato).mockResolvedValue(mockResumoImportacao())
+  renderPagina()
+
+  const arquivo = new File(['conteudo'], 'extrato.csv', { type: 'text/csv' })
+  await selecionarArquivo(arquivo)
+
+  await screen.findByRole('button', { name: /Importar 2 transação/ })
+  expect(screen.queryByText('Cartão / banco')).not.toBeInTheDocument()
 })

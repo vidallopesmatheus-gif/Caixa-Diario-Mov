@@ -17,6 +17,7 @@ public class FaturaCartaoServiceTests
     private readonly Mock<IPagamentoFaturaRepository> _pagamentoRepoMock = new();
     private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
     private readonly Mock<IAuditService> _auditMock = new();
+    private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
     private readonly FaturaCartaoService _sut;
 
     // InMemory não é relacional — o serviço detecta isso (Database.IsRelational()) e não abre
@@ -30,7 +31,7 @@ public class FaturaCartaoServiceTests
         _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>());
         _sut = new FaturaCartaoService(
             _contaRepoMock.Object, _registroRepoMock.Object, _pagamentoRepoMock.Object, _categoriaRepoMock.Object,
-            _auditMock.Object, CriarContexto());
+            _auditMock.Object, CriarContexto(), _faturaRepoMock.Object);
     }
 
     private static ContaBancaria CriarConta(
@@ -537,5 +538,34 @@ public class FaturaCartaoServiceTests
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    // ── ListarBancosAsync (Bloco 2) ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ListarBancosAsync_RetornaBancosDistintosDoCliente()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _faturaRepoMock.Setup(r => r.ListarBancosDistintosPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<string> { "C6", "Nubank" });
+
+        var bancos = await _sut.ListarBancosAsync(contaCartao.Id, clienteId, "cliente");
+
+        Assert.Equal(new[] { "C6", "Nubank" }, bancos);
+    }
+
+    [Fact]
+    public async Task ListarBancosAsync_ClienteAcessandoOutroCliente_LancaAcessoNegado()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(
+            () => _sut.ListarBancosAsync(contaCartao.Id, Guid.NewGuid(), "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
     }
 }

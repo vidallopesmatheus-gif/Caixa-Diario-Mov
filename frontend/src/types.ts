@@ -390,6 +390,8 @@ export interface ResultadoImportacao {
   totalDuplicatasEntreArquivosSinalizadas: number
   totalDuplicatasEntreArquivosIgnoradas: number
   totalSugestoesVinculo: number
+  // Cartão (Bloco 2): preenchido só quando a conta é CartaoCredito — a fatura criada por esta importação.
+  faturaId: string | null
 }
 
 /** Lançamento já real (afeta saldo) que ainda não tem categoria. */

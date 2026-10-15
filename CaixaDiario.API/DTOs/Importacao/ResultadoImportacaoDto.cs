@@ -26,4 +26,7 @@ public class ResultadoImportacaoDto
     // Fase 1.2: quantas sugestões de vínculo (título pendente × lançamento real) o motor encontrou
     // no intervalo deste arquivo, depois da deduplicação — a tela mostra "confirmar todas / revisar".
     public int TotalSugestoesVinculo { get; set; }
+    // Cartão (Bloco 2): preenchido só quando a conta é CartaoCredito — a fatura criada por esta
+    // importação, pra tela redirecionar pra "Ver faturas" ou pra abrir ela direto.
+    public Guid? FaturaId { get; set; }
 }

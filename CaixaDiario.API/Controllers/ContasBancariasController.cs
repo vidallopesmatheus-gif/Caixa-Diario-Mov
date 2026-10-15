@@ -131,7 +131,10 @@ public class ContasBancariasController : ControllerBase
         [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim,
         // Fase 1.7: JSON [{"transacaoIndice":N,"acao":"Mesclar"|"ImportarComoNovo"}] — só pras
         // transações que a tela de revisão listou em DuplicatasManuais; índice ausente = Mesclar.
-        [FromForm] string? resolucoesDuplicatasJson = null)
+        [FromForm] string? resolucoesDuplicatasJson = null,
+        // Cartão (Bloco 2): obrigatórios só quando a conta é CartaoCredito — ver ImportacaoService.
+        [FromForm] string? banco = null, [FromForm] DateOnly? dataVencimentoFatura = null,
+        [FromForm] DateOnly? dataFechamentoFatura = null, [FromForm] string? competenciaFatura = null)
     {
         List<ResolucaoDuplicataDto>? resolucoes = null;
         if (!string.IsNullOrWhiteSpace(resolucoesDuplicatasJson))
@@ -149,7 +152,8 @@ public class ContasBancariasController : ControllerBase
         }
 
         var resultado = await _importacaoService.ImportarArquivoAsync(
-            contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim, resolucoes);
+            contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim, resolucoes,
+            banco, dataVencimentoFatura, dataFechamentoFatura, competenciaFatura);
         return Ok(new ApiResponse<ResultadoImportacaoDto> { Dados = resultado });
     }
 

@@ -29,6 +29,7 @@ public class FaturaCartaoService : IFaturaCartaoService
     private readonly ICategoriaRepository _categoriaRepo;
     private readonly IAuditService _auditService;
     private readonly AppDbContext _context;
+    private readonly IFaturaRepository _faturaRepo;
 
     public FaturaCartaoService(
         IContaBancariaRepository contaRepo,
@@ -36,7 +37,8 @@ public class FaturaCartaoService : IFaturaCartaoService
         IPagamentoFaturaRepository pagamentoRepo,
         ICategoriaRepository categoriaRepo,
         IAuditService auditService,
-        AppDbContext context)
+        AppDbContext context,
+        IFaturaRepository faturaRepo)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
@@ -44,6 +46,14 @@ public class FaturaCartaoService : IFaturaCartaoService
         _categoriaRepo = categoriaRepo;
         _auditService = auditService;
         _context = context;
+        _faturaRepo = faturaRepo;
+    }
+
+    public async Task<List<string>> ListarBancosAsync(Guid contaCartaoId, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await ObterCartaoOuFalharAsync(contaCartaoId);
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+        return await _faturaRepo.ListarBancosDistintosPorClienteAsync(conta.ClienteId);
     }
 
     public async Task<List<FaturaCartaoDto>> ListarFaturasAsync(Guid contaCartaoId, Guid usuarioLogadoId, string perfil)

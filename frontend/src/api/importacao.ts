@@ -88,7 +88,11 @@ export interface ResolucaoDuplicata {
 export const importarExtrato = async (
   contaId: string,
   arquivo: File,
-  opcoes?: { dataInicio?: string; dataFim?: string; resolucoesDuplicatas?: ResolucaoDuplicata[] },
+  opcoes?: {
+    dataInicio?: string; dataFim?: string; resolucoesDuplicatas?: ResolucaoDuplicata[]
+    // Cartão (Bloco 2): obrigatórios só quando a conta é CartaoCredito — ver ImportacaoService.
+    banco?: string; dataVencimentoFatura?: string; dataFechamentoFatura?: string; competenciaFatura?: string
+  },
 ): Promise<ResultadoImportacao> => {
   const form = new FormData()
   form.append('arquivo', arquivo)
@@ -98,6 +102,10 @@ export const importarExtrato = async (
   if (opcoes?.resolucoesDuplicatas?.length) {
     form.append('resolucoesDuplicatasJson', JSON.stringify(opcoes.resolucoesDuplicatas))
   }
+  if (opcoes?.banco) form.append('banco', opcoes.banco)
+  if (opcoes?.dataVencimentoFatura) form.append('dataVencimentoFatura', opcoes.dataVencimentoFatura)
+  if (opcoes?.dataFechamentoFatura) form.append('dataFechamentoFatura', opcoes.dataFechamentoFatura)
+  if (opcoes?.competenciaFatura) form.append('competenciaFatura', opcoes.competenciaFatura)
 
   const res = await apiFetch<ApiResponse<unknown>>(
     `/api/contas-bancarias/${contaId}/importar-extrato`,
@@ -116,6 +124,7 @@ export const importarExtrato = async (
     totalDuplicatasEntreArquivosSinalizadas: Number(d.totalDuplicatasEntreArquivosSinalizadas ?? 0),
     totalDuplicatasEntreArquivosIgnoradas: Number(d.totalDuplicatasEntreArquivosIgnoradas ?? 0),
     totalSugestoesVinculo: Number(d.totalSugestoesVinculo ?? 0),
+    faturaId: (d.faturaId as string | null) ?? null,
   }
 }
 

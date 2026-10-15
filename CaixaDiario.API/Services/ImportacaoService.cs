@@ -18,6 +18,7 @@ public class ImportacaoService : IImportacaoService
     private readonly IRegraCategorizacaoRepository _regraRepo;
     private readonly ITransferenciaService _transferenciaService;
     private readonly IConciliacaoService _conciliacaoService;
+    private readonly IFaturaRepository _faturaRepo;
 
     public ImportacaoService(
         IContaBancariaRepository contaRepo,
@@ -26,7 +27,8 @@ public class ImportacaoService : IImportacaoService
         ICategoriaRepository categoriaRepo,
         IRegraCategorizacaoRepository regraRepo,
         ITransferenciaService transferenciaService,
-        IConciliacaoService conciliacaoService)
+        IConciliacaoService conciliacaoService,
+        IFaturaRepository faturaRepo)
     {
         _contaRepo = contaRepo;
         _importRepo = importRepo;
@@ -35,7 +37,17 @@ public class ImportacaoService : IImportacaoService
         _regraRepo = regraRepo;
         _transferenciaService = transferenciaService;
         _conciliacaoService = conciliacaoService;
+        _faturaRepo = faturaRepo;
     }
+
+    // Cartão (Bloco 2, Money Vision): a fatura/extrato de cartão representa compras como valores
+    // POSITIVOS (é um extrato de dívida, não de conta corrente) — os parsers assumem a convenção
+    // contrária (positivo = Entrada, convenção de conta corrente/caixa), então pra conta
+    // CartaoCredito o sentido é invertido: positivo vira compra (Saída/dívida), negativo vira
+    // estorno/crédito (Entrada). Sem isso o saldo da conta Cartões nascia positivo (como se fosse
+    // dinheiro) em vez de negativo (dívida).
+    private static List<TransacaoParseada> InverterSinalParaCartao(List<TransacaoParseada> parseadas) =>
+        parseadas.Select(t => t with { Tipo = t.Tipo == "Entrada" ? "Saida" : "Entrada" }).ToList();
 
     // Representação unificada de uma linha do arquivo, independente do formato de origem.
     // Indice = posição no arquivo, na mesma ordem em que o parser encontrou.
@@ -46,8 +58,9 @@ public class ImportacaoService : IImportacaoService
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
         DateOnly? dataInicio, DateOnly? dataFim)
     {
-        await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
         var todasParseadas = ParsearArquivoValidando(arquivo);
+        if (conta.Tipo == "CartaoCredito") todasParseadas = InverterSinalParaCartao(todasParseadas);
 
         var dataInicioArquivo = todasParseadas.Min(t => t.Data);
         var dataFimArquivo = todasParseadas.Max(t => t.Data);
@@ -277,13 +290,43 @@ public class ImportacaoService : IImportacaoService
     // ── Importar (lança direto no RegistroDiario — afeta saldo na hora) ──────────
     public async Task<ResultadoImportacaoDto> ImportarArquivoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
-        DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null)
+        DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null,
+        string? banco = null, DateOnly? dataVencimentoFatura = null, DateOnly? dataFechamentoFatura = null,
+        string? competenciaFatura = null)
     {
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
         var parseadas = ParsearArquivoValidando(arquivo);
+        if (conta.Tipo == "CartaoCredito") parseadas = InverterSinalParaCartao(parseadas);
 
         if (dataInicio.HasValue) parseadas = parseadas.Where(t => t.Data >= dataInicio.Value).ToList();
         if (dataFim.HasValue) parseadas = parseadas.Where(t => t.Data <= dataFim.Value).ToList();
+
+        // Cartão: cada importação é UMA fatura — todas as compras do arquivo (nunca particionadas
+        // por mês-calendário) se ligam a ela via ItemFinanceiroSaida.FaturaId (ver Models/Fatura.cs).
+        Fatura? fatura = null;
+        if (conta.Tipo == "CartaoCredito")
+        {
+            if (string.IsNullOrWhiteSpace(banco))
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe o cartão/banco desta fatura.", "banco");
+            if (!dataVencimentoFatura.HasValue)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe o vencimento desta fatura.", "dataVencimentoFatura");
+
+            var competencia = string.IsNullOrWhiteSpace(competenciaFatura)
+                ? $"{dataVencimentoFatura.Value.Year:D4}-{dataVencimentoFatura.Value.Month:D2}"
+                : competenciaFatura!.Trim();
+
+            fatura = await _faturaRepo.AdicionarAsync(new Fatura
+            {
+                Id = Guid.NewGuid(),
+                ClienteId = conta.ClienteId,
+                ContaBancariaId = conta.Id,
+                Banco = banco.Trim(),
+                Competencia = competencia,
+                DataFechamento = dataFechamentoFatura,
+                DataVencimento = dataVencimentoFatura.Value,
+                CriadoEm = DateTime.UtcNow,
+            });
+        }
 
         var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
@@ -542,6 +585,7 @@ public class ImportacaoService : IImportacaoService
                         RegraCategorizacaoId = regraIdAplicada,
                         PendenteCategorizacao = pendente,
                         CategoriaSugerida = sugerida,
+                        FaturaId = fatura?.Id,
                     });
                     registro.SaldoFinal -= t.Valor;
                 }
@@ -651,6 +695,7 @@ public class ImportacaoService : IImportacaoService
             TotalDuplicatasEntreArquivosSinalizadas = totalDuplicatasEntreArquivosSinalizadas,
             TotalDuplicatasEntreArquivosIgnoradas = totalDuplicatasEntreArquivosIgnoradas,
             TotalSugestoesVinculo = totalSugestoesVinculo,
+            FaturaId = fatura?.Id,
         };
     }
 

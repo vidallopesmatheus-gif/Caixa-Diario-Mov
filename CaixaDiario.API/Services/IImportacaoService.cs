@@ -18,10 +18,15 @@ public interface IImportacaoService
     /// Lança as transações do arquivo direto no RegistroDiario (afeta saldo na hora).
     /// dataInicio/dataFim restringem quais linhas do arquivo entram. Deduplicação (FITID ou
     /// heurística data+valor+descrição) roda automaticamente, sem seleção manual do usuário.
+    /// Cartão (Bloco 2, Money Vision): quando a conta é CartaoCredito, banco/dataVencimentoFatura
+    /// são obrigatórios — o arquivo inteiro vira UMA fatura (nunca mais partida por mês-calendário),
+    /// e o sinal das transações é invertido (positivo = compra/dívida, não dinheiro entrando).
     /// </summary>
     Task<ResultadoImportacaoDto> ImportarArquivoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
-        DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null);
+        DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null,
+        string? banco = null, DateOnly? dataVencimentoFatura = null, DateOnly? dataFechamentoFatura = null,
+        string? competenciaFatura = null);
 
     Task<List<PendenteCategorizacaoDto>> ListarPendentesCategorizacaoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil);

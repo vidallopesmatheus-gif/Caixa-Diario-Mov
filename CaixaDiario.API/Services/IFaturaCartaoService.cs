@@ -5,6 +5,9 @@ namespace CaixaDiario.API.Services;
 public interface IFaturaCartaoService
 {
     Task<List<FaturaCartaoDto>> ListarFaturasAsync(Guid contaCartaoId, Guid usuarioLogadoId, string perfil);
+    // Cartão (Bloco 2): valores de "banco" já usados por este cliente — alimenta o combobox
+    // editável da importação ("Nubank, C6, Itaú..."; digitar um nome novo "cria" o emissor).
+    Task<List<string>> ListarBancosAsync(Guid contaCartaoId, Guid usuarioLogadoId, string perfil);
     Task<FaturaCartaoDto?> SugerirFaturaAsync(Guid contaCartaoId, decimal valor, DateOnly data, Guid usuarioLogadoId, string perfil);
     Task<PagamentoFaturaDto> VincularPagamentoAsync(VincularPagamentoFaturaDto dto, Guid usuarioLogadoId, string perfil);
     Task<PagamentoFaturaDto> PagarFaturaAsync(Guid contaCartaoId, PagarFaturaDto dto, Guid usuarioLogadoId, string perfil);
