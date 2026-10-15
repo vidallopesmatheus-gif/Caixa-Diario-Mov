@@ -13,9 +13,25 @@ export function fmtNumDecimal(value: number, casas = 1): string {
   return value.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })
 }
 
+/** Redesign visual (Money Vision): valor abreviado pra eixos/rótulos de gráfico — "R$ 12,4 mil",
+ * "R$ 3,2 mi" — nunca usado no tooltip, que sempre mostra o valor cheio (fmtBRL). */
+export function fmtBRLCompacto(value: number): string {
+  const abs = Math.abs(value)
+  const sinal = value < 0 ? '-' : ''
+  if (abs >= 1_000_000) return `${sinal}R$ ${(abs / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`
+  if (abs >= 1_000) return `${sinal}R$ ${(abs / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`
+  return fmtBRL(value)
+}
+
 export function fmtDate(iso: string): string {
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`
+}
+
+/** Redesign visual (Money Vision): rodapé mono dos heróis — "LIDO EM 14/10/2026 · <fonte>". */
+export function fmtLidoEm(fonte?: string): string {
+  const base = `LIDO EM ${fmtDate(todayISO())}`
+  return fonte ? `${base} · ${fonte}` : base
 }
 
 // toISOString() usa UTC: perto da meia-noite em São Paulo (UTC-3) ele já mostra o dia seguinte.
