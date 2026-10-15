@@ -88,8 +88,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     [registros, contaFiltro]
   )
 
+  // Cartão (Bloco 3, Money Vision): saldo de cartão é dívida, nunca dinheiro disponível.
   const saldoConsolidado = useMemo(() =>
-    contasBancarias.filter(c => c.ativa).reduce((s, c) => s + c.saldoAtual, 0),
+    contasBancarias.filter(c => c.ativa && c.tipo !== 'CartaoCredito').reduce((s, c) => s + c.saldoAtual, 0),
     [contasBancarias]
   )
 

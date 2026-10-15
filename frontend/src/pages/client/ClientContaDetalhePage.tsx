@@ -992,8 +992,11 @@ export default function ClientContaDetalhePage() {
           <div className="cd-subtitulo">{TIPO_LABEL[conta.tipo] ?? conta.tipo}</div>
         </div>
         <div className="cd-saldo-box">
-          <span className="cd-saldo-label">Saldo atual</span>
-          <span className={`cd-saldo-val ${conta.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(conta.saldoAtual)}</span>
+          {/* Cartão: dívida é sempre vermelha — usa saldoDevedor, não saldoAtual (que pode estar com sinal invertido). */}
+          <span className="cd-saldo-label">{conta.tipo === 'CartaoCredito' ? 'Fatura(s) em aberto' : 'Saldo atual'}</span>
+          <span className={`cd-saldo-val ${conta.tipo === 'CartaoCredito' ? 'val-red' : conta.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>
+            {fmtBRL(conta.tipo === 'CartaoCredito' ? (conta.saldoDevedor ?? 0) : conta.saldoAtual)}
+          </span>
         </div>
       </div>
 

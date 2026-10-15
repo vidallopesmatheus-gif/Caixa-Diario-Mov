@@ -28,9 +28,12 @@ export default function ResumoStatusBar({
   const contasAtivas = contasBancarias.filter(c => c.ativa)
   const contaSelecionada = contaFiltro ? contasAtivas.find(c => c.id === contaFiltro) : null
 
+  // Cartão (Bloco 3, Money Vision): saldo de cartão é dívida, nunca dinheiro — nunca soma no
+  // consolidado (mesmo sinal errado de antes da correção, ele nunca poderia entrar aqui como se
+  // fosse saldo disponível).
   const saldoConsolidado = contaSelecionada
     ? contaSelecionada.saldoAtual
-    : contasAtivas.reduce((s, c) => s + c.saldoAtual, 0)
+    : contasAtivas.filter(c => c.tipo !== 'CartaoCredito').reduce((s, c) => s + c.saldoAtual, 0)
 
   return (
     <div className="resumo-status-bar">

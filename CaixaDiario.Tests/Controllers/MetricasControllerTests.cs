@@ -81,6 +81,35 @@ public class MetricasControllerTests
     }
 
     [Fact]
+    public async Task ObterMetricas_ComContaCartaoCredito_NaoSomaNoConsolidado()
+    {
+        // Bloco 3 (Money Vision): saldo de cartão é dívida, não dinheiro — mesmo com SaldoFinal
+        // positivo (bug que o Bloco 2 corrigiu na importação), o consolidado nunca pode incluí-lo.
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "ContaCorrente", Ativa = true, SaldoInicial = 0m };
+        var contaCartao = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "CartaoCredito", Ativa = true, SaldoInicial = 0m };
+
+        var registros = new List<RegistroDiario>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = new DateOnly(2026, 1, 15), SaldoFinal = 1000m },
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 1, 15), SaldoFinal = 500m },
+        };
+
+        _registroMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(registros);
+        _contaBancariaMock.Setup(c => c.ListarPorClienteAsync(clienteId))
+            .ReturnsAsync(new List<ContaBancaria> { contaCorrente, contaCartao });
+        _metricasMock.Setup(m => m.CalcularPeriodo(
+                It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), It.IsAny<decimal>(), It.IsAny<decimal>(), It.IsAny<IReadOnlyList<Categoria>>()))
+            .Returns(new MetricasPeriodoDto());
+
+        await CriarSut(Guid.NewGuid(), "admin")
+            .ObterMetricas(clienteId, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+
+        _metricasMock.Verify(m => m.CalcularPeriodo(
+            It.IsAny<List<RegistroDiario>>(), It.IsAny<List<RegistroDiario>>(), 1000m, It.IsAny<decimal>(), It.IsAny<IReadOnlyList<Categoria>>()), Times.Once);
+    }
+
+    [Fact]
     public async Task ObterMetricas_ClienteAcessandoOutro_LancaAcessoNegado()
     {
         var sut = CriarSut(Guid.NewGuid(), "cliente");
