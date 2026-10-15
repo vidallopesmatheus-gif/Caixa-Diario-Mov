@@ -34,4 +34,8 @@ public class MetaAnualDto
     public string? Observacao { get; set; }
     public Guid? TransferenciaResgateId { get; set; }
     public Guid? FinanciamentoId { get; set; }
+    // Item 5 (Money Vision): "Ativo" | "Quitado" do contrato (Models/Financiamento.cs), só
+    // preenchido quando FinanciamentoId existe — permite o front mostrar "Quitar <bem>" em vez de
+    // só "Conquistada" enquanto o financiamento ainda está em aberto.
+    public string? FinanciamentoStatus { get; set; }
 }

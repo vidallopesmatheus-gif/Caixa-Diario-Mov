@@ -58,6 +58,7 @@ public class FinanciamentoServiceTests
     private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
     private readonly Mock<IMetaRepository> _metaRepoMock = new();
     private readonly Mock<IAuditService> _auditMock = new();
+    private readonly Mock<ITransferenciaService> _transferenciaServiceMock = new();
     private readonly FinanciamentoService _sut;
     private readonly List<Financiamento> _financiamentos = new();
     private readonly List<MetaAnual> _metas = new();
@@ -93,7 +94,7 @@ public class FinanciamentoServiceTests
 
         _sut = new FinanciamentoService(
             _financiamentoRepoMock.Object, _contaRepoMock.Object, _registroRepo, _categoriaRepoMock.Object,
-            _metaRepoMock.Object, _auditMock.Object, CriarContexto());
+            _metaRepoMock.Object, _auditMock.Object, CriarContexto(), _transferenciaServiceMock.Object);
     }
 
     private readonly List<ContaBancaria> _contas = new();
@@ -209,6 +210,93 @@ public class FinanciamentoServiceTests
         Assert.Equal(30000m, meta.ValorPago);
         Assert.Equal(resultado.Id, meta.FinanciamentoId);
         Assert.Equal(conta.Id, meta.ContaPagamentoId);
+    }
+
+    // Item 5 (Money Vision): "Entrada (da reserva)" — resgata da conta de investimento da meta pra
+    // conta do financiamento, capado ao saldo REAL (nunca o que TransferenciaService não valida).
+    [Fact]
+    public async Task CriarAsync_ComEntradaDaReservaESaldoSuficiente_ResgataOValorIntegralDaEntrada()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        var contaInvestimento = new ContaBancaria
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "Investimento", Ativa = true, SaldoInicial = 10000m,
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimento.Id)).ReturnsAsync(contaInvestimento);
+        var meta = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, Status = "EmAndamento", Sonho = "Carro", ContaInvestimentoId = contaInvestimento.Id };
+        _metas.Add(meta);
+        var transferenciaId = Guid.NewGuid();
+        _transferenciaServiceMock
+            .Setup(s => s.CriarAsync(clienteId, contaInvestimento.Id, conta.Id, It.IsAny<DateOnly>(), 5000m, It.IsAny<string>(), clienteId, "cliente"))
+            .ReturnsAsync(new CaixaDiario.API.DTOs.Transferencias.TransferenciaDto { Id = transferenciaId });
+
+        var dto = new CriarFinanciamentoDto
+        {
+            Descricao = "Carro", ValorBem = 30000m, ValorEntrada = 5000m, NumeroParcelas = 42,
+            ValorParcela = 1000m, Sistema = "Price", DataPrimeiraParcela = new DateOnly(2027, 1, 10),
+            ContaBancariaId = conta.Id, OrigemMetaId = meta.Id, ResgatarEntradaDoInvestimento = true,
+        };
+        await _sut.CriarAsync(clienteId, clienteId, "cliente", dto);
+
+        _transferenciaServiceMock.Verify(s => s.CriarAsync(
+            clienteId, contaInvestimento.Id, conta.Id, It.IsAny<DateOnly>(), 5000m, It.IsAny<string>(), clienteId, "cliente"), Times.Once);
+        Assert.Equal(transferenciaId, meta.TransferenciaResgateId);
+    }
+
+    [Fact]
+    public async Task CriarAsync_ComEntradaDaReservaESaldoInsuficiente_ResgataSoOSaldoDisponivel()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        // Saldo real da reserva: só 2000, bem menos que os 5000 de entrada pedidos.
+        var contaInvestimento = new ContaBancaria
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "Investimento", Ativa = true, SaldoInicial = 2000m,
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimento.Id)).ReturnsAsync(contaInvestimento);
+        var meta = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, Status = "EmAndamento", Sonho = "Carro", ContaInvestimentoId = contaInvestimento.Id };
+        _metas.Add(meta);
+        _transferenciaServiceMock
+            .Setup(s => s.CriarAsync(clienteId, contaInvestimento.Id, conta.Id, It.IsAny<DateOnly>(), 2000m, It.IsAny<string>(), clienteId, "cliente"))
+            .ReturnsAsync(new CaixaDiario.API.DTOs.Transferencias.TransferenciaDto { Id = Guid.NewGuid() });
+
+        var dto = new CriarFinanciamentoDto
+        {
+            Descricao = "Carro", ValorBem = 30000m, ValorEntrada = 5000m, NumeroParcelas = 42,
+            ValorParcela = 1000m, Sistema = "Price", DataPrimeiraParcela = new DateOnly(2027, 1, 10),
+            ContaBancariaId = conta.Id, OrigemMetaId = meta.Id, ResgatarEntradaDoInvestimento = true,
+        };
+        await _sut.CriarAsync(clienteId, clienteId, "cliente", dto);
+
+        _transferenciaServiceMock.Verify(s => s.CriarAsync(
+            clienteId, contaInvestimento.Id, conta.Id, It.IsAny<DateOnly>(), 2000m, It.IsAny<string>(), clienteId, "cliente"), Times.Once);
+    }
+
+    [Fact]
+    public async Task CriarAsync_SemPedirResgateDeEntrada_NaoCriaTransferencia()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        var contaInvestimento = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "Investimento", Ativa = true, SaldoInicial = 10000m };
+        var meta = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, Status = "EmAndamento", Sonho = "Carro", ContaInvestimentoId = contaInvestimento.Id };
+        _metas.Add(meta);
+
+        var dto = new CriarFinanciamentoDto
+        {
+            Descricao = "Carro", ValorBem = 30000m, ValorEntrada = 5000m, NumeroParcelas = 42,
+            ValorParcela = 1000m, Sistema = "Price", DataPrimeiraParcela = new DateOnly(2027, 1, 10),
+            ContaBancariaId = conta.Id, OrigemMetaId = meta.Id, ResgatarEntradaDoInvestimento = false,
+        };
+        await _sut.CriarAsync(clienteId, clienteId, "cliente", dto);
+
+        _transferenciaServiceMock.Verify(s => s.CriarAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DateOnly>(), It.IsAny<decimal>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>()),
+            Times.Never);
+        Assert.Null(meta.TransferenciaResgateId);
     }
 
     [Fact]

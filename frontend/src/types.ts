@@ -316,6 +316,9 @@ export interface MetaAnual {
   observacao?: string
   transferenciaResgateId?: string
   financiamentoId?: string
+  // Item 5 (Money Vision): "Ativo" | "Quitado" do contrato vinculado — "Ativo" mostra "Quitar
+  // <bem>" em vez de só "Conquistada".
+  financiamentoStatus?: 'Ativo' | 'Quitado'
 }
 
 export interface LoginResponse {

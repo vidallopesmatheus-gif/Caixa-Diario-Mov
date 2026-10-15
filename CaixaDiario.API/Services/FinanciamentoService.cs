@@ -25,11 +25,12 @@ public class FinanciamentoService : IFinanciamentoService
     private readonly IMetaRepository _metaRepo;
     private readonly IAuditService _auditService;
     private readonly AppDbContext _context;
+    private readonly ITransferenciaService _transferenciaService;
 
     public FinanciamentoService(
         IFinanciamentoRepository financiamentoRepo, IContaBancariaRepository contaRepo,
         IRegistroRepository registroRepo, ICategoriaRepository categoriaRepo, IMetaRepository metaRepo,
-        IAuditService auditService, AppDbContext context)
+        IAuditService auditService, AppDbContext context, ITransferenciaService transferenciaService)
     {
         _financiamentoRepo = financiamentoRepo;
         _contaRepo = contaRepo;
@@ -38,6 +39,7 @@ public class FinanciamentoService : IFinanciamentoService
         _metaRepo = metaRepo;
         _auditService = auditService;
         _context = context;
+        _transferenciaService = transferenciaService;
     }
 
     public async Task<FinanciamentoDto> CriarAsync(Guid clienteId, Guid usuarioLogadoId, string perfil, CriarFinanciamentoDto dto)
@@ -126,6 +128,28 @@ public class FinanciamentoService : IFinanciamentoService
             var meta = await _metaRepo.ObterPorIdAsync(dto.OrigemMetaId.Value);
             if (meta != null && meta.ClienteId == clienteId && meta.Status == "EmAndamento")
             {
+                // Item 5 (Money Vision): "Entrada (da reserva)" — resgata da conta de investimento
+                // da meta pra conta do financiamento, capado ao saldo REAL (mesmo critério do "🏆
+                // Conquistei" à vista — nunca deixa a reserva negativa; o que faltar sai do que a
+                // conta do financiamento já tinha).
+                if (dto.ResgatarEntradaDoInvestimento && dto.ValorEntrada > 0 && meta.ContaInvestimentoId.HasValue)
+                {
+                    var contaInvestimento = await _contaRepo.ObterPorIdAsync(meta.ContaInvestimentoId.Value);
+                    if (contaInvestimento != null)
+                    {
+                        var registrosInvestimento = await _registroRepo.ListarPorContaAsync(contaInvestimento.Id);
+                        var saldoRealInvestimento = ContaBancariaService.ObterSaldoAtual(contaInvestimento, registrosInvestimento);
+                        var valorResgate = Math.Min(dto.ValorEntrada, Math.Max(0m, saldoRealInvestimento));
+                        if (valorResgate > 0)
+                        {
+                            var resgate = await _transferenciaService.CriarAsync(
+                                clienteId, meta.ContaInvestimentoId.Value, dto.ContaBancariaId, DataLocalHelper.Hoje(), valorResgate,
+                                $"Resgate para entrada — {dto.Descricao}", usuarioLogadoId, perfil);
+                            meta.TransferenciaResgateId = resgate.Id;
+                        }
+                    }
+                }
+
                 meta.Status = "Conquistada";
                 meta.DataConquista = DataLocalHelper.Hoje();
                 meta.ValorPago = dto.ValorBem;

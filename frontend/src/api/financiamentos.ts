@@ -50,6 +50,7 @@ export const criarFinanciamento = async (clienteId: string, dto: {
   contaBancariaId: string
   bemVinculado?: string
   origemMetaId?: string
+  resgatarEntradaDoInvestimento?: boolean
 }): Promise<Financiamento> => {
   const res = await apiFetch<ApiResponse<unknown>>(`/api/financiamentos/${clienteId}`, {
     method: 'POST',
@@ -59,6 +60,7 @@ export const criarFinanciamento = async (clienteId: string, dto: {
       Sistema: dto.sistema, DataPrimeiraParcela: dto.dataPrimeiraParcela, ContaBancariaId: dto.contaBancariaId,
       OrigemMetaId: dto.origemMetaId,
       BemVinculado: dto.bemVinculado,
+      ResgatarEntradaDoInvestimento: dto.resgatarEntradaDoInvestimento ?? false,
     }),
   })
   return mapFinanciamento(res.dados)

@@ -34,6 +34,7 @@ function mapMeta(raw: any): MetaAnual {
     observacao: raw.observacao ?? undefined,
     transferenciaResgateId: raw.transferenciaResgateId ?? undefined,
     financiamentoId: raw.financiamentoId ?? undefined,
+    financiamentoStatus: raw.financiamentoStatus ?? undefined,
   }
 }
 
