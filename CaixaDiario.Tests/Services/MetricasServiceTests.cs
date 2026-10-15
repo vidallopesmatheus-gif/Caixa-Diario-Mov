@@ -1491,4 +1491,29 @@ public class MetricasServiceTests
 
         Assert.Null(resultado.TaxaPoupancaPercentual);
     }
+
+    // Redesign visual (Money Vision): top 3 categorias de gasto, pro fluxo "Entrou → Gastou (top
+    // 3) → Guardou → Ficou" — só apresentação, nunca muda o valor de Gastou.
+    [Fact]
+    public void CalcularParaOndeFoiMeuDinheiro_RetornaAs3MaioresCategoriasDeGasto()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 10, 5),
+            new() { Item("Venda", 10000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Aluguel", 2000m, "Aluguel", "CustoFixo"),
+                Item("Folha", 3000m, "Folha de pagamento", "CustoFixo"),
+                Item("Marketing", 500m, "Marketing", "CustoVariavel"),
+                Item("Software", 100m, "Software", "CustoVariavel"),
+            });
+
+        var resultado = _sut.CalcularParaOndeFoiMeuDinheiro(new() { reg }, new HashSet<Guid>());
+
+        Assert.Equal(3, resultado.TopCategoriasGasto.Count);
+        Assert.Equal("Folha de pagamento", resultado.TopCategoriasGasto[0].Nome);
+        Assert.Equal(3000m, resultado.TopCategoriasGasto[0].Total);
+        Assert.Equal("Aluguel", resultado.TopCategoriasGasto[1].Nome);
+        Assert.Equal("Marketing", resultado.TopCategoriasGasto[2].Nome);
+        Assert.DoesNotContain(resultado.TopCategoriasGasto, c => c.Nome == "Software"); // 4º maior, fora do top 3
+    }
 }

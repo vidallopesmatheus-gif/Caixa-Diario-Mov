@@ -881,6 +881,14 @@ public class MetricasService : IMetricasService
 
         var ficou = entrou - gastou - guardou;
 
+        // Redesign visual: top 3 categorias de saída do período — mesma agregação já usada no
+        // ranking de categorias da DRE (SomarSaidasPorCategoria), só reaproveitada pra exibição.
+        var topCategorias = SomarSaidasPorCategoria(registrosDoMes)
+            .OrderByDescending(kv => kv.Value)
+            .Take(3)
+            .Select(kv => new DreCategoriaDto { Nome = kv.Key, Total = kv.Value })
+            .ToList();
+
         return new ParaOndeFoiMeuDinheiroDto
         {
             Entrou = entrou,
@@ -888,6 +896,7 @@ public class MetricasService : IMetricasService
             Guardou = guardou,
             Ficou = ficou,
             TaxaPoupancaPercentual = entrou > 0 ? Math.Round(guardou / entrou * 100, 1) : null,
+            TopCategoriasGasto = topCategorias,
         };
     }
 }

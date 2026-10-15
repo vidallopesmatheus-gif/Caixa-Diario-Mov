@@ -15,4 +15,7 @@ public class ParaOndeFoiMeuDinheiroDto
     public decimal Ficou { get; set; }
     /// <summary>Guardou / Entrou — null quando não há receita no período (divisão indefinida).</summary>
     public decimal? TaxaPoupancaPercentual { get; set; }
+    /// <summary>Redesign visual (Money Vision): as 3 maiores categorias de saída do período, pro
+    /// fluxo "Entrou → Gastou (top 3) → Guardou → Ficou" — só apresentação, nunca mudam Gastou.</summary>
+    public List<DreCategoriaDto> TopCategoriasGasto { get; set; } = new();
 }
