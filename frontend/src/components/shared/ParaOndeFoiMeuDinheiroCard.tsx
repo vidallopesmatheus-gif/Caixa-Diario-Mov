@@ -1,5 +1,5 @@
 import type { ParaOndeFoiMeuDinheiro } from '../../api/metricas'
-import { fmtBRL } from '../../utils/format'
+import { fmtBRL, fmtPct } from '../../utils/format'
 import './ParaOndeFoiMeuDinheiroCard.css'
 
 interface Props {
@@ -33,8 +33,8 @@ export default function ParaOndeFoiMeuDinheiroCard({ dados }: Props) {
         <span className="pofmd-passo"><span className="pofmd-rotulo">Gastou</span><span className="val-red">{fmtBRL(gastou)}</span></span>
         <span className="pofmd-seta">→</span>
         <span className="pofmd-passo">
-          <span className="pofmd-rotulo">Guardou</span>
-          <span className={guardou >= 0 ? 'val-green' : 'val-red'}>{fmtBRL(guardou)}</span>
+          <span className="pofmd-rotulo">{guardou >= 0 ? 'Guardou' : 'Resgatou'}</span>
+          <span className={guardou >= 0 ? 'val-green' : 'val-red'}>{fmtBRL(Math.abs(guardou))}</span>
         </span>
         <span className="pofmd-seta">→</span>
         <span className="pofmd-passo"><span className="pofmd-rotulo">Ficou na conta</span><span>{fmtBRL(ficou)}</span></span>
@@ -42,7 +42,7 @@ export default function ParaOndeFoiMeuDinheiroCard({ dados }: Props) {
       <p className="pofmd-frase">{frase}</p>
       {taxaPoupancaPercentual != null && (
         <div className="pofmd-taxa">
-          Taxa de poupança: <strong style={{ color: corTaxa }}>{taxaPoupancaPercentual.toFixed(1)}%</strong>
+          Taxa de poupança: <strong style={{ color: corTaxa }}>{fmtPct(taxaPoupancaPercentual)}</strong>
           {taxaPoupancaPercentual < 0 && <span style={{ color: 'var(--danger)' }}> — você usou a reserva</span>}
         </div>
       )}

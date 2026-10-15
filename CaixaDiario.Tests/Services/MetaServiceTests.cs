@@ -21,6 +21,7 @@ public class MetaServiceTests
     private readonly Mock<IContaProvisionadaService> _contaProvisionadaServiceMock = new();
     private readonly Mock<IFaturaCartaoService> _faturaCartaoServiceMock = new();
     private readonly Mock<ITransferenciaService> _transferenciaServiceMock = new();
+    private readonly Mock<IFinanciamentoRepository> _financiamentoRepoMock = new();
     private readonly MetaService _sut;
 
     public MetaServiceTests()
@@ -29,7 +30,7 @@ public class MetaServiceTests
         _sut = new MetaService(
             _repoMock.Object, _metaProgressoMock.Object, _contaBancariaRepoMock.Object,
             _registroRepoMock.Object, _categoriaRepoMock.Object, _contaProvisionadaServiceMock.Object,
-            _faturaCartaoServiceMock.Object, _transferenciaServiceMock.Object);
+            _faturaCartaoServiceMock.Object, _transferenciaServiceMock.Object, _financiamentoRepoMock.Object);
     }
 
     [Fact]
@@ -77,6 +78,40 @@ public class MetaServiceTests
 
         Assert.Equal(2027, resultado[0].Ano);
         Assert.Equal(2025, resultado[1].Ano);
+    }
+
+    // Item 5 (Money Vision): meta conquistada via "Financiado" expõe o status do contrato — base
+    // pro front mostrar "Quitar <bem>" em vez de só "Conquistada" enquanto não fica "Quitado".
+    [Fact]
+    public async Task ListarMetas_MetaConquistadaComFinanciamentoAberto_ExpoeFinanciamentoStatusAtivo()
+    {
+        var clienteId = Guid.NewGuid();
+        var financiamentoId = Guid.NewGuid();
+        var meta = new MetaAnual
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Ano = 2026, ModoMeta = "metodo", Status = "Conquistada",
+            FormaPagamento = "Financiado", FinanciamentoId = financiamentoId, CriadoEm = DateTime.UtcNow, AtualizadoEm = DateTime.UtcNow,
+        };
+        _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual> { meta });
+        _financiamentoRepoMock.Setup(r => r.ObterPorIdAsync(financiamentoId))
+            .ReturnsAsync(new Financiamento { Id = financiamentoId, ClienteId = clienteId, Status = "Ativo" });
+
+        var resultado = await _sut.ListarMetasAsync(clienteId, clienteId, "cliente");
+
+        Assert.Equal("Ativo", Assert.Single(resultado).FinanciamentoStatus);
+    }
+
+    [Fact]
+    public async Task ListarMetas_SemFinanciamentoVinculado_FinanciamentoStatusNulo()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = new MetaAnual { Id = Guid.NewGuid(), ClienteId = clienteId, Ano = 2026, ModoMeta = "metodo", CriadoEm = DateTime.UtcNow, AtualizadoEm = DateTime.UtcNow };
+        _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual> { meta });
+
+        var resultado = await _sut.ListarMetasAsync(clienteId, clienteId, "cliente");
+
+        Assert.Null(Assert.Single(resultado).FinanciamentoStatus);
+        _financiamentoRepoMock.Verify(r => r.ObterPorIdAsync(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]
@@ -234,7 +269,7 @@ public class MetaServiceTests
         var sut = new MetaService(
             repoMock.Object, _metaProgressoMock.Object, _contaBancariaRepoMock.Object,
             _registroRepoMock.Object, _categoriaRepoMock.Object, _contaProvisionadaServiceMock.Object,
-            _faturaCartaoServiceMock.Object, _transferenciaServiceMock.Object);
+            _faturaCartaoServiceMock.Object, _transferenciaServiceMock.Object, _financiamentoRepoMock.Object);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() => sut.ExcluirMetaAsync(meta.Id, Guid.NewGuid(), "cliente"));
 
@@ -308,13 +343,18 @@ public class MetaServiceTests
         meta.ContaInvestimentoId = contaInvestimentoId;
         var contaId = Guid.NewGuid();
         var conta = new ContaBancaria { Id = contaId, ClienteId = clienteId, Tipo = "ContaCorrente", Ativa = true };
+        var contaInvestimento = new ContaBancaria { Id = contaInvestimentoId, ClienteId = clienteId, Tipo = "Investimento", Ativa = true, SaldoInicial = 5000m };
         var data = new DateOnly(2026, 11, 10);
         var transferenciaId = Guid.NewGuid();
 
         _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
         _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimentoId)).ReturnsAsync(contaInvestimento);
         _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync((RegistroDiario?)null);
         _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+        // Saldo real da reserva (5000, via SaldoInicial — sem registros) é maior que o valor pago
+        // (4000), então o resgate sai integral — ver teste dedicado pro caso saldo insuficiente.
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaInvestimentoId)).ReturnsAsync(new List<RegistroDiario>());
         _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
         _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
         _transferenciaServiceMock
@@ -331,6 +371,48 @@ public class MetaServiceTests
 
         _transferenciaServiceMock.Verify(s => s.CriarAsync(
             clienteId, contaInvestimentoId, contaId, data, 4000m, It.IsAny<string>(), clienteId, "cliente"), Times.Once);
+        Assert.Equal(transferenciaId, resultado.TransferenciaResgateId);
+    }
+
+    // Item 2 (Money Vision): saldo real da reserva menor que o valor pago — resgata só o
+    // disponível (nunca o que TransferenciaService deixaria a reserva negativa); a diferença sai
+    // naturalmente do saldo que a conta de pagamento já tinha (split reserva + conta de pagamento).
+    [Fact]
+    public async Task Conquistar_AVistaComResgate_SaldoRealMenorQueOValorPago_ResgataSoOSaldoDisponivel()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaInvestimentoId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        meta.ContaInvestimentoId = contaInvestimentoId;
+        var contaId = Guid.NewGuid();
+        var conta = new ContaBancaria { Id = contaId, ClienteId = clienteId, Tipo = "ContaCorrente", Ativa = true };
+        // Saldo real da reserva: só 1500 (via SaldoInicial), bem menos que os 4000 pagos.
+        var contaInvestimento = new ContaBancaria { Id = contaInvestimentoId, ClienteId = clienteId, Tipo = "Investimento", Ativa = true, SaldoInicial = 1500m };
+        var data = new DateOnly(2026, 11, 10);
+        var transferenciaId = Guid.NewGuid();
+
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimentoId)).ReturnsAsync(contaInvestimento);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaInvestimentoId)).ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
+        _transferenciaServiceMock
+            .Setup(s => s.CriarAsync(clienteId, contaInvestimentoId, contaId, data, 1500m, It.IsAny<string>(), clienteId, "cliente"))
+            .ReturnsAsync(new TransferenciaDto { Id = transferenciaId });
+
+        var dto = new ConquistarMetaDto
+        {
+            ValorPago = 4000m, Data = data, FormaPagamento = "AVista",
+            ContaPagamentoId = contaId, Categoria = "Equipamentos", ResgatarDoInvestimento = true,
+        };
+
+        var resultado = await _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto);
+
+        _transferenciaServiceMock.Verify(s => s.CriarAsync(
+            clienteId, contaInvestimentoId, contaId, data, 1500m, It.IsAny<string>(), clienteId, "cliente"), Times.Once);
         Assert.Equal(transferenciaId, resultado.TransferenciaResgateId);
     }
 
@@ -454,20 +536,45 @@ public class MetaServiceTests
         _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartaoId)).ReturnsAsync(contaCartao);
         _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
 
+        var dataPrimeiraParcela = new DateOnly(2026, 12, 5);
         var dto = new ConquistarMetaDto
         {
             ValorPago = 4000m, Data = data, FormaPagamento = "Cartao", Parcelas = 10,
-            ContaPagamentoId = contaCartaoId, Categoria = "Equipamentos",
+            DataPrimeiraParcela = dataPrimeiraParcela, ContaPagamentoId = contaCartaoId, Categoria = "Equipamentos",
         };
 
         var resultado = await _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto);
 
+        // Item 3 (Money Vision): a 1ª parcela usa a data do próximo vencimento do cartão
+        // (DataPrimeiraParcela), não a data da compra — nunca mais as duas coincidindo por acaso.
         _faturaCartaoServiceMock.Verify(s => s.LancarComprasParceladaAsync(
             contaCartaoId, clienteId, "cliente",
             It.Is<LancarCompraParceladaDto>(d => d.ValorTotal == 4000m && d.QuantidadeParcelas == 10
-                && d.Descricao == "🏆 Notebook" && d.Categoria == "Equipamentos" && d.Data == data),
+                && d.Descricao == "🏆 Notebook" && d.Categoria == "Equipamentos" && d.Data == dataPrimeiraParcela),
             meta.Id), Times.Once);
         Assert.Equal("Conquistada", resultado.Status);
+    }
+
+    [Fact]
+    public async Task Conquistar_CartaoSemDataPrimeiraParcela_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        var contaCartaoId = Guid.NewGuid();
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartaoId))
+            .ReturnsAsync(new ContaBancaria { Id = contaCartaoId, ClienteId = clienteId, Tipo = "CartaoCredito", Ativa = true });
+
+        var dto = new ConquistarMetaDto
+        {
+            ValorPago = 4000m, Data = new DateOnly(2026, 11, 10), FormaPagamento = "Cartao", Parcelas = 10,
+            ContaPagamentoId = contaCartaoId, Categoria = "Equipamentos",
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("dataPrimeiraParcela", ex.Campo);
     }
 
     [Fact]

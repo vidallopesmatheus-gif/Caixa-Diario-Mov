@@ -7,6 +7,7 @@ import * as contasRecorrentesApi from '../../api/contasRecorrentes'
 import * as contasBancariasApi from '../../api/contasBancarias'
 import * as categoriasApi from '../../api/categorias'
 import { addDays, todayISO } from '../../utils/format'
+import * as faturasCartaoApi from '../../api/faturasCartao'
 import type { ContaBancaria, Registro } from '../../types'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
@@ -17,6 +18,14 @@ vi.mock('../../hooks/useRegistros')
 vi.mock('../../api/contasRecorrentes')
 vi.mock('../../api/contasBancarias')
 vi.mock('../../api/categorias')
+vi.mock('../../api/faturasCartao')
+// Item 6 (Money Vision): useNavigate passou a ser usado pra abrir "Ver Faturas" a partir desta
+// tela — precisa de um Router de verdade só pra navegação de fato; stub evita envolver TODO
+// render(<ClientContasPage />) existente num <MemoryRouter>.
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => vi.fn() }
+})
 
 const mockUser = { usuarioId: 'u1', nomeUsuario: 'cli1', perfil: 'cliente' as const, nomeCompleto: 'Cliente Um', nomeEstabelecimento: '', token: 'tok' }
 
@@ -30,6 +39,7 @@ function mockHooks(registros: Registro[], overrides: Partial<ReturnType<typeof u
   vi.mocked(contasRecorrentesApi.listarSugestoesRecorrencia).mockResolvedValue([])
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([])
   vi.mocked(categoriasApi.listarCategorias).mockResolvedValue({ entradas: [], saidas: [] })
+  vi.mocked(faturasCartaoApi.listarFaturasCartao).mockResolvedValue([])
   vi.mocked(useRegistrosHook.useRegistros).mockReturnValue({
     registros,
     loading: false,
@@ -62,6 +72,14 @@ function criarRegistro(overrides: Partial<Registro>): Registro {
 
 function irParaAbaPagar() {
   fireEvent.click(screen.getByRole('button', { name: /A Pagar/ }))
+}
+
+// Dia `dia` do mês ANTERIOR ao atual — sempre vencido, sem depender de quando o teste roda e sem
+// cair na pegadinha de toISOString() (UTC) empurrar a data perto da virada do dia.
+function isoMesAnterior(dia: number): string {
+  const hoje = new Date(todayISO() + 'T12:00:00')
+  const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, dia, 12)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 test('exclui a conta certa quando dois registros compartilham a mesma data sem conta bancária vinculada', async () => {
@@ -166,6 +184,24 @@ test('mostra os totais pendentes do mês a receber e a pagar no topo', async () 
   expect(within(totalPagar).getByText('R$ 300,00')).toBeInTheDocument()
 })
 
+// Item 6 (Money Vision): faturas de cartão em aberto aparecem aqui também, não só em
+// Projeção/Meu Futuro/"A pagar em cartões".
+test('mostra faturas de cartão em aberto, mas não as já pagas', async () => {
+  const cartao = criarConta({ id: 'cartao-1', nome: 'Nubank', tipo: 'CartaoCredito' })
+  mockHooks([])
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([cartao])
+  vi.mocked(faturasCartaoApi.listarFaturasCartao).mockResolvedValue([
+    { id: 'f1', banco: 'Nubank', competencia: '2026-10', dataFechamento: '2026-10-01', dataVencimento: '2026-10-10', valorTotal: 500, valorPago: 0, saldoDevedor: 500, quantidadeCompras: 3, status: 'Fechada' },
+    { id: 'f2', banco: 'Nubank', competencia: '2026-09', dataFechamento: '2026-09-01', dataVencimento: '2026-09-10', valorTotal: 300, valorPago: 300, saldoDevedor: 0, quantidadeCompras: 1, status: 'Paga' },
+  ])
+
+  render(<ClientContasPage />)
+
+  expect(await screen.findByText('Nubank — Nubank')).toBeInTheDocument()
+  expect(screen.getByText('R$ 500,00')).toBeInTheDocument()
+  expect(screen.getByText('💳 Faturas de cartão em aberto (1)')).toBeInTheDocument()
+})
+
 test('filtro por conta esconde pendências de outras contas', async () => {
   const contaA = criarConta({ id: 'conta-A', nome: 'Conta A' })
   const contaB = criarConta({ id: 'conta-B', nome: 'Conta B' })
@@ -191,9 +227,13 @@ test('filtro por conta esconde pendências de outras contas', async () => {
 
 // ── Parte 3 (Money Vision): seletor de mês, atrasadas sempre no topo, pagas/recebidas recolhidas ──
 
-test('atrasada some da lista do mês e aparece só no aviso do topo e no modo "Atrasadas"', async () => {
+// Parte 4 (Money Vision): atrasada não some da lista — continua listada dentro do mês do seu
+// próprio vencimento (e conta no total daquele mês), além de continuar no aviso do topo e no
+// modo "Atrasadas".
+test('atrasada aparece dentro do mês do seu vencimento e conta no total daquele mês', async () => {
+  const vencimentoMesAnterior = isoMesAnterior(15)
   const registro = criarRegistro({
-    contasAPagar: [{ descricao: 'Conta velha', valor: 400, dataVencimento: addDays(todayISO(), -10), pago: false }],
+    contasAPagar: [{ descricao: 'Conta velha', valor: 400, dataVencimento: vencimentoMesAnterior, pago: false }],
   })
   mockHooks([registro])
 
@@ -201,9 +241,17 @@ test('atrasada some da lista do mês e aparece só no aviso do topo e no modo "A
   irParaAbaPagar()
 
   expect(await screen.findByText(/1 conta\(s\) atrasada\(s\) · R\$ 400,00/)).toBeInTheDocument()
+  // Mês atual (padrão) não é o mês do vencimento dela — ainda não aparece aqui.
   expect(screen.getByText('Nenhuma pendente.')).toBeInTheDocument()
   expect(screen.queryByText('Conta velha')).not.toBeInTheDocument()
 
+  // Navega pro mês do próprio vencimento: aparece lá, e conta no total daquele mês.
+  fireEvent.click(screen.getByRole('button', { name: '‹' }))
+  expect(await screen.findByText('Conta velha')).toBeInTheDocument()
+  const totalPagar = screen.getByText(/A pagar em/).closest('.contas-total-card') as HTMLElement
+  expect(within(totalPagar).getByText('R$ 400,00')).toBeInTheDocument()
+
+  // Continua aparecendo também no modo "Atrasadas", pra quem quer ver todas de uma vez.
   fireEvent.click(screen.getByRole('button', { name: 'Atrasadas' }))
   expect(await screen.findByText('Conta velha')).toBeInTheDocument()
 })

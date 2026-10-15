@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { useMetricas } from '../../hooks/useMetricas'
@@ -55,6 +56,7 @@ function parseDataAlvo(iso: string): Date | null {
 
 export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, loading } = useRegistros(clienteId)
 
@@ -88,8 +90,9 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     [registros, contaFiltro]
   )
 
+  // Cartão (Bloco 3, Money Vision): saldo de cartão é dívida, nunca dinheiro disponível.
   const saldoConsolidado = useMemo(() =>
-    contasBancarias.filter(c => c.ativa).reduce((s, c) => s + c.saldoAtual, 0),
+    contasBancarias.filter(c => c.ativa && c.tipo !== 'CartaoCredito').reduce((s, c) => s + c.saldoAtual, 0),
     [contasBancarias]
   )
 
@@ -1009,6 +1012,19 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           </div>
         </div>
 
+        {/* Item 7 (Money Vision): data-alvo do objetivo já passou e ele continua "EmAndamento" —
+            aviso distinto do "ritmo atrasado" (que é sobre o aporte, não sobre o prazo em si). */}
+        {objetivoSelecionado && objetivoSelecionado.status === 'EmAndamento'
+          && objetivoSelecionado.dataAlvo && objetivoSelecionado.dataAlvo < todayISO() && (
+          <div className="meta-recovery-card" style={{ marginTop: 4 }}>
+            <div className="meta-recovery-title">⏰ Prazo vencido</div>
+            <p className="meta-recovery-desc">
+              A data planejada ({new Date(objetivoSelecionado.dataAlvo + 'T12:00:00').toLocaleDateString('pt-BR')}) já passou.
+              Já conquistou? Clique em "🏆 Conquistei" abaixo — ou ajuste a data planejada.
+            </p>
+          </div>
+        )}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
           <button className="btn-meta" onClick={handleSaveObjetivo} disabled={savingObjetivo}>
             {savingObjetivo ? 'Salvando...' : objetivoSelecionadoId ? '💾 Salvar objetivo' : '➕ Criar objetivo'}
@@ -1031,6 +1047,21 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
               }}
             >
               🏆 Conquistei
+            </button>
+          )}
+          {/* Item 5 (Money Vision): financiamento ainda em aberto — "Quitar <bem>" leva direto pra
+              tela de Financiamentos em vez de só mostrar "Conquistada" sem nenhuma próxima ação. */}
+          {objetivoSelecionado && objetivoSelecionado.status === 'Conquistada'
+            && objetivoSelecionado.formaPagamento === 'Financiado' && objetivoSelecionado.financiamentoStatus === 'Ativo' && (
+            <button
+              type="button"
+              onClick={() => navigate('/contas/financiamentos')}
+              style={{
+                padding: '8px 16px', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer',
+                border: '1px solid var(--accent)', background: 'transparent', color: 'var(--accent)',
+              }}
+            >
+              💳 Quitar {objetivoSelecionado.sonho || 'objetivo'}
             </button>
           )}
           {objetivoMsg && <span style={{ fontSize: 13, color: objetivoMsg === 'Objetivo salvo!' ? '#34c759' : '#ff6b6b' }}>{objetivoMsg}</span>}

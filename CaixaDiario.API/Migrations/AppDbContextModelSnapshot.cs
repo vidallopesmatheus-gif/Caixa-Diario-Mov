@@ -321,6 +321,54 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("duplicatas_dispensadas", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.Fatura", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Banco")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("banco");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<string>("Competencia")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("competencia");
+
+                    b.Property<Guid>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateOnly?>("DataFechamento")
+                        .HasColumnType("date")
+                        .HasColumnName("data_fechamento");
+
+                    b.Property<DateOnly>("DataVencimento")
+                        .HasColumnType("date")
+                        .HasColumnName("data_vencimento");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClienteId");
+
+                    b.HasIndex("ContaBancariaId", "DataVencimento");
+
+                    b.ToTable("faturas", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.Financiamento", b =>
                 {
                     b.Property<Guid>("Id")
@@ -726,6 +774,10 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("date")
                         .HasColumnName("data");
 
+                    b.Property<Guid?>("FaturaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("fatura_id");
+
                     b.Property<decimal>("ValorPago")
                         .HasColumnType("decimal(18,2)")
                         .HasColumnName("valor_pago");
@@ -735,6 +787,8 @@ namespace CaixaDiario.API.Migrations
                     b.HasIndex("ClienteId");
 
                     b.HasIndex("ContaOrigemId");
+
+                    b.HasIndex("FaturaId");
 
                     b.HasIndex("ContaCartaoId", "Competencia");
 
@@ -1194,6 +1248,25 @@ namespace CaixaDiario.API.Migrations
                     b.Navigation("ContaBancaria");
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.Fatura", b =>
+                {
+                    b.HasOne("CaixaDiario.API.Models.Usuario", "Cliente")
+                        .WithMany()
+                        .HasForeignKey("ClienteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CaixaDiario.API.Models.ContaBancaria", "ContaBancaria")
+                        .WithMany()
+                        .HasForeignKey("ContaBancariaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Cliente");
+
+                    b.Navigation("ContaBancaria");
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.Financiamento", b =>
                 {
                     b.HasOne("CaixaDiario.API.Models.Usuario", "Cliente")
@@ -1267,11 +1340,18 @@ namespace CaixaDiario.API.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("CaixaDiario.API.Models.Fatura", "Fatura")
+                        .WithMany()
+                        .HasForeignKey("FaturaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Cliente");
 
                     b.Navigation("ContaCartao");
 
                     b.Navigation("ContaOrigem");
+
+                    b.Navigation("Fatura");
                 });
 
             modelBuilder.Entity("CaixaDiario.API.Models.RegistroDiario", b =>

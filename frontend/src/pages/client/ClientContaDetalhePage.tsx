@@ -19,6 +19,7 @@ import type { ResolucaoDuplicata } from '../../api/importacao'
 import { converterLancamentoEmTransferencia, desfazerClassificacaoTransferencia, listarTransferencias } from '../../api/transferencias'
 import type { Transferencia } from '../../api/transferencias'
 import { listarSugestoesVinculo } from '../../api/conciliacao'
+import { listarBancosCartao } from '../../api/faturasCartao'
 import { atualizarContaProvisionada } from '../../api/contasProvisionadas'
 import { listarRegras, atualizarRegra, criarRegra, contarCorrespondencias, aplicarRegraRetroativamente } from '../../api/regras'
 import { buscarCandidatoContrapartida } from '../../utils/candidatoTransferencia'
@@ -40,6 +41,7 @@ const TIPO_LABEL: Record<string, string> = {
   Caixa: '💵 Caixa',
   ContaCorrente: '🏦 Conta Corrente',
   Investimento: '📈 Investimento',
+  CartaoCredito: '💳 Cartão de crédito',
 }
 
 export default function ClientContaDetalhePage() {
@@ -92,6 +94,16 @@ export default function ClientContaDetalhePage() {
   const [resolucoesDuplicatas, setResolucoesDuplicatas] = useState<Record<number, 'Mesclar' | 'ImportarComoNovo' | 'Ignorar' | 'Importar'>>({})
   const [confirmandoTodasSugestoes, setConfirmandoTodasSugestoes] = useState(false)
   const [sugestoesConfirmadas, setSugestoesConfirmadas] = useState(false)
+
+  // Cartão (Bloco 2, Money Vision): cada importação numa conta CartaoCredito é UMA fatura — pede
+  // banco/vencimento (obrigatórios) e fechamento/competência (opcionais, competência é sugerida
+  // pelo vencimento mas editável).
+  const [bancoFatura, setBancoFatura] = useState('')
+  const [bancosDisponiveis, setBancosDisponiveis] = useState<string[]>([])
+  const [dataVencimentoFatura, setDataVencimentoFatura] = useState('')
+  const [dataFechamentoFatura, setDataFechamentoFatura] = useState('')
+  const [competenciaFatura, setCompetenciaFatura] = useState('')
+  const [competenciaEditadaManualmente, setCompetenciaEditadaManualmente] = useState(false)
 
   // ── Fase 0.5: "Revisar duplicatas" — mesma conta/sentido/valor importados duas vezes ─────────
   const [modalDuplicatas, setModalDuplicatas] = useState(false)
@@ -226,17 +238,33 @@ export default function ClientContaDetalhePage() {
     setResultadoImportacao(null)
     setResolucoesDuplicatas({})
     setSugestoesConfirmadas(false)
+    // Cartão: cada arquivo é uma fatura nova — reseta os campos da fatura anterior.
+    setBancoFatura('')
+    setDataVencimentoFatura('')
+    setDataFechamentoFatura('')
+    setCompetenciaFatura('')
+    setCompetenciaEditadaManualmente(false)
     try {
       const resumo = await previewExtrato(contaId, arquivo)
       setDataInicioImport(resumo.dataInicioArquivo || todayISO())
       setDataFimImport(resumo.dataFimArquivo || todayISO())
       setResumoImportacao(resumo)
       setModalImportar(true)
+      if (conta?.tipo === 'CartaoCredito') {
+        listarBancosCartao(contaId).then(setBancosDisponiveis).catch(() => {})
+      }
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao ler o arquivo.')
     } finally {
       setPreviewCarregando(false)
     }
+  }
+
+  // Cartão: competência sugerida pelo vencimento ("yyyy-MM"), mas o usuário pode sobrescrever —
+  // depois disso a sugestão automática para de pisar no valor editado.
+  function handleAlterarVencimentoFatura(valor: string) {
+    setDataVencimentoFatura(valor)
+    if (!competenciaEditadaManualmente && valor) setCompetenciaFatura(valor.slice(0, 7))
   }
 
   async function handleAlterarIntervaloImportacao(novoInicio: string, novoFim: string) {
@@ -267,6 +295,12 @@ export default function ClientContaDetalhePage() {
         dataInicio: dataInicioImport,
         dataFim: dataFimImport,
         resolucoesDuplicatas: resolucoes,
+        ...(conta?.tipo === 'CartaoCredito' ? {
+          banco: bancoFatura,
+          dataVencimentoFatura,
+          dataFechamentoFatura: dataFechamentoFatura || undefined,
+          competenciaFatura: competenciaFatura || undefined,
+        } : {}),
       })
       setResultadoImportacao(resultado)
       setModalImportar(false)
@@ -958,8 +992,11 @@ export default function ClientContaDetalhePage() {
           <div className="cd-subtitulo">{TIPO_LABEL[conta.tipo] ?? conta.tipo}</div>
         </div>
         <div className="cd-saldo-box">
-          <span className="cd-saldo-label">Saldo atual</span>
-          <span className={`cd-saldo-val ${conta.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(conta.saldoAtual)}</span>
+          {/* Cartão: dívida é sempre vermelha — usa saldoDevedor, não saldoAtual (que pode estar com sinal invertido). */}
+          <span className="cd-saldo-label">{conta.tipo === 'CartaoCredito' ? 'Fatura(s) em aberto' : 'Saldo atual'}</span>
+          <span className={`cd-saldo-val ${conta.tipo === 'CartaoCredito' ? 'val-red' : conta.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>
+            {fmtBRL(conta.tipo === 'CartaoCredito' ? (conta.saldoDevedor ?? 0) : conta.saldoAtual)}
+          </span>
         </div>
       </div>
 
@@ -1562,13 +1599,49 @@ export default function ClientContaDetalhePage() {
             <button
               className="btn-confirm"
               onClick={handleConfirmarImportacao}
-              disabled={importando || previewCarregando || !resumoImportacao || resumoImportacao.totalNovas === 0}
+              disabled={
+                importando || previewCarregando || !resumoImportacao || resumoImportacao.totalNovas === 0
+                || (conta?.tipo === 'CartaoCredito' && (!bancoFatura.trim() || !dataVencimentoFatura))
+              }
             >
               {importando ? 'Importando...' : `Importar ${resumoImportacao?.totalNovas ?? 0} transação(ões)`}
             </button>
           </>
         }
       >
+        {conta?.tipo === 'CartaoCredito' && (
+          <>
+            <p style={{ fontSize: 12, color: 'var(--tx3)', marginBottom: 10 }}>
+              Cada importação é uma fatura — todas as compras deste arquivo entram juntas, numa fatura só.
+            </p>
+            <div className="inp-group">
+              <label>Cartão / banco</label>
+              <input
+                type="text" list="bancos-fatura" value={bancoFatura}
+                onChange={e => setBancoFatura(e.target.value)} placeholder="Ex.: Nubank"
+              />
+              <datalist id="bancos-fatura">
+                {bancosDisponiveis.map(b => <option key={b} value={b} />)}
+              </datalist>
+            </div>
+            <div className="inp-group">
+              <label>Vencimento</label>
+              <input type="date" value={dataVencimentoFatura} onChange={e => handleAlterarVencimentoFatura(e.target.value)} />
+            </div>
+            <div className="inp-group">
+              <label>Fechamento (opcional)</label>
+              <input type="date" value={dataFechamentoFatura} onChange={e => setDataFechamentoFatura(e.target.value)} />
+            </div>
+            <div className="inp-group">
+              <label>Referência (mês/ano)</label>
+              <input
+                type="text" value={competenciaFatura} placeholder="yyyy-MM"
+                onChange={e => { setCompetenciaFatura(e.target.value); setCompetenciaEditadaManualmente(true) }}
+              />
+            </div>
+          </>
+        )}
+
         <div className="inp-group">
           <label>Importar do dia</label>
           <input type="date" value={dataInicioImport} onChange={e => handleAlterarIntervaloImportacao(e.target.value, dataFimImport)} />

@@ -13,6 +13,8 @@ public class PagarFaturaDto
     [Required] public Guid ContaOrigemId { get; set; }
     [Required] public DateOnly Data { get; set; }
     [Required] public string Competencia { get; set; } = string.Empty; // "yyyy-MM"
+    // Fatura real (Models/Fatura.cs) sendo paga — null só pro grupo "virtual" (sem Fatura real).
+    public Guid? FaturaId { get; set; }
     // Se omitido, usa o saldo devedor atual da fatura (pagamento integral).
     public decimal? Valor { get; set; }
 }

@@ -22,12 +22,28 @@ public class SaudeFinanceiraServiceTests
         SalvoEm = DateTime.UtcNow,
     };
 
-    [Fact]
-    public void Calcular_ComReceitaEDespesasDoMes_CalculaTaxaPoupancaVerde()
+    // Item 5 (Money Vision): mesma fórmula de "Para onde foi meu dinheiro" — guardado (aporte
+    // líquido em Transferencia numa conta de Investimento) ÷ receita, não (receita−despesas) ÷
+    // receita (duas fórmulas diferentes pro mesmo nome confundiam o cliente).
+    private static RegistroDiario CriarAporteInvestimento(Guid contaInvestimentoId, DateOnly data, decimal valor) => new()
     {
-        var registros = new List<RegistroDiario> { CriarRegistro(Hoje, entradas: 1000m, saidas: 700m) };
+        Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ContaBancariaId = contaInvestimentoId, Data = data,
+        Entradas = new List<ItemFinanceiro> { new() { Descricao = "Aporte", Valor = valor, Categoria = "Transferência", TipoCusto = "Transferencia" } },
+        Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+    };
 
-        var resultado = _sut.Calcular(registros, new List<MetaAnual>());
+    [Fact]
+    public void Calcular_ComAporteEmContaDeInvestimento_CalculaTaxaPoupancaVerde()
+    {
+        var contaInvestimentoId = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(Hoje, entradas: 1000m),
+            CriarAporteInvestimento(contaInvestimentoId, Hoje, 300m),
+        };
+
+        var resultado = _sut.Calcular(registros, new List<MetaAnual>(), new HashSet<Guid> { contaInvestimentoId });
 
         Assert.True(resultado.TaxaPoupanca.Disponivel);
         Assert.Equal(30m, resultado.TaxaPoupanca.Valor);
@@ -37,7 +53,7 @@ public class SaudeFinanceiraServiceTests
     [Fact]
     public void Calcular_SemReceitaNoMes_TaxaPoupancaIndisponivel()
     {
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual>());
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual>(), new HashSet<Guid>());
 
         Assert.False(resultado.TaxaPoupanca.Disponivel);
         Assert.Equal("cinza", resultado.TaxaPoupanca.Semaforo);
@@ -49,19 +65,24 @@ public class SaudeFinanceiraServiceTests
         var excluido = CriarRegistro(Hoje, entradas: 1000m, saidas: 100m);
         excluido.Excluido = true;
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { excluido }, new List<MetaAnual>());
+        var resultado = _sut.Calcular(new List<RegistroDiario> { excluido }, new List<MetaAnual>(), new HashSet<Guid>());
 
         Assert.False(resultado.TaxaPoupanca.Disponivel);
     }
 
     [Theory]
-    [InlineData(1000, 850, "amarelo")]
-    [InlineData(1000, 980, "vermelho")]
-    public void Calcular_TaxaPoupanca_ClassificaSemaforoPorFaixa(decimal receita, decimal despesa, string semaforoEsperado)
+    [InlineData(1000, 150, "amarelo")]
+    [InlineData(1000, 20, "vermelho")]
+    public void Calcular_TaxaPoupanca_ClassificaSemaforoPorFaixa(decimal receita, decimal aporte, string semaforoEsperado)
     {
-        var registros = new List<RegistroDiario> { CriarRegistro(Hoje, entradas: receita, saidas: despesa) };
+        var contaInvestimentoId = Guid.NewGuid();
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(Hoje, entradas: receita),
+            CriarAporteInvestimento(contaInvestimentoId, Hoje, aporte),
+        };
 
-        var resultado = _sut.Calcular(registros, new List<MetaAnual>());
+        var resultado = _sut.Calcular(registros, new List<MetaAnual>(), new HashSet<Guid> { contaInvestimentoId });
 
         Assert.Equal(semaforoEsperado, resultado.TaxaPoupanca.Semaforo);
     }
@@ -69,7 +90,7 @@ public class SaudeFinanceiraServiceTests
     [Fact]
     public void Calcular_SemHistoricoDeReceita_ComprometimentoFixoIndisponivel()
     {
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual>());
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual>(), new HashSet<Guid>());
 
         Assert.False(resultado.ComprometimentoFixos.Disponivel);
     }
@@ -99,7 +120,7 @@ public class SaudeFinanceiraServiceTests
             RegistroComCustoFixo(mesPassado2, 5000m, 1000m),
         };
 
-        var resultado = _sut.Calcular(registros, new List<MetaAnual>());
+        var resultado = _sut.Calcular(registros, new List<MetaAnual>(), new HashSet<Guid>());
 
         Assert.True(resultado.ComprometimentoFixos.Disponivel);
         Assert.Equal(20m, resultado.ComprometimentoFixos.Valor);
@@ -112,7 +133,7 @@ public class SaudeFinanceiraServiceTests
         var mesPassado1 = Hoje.AddMonths(-1);
         var registro = CriarRegistro(mesPassado1, entradas: 5000m, saidas: 2000m); // Categoria "Geral", sem TipoCusto
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<MetaAnual>());
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<MetaAnual>(), new HashSet<Guid>());
 
         Assert.True(resultado.ComprometimentoFixos.Disponivel);
         Assert.Equal(0m, resultado.ComprometimentoFixos.Valor);
@@ -123,7 +144,7 @@ public class SaudeFinanceiraServiceTests
     {
         var metaSimples = new MetaAnual { Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ModoMeta = "simples", AtualizadoEm = DateTime.UtcNow, CriadoEm = DateTime.UtcNow };
 
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { metaSimples });
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { metaSimples }, new HashSet<Guid>());
 
         Assert.False(resultado.RitmoMeta.Disponivel);
     }
@@ -138,7 +159,7 @@ public class SaudeFinanceiraServiceTests
             AtualizadoEm = DateTime.UtcNow, CriadoEm = DateTime.UtcNow,
         };
 
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta }, new HashSet<Guid>());
 
         Assert.False(resultado.RitmoMeta.Disponivel);
     }
@@ -160,7 +181,7 @@ public class SaudeFinanceiraServiceTests
             CriadoEm = DateTime.UtcNow.AddMonths(-6),
         };
 
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta }, new HashSet<Guid>());
 
         Assert.True(resultado.RitmoMeta.Disponivel);
         Assert.Equal(85.3m, resultado.RitmoMeta.Valor);
@@ -171,7 +192,7 @@ public class SaudeFinanceiraServiceTests
     [Fact]
     public void Calcular_PreencheOMesEAnoDoPeriodo()
     {
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual>());
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual>(), new HashSet<Guid>());
 
         Assert.Contains(Hoje.Year.ToString(), resultado.Periodo);
         Assert.NotEmpty(resultado.Periodo);
@@ -197,7 +218,7 @@ public class SaudeFinanceiraServiceTests
             CriadoEm = DateTime.UtcNow.AddMonths(-6),
         };
 
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta }, new HashSet<Guid>());
 
         Assert.True(resultado.RitmoMeta.Disponivel);
         Assert.Contains("Reserva de emergência", resultado.RitmoMeta.Calculo);
@@ -213,7 +234,7 @@ public class SaudeFinanceiraServiceTests
             AtualizadoEm = DateTime.UtcNow, CriadoEm = DateTime.UtcNow,
         };
 
-        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta });
+        var resultado = _sut.Calcular(new List<RegistroDiario>(), new List<MetaAnual> { meta }, new HashSet<Guid>());
 
         Assert.False(resultado.RitmoMeta.Disponivel);
         Assert.Contains("aguarde", resultado.RitmoMeta.Calculo, StringComparison.OrdinalIgnoreCase);
@@ -221,16 +242,21 @@ public class SaudeFinanceiraServiceTests
     }
 
     [Fact]
-    public void Calcular_IgnoraTransferenciasERendimentoNaTaxaDePoupanca()
+    public void Calcular_IgnoraTransferenciaERendimentoDeContaQueNaoEInvestimentoNaTaxaDePoupanca()
     {
+        var contaInvestimentoId = Guid.NewGuid();
         var registro = CriarRegistro(Hoje, entradas: 1000m, saidas: 700m);
-        registro.Entradas.Add(new ItemFinanceiro { Descricao = "Resgate", Valor = 5000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
-        registro.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aporte", Valor = 2000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
+        // Ruído numa conta comum (não investimento) — nunca deveria inflar a receita nem contar
+        // como "guardado", mesmo sendo Transferencia/Rendimento.
+        registro.Entradas.Add(new ItemFinanceiro { Descricao = "Resgate em outra conta", Valor = 5000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
+        registro.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aporte em outra conta", Valor = 2000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
         registro.Entradas.Add(new ItemFinanceiro { Descricao = "Rendimento", Valor = 50m, Categoria = "Rendimento", TipoCusto = "Rendimento" });
+        var aporte = CriarAporteInvestimento(contaInvestimentoId, Hoje, 300m);
 
-        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<MetaAnual>());
+        var resultado = _sut.Calcular(
+            new List<RegistroDiario> { registro, aporte }, new List<MetaAnual>(), new HashSet<Guid> { contaInvestimentoId });
 
-        // Mesmo resultado do teste acima (30%) — transferências/rendimento não entram na conta.
+        // Receita continua só os 1000 operacionais; guardado é só o aporte na conta de investimento.
         Assert.Equal(30m, resultado.TaxaPoupanca.Valor);
     }
 }

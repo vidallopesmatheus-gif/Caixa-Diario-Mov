@@ -17,7 +17,7 @@ const TIPO_LABEL: Record<string, string> = {
   Caixa: '💵 Caixa',
   ContaCorrente: '🏦 Conta Corrente',
   Investimento: '📈 Investimento',
-  CartaoCredito: '💳 Cartão de Crédito',
+  CartaoCredito: '💳 Cartão de crédito',
 }
 
 function fmtNum(n: number) {

@@ -23,6 +23,7 @@ public class AppDbContext : DbContext
     public DbSet<RegraCategorizacao> RegrasCategorizacao { get; set; }
     public DbSet<LinkConciliacao> LinksConciliacao { get; set; }
     public DbSet<PagamentoFatura> PagamentosFatura { get; set; }
+    public DbSet<Fatura> Faturas { get; set; }
     public DbSet<OcorrenciaRecorrenteDispensada> OcorrenciasRecorrentesDispensadas { get; set; }
     public DbSet<DuplicataDispensada> DuplicatasDispensadas { get; set; }
     public DbSet<SugestaoVinculoIgnorada> SugestoesVinculoIgnoradas { get; set; }
@@ -473,6 +474,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ContaCartaoId).HasColumnName("conta_cartao_id");
             entity.Property(e => e.ContaOrigemId).HasColumnName("conta_origem_id");
             entity.Property(e => e.Competencia).HasColumnName("competencia").IsRequired();
+            entity.Property(e => e.FaturaId).HasColumnName("fatura_id");
             entity.Property(e => e.ValorPago).HasColumnName("valor_pago").HasColumnType("decimal(18,2)");
             entity.Property(e => e.Data).HasColumnName("data");
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
@@ -491,7 +493,38 @@ public class AppDbContext : DbContext
                 .HasForeignKey(e => e.ContaOrigemId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(e => e.Fatura)
+                .WithMany()
+                .HasForeignKey(e => e.FaturaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(e => new { e.ContaCartaoId, e.Competencia });
+        });
+
+        // Cartão (Bloco 1): fatura como entidade própria — ver Models/Fatura.cs.
+        modelBuilder.Entity<Fatura>(entity =>
+        {
+            entity.ToTable("faturas");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+            entity.Property(e => e.Banco).HasColumnName("banco").IsRequired();
+            entity.Property(e => e.Competencia).HasColumnName("competencia").IsRequired();
+            entity.Property(e => e.DataFechamento).HasColumnName("data_fechamento");
+            entity.Property(e => e.DataVencimento).HasColumnName("data_vencimento").IsRequired();
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+
+            entity.HasOne(e => e.Cliente)
+                .WithMany()
+                .HasForeignKey(e => e.ClienteId);
+
+            entity.HasOne(e => e.ContaBancaria)
+                .WithMany()
+                .HasForeignKey(e => e.ContaBancariaId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.ContaBancariaId, e.DataVencimento });
         });
     }
 }

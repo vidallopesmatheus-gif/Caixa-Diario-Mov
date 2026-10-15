@@ -2,6 +2,10 @@ import { apiFetch } from './client'
 import type { ApiResponse } from '../types'
 
 export interface FaturaCartao {
+  // Id da Fatura real (Bloco 1/4) — null só no grupo "virtual" (parcelas lançadas direto no
+  // cartão, ainda sem fatura real; identificado só pela competencia).
+  id: string | null
+  banco: string | null
   competencia: string // "yyyy-MM"
   dataFechamento: string
   dataVencimento: string
@@ -9,7 +13,7 @@ export interface FaturaCartao {
   valorPago: number
   saldoDevedor: number
   quantidadeCompras: number
-  status: 'Aberta' | 'Fechada' | 'Paga'
+  status: 'Aberta' | 'Fechada' | 'Parcial' | 'Paga'
 }
 
 export interface PagamentoFatura {
@@ -19,6 +23,7 @@ export interface PagamentoFatura {
   contaOrigemId: string
   contaOrigemNome: string
   competencia: string
+  faturaId: string | null
   valorPago: number
   data: string
   criadoEm: string
@@ -27,6 +32,8 @@ export interface PagamentoFatura {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapFatura(raw: any): FaturaCartao {
   return {
+    id: raw.id ?? null,
+    banco: raw.banco ?? null,
     competencia: raw.competencia,
     dataFechamento: raw.dataFechamento,
     dataVencimento: raw.dataVencimento,
@@ -47,6 +54,7 @@ function mapPagamento(raw: any): PagamentoFatura {
     contaOrigemId: raw.contaOrigemId,
     contaOrigemNome: raw.contaOrigemNome ?? '',
     competencia: raw.competencia,
+    faturaId: raw.faturaId ?? null,
     valorPago: raw.valorPago ?? 0,
     data: raw.data,
     criadoEm: raw.criadoEm,
@@ -56,6 +64,13 @@ function mapPagamento(raw: any): PagamentoFatura {
 export const listarFaturasCartao = async (contaCartaoId: string): Promise<FaturaCartao[]> => {
   const res = await apiFetch<ApiResponse<unknown[]>>(`/api/faturas-cartao/${contaCartaoId}`)
   return (res.dados ?? []).map(mapFatura)
+}
+
+// Cartão (Bloco 2): bancos já usados por este cliente — alimenta o combobox editável da
+// importação ("Nubank, C6, Itaú..."; digitar um nome novo "cria" o emissor, sem cadastro à parte).
+export const listarBancosCartao = async (contaCartaoId: string): Promise<string[]> => {
+  const res = await apiFetch<ApiResponse<string[]>>(`/api/faturas-cartao/${contaCartaoId}/bancos`)
+  return res.dados ?? []
 }
 
 export const sugerirFaturaCartao = async (
@@ -76,6 +91,7 @@ export const vincularPagamentoFatura = async (dto: {
   data: string
   contaCartaoId: string
   competencia: string
+  faturaId?: string | null
 }): Promise<PagamentoFatura> => {
   const res = await apiFetch<ApiResponse<unknown>>('/api/faturas-cartao/vincular-pagamento', {
     method: 'POST',
@@ -85,6 +101,7 @@ export const vincularPagamentoFatura = async (dto: {
       Data: dto.data,
       ContaCartaoId: dto.contaCartaoId,
       Competencia: dto.competencia,
+      FaturaId: dto.faturaId ?? null,
     }),
   })
   return mapPagamento(res.dados)
@@ -103,12 +120,14 @@ export const pagarFatura = async (contaCartaoId: string, dto: {
   contaOrigemId: string
   data: string
   competencia: string
+  faturaId?: string | null
   valor?: number
 }): Promise<PagamentoFatura> => {
   const res = await apiFetch<ApiResponse<unknown>>(`/api/faturas-cartao/${contaCartaoId}/pagar`, {
     method: 'POST',
     body: JSON.stringify({
-      ContaOrigemId: dto.contaOrigemId, Data: dto.data, Competencia: dto.competencia, Valor: dto.valor,
+      ContaOrigemId: dto.contaOrigemId, Data: dto.data, Competencia: dto.competencia,
+      FaturaId: dto.faturaId ?? null, Valor: dto.valor,
     }),
   })
   return mapPagamento(res.dados)

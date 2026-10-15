@@ -25,6 +25,13 @@ public class FaturasCartaoController : ControllerBase
         return Ok(new ApiResponse<List<FaturaCartaoDto>> { Dados = faturas });
     }
 
+    [HttpGet("{contaCartaoId:guid}/bancos")]
+    public async Task<IActionResult> ListarBancos(Guid contaCartaoId)
+    {
+        var bancos = await _service.ListarBancosAsync(contaCartaoId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<List<string>> { Dados = bancos });
+    }
+
     [HttpGet("{contaCartaoId:guid}/sugestao")]
     public async Task<IActionResult> Sugerir(Guid contaCartaoId, [FromQuery] decimal valor, [FromQuery] DateOnly data)
     {

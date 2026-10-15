@@ -1,0 +1,36 @@
+/* Item 6 (Money Vision): segmented control pra forma de pagamento — a opção escolhida cresce e
+   ganha destaque; as outras encolhem e se reorganizam ao redor dela. */
+.cm-segmented {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--bg-input);
+}
+
+.cm-segmented-opcao {
+  flex: 1;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tx2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: flex .2s ease, background .2s ease, color .2s ease, transform .15s ease;
+  white-space: nowrap;
+}
+
+.cm-segmented-opcao:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.cm-segmented-opcao.ativa {
+  flex: 1.6;
+  background: var(--accent);
+  color: #fff;
+  transform: scale(1.03);
+  box-shadow: 0 2px 8px rgba(10, 132, 255, .35);
+}

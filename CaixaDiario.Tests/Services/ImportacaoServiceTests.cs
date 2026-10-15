@@ -19,6 +19,7 @@ public class ImportacaoServiceTests
     private readonly Mock<IRegraCategorizacaoRepository> _regraRepoMock = new();
     private readonly Mock<ITransferenciaService> _transferenciaServiceMock = new();
     private readonly Mock<IConciliacaoService> _conciliacaoServiceMock = new();
+    private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
     private readonly ImportacaoService _sut;
 
     public ImportacaoServiceTests()
@@ -42,16 +43,17 @@ public class ImportacaoServiceTests
         _conciliacaoServiceMock.Setup(s => s.ListarSugestoesAsync(
             It.IsAny<Guid>(), It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>()))
             .ReturnsAsync(new List<CaixaDiario.API.DTOs.Conciliacao.SugestaoVinculoDto>());
+        _faturaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Fatura>())).ReturnsAsync((Fatura f) => f);
         _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object, _categoriaRepoMock.Object,
-            _regraRepoMock.Object, _transferenciaServiceMock.Object, _conciliacaoServiceMock.Object);
+            _regraRepoMock.Object, _transferenciaServiceMock.Object, _conciliacaoServiceMock.Object, _faturaRepoMock.Object);
     }
 
-    private static ContaBancaria CriarConta(Guid contaId, Guid clienteId, decimal saldoInicial = 0m) => new()
+    private static ContaBancaria CriarConta(Guid contaId, Guid clienteId, decimal saldoInicial = 0m, string tipo = "ContaCorrente") => new()
     {
         Id = contaId,
         ClienteId = clienteId,
         Nome = "Conta Teste",
-        Tipo = "ContaCorrente",
+        Tipo = tipo,
         SaldoInicial = saldoInicial,
         Ativa = true,
         DataCriacao = DateTime.UtcNow,
@@ -341,6 +343,149 @@ public class ImportacaoServiceTests
         Assert.Single(criado.Saidas);
         Assert.Equal(2, resultado.TotalImportadas);
         _importRepoMock.Verify(r => r.AdicionarLoteAsync(It.Is<IEnumerable<TransacaoImportada>>(l => l.Count() == 2)), Times.Once);
+    }
+
+    // ── Cartão (Bloco 2, Money Vision): sinal invertido + fatura única por importação ───────────
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_InverteSinalDasTransacoes()
+    {
+        // Numa fatura de cartão, valor positivo = compra (dívida), negativo = estorno/crédito —
+        // o contrário da convenção de conta corrente que os parsers assumem por padrão.
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Compra Mercado;150,00\n26/07/2026;Estorno Loja;-30,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "Nubank", dataVencimentoFatura: new DateOnly(2026, 8, 10));
+
+        var compra = Assert.Single(criado!.Saidas);
+        Assert.Equal(150m, compra.Valor);
+        var estorno = Assert.Single(criado.Entradas);
+        Assert.Equal(30m, estorno.Valor);
+        Assert.Equal(-120m, criado.SaldoFinal); // dívida: -150 (compra) + 30 (estorno)
+    }
+
+    // Item 7 (Bloco 5, opcional): compra parcelada no próprio extrato ("<comerciante> - Parcela
+    // N/M") grava NumeroParcela/TotalParcelas — base pra Projeção/Meu Futuro projetarem as
+    // parcelas futuras (ver FaturaCartaoService.CalcularParcelasFuturasProjetadas).
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_CompraParcelada_GravaNumeroETotalDeParcelas()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Trocafone - Parcela 1/10;100,00\n26/07/2026;Apple.Com/Bill;30,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "Nubank", dataVencimentoFatura: new DateOnly(2026, 8, 10));
+
+        var parcelada = criado!.Saidas.Single(s => s.Descricao == "Trocafone - Parcela 1/10");
+        Assert.Equal(1, parcelada.NumeroParcela);
+        Assert.Equal(10, parcelada.TotalParcelas);
+
+        var naoParcelada = criado.Saidas.Single(s => s.Descricao == "Apple.Com/Bill");
+        Assert.Null(naoParcelada.NumeroParcela);
+        Assert.Null(naoParcelada.TotalParcelas);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_SemBanco_LancaDadosInvalidos()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+        var arquivo = CriarArquivoTexto("fatura.csv", "Data;Descricao;Valor\n26/07/2026;Compra;100,00\n");
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ImportarArquivoAsync(
+            contaId, clienteId, "cliente", arquivo, null, null, dataVencimentoFatura: new DateOnly(2026, 8, 10)));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("banco", ex.Campo);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_SemVencimento_LancaDadosInvalidos()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+        var arquivo = CriarArquivoTexto("fatura.csv", "Data;Descricao;Valor\n26/07/2026;Compra;100,00\n");
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ImportarArquivoAsync(
+            contaId, clienteId, "cliente", arquivo, null, null, banco: "Nubank"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal("dataVencimentoFatura", ex.Campo);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_CriaUmaFaturaELigaTodasAsCompras()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        Fatura? faturaCriada = null;
+        _faturaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Fatura>()))
+            .Callback<Fatura>(f => faturaCriada = f).ReturnsAsync((Fatura f) => f);
+
+        var registrosCriados = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => registrosCriados.Add(r)).ReturnsAsync((RegistroDiario r) => r);
+
+        // Duas datas diferentes — mesmo arquivo, mesma fatura (nunca mais particionada por data).
+        var csv = "Data;Descricao;Valor\n26/07/2026;Compra A;100,00\n28/08/2026;Compra B;50,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "Nubank", dataVencimentoFatura: new DateOnly(2026, 9, 10), dataFechamentoFatura: new DateOnly(2026, 9, 1));
+
+        Assert.NotNull(faturaCriada);
+        Assert.Equal("Nubank", faturaCriada!.Banco);
+        Assert.Equal("2026-09", faturaCriada.Competencia);
+        Assert.Equal(new DateOnly(2026, 9, 10), faturaCriada.DataVencimento);
+        Assert.Equal(new DateOnly(2026, 9, 1), faturaCriada.DataFechamento);
+        Assert.Equal(faturaCriada.Id, resultado.FaturaId);
+
+        var todasAsCompras = registrosCriados.SelectMany(r => r.Saidas).ToList();
+        Assert.Equal(2, todasAsCompras.Count);
+        Assert.All(todasAsCompras, c => Assert.Equal(faturaCriada.Id, c.FaturaId));
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ContaCartaoCredito_InverteSinalNosTotais()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Compra;150,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Equal(150m, resultado.TotalSaidas);
+        Assert.Equal(0m, resultado.TotalEntradas);
     }
 
     [Fact]

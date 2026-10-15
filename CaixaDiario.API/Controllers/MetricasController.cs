@@ -35,12 +35,16 @@ public class MetricasController : ControllerBase
     // Mesmo cálculo de /banco: soma o saldo atual de cada conta ATIVA do cliente — nunca o
     // SaldoFinal de "o registro mais recente", que é só uma conta aleatória, não o consolidado.
     // Item 1.5: só contas correntes/Caixa — investimento fica à parte (não é dinheiro disponível
-    // pro dia a dia; contar aqui inflava Runway/SaldoProjetado). Única fórmula usada tanto pelo
-    // Dashboard quanto por qualquer outra tela que chamar /api/metricas.
+    // pro dia a dia; contar aqui inflava Runway/SaldoProjetado). Cartão (Bloco 3, Money Vision):
+    // saldo de cartão é dívida, nunca dinheiro — contá-lo aqui inflava o consolidado com a dívida
+    // em aberto (um cartão com fatura de R$2.000 chegava a somar +R$2.000 no saldo disponível em
+    // vez de não entrar). Única fórmula usada tanto pelo Dashboard quanto por qualquer outra tela
+    // que chamar /api/metricas.
     private async Task<decimal> CalcularSaldoConsolidadoAsync(Guid clienteId, List<RegistroDiario> registros)
     {
         var contas = await _contaBancariaRepo.ListarPorClienteAsync(clienteId);
-        return contas.Where(c => c.Ativa && c.Tipo != "Investimento").Sum(c => ContaBancariaService.ObterSaldoAtual(c, registros));
+        return contas.Where(c => c.Ativa && c.Tipo != "Investimento" && c.Tipo != "CartaoCredito")
+            .Sum(c => ContaBancariaService.ObterSaldoAtual(c, registros));
     }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);

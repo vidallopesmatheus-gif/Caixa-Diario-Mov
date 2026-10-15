@@ -18,12 +18,14 @@ public class MetaService : IMetaService
     private readonly IContaProvisionadaService _contaProvisionadaService;
     private readonly IFaturaCartaoService _faturaCartaoService;
     private readonly ITransferenciaService _transferenciaService;
+    private readonly IFinanciamentoRepository _financiamentoRepository;
 
     public MetaService(
         IMetaRepository metaRepository, IMetaProgressoService metaProgressoService,
         IContaBancariaRepository contaBancariaRepository, IRegistroRepository registroRepository,
         ICategoriaRepository categoriaRepository, IContaProvisionadaService contaProvisionadaService,
-        IFaturaCartaoService faturaCartaoService, ITransferenciaService transferenciaService)
+        IFaturaCartaoService faturaCartaoService, ITransferenciaService transferenciaService,
+        IFinanciamentoRepository financiamentoRepository)
     {
         _metaRepository = metaRepository;
         _metaProgressoService = metaProgressoService;
@@ -33,7 +35,13 @@ public class MetaService : IMetaService
         _contaProvisionadaService = contaProvisionadaService;
         _faturaCartaoService = faturaCartaoService;
         _transferenciaService = transferenciaService;
+        _financiamentoRepository = financiamentoRepository;
     }
+
+    // Item 5 (Money Vision): status do contrato de financiamento vinculado, quando existir — ver
+    // MetaAnualDto.FinanciamentoStatus.
+    private async Task<string?> ObterFinanciamentoStatusAsync(MetaAnual m) =>
+        m.FinanciamentoId.HasValue ? (await _financiamentoRepository.ObterPorIdAsync(m.FinanciamentoId.Value))?.Status : null;
 
     public async Task<MetaAnualDto> ObterMetaAsync(Guid clienteId, int ano, Guid usuarioLogadoId, string perfil)
     {
@@ -50,7 +58,7 @@ public class MetaService : IMetaService
         var metas = new List<MetaAnual> { meta };
         await _metaProgressoService.AplicarSaldoDeContasVinculadasAsync(clienteId, metas);
 
-        return MapToDto(meta);
+        return MapToDto(meta, await ObterFinanciamentoStatusAsync(meta));
     }
 
     public async Task<List<MetaAnualDto>> ListarMetasAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -60,7 +68,10 @@ public class MetaService : IMetaService
 
         var metas = await _metaRepository.ListarPorClienteAsync(clienteId);
         await _metaProgressoService.AplicarSaldoDeContasVinculadasAsync(clienteId, metas);
-        return metas.OrderByDescending(m => m.Ano).Select(MapToDto).ToList();
+        var resultado = new List<MetaAnualDto>();
+        foreach (var m in metas.OrderByDescending(m => m.Ano))
+            resultado.Add(MapToDto(m, await ObterFinanciamentoStatusAsync(m)));
+        return resultado;
     }
 
     public async Task<MetaAnualDto> SalvarMetaAsync(SalvarMetaAnualDto dto, Guid usuarioLogadoId, string perfil)
@@ -107,7 +118,8 @@ public class MetaService : IMetaService
             existente.IconeSonho = dto.IconeSonho;
             existente.DataAlvo = dto.DataAlvo;
             existente.AtualizadoEm = DateTime.UtcNow;
-            return MapToDto(await _metaRepository.SalvarAsync(existente));
+            var salvo = await _metaRepository.SalvarAsync(existente);
+            return MapToDto(salvo, await ObterFinanciamentoStatusAsync(salvo));
         }
 
         var nova = new MetaAnual
@@ -203,12 +215,28 @@ public class MetaService : IMetaService
             // Fase 5.3: meta vinculada a investimento — resgata o valor pago de lá pra conta de
             // pagamento (fora do DRE). Só faz sentido à vista: boleto/cartão ainda não debitaram
             // nada da conta de pagamento na hora da compra, resgatar agora seria prematuro.
+            //
+            // Item 2 (Money Vision): o resgate nunca pode passar do saldo REAL da conta de
+            // investimento (TransferenciaService não valida isso — deixaria a reserva negativa).
+            // Quando o saldo real é menor que o valor pago, resgata só o disponível; a diferença
+            // sai naturalmente do saldo que a conta de pagamento já tinha antes da saída acima (é
+            // o "split reserva + conta de pagamento" — nunca um erro bloqueando a conquista).
             if (meta.ContaInvestimentoId.HasValue && dto.ResgatarDoInvestimento)
             {
-                var resgate = await _transferenciaService.CriarAsync(
-                    meta.ClienteId, meta.ContaInvestimentoId.Value, contaPagamento.Id, dto.Data, dto.ValorPago,
-                    $"Resgate para {descricao}", usuarioLogadoId, perfil);
-                meta.TransferenciaResgateId = resgate.Id;
+                var contaInvestimento = await _contaBancariaRepository.ObterPorIdAsync(meta.ContaInvestimentoId.Value);
+                if (contaInvestimento != null)
+                {
+                    var registrosInvestimento = await _registroRepository.ListarPorContaAsync(contaInvestimento.Id);
+                    var saldoRealInvestimento = ContaBancariaService.ObterSaldoAtual(contaInvestimento, registrosInvestimento);
+                    var valorResgate = Math.Min(dto.ValorPago, Math.Max(0m, saldoRealInvestimento));
+                    if (valorResgate > 0)
+                    {
+                        var resgate = await _transferenciaService.CriarAsync(
+                            meta.ClienteId, meta.ContaInvestimentoId.Value, contaPagamento.Id, dto.Data, valorResgate,
+                            $"Resgate para {descricao}", usuarioLogadoId, perfil);
+                        meta.TransferenciaResgateId = resgate.Id;
+                    }
+                }
             }
         }
         else if (dto.FormaPagamento == "Cartao")
@@ -220,12 +248,17 @@ public class MetaService : IMetaService
             if (parcelas < 2)
                 throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
                     "Pagamento no cartão precisa de ao menos 2 parcelas — pra 1x, use a forma À Vista.", "parcelas");
+            if (!dto.DataPrimeiraParcela.HasValue)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe a data da 1ª parcela.", "dataPrimeiraParcela");
 
+            // Item 3 (Money Vision): a 1ª parcela cai no próximo vencimento do cartão escolhido
+            // (dto.DataPrimeiraParcela, calculado no front), nunca na data da compra — antes vinha
+            // de dto.Data e misturava com o fechamento errado, parcela cobrada fatura antes da hora.
             await _faturaCartaoService.LancarComprasParceladaAsync(contaPagamento.Id, usuarioLogadoId, perfil,
                 new LancarCompraParceladaDto
                 {
                     Descricao = descricao, ValorTotal = dto.ValorPago, Categoria = dto.Categoria,
-                    QuantidadeParcelas = parcelas, Data = dto.Data,
+                    QuantidadeParcelas = parcelas, Data = dto.DataPrimeiraParcela.Value,
                 }, meta.Id);
         }
         else // Boleto
@@ -266,7 +299,8 @@ public class MetaService : IMetaService
         meta.Observacao = dto.Observacao;
         meta.AtualizadoEm = DateTime.UtcNow;
 
-        return MapToDto(await _metaRepository.SalvarAsync(meta));
+        var metaSalva = await _metaRepository.SalvarAsync(meta);
+        return MapToDto(metaSalva, await ObterFinanciamentoStatusAsync(metaSalva));
     }
 
     // Fase 5.5: "Desfazer conquista" — remove só o que ainda não foi pago/vinculado ao extrato
@@ -404,7 +438,7 @@ public class MetaService : IMetaService
         return resultado;
     }
 
-    private static MetaAnualDto MapToDto(MetaAnual m) => new()
+    private static MetaAnualDto MapToDto(MetaAnual m, string? financiamentoStatus = null) => new()
     {
         Id = m.Id, ClienteId = m.ClienteId, Ano = m.Ano,
         MetaReceita = m.MetaReceita, MetaLucro = m.MetaLucro,
@@ -419,5 +453,6 @@ public class MetaService : IMetaService
         FormaPagamento = m.FormaPagamento, Parcelas = m.Parcelas, DataPrimeiraParcela = m.DataPrimeiraParcela,
         ContaPagamentoId = m.ContaPagamentoId, Categoria = m.Categoria, Observacao = m.Observacao,
         TransferenciaResgateId = m.TransferenciaResgateId, FinanciamentoId = m.FinanciamentoId,
+        FinanciamentoStatus = financiamentoStatus,
     };
 }

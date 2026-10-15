@@ -18,17 +18,20 @@ public class SaudeFinanceiraController : ControllerBase
     private readonly IRegistroRepository _registroRepo;
     private readonly IMetaRepository _metaRepo;
     private readonly IMetaProgressoService _metaProgressoService;
+    private readonly IContaBancariaRepository _contaBancariaRepo;
 
     public SaudeFinanceiraController(
         ISaudeFinanceiraService saudeService,
         IRegistroRepository registroRepo,
         IMetaRepository metaRepo,
-        IMetaProgressoService metaProgressoService)
+        IMetaProgressoService metaProgressoService,
+        IContaBancariaRepository contaBancariaRepo)
     {
         _saudeService        = saudeService;
         _registroRepo        = registroRepo;
         _metaRepo            = metaRepo;
         _metaProgressoService = metaProgressoService;
+        _contaBancariaRepo   = contaBancariaRepo;
     }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
@@ -43,8 +46,10 @@ public class SaudeFinanceiraController : ControllerBase
         var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
         var metas     = await _metaRepo.ListarPorClienteAsync(clienteId);
         await _metaProgressoService.AplicarSaldoDeContasVinculadasAsync(clienteId, metas);
+        var contasInvestimentoIds = (await _contaBancariaRepo.ListarPorClienteAsync(clienteId))
+            .Where(c => c.Tipo == "Investimento").Select(c => c.Id).ToHashSet();
 
-        var resultado = _saudeService.Calcular(registros, metas);
+        var resultado = _saudeService.Calcular(registros, metas, contasInvestimentoIds);
         return Ok(new ApiResponse<SaudeFinanceiraDto> { Dados = resultado });
     }
 }

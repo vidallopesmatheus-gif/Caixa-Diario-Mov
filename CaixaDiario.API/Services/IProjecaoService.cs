@@ -18,7 +18,11 @@ public record ProjecaoOpcoes(
     // Por padrão, contas Tipo == "Investimento" ficam de fora do saldo (mesmo critério já usado
     // em Dashboard/Indicadores — reserva não é dinheiro disponível pro dia a dia). true inclui a
     // reserva na projeção, pra quem quiser simular "e se eu usasse tudo".
-    bool IncluirReserva = false);
+    bool IncluirReserva = false,
+    // Cartão (Bloco 4, Money Vision): faturas reais (Models/Fatura.cs) do cliente — mesmo
+    // agrupamento usado em FaturaCartaoService.CalcularFaturas, pra nunca duplicar a lógica de
+    // "qual compra pertence a qual fatura" entre Faturas e Projeção.
+    List<Fatura>? FaturasReais = null);
 
 public interface IProjecaoService
 {

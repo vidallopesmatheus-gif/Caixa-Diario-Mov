@@ -73,7 +73,10 @@ export default function ClientExtratoRevisaoPage() {
   const [itemParaPagamentoFatura, setItemParaPagamentoFatura] = useState<PendenteCategorizacao | null>(null)
   const [contaCartaoId, setContaCartaoId] = useState('')
   const [faturasDoCartao, setFaturasDoCartao] = useState<FaturaCartao[]>([])
-  const [competenciaEscolhida, setCompetenciaEscolhida] = useState('')
+  // Chave única por fatura (id da Fatura real, ou a competencia pro grupo "virtual" sem Fatura
+  // real) — nunca só a competencia: bancos diferentes podem ter faturas na mesma competência.
+  const [faturaChaveEscolhida, setFaturaChaveEscolhida] = useState('')
+  const faturaEscolhida = faturasDoCartao.find(f => (f.id ?? f.competencia) === faturaChaveEscolhida) ?? null
   const [carregandoFaturas, setCarregandoFaturas] = useState(false)
   const [vinculandoPagamento, setVinculandoPagamento] = useState(false)
 
@@ -301,12 +304,12 @@ export default function ClientExtratoRevisaoPage() {
     setItemParaPagamentoFatura(item)
     setContaCartaoId(contasCartao.length === 1 ? contasCartao[0].id : '')
     setFaturasDoCartao([])
-    setCompetenciaEscolhida('')
+    setFaturaChaveEscolhida('')
     setMsg('')
   }
 
   useEffect(() => {
-    if (!itemParaPagamentoFatura || !contaCartaoId) { setFaturasDoCartao([]); setCompetenciaEscolhida(''); return }
+    if (!itemParaPagamentoFatura || !contaCartaoId) { setFaturasDoCartao([]); setFaturaChaveEscolhida(''); return }
     let cancelado = false
     setCarregandoFaturas(true)
     Promise.all([
@@ -316,20 +319,21 @@ export default function ClientExtratoRevisaoPage() {
       .then(([faturas, sugestao]) => {
         if (cancelado) return
         setFaturasDoCartao(faturas)
-        setCompetenciaEscolhida(sugestao?.competencia ?? faturas.find(f => f.status !== 'Paga')?.competencia ?? '')
+        const alvo = sugestao ?? faturas.find(f => f.status !== 'Paga')
+        setFaturaChaveEscolhida(alvo ? (alvo.id ?? alvo.competencia) : '')
       })
       .finally(() => { if (!cancelado) setCarregandoFaturas(false) })
     return () => { cancelado = true }
   }, [itemParaPagamentoFatura, contaCartaoId])
 
   async function confirmarPagamentoFatura() {
-    if (!itemParaPagamentoFatura || !contaId || !contaCartaoId || !competenciaEscolhida) return
+    if (!itemParaPagamentoFatura || !contaId || !contaCartaoId || !faturaEscolhida) return
     setVinculandoPagamento(true)
     setMsg('')
     try {
       await vincularPagamentoFatura({
         contaOrigemId: contaId, lancamentoId: itemParaPagamentoFatura.id, data: itemParaPagamentoFatura.data,
-        contaCartaoId, competencia: competenciaEscolhida,
+        contaCartaoId, competencia: faturaEscolhida.competencia, faturaId: faturaEscolhida.id,
       })
       setPendentes(prev => prev.filter(p => p.id !== itemParaPagamentoFatura.id))
       setItemParaPagamentoFatura(null)
@@ -709,7 +713,7 @@ export default function ClientExtratoRevisaoPage() {
             <button
               className="btn-save"
               onClick={confirmarPagamentoFatura}
-              disabled={vinculandoPagamento || !contaCartaoId || !competenciaEscolhida}
+              disabled={vinculandoPagamento || !contaCartaoId || !faturaChaveEscolhida}
             >
               {vinculandoPagamento ? 'Vinculando...' : 'Confirmar'}
             </button>
@@ -739,10 +743,10 @@ export default function ClientExtratoRevisaoPage() {
                 ) : faturasDoCartao.length === 0 ? (
                   <p style={{ fontSize: 12, color: 'var(--tx3)' }}>Nenhuma fatura encontrada nesta conta ainda.</p>
                 ) : (
-                  <select value={competenciaEscolhida} onChange={e => setCompetenciaEscolhida(e.target.value)}>
+                  <select value={faturaChaveEscolhida} onChange={e => setFaturaChaveEscolhida(e.target.value)}>
                     {faturasDoCartao.map(f => (
-                      <option key={f.competencia} value={f.competencia}>
-                        {f.competencia} · devedor {fmtBRL(f.saldoDevedor)} · {f.status}
+                      <option key={f.id ?? f.competencia} value={f.id ?? f.competencia}>
+                        {f.banco ? `${f.banco} · ` : ''}{f.competencia} · devedor {fmtBRL(f.saldoDevedor)} · {f.status}
                       </option>
                     ))}
                   </select>

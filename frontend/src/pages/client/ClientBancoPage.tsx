@@ -16,7 +16,7 @@ const TIPO_LABEL: Record<string, string> = {
   Caixa: '💵 Caixa',
   ContaCorrente: '🏦 Conta Corrente',
   Investimento: '📈 Investimento',
-  CartaoCredito: '💳 Cartão de Crédito',
+  CartaoCredito: '💳 Cartão de crédito',
 }
 
 /**
@@ -147,9 +147,21 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
                     : (c.saldoInicial !== 0 && ` · Saldo inicial: ${fmtBRL(c.saldoInicial)}`)}
                 </div>
                 <div className="cb-conta-resumo-mes">
-                  Este mês: <span className="val-green">+{fmtBRL(c.entradasMes)}</span>
-                  {' · '}
-                  <span className="val-red">-{fmtBRL(c.saidasMes)}</span>
+                  {/* Item 5 (Money Vision): investimento usa aporte/resgate — entradasMes/saidasMes
+                      excluem Transferencia por design e sempre mostravam R$ 0,00 aqui. */}
+                  {c.tipo === 'Investimento' ? (
+                    <>
+                      Este mês: <span className="val-green">+{fmtBRL(c.aporteMesAtual ?? 0)}</span>
+                      {' · '}
+                      <span className="val-red">-{fmtBRL(c.resgateMesAtual ?? 0)}</span>
+                    </>
+                  ) : (
+                    <>
+                      Este mês: <span className="val-green">+{fmtBRL(c.entradasMes)}</span>
+                      {' · '}
+                      <span className="val-red">-{fmtBRL(c.saidasMes)}</span>
+                    </>
+                  )}
                   {c.pendentesCategorizacao > 0 && (
                     <> · <span style={{ color: 'var(--warning)' }}>🏷️ {c.pendentesCategorizacao} pendente(s)</span></>
                   )}

@@ -21,4 +21,7 @@ public class CriarFinanciamentoDto
     [Required] public Guid ContaBancariaId { get; set; }
     public string? BemVinculado { get; set; }
     public Guid? OrigemMetaId { get; set; }
+    // Item 5 (Money Vision): confirma se a Entrada deve ser resgatada da conta de investimento
+    // vinculada ao objetivo de origem (OrigemMetaId) — só tem efeito quando os dois estão presentes.
+    public bool ResgatarEntradaDoInvestimento { get; set; }
 }

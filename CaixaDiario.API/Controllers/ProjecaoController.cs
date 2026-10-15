@@ -20,19 +20,22 @@ public class ProjecaoController : ControllerBase
     private readonly IContaRecorrenteRepository _recorrenteRepo;
     private readonly IContaBancariaRepository _contaRepo;
     private readonly IPagamentoFaturaRepository _pagamentoFaturaRepo;
+    private readonly IFaturaRepository _faturaRepo;
 
     public ProjecaoController(
         IProjecaoService projecaoService,
         IRegistroRepository registroRepo,
         IContaRecorrenteRepository recorrenteRepo,
         IContaBancariaRepository contaRepo,
-        IPagamentoFaturaRepository pagamentoFaturaRepo)
+        IPagamentoFaturaRepository pagamentoFaturaRepo,
+        IFaturaRepository faturaRepo)
     {
         _projecaoService     = projecaoService;
         _registroRepo        = registroRepo;
         _recorrenteRepo       = recorrenteRepo;
         _contaRepo            = contaRepo;
         _pagamentoFaturaRepo  = pagamentoFaturaRepo;
+        _faturaRepo           = faturaRepo;
     }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
@@ -46,11 +49,15 @@ public class ProjecaoController : ControllerBase
         var contas = await _contaRepo.ListarPorClienteAsync(clienteId);
         var cartoes = contas.Where(c => c.Tipo == "CartaoCredito").ToList();
         var pagamentosFatura = new List<PagamentoFatura>();
+        var faturasReais = new List<Fatura>();
         foreach (var cartao in cartoes)
+        {
             pagamentosFatura.AddRange(await _pagamentoFaturaRepo.ListarPorContaCartaoAsync(cartao.Id));
+            faturasReais.AddRange(await _faturaRepo.ListarPorContaAsync(cartao.Id));
+        }
 
         var cenarioValido = cenario == "Conservador" ? "Conservador" : "Provavel";
-        return new ProjecaoOpcoes(contas, pagamentosFatura, cenarioValido, incluirReserva);
+        return new ProjecaoOpcoes(contas, pagamentosFatura, cenarioValido, incluirReserva, faturasReais);
     }
 
     [HttpGet("{clienteId:guid}")]

@@ -8,7 +8,8 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
 {
     public SaudeFinanceiraDto Calcular(
         List<RegistroDiario> registros,
-        List<MetaAnual> metas)
+        List<MetaAnual> metas,
+        HashSet<Guid> contasInvestimentoIds)
     {
         var hoje = DataLocalHelper.Hoje();
         var anoAtual = hoje.Year;
@@ -19,34 +20,43 @@ public class SaudeFinanceiraService : ISaudeFinanceiraService
         return new SaudeFinanceiraDto
         {
             Periodo              = $"{char.ToUpperInvariant(nomeMes[0])}{nomeMes[1..]}/{anoAtual}",
-            TaxaPoupanca        = CalcTaxaPoupanca(reg, anoAtual, mesAtual),
+            TaxaPoupanca        = CalcTaxaPoupanca(reg, anoAtual, mesAtual, contasInvestimentoIds),
             ComprometimentoFixos = CalcComprometimento(reg, hoje),
             RitmoMeta           = CalcRitmoMeta(metas, anoAtual, mesAtual),
         };
     }
 
     // ── 1. Taxa de Poupança ─────────────────────────────────────────────────
+    // Item 5 (Money Vision): mesma fórmula de "Para onde foi meu dinheiro"
+    // (MetricasService.CalcularParaOndeFoiMeuDinheiro) — guardado ÷ receita, não (receita−despesas)
+    // ÷ receita. Duas fórmulas diferentes pro mesmo nome confundiam o cliente (números diferentes
+    // nas duas telas pra "taxa de poupança" do mesmo mês).
     private static GaugeIndicadorDto CalcTaxaPoupanca(
-        List<RegistroDiario> reg, int ano, int mes)
+        List<RegistroDiario> reg, int ano, int mes, HashSet<Guid> contasInvestimentoIds)
     {
         var doMes = reg.Where(r => r.Data.Year == ano && r.Data.Month == mes).ToList();
-        var receita  = doMes.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);
-        var despesas = doMes.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
+        var receita = doMes.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).Sum(e => e.Valor);
 
         if (receita <= 0)
             return Indisponivel("Taxa de Poupança",
-                "Quanto da receita mensal sobra após todas as despesas.",
+                "Quanto da receita mensal foi guardado em investimento.",
                 "Sem receitas registradas neste mês.");
 
-        var taxa = (receita - despesas) / receita * 100m;
+        var guardou = doMes
+            .Where(r => r.ContaBancariaId.HasValue && contasInvestimentoIds.Contains(r.ContaBancariaId.Value))
+            .Sum(r =>
+                r.Entradas.Where(e => e.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(e => e.Valor)
+                - r.Saidas.Where(s => s.TipoCusto == LancamentoFiltro.TipoTransferencia).Sum(s => s.Valor));
+
+        var taxa = guardou / receita * 100m;
         return new GaugeIndicadorDto
         {
             Titulo           = "Taxa de Poupança",
             Valor            = Math.Round(taxa, 1),
             ValorNormalizado = Math.Max(0m, Math.Min(100m, taxa)),
             Semaforo         = taxa >= 20m ? "verde" : taxa >= 5m ? "amarelo" : "vermelho",
-            Descricao        = "Quanto da receita mensal sobra após todas as despesas. Acima de 20% é saudável.",
-            Calculo          = $"(Receita − Despesas) ÷ Receita = {taxa:F1}%",
+            Descricao        = "Quanto da receita mensal foi guardado em investimento (aporte líquido). Acima de 20% é saudável.",
+            Calculo          = $"Guardado em investimento ÷ Receita = {taxa:F1}%",
             Disponivel       = true,
         };
     }

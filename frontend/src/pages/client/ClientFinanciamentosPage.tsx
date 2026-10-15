@@ -38,6 +38,9 @@ export interface PrefillFinanciamento {
   valorBem: number
   contaBancariaId: string
   origemMetaId: string
+  // Item 5 (Money Vision): entrada já calculada no modal "🏆 Conquistei" (saldo real da reserva).
+  valorEntrada?: number
+  resgatarEntradaDoInvestimento?: boolean
 }
 
 export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
@@ -291,7 +294,8 @@ function NovoFinanciamentoModal({ clienteId, contas, prefill, onClose, onCriado 
   const [descricao, setDescricao] = useState(prefill?.descricao ?? '')
   const [tipo, setTipo] = useState<Financiamento['tipo']>('Financiamento')
   const [valorBem, setValorBem] = useState(prefill ? fmtNum(prefill.valorBem) : '')
-  const [valorEntrada, setValorEntrada] = useState('')
+  const [valorEntrada, setValorEntrada] = useState(prefill?.valorEntrada ? fmtNum(prefill.valorEntrada) : '')
+  const [resgatarEntradaDaReserva, setResgatarEntradaDaReserva] = useState(prefill?.resgatarEntradaDoInvestimento ?? false)
   const [numeroParcelas, setNumeroParcelas] = useState('')
   const [valorParcela, setValorParcela] = useState('')
   const [taxaJurosMensal, setTaxaJurosMensal] = useState('')
@@ -322,6 +326,7 @@ function NovoFinanciamentoModal({ clienteId, contas, prefill, onClose, onCriado 
         taxaJurosMensal: taxaJurosMensal ? parseFloat(taxaJurosMensal.replace(',', '.')) / 100 : undefined,
         sistema, dataPrimeiraParcela, contaBancariaId, bemVinculado: bemVinculado.trim() || undefined,
         origemMetaId: prefill?.origemMetaId,
+        resgatarEntradaDoInvestimento: !!prefill?.origemMetaId && entrada > 0 && resgatarEntradaDaReserva,
       })
       onCriado()
     } catch (e) {
@@ -362,6 +367,14 @@ function NovoFinanciamentoModal({ clienteId, contas, prefill, onClose, onCriado 
         <label>Entrada
           <input value={valorEntrada} onChange={e => setValorEntrada(e.target.value)} onBlur={() => setValorEntrada(fmtNum(parseBRL(valorEntrada)))} placeholder="0,00" />
         </label>
+        {/* Item 5 (Money Vision): só aparece quando o contrato nasceu do "🏆 Conquistei" — a
+            entrada já veio pré-calculada do saldo real da reserva naquele modal. */}
+        {prefill?.origemMetaId && parseBRL(valorEntrada) > 0 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, gridColumn: '1 / -1' }}>
+            <input type="checkbox" checked={resgatarEntradaDaReserva} onChange={e => setResgatarEntradaDaReserva(e.target.checked)} />
+            <span style={{ fontSize: 13, fontWeight: 400 }}>Resgatar a entrada da reserva vinculada ao objetivo</span>
+          </label>
+        )}
         <label>Nº de parcelas
           <input value={numeroParcelas} onChange={e => setNumeroParcelas(e.target.value.replace(/\D/g, ''))} placeholder="Ex.: 42" />
         </label>
