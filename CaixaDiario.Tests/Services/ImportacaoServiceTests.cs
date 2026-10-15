@@ -374,6 +374,36 @@ public class ImportacaoServiceTests
         Assert.Equal(-120m, criado.SaldoFinal); // dívida: -150 (compra) + 30 (estorno)
     }
 
+    // Item 7 (Bloco 5, opcional): compra parcelada no próprio extrato ("<comerciante> - Parcela
+    // N/M") grava NumeroParcela/TotalParcelas — base pra Projeção/Meu Futuro projetarem as
+    // parcelas futuras (ver FaturaCartaoService.CalcularParcelasFuturasProjetadas).
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_CompraParcelada_GravaNumeroETotalDeParcelas()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Trocafone - Parcela 1/10;100,00\n26/07/2026;Apple.Com/Bill;30,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "Nubank", dataVencimentoFatura: new DateOnly(2026, 8, 10));
+
+        var parcelada = criado!.Saidas.Single(s => s.Descricao == "Trocafone - Parcela 1/10");
+        Assert.Equal(1, parcelada.NumeroParcela);
+        Assert.Equal(10, parcelada.TotalParcelas);
+
+        var naoParcelada = criado.Saidas.Single(s => s.Descricao == "Apple.Com/Bill");
+        Assert.Null(naoParcelada.NumeroParcela);
+        Assert.Null(naoParcelada.TotalParcelas);
+    }
+
     [Fact]
     public async Task ImportarArquivoAsync_ContaCartaoCredito_SemBanco_LancaDadosInvalidos()
     {

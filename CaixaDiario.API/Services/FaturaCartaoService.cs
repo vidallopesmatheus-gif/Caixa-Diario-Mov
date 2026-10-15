@@ -475,6 +475,49 @@ public class FaturaCartaoService : IFaturaCartaoService
         return pago > ToleranciaQuitacao ? "Parcial" : "Fechada";
     }
 
+    public record ParcelaFuturaProjetada(string Descricao, decimal Valor, DateOnly DataVencimento);
+
+    // Item 7 (Bloco 5, opcional — Money Vision): compra parcelada identificada pelo PRÓPRIO
+    // extrato do banco ("<comerciante> - Parcela N/M", ver ParcelaDescricaoParser) ainda não tem
+    // fatura real pras parcelas futuras (M-N meses adiante) — projeta pra Projeção/Meu Futuro
+    // mostrarem esse compromisso já esperado, mesmo sem o arquivo do banco daquele mês futuro.
+    // Nunca persiste nada: pura leitura, igual a CalcularFaturas — some automaticamente quando a
+    // fatura real daquele mês for importada (a parcela real importada passa a ser o "máximo
+    // visto" do grupo, encurtando quantas parcelas futuras ainda faltam projetar).
+    public static List<ParcelaFuturaProjetada> CalcularParcelasFuturasProjetadas(
+        ContaBancaria contaCartao, List<RegistroDiario> registrosDaConta)
+    {
+        // Agrupa pelo nome do comerciante (extraído da própria descrição) + total de parcelas —
+        // guarda a parcela de MAIOR número já importada de verdade (base pra projetar o resto).
+        var grupos = new Dictionary<(string Comerciante, int Total), (int MaxNumero, decimal Valor, DateOnly DataMax)>();
+
+        foreach (var r in registrosDaConta.Where(r => !r.Excluido))
+        {
+            foreach (var s in r.Saidas.Where(s => s.NumeroParcela.HasValue && s.TotalParcelas.HasValue))
+            {
+                var parse = ParcelaDescricaoParser.TentarExtrair(s.Descricao);
+                if (parse == null) continue; // descrição foi editada manualmente — não dá mais pra confiar no padrão.
+
+                var chave = (parse.Comerciante, parse.Total);
+                if (!grupos.TryGetValue(chave, out var atual) || s.NumeroParcela!.Value > atual.MaxNumero)
+                    grupos[chave] = (s.NumeroParcela!.Value, s.Valor, r.Data);
+            }
+        }
+
+        var resultado = new List<ParcelaFuturaProjetada>();
+        foreach (var ((comerciante, total), info) in grupos)
+        {
+            for (var numero = info.MaxNumero + 1; numero <= total; numero++)
+            {
+                var dataPrevista = info.DataMax.AddMonths(numero - info.MaxNumero);
+                var competencia = ObterCompetencia(dataPrevista, contaCartao.DiaFechamento);
+                var (_, vencimento) = ObterDatasCiclo(competencia, contaCartao.DiaFechamento, contaCartao.DiaVencimento);
+                resultado.Add(new ParcelaFuturaProjetada($"{comerciante} - Parcela {numero}/{total} (previsto)", info.Valor, vencimento));
+            }
+        }
+        return resultado;
+    }
+
     /// <summary>
     /// Em qual fatura (competência "yyyy-MM", identificada pelo mês em que ela FECHA) uma compra
     /// cai, dado o dia de fechamento do cartão. Sem DiaFechamento configurado, cai no mês

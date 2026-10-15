@@ -558,6 +558,25 @@ public class ProjecaoService : IProjecaoService
                     Origem = "Fatura",
                 });
             }
+
+            // Item 7 (Bloco 5, opcional): parcelas futuras previstas (ainda sem fatura real) —
+            // mesma lista, rótulo "(previsto)" (já embutido na descrição) pra nunca se confundir
+            // com uma fatura real/confirmada.
+            foreach (var parcela in FaturaCartaoService.CalcularParcelasFuturasProjetadas(cartao, registrosDoCartao))
+            {
+                if (parcela.DataVencimento <= hoje || parcela.DataVencimento > ate) continue;
+                if (!resultado.TryGetValue(parcela.DataVencimento, out var listaParcela))
+                {
+                    listaParcela = new List<ProjecaoItemDto>();
+                    resultado[parcela.DataVencimento] = listaParcela;
+                }
+                listaParcela.Add(new ProjecaoItemDto
+                {
+                    Descricao = $"{parcela.Descricao} — {cartao.Nome}",
+                    Valor = parcela.Valor,
+                    Origem = "Fatura",
+                });
+            }
         }
         return resultado;
     }

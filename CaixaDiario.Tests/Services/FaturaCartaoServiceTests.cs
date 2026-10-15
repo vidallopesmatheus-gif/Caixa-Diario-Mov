@@ -556,6 +556,96 @@ public class FaturaCartaoServiceTests
         Assert.Equal("Nubank", sugestao.Banco);
     }
 
+    // ── CalcularParcelasFuturasProjetadas (item 7, Bloco 5 opcional) ────────────────────────────
+
+    [Fact]
+    public void CalcularParcelasFuturasProjetadas_ComParcelaRealImportada_ProjetaAsRestantes()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        var registros = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 8, 10),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Descricao = "Trocafone - Parcela 1/10", Valor = 100m, Categoria = "Eletrônicos", NumeroParcela = 1, TotalParcelas = 10 } },
+            },
+        };
+
+        var projetadas = FaturaCartaoService.CalcularParcelasFuturasProjetadas(contaCartao, registros);
+
+        Assert.Equal(9, projetadas.Count); // parcelas 2 a 10
+        Assert.All(projetadas, p => Assert.Equal(100m, p.Valor));
+        Assert.Contains(projetadas, p => p.Descricao == "Trocafone - Parcela 2/10 (previsto)");
+        Assert.Contains(projetadas, p => p.Descricao == "Trocafone - Parcela 10/10 (previsto)");
+    }
+
+    [Fact]
+    public void CalcularParcelasFuturasProjetadas_ComFaturaRealJaImportadaParaUmMesFuturo_ProjetaMenosParcelas()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        var registros = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 8, 10),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Descricao = "Trocafone - Parcela 1/10", Valor = 100m, Categoria = "Eletrônicos", NumeroParcela = 1, TotalParcelas = 10 } },
+            },
+            // Fatura real de setembro já importada — a parcela 2/10 real "substitui" a projetada.
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 9, 10),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Descricao = "Trocafone - Parcela 2/10", Valor = 100m, Categoria = "Eletrônicos", NumeroParcela = 2, TotalParcelas = 10 } },
+            },
+        };
+
+        var projetadas = FaturaCartaoService.CalcularParcelasFuturasProjetadas(contaCartao, registros);
+
+        Assert.Equal(8, projetadas.Count); // parcelas 3 a 10 — 2/10 não é mais projetada, já é real
+        Assert.DoesNotContain(projetadas, p => p.Descricao.Contains("2/10"));
+        Assert.Contains(projetadas, p => p.Descricao == "Trocafone - Parcela 3/10 (previsto)");
+    }
+
+    [Fact]
+    public void CalcularParcelasFuturasProjetadas_UltimaParcelaJaImportada_NaoProjetaNada()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        var registros = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 8, 10),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Descricao = "Loja X - Parcela 3/3", Valor = 50m, Categoria = "Geral", NumeroParcela = 3, TotalParcelas = 3 } },
+            },
+        };
+
+        Assert.Empty(FaturaCartaoService.CalcularParcelasFuturasProjetadas(contaCartao, registros));
+    }
+
+    [Fact]
+    public void CalcularParcelasFuturasProjetadas_SemCompraParcelada_RetornaVazio()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        var registros = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 8, 10),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Descricao = "Apple.Com/Bill", Valor = 50m, Categoria = "Geral" } },
+            },
+        };
+
+        Assert.Empty(FaturaCartaoService.CalcularParcelasFuturasProjetadas(contaCartao, registros));
+    }
+
     // ── LancarComprasParceladaAsync (item 9) ─────────────────────────────────────────────────────
 
     /// <summary>Fake simples por trás dos mocks de IRegistroRepository — ResolverOuCriarAsync e

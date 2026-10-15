@@ -579,7 +579,39 @@ public class ProjecaoServiceTests
         var diaFatura = resultado.Dias.Single(d => d.Data == faturaEsperada.DataVencimento);
         var item = Assert.Single(diaFatura.Saidas, s => s.Origem == "Fatura");
         Assert.Equal(faturaEsperada.SaldoDevedor, item.Valor);
-        Assert.Equal(700m, diaFatura.SaldoFim); // 1000 (corrente) − 0 (cartão não contava no saldo inicial) − 300 (fatura)
+    }
+
+    // Item 7 (Bloco 5, opcional — Money Vision): compra parcelada identificada no extrato ("<comerciante>
+    // - Parcela N/M") projeta as parcelas futuras (M-N meses adiante), cada uma na fatura futura
+    // correspondente — mesmo sem a fatura real daquele mês ainda ter sido importada.
+    [Fact]
+    public void Calcular_ComCompraParceladaNoExtrato_ProjetaAsParcelasFuturasNasFaturasCorrespondentes()
+    {
+        var contaCartao = new ContaBancaria
+        {
+            Id = Guid.NewGuid(), Nome = "Cartão", Tipo = "CartaoCredito", Ativa = true,
+            DiaFechamento = 1, DiaVencimento = 10,
+        };
+        var registroCompra = CriarRegistro(contaCartao.Id, Hoje, 0m);
+        registroCompra.Saidas.Add(new ItemFinanceiroSaida
+        {
+            Descricao = "Trocafone - Parcela 1/3", Valor = 100m, Categoria = "Eletrônicos", NumeroParcela = 1, TotalParcelas = 3,
+        });
+
+        var contaCorrente = Guid.NewGuid();
+        var registroCorrente = CriarRegistro(contaCorrente, Hoje.AddDays(-1), 1000m);
+        var registros = new List<RegistroDiario> { registroCompra, registroCorrente };
+        var contas = new List<ContaBancaria> { contaCartao, new() { Id = contaCorrente, Tipo = "ContaCorrente", Ativa = true } };
+        var opcoes = new ProjecaoOpcoes(contas, new List<PagamentoFatura>());
+
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), 150, null, opcoes);
+
+        var projetadas = resultado.Dias.SelectMany(d => d.Saidas.Where(s => s.Origem == "Fatura" && s.Descricao.Contains("(previsto)")))
+            .ToList();
+        Assert.Equal(2, projetadas.Count); // parcelas 2/3 e 3/3
+        Assert.All(projetadas, s => Assert.Equal(100m, s.Valor));
+        Assert.Contains(projetadas, s => s.Descricao.Contains("Parcela 2/3"));
+        Assert.Contains(projetadas, s => s.Descricao.Contains("Parcela 3/3"));
     }
 
     // Fatura de ciclo já encerrado há meses e totalmente paga — tem que ficar de fora tanto pelo

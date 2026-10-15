@@ -573,6 +573,11 @@ public class ImportacaoService : IImportacaoService
                     // variável no DRE mesmo tendo uma categoria "certa" atribuída.
                     tipoCustoFinal = !string.IsNullOrEmpty(categoriaFinal) && categoriasPorNome.TryGetValue(categoriaFinal, out var tc) ? tc : null;
 
+                    // Item 7 (Bloco 5, opcional): cartão formata compra parcelada como "<comerciante> -
+                    // Parcela N/M" no próprio extrato — grava N/M pra Projeção/Meu Futuro projetarem as
+                    // parcelas futuras (ainda sem fatura real) até a fatura real de cada mês chegar.
+                    var parcelaDetectada = conta.Tipo == "CartaoCredito" ? ParcelaDescricaoParser.TentarExtrair(t.Descricao) : null;
+
                     registro.Saidas.Add(new ItemFinanceiroSaida
                     {
                         Id = itemId,
@@ -586,6 +591,8 @@ public class ImportacaoService : IImportacaoService
                         PendenteCategorizacao = pendente,
                         CategoriaSugerida = sugerida,
                         FaturaId = fatura?.Id,
+                        NumeroParcela = parcelaDetectada?.Numero,
+                        TotalParcelas = parcelaDetectada?.Total,
                     });
                     registro.SaldoFinal -= t.Valor;
                 }
