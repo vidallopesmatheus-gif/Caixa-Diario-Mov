@@ -15,7 +15,7 @@
 .lanc-desc { grid-area: desc; min-width: 0; }
 .lanc-valor { grid-area: valor; min-width: 0; }
 .lanc-cat { grid-area: cat; position: relative; min-width: 0; }
-.lanc-acoes { grid-area: acoes; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lanc-acoes { grid-area: acoes; display: flex; align-items: center; gap: 10px; min-width: 0; }
 
 .lancamento-desc {
   padding: 9px 12px; background: var(--bg-input);
@@ -56,8 +56,8 @@
 .cat-btn-saida:hover { filter: brightness(1.15); }
 
 /* ── Botões de ação da linha (🔁 transferência / ✔ confirmar / ✕ remover) ──────────────────── */
-/* Item 2.1: mesmo tamanho (36x36), ícone centralizado, lado a lado com 6px de gap — nunca mais
-   dividindo espaço com a categoria. */
+/* Item 2.1: mesmo tamanho (36x36), ícone centralizado, lado a lado com 10px de gap (item do
+   usuário: 6px deixava os botões colados um no outro) — nunca mais dividindo espaço com a categoria. */
 .lanc-icon-btn {
   width: 36px; height: 36px; flex: 0 0 36px; border-radius: 8px; font-size: 15px; font-weight: 700;
   cursor: pointer; border: 1px solid; transition: opacity 0.15s, filter 0.15s;
