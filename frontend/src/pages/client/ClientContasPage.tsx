@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
@@ -10,6 +11,7 @@ import { listarContasBancarias } from '../../api/contasBancarias'
 import { criarContaProvisionada, atualizarContaProvisionada, excluirContaProvisionada } from '../../api/contasProvisionadas'
 import { listarSugestoesVinculo, ignorarSugestaoVinculo, type SugestaoVinculo } from '../../api/conciliacao'
 import { listarCategorias } from '../../api/categorias'
+import { listarFaturasCartao, type FaturaCartao } from '../../api/faturasCartao'
 import Modal from '../../components/shared/Modal'
 import type { ContaProvisionada, ContaRecorrente, ContaBancaria, Categorias } from '../../types'
 import { mesAtualISO, deslocarMes, labelMes, calcularDiasAtraso, dataReferencia, estaNoMes } from '../../utils/contasPagarReceber'
@@ -49,8 +51,14 @@ function parseBRL(s: string): number {
 
 export default function ClientContasPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, salvar, recarregar, loading } = useRegistros(clienteId)
+
+  // Item 6 (Money Vision): faturas de cartão em aberto também aparecem aqui, não só em
+  // Projeção/Meu Futuro/"A pagar em cartões" — informativo (pagamento continua pela tela de
+  // Faturas, já que quitar uma fatura não é um "pagar" genérico como as contas abaixo).
+  const [faturasCartaoAbertas, setFaturasCartaoAbertas] = useState<(FaturaCartao & { contaCartaoId: string; contaCartaoNome: string })[]>([])
 
   // Formulário unificado
   const [tipo, setTipo] = useState<'receber' | 'pagar'>('receber')
@@ -146,7 +154,15 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   useEffect(() => {
     if (!clienteId) return
     listarContasRecorrentes(clienteId).then(setRecorrentes).catch(console.error)
-    listarContasBancarias(clienteId).then(setContasBancarias).catch(console.error)
+    listarContasBancarias(clienteId).then(cs => {
+      setContasBancarias(cs)
+      const cartoes = cs.filter(c => c.ativa && c.tipo === 'CartaoCredito')
+      Promise.all(cartoes.map(c => listarFaturasCartao(c.id).then(fs => fs
+        .filter(f => f.status !== 'Paga')
+        .map(f => ({ ...f, contaCartaoId: c.id, contaCartaoNome: c.nome })))))
+        .then(porCartao => setFaturasCartaoAbertas(porCartao.flat()))
+        .catch(console.error)
+    }).catch(console.error)
     listarCategorias(clienteId).then(setCategorias).catch(console.error)
     listarSugestoesRecorrencia(clienteId).then(setSugestoesRecorrencia).catch(console.error)
   }, [clienteId])
@@ -998,6 +1014,33 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         <button type="button" className="contas-atrasadas-aviso" onClick={() => { setModoLista('atrasadas'); setAbaAtiva(atrasadasPagar.length >= atrasadasReceber.length ? 'pagar' : 'receber') }}>
           ⚠️ {atrasadasReceber.length + atrasadasPagar.length} conta(s) atrasada(s) · {fmtBRL(totalAtrasadoReceber + totalAtrasadoPagar)}
         </button>
+      )}
+
+      {/* Item 6 (Money Vision): faturas de cartão em aberto — informativo; pagamento é sempre
+          pela tela de Faturas (nunca pelo fluxo genérico de baixa abaixo, que não sabe quitar
+          fatura por match valor+banco). */}
+      {faturasCartaoAbertas.length > 0 && (
+        <div className="contas-section">
+          <h3>💳 Faturas de cartão em aberto ({faturasCartaoAbertas.length})</h3>
+          {faturasCartaoAbertas.map(f => (
+            <button
+              key={f.id ?? `${f.contaCartaoId}-${f.competencia}`}
+              type="button"
+              className="conta-item"
+              style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }}
+              onClick={() => navigate(`/banco/${f.contaCartaoId}/faturas`)}
+            >
+              <div className="conta-info">
+                <div className="conta-desc">{f.banco ? `${f.banco} — ${f.contaCartaoNome}` : f.contaCartaoNome}</div>
+                <div className="conta-meta">
+                  Vence: {fmtDate(f.dataVencimento)} · {f.status}
+                  {f.valorPago > 0 && ` · pago ${fmtBRL(f.valorPago)}`}
+                </div>
+              </div>
+              <div className="conta-valor pagar">{fmtBRL(f.saldoDevedor)}</div>
+            </button>
+          ))}
+        </div>
       )}
 
       {/* Item 1 (Parte 3): seletor de mês + atalhos — filtra os pendentes do mês nas abas abaixo. */}

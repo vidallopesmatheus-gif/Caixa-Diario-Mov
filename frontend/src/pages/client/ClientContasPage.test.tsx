@@ -7,6 +7,7 @@ import * as contasRecorrentesApi from '../../api/contasRecorrentes'
 import * as contasBancariasApi from '../../api/contasBancarias'
 import * as categoriasApi from '../../api/categorias'
 import { addDays, todayISO } from '../../utils/format'
+import * as faturasCartaoApi from '../../api/faturasCartao'
 import type { ContaBancaria, Registro } from '../../types'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
@@ -17,6 +18,14 @@ vi.mock('../../hooks/useRegistros')
 vi.mock('../../api/contasRecorrentes')
 vi.mock('../../api/contasBancarias')
 vi.mock('../../api/categorias')
+vi.mock('../../api/faturasCartao')
+// Item 6 (Money Vision): useNavigate passou a ser usado pra abrir "Ver Faturas" a partir desta
+// tela — precisa de um Router de verdade só pra navegação de fato; stub evita envolver TODO
+// render(<ClientContasPage />) existente num <MemoryRouter>.
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => vi.fn() }
+})
 
 const mockUser = { usuarioId: 'u1', nomeUsuario: 'cli1', perfil: 'cliente' as const, nomeCompleto: 'Cliente Um', nomeEstabelecimento: '', token: 'tok' }
 
@@ -30,6 +39,7 @@ function mockHooks(registros: Registro[], overrides: Partial<ReturnType<typeof u
   vi.mocked(contasRecorrentesApi.listarSugestoesRecorrencia).mockResolvedValue([])
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([])
   vi.mocked(categoriasApi.listarCategorias).mockResolvedValue({ entradas: [], saidas: [] })
+  vi.mocked(faturasCartaoApi.listarFaturasCartao).mockResolvedValue([])
   vi.mocked(useRegistrosHook.useRegistros).mockReturnValue({
     registros,
     loading: false,
@@ -172,6 +182,24 @@ test('mostra os totais pendentes do mês a receber e a pagar no topo', async () 
   const totalPagar = screen.getByText(/A pagar em/).closest('.contas-total-card') as HTMLElement
   expect(within(totalReceber).getByText('R$ 750,00')).toBeInTheDocument() // 500 + 250
   expect(within(totalPagar).getByText('R$ 300,00')).toBeInTheDocument()
+})
+
+// Item 6 (Money Vision): faturas de cartão em aberto aparecem aqui também, não só em
+// Projeção/Meu Futuro/"A pagar em cartões".
+test('mostra faturas de cartão em aberto, mas não as já pagas', async () => {
+  const cartao = criarConta({ id: 'cartao-1', nome: 'Nubank', tipo: 'CartaoCredito' })
+  mockHooks([])
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([cartao])
+  vi.mocked(faturasCartaoApi.listarFaturasCartao).mockResolvedValue([
+    { id: 'f1', banco: 'Nubank', competencia: '2026-10', dataFechamento: '2026-10-01', dataVencimento: '2026-10-10', valorTotal: 500, valorPago: 0, saldoDevedor: 500, quantidadeCompras: 3, status: 'Fechada' },
+    { id: 'f2', banco: 'Nubank', competencia: '2026-09', dataFechamento: '2026-09-01', dataVencimento: '2026-09-10', valorTotal: 300, valorPago: 300, saldoDevedor: 0, quantidadeCompras: 1, status: 'Paga' },
+  ])
+
+  render(<ClientContasPage />)
+
+  expect(await screen.findByText('Nubank — Nubank')).toBeInTheDocument()
+  expect(screen.getByText('R$ 500,00')).toBeInTheDocument()
+  expect(screen.getByText('💳 Faturas de cartão em aberto (1)')).toBeInTheDocument()
 })
 
 test('filtro por conta esconde pendências de outras contas', async () => {
