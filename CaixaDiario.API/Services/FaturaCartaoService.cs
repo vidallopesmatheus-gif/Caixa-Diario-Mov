@@ -73,9 +73,14 @@ public class FaturaCartaoService : IFaturaCartaoService
         if (faturas.Count == 0) return null;
 
         // Confirmação de qual fatura é sempre do usuário — isto só pré-seleciona a opção mais
-        // provável, priorizando valor batendo (o critério mais forte) e desempatando por vencimento
-        // mais próximo da data do pagamento.
-        return faturas
+        // provável. Prioriza valor batendo exatamente (duas faturas de bancos diferentes raramente
+        // têm o mesmo saldo devedor, então valor exato já costuma apontar o banco certo também);
+        // sem match exato, cai pro "mais parecido" como fallback. Desempate por vencimento mais
+        // próximo da data do pagamento.
+        var exatas = faturas.Where(f => Math.Abs(f.SaldoDevedor - valor) <= ToleranciaQuitacao).ToList();
+        var candidatas = exatas.Count > 0 ? exatas : faturas;
+
+        return candidatas
             .OrderBy(f => Math.Abs(f.SaldoDevedor - valor))
             .ThenBy(f => Math.Abs(f.DataVencimento.DayNumber - data.DayNumber))
             .First();
@@ -144,6 +149,7 @@ public class FaturaCartaoService : IFaturaCartaoService
             ContaCartaoId = dto.ContaCartaoId,
             ContaOrigemId = dto.ContaOrigemId,
             Competencia = dto.Competencia,
+            FaturaId = dto.FaturaId,
             ValorPago = valorPago,
             Data = dto.Data,
             CriadoEm = DateTime.UtcNow,
@@ -183,7 +189,10 @@ public class FaturaCartaoService : IFaturaCartaoService
         if (!contaOrigem.Ativa)
             throw new ApiException(400, CodigoRetorno.CONTA_INATIVA, "A conta de origem deve estar ativa.");
 
-        var fatura = (await ListarFaturasInternoAsync(contaCartao)).FirstOrDefault(f => f.Competencia == dto.Competencia)
+        var faturasDaConta = await ListarFaturasInternoAsync(contaCartao);
+        var fatura = (dto.FaturaId.HasValue
+                ? faturasDaConta.FirstOrDefault(f => f.Id == dto.FaturaId)
+                : faturasDaConta.FirstOrDefault(f => f.Id == null && f.Competencia == dto.Competencia))
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Fatura não encontrada.");
         if (fatura.Status == "Paga")
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Esta fatura já está paga.");
@@ -233,8 +242,8 @@ public class FaturaCartaoService : IFaturaCartaoService
         var pagamento = new PagamentoFatura
         {
             Id = pagamentoId, ClienteId = contaOrigem.ClienteId, ContaCartaoId = contaCartaoId,
-            ContaOrigemId = dto.ContaOrigemId, Competencia = dto.Competencia, ValorPago = valorPago,
-            Data = dto.Data, CriadoEm = DateTime.UtcNow,
+            ContaOrigemId = dto.ContaOrigemId, Competencia = dto.Competencia, FaturaId = fatura.Id,
+            ValorPago = valorPago, Data = dto.Data, CriadoEm = DateTime.UtcNow,
         };
         var criado = await _pagamentoRepo.AdicionarAsync(pagamento);
         if (transacao != null) await transacao.CommitAsync();
@@ -361,50 +370,109 @@ public class FaturaCartaoService : IFaturaCartaoService
     {
         var registros = (await _registroRepo.ListarPorContaAsync(contaCartao.Id)).Where(r => !r.Excluido).ToList();
         var pagamentos = await _pagamentoRepo.ListarPorContaCartaoAsync(contaCartao.Id);
-        return CalcularFaturas(contaCartao, registros, pagamentos, DataLocalHelper.Hoje());
+        var faturas = await _faturaRepo.ListarPorContaAsync(contaCartao.Id);
+        return CalcularFaturas(contaCartao, registros, pagamentos, faturas, DataLocalHelper.Hoje());
     }
 
     // Extraído de ListarFaturasInternoAsync pra reuso fora deste service (item 4 da rodada "Visão
     // de Futuro": a Projeção precisa das mesmas faturas, sem repetir o cálculo de competência/ciclo
     // nem depender deste service inteiro, que faz checagem de acesso por requisição HTTP).
+    //
+    // Cartão (Bloco 3/4, Money Vision): agrupa primeiro pela Fatura REAL (ItemFinanceiroSaida.
+    // FaturaId) — cada arquivo importado é uma fatura só, nunca mais partida pela competência
+    // inferida. Compras sem FaturaId (parcelas lançadas direto no cartão, ainda sem documento real)
+    // caem num grupo "virtual" por competência inferida, como antes — é só projeção até a fatura
+    // real do banco chegar.
     public static List<FaturaCartaoDto> CalcularFaturas(
-        ContaBancaria contaCartao, List<RegistroDiario> registrosDaConta, List<PagamentoFatura> pagamentosDaConta, DateOnly hoje)
+        ContaBancaria contaCartao, List<RegistroDiario> registrosDaConta, List<PagamentoFatura> pagamentosDaConta,
+        List<Fatura> faturasReaisDaConta, DateOnly hoje)
     {
-        var comprasPorCompetencia = registrosDaConta
-            .SelectMany(r => r.Saidas
-                .Where(s => s.TipoCusto != LancamentoFiltro.TipoPagamentoFatura)
-                .Select(s => (Competencia: ObterCompetencia(r.Data, contaCartao.DiaFechamento), s.Valor)))
-            .GroupBy(x => x.Competencia)
-            .ToDictionary(g => g.Key, g => (Total: g.Sum(x => x.Valor), Qtd: g.Count()));
+        var comprasPorFaturaId = new Dictionary<Guid, (decimal Total, int Qtd)>();
+        var comprasVirtuaisPorCompetencia = new Dictionary<string, (decimal Total, int Qtd)>();
 
-        var pagoPorCompetencia = pagamentosDaConta
+        foreach (var r in registrosDaConta)
+        {
+            foreach (var s in r.Saidas.Where(s => s.TipoCusto != LancamentoFiltro.TipoPagamentoFatura))
+            {
+                if (s.FaturaId.HasValue)
+                {
+                    var atual = comprasPorFaturaId.GetValueOrDefault(s.FaturaId.Value, (Total: 0m, Qtd: 0));
+                    comprasPorFaturaId[s.FaturaId.Value] = (atual.Total + s.Valor, atual.Qtd + 1);
+                }
+                else
+                {
+                    var competencia = ObterCompetencia(r.Data, contaCartao.DiaFechamento);
+                    var atual = comprasVirtuaisPorCompetencia.GetValueOrDefault(competencia, (Total: 0m, Qtd: 0));
+                    comprasVirtuaisPorCompetencia[competencia] = (atual.Total + s.Valor, atual.Qtd + 1);
+                }
+            }
+        }
+
+        var pagoPorFaturaId = pagamentosDaConta.Where(p => p.FaturaId.HasValue)
+            .GroupBy(p => p.FaturaId!.Value)
+            .ToDictionary(g => g.Key, g => g.Sum(p => p.ValorPago));
+        var pagoVirtualPorCompetencia = pagamentosDaConta.Where(p => !p.FaturaId.HasValue)
             .GroupBy(p => p.Competencia)
             .ToDictionary(g => g.Key, g => g.Sum(p => p.ValorPago));
 
-        var competencias = comprasPorCompetencia.Keys.Union(pagoPorCompetencia.Keys).Distinct();
+        var resultado = new List<FaturaCartaoDto>();
 
-        return competencias.Select(competencia =>
+        var idsComMovimento = comprasPorFaturaId.Keys.Union(pagoPorFaturaId.Keys).Distinct();
+        foreach (var faturaId in idsComMovimento)
         {
-            var (total, qtd) = comprasPorCompetencia.GetValueOrDefault(competencia, (Total: 0m, Qtd: 0));
-            var pago = pagoPorCompetencia.GetValueOrDefault(competencia, 0m);
-            var saldoDevedor = Math.Max(0m, total - pago);
-            var (fechamento, vencimento) = ObterDatasCiclo(competencia, contaCartao.DiaFechamento, contaCartao.DiaVencimento);
-            var status = hoje < fechamento ? "Aberta" : (saldoDevedor <= ToleranciaQuitacao ? "Paga" : "Fechada");
+            var fatura = faturasReaisDaConta.FirstOrDefault(f => f.Id == faturaId);
+            if (fatura == null) continue; // pagamento órfão (fatura real removida) — não deveria acontecer, mas não quebra a listagem.
 
-            return new FaturaCartaoDto
+            var (total, qtd) = comprasPorFaturaId.GetValueOrDefault(faturaId, (0m, 0));
+            var pago = pagoPorFaturaId.GetValueOrDefault(faturaId, 0m);
+            // Sem DataFechamento informado, aproxima pelo mês anterior ao vencimento (mesma relação
+            // de 1 mês usada em ObterDatasCiclo pro grupo virtual).
+            var fechamento = fatura.DataFechamento ?? fatura.DataVencimento.AddMonths(-1);
+            resultado.Add(new FaturaCartaoDto
             {
+                Id = fatura.Id,
+                Banco = fatura.Banco,
+                Competencia = fatura.Competencia,
+                DataFechamento = fechamento,
+                DataVencimento = fatura.DataVencimento,
+                ValorTotal = total,
+                ValorPago = pago,
+                SaldoDevedor = Math.Max(0m, total - pago),
+                QuantidadeCompras = qtd,
+                Status = CalcularStatus(hoje, fechamento, total, pago),
+            });
+        }
+
+        var competenciasVirtuais = comprasVirtuaisPorCompetencia.Keys.Union(pagoVirtualPorCompetencia.Keys).Distinct();
+        foreach (var competencia in competenciasVirtuais)
+        {
+            var (total, qtd) = comprasVirtuaisPorCompetencia.GetValueOrDefault(competencia, (0m, 0));
+            var pago = pagoVirtualPorCompetencia.GetValueOrDefault(competencia, 0m);
+            var (fechamento, vencimento) = ObterDatasCiclo(competencia, contaCartao.DiaFechamento, contaCartao.DiaVencimento);
+            resultado.Add(new FaturaCartaoDto
+            {
+                Id = null,
+                Banco = null,
                 Competencia = competencia,
                 DataFechamento = fechamento,
                 DataVencimento = vencimento,
                 ValorTotal = total,
                 ValorPago = pago,
-                SaldoDevedor = saldoDevedor,
+                SaldoDevedor = Math.Max(0m, total - pago),
                 QuantidadeCompras = qtd,
-                Status = status,
-            };
-        })
-        .OrderByDescending(f => f.Competencia)
-        .ToList();
+                Status = CalcularStatus(hoje, fechamento, total, pago),
+            });
+        }
+
+        return resultado.OrderByDescending(f => f.DataVencimento).ToList();
+    }
+
+    private static string CalcularStatus(DateOnly hoje, DateOnly fechamento, decimal total, decimal pago)
+    {
+        if (hoje < fechamento) return "Aberta";
+        var saldoDevedor = total - pago;
+        if (saldoDevedor <= ToleranciaQuitacao) return "Paga";
+        return pago > ToleranciaQuitacao ? "Parcial" : "Fechada";
     }
 
     /// <summary>
@@ -467,6 +535,7 @@ public class FaturaCartaoService : IFaturaCartaoService
         ContaOrigemId = p.ContaOrigemId,
         ContaOrigemNome = contaOrigemNome,
         Competencia = p.Competencia,
+        FaturaId = p.FaturaId,
         ValorPago = p.ValorPago,
         Data = p.Data,
         CriadoEm = p.CriadoEm,

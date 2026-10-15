@@ -71,7 +71,7 @@ public class ProjecaoService : IProjecaoService
         // projetada na data de vencimento — só no modo "todas as contas" (ver comentário em
         // ObterContasExcluidasDoSaldo sobre por que o saldo do cartão fica de fora da soma inicial).
         var faturasPorDia = consolidado
-            ? ObterFaturasPorDia(registros, opcoes.Contas, opcoes.PagamentosFatura, hoje, hoje.AddDays(dias))
+            ? ObterFaturasPorDia(registros, opcoes.Contas, opcoes.PagamentosFatura, opcoes.FaturasReais ?? new List<Fatura>(), hoje, hoje.AddDays(dias))
             : new Dictionary<DateOnly, List<ProjecaoItemDto>>();
 
         // Projeção dia a dia
@@ -290,7 +290,7 @@ public class ProjecaoService : IProjecaoService
 
         var diasTotais = hoje.AddMonths(mesesFuturo).DayNumber - hoje.DayNumber;
         var faturasPorDia = consolidado
-            ? ObterFaturasPorDia(registros, opcoes.Contas, opcoes.PagamentosFatura, hoje, hoje.AddDays(diasTotais))
+            ? ObterFaturasPorDia(registros, opcoes.Contas, opcoes.PagamentosFatura, opcoes.FaturasReais ?? new List<Fatura>(), hoje, hoje.AddDays(diasTotais))
             : new Dictionary<DateOnly, List<ProjecaoItemDto>>();
 
         var projetado = new List<TrajetoriaPontoDto>();
@@ -534,14 +534,15 @@ public class ProjecaoService : IProjecaoService
     // controles de acesso por requisição HTTP (a Projeção já recebeu tudo filtrado por cliente).
     private static Dictionary<DateOnly, List<ProjecaoItemDto>> ObterFaturasPorDia(
         List<RegistroDiario> registros, List<ContaBancaria> contas, List<PagamentoFatura> pagamentosFatura,
-        DateOnly hoje, DateOnly ate)
+        List<Fatura> faturasReais, DateOnly hoje, DateOnly ate)
     {
         var resultado = new Dictionary<DateOnly, List<ProjecaoItemDto>>();
         foreach (var cartao in contas.Where(c => c.Tipo == "CartaoCredito"))
         {
             var registrosDoCartao = registros.Where(r => r.ContaBancariaId == cartao.Id && !r.Excluido).ToList();
             var pagamentosDoCartao = pagamentosFatura.Where(p => p.ContaCartaoId == cartao.Id).ToList();
-            var faturas = FaturaCartaoService.CalcularFaturas(cartao, registrosDoCartao, pagamentosDoCartao, hoje);
+            var faturasDoCartao = faturasReais.Where(f => f.ContaBancariaId == cartao.Id).ToList();
+            var faturas = FaturaCartaoService.CalcularFaturas(cartao, registrosDoCartao, pagamentosDoCartao, faturasDoCartao, hoje);
 
             foreach (var fatura in faturas.Where(f => f.Status != "Paga" && f.DataVencimento > hoje && f.DataVencimento <= ate))
             {

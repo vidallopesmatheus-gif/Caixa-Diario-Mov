@@ -23,6 +23,7 @@ interface Props { clienteIdOverride?: string }
 const STATUS_COR: Record<FaturaCartao['status'], string> = {
   Aberta: 'var(--tx3)',
   Fechada: 'var(--warning)',
+  Parcial: 'var(--warning)',
   Paga: 'var(--success)',
 }
 
@@ -74,6 +75,16 @@ export default function ClientFaturasCartaoPage({ clienteIdOverride }: Props) {
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
+  // Item 8: agrupa por banco/emissor — a conta "Cartões" é única pra todos os cartões, então sem
+  // isso as faturas de bancos diferentes ficariam misturadas numa lista só.
+  const porBanco = new Map<string, FaturaCartao[]>()
+  for (const f of faturas) {
+    const chave = f.banco ?? 'Sem banco informado'
+    const grupo = porBanco.get(chave) ?? []
+    grupo.push(f)
+    porBanco.set(chave, grupo)
+  }
+
   return (
     <>
       <div className="cd-header">
@@ -89,39 +100,44 @@ export default function ClientFaturasCartaoPage({ clienteIdOverride }: Props) {
       {faturas.length === 0 ? (
         <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma fatura encontrada nesta conta ainda.</p>
       ) : (
-        <div className="contas-section">
-          {faturas.map(f => (
-            <div key={f.competencia} className="cb-conta-item">
-              <div className="cb-conta-info">
-                <div className="cb-conta-nome">
-                  {fmtCompetencia(f.competencia)}
-                  <span style={{
-                    marginLeft: 8, fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                    color: STATUS_COR[f.status], border: `1px solid ${STATUS_COR[f.status]}`,
-                    borderRadius: 999, padding: '1px 8px',
-                  }}>
-                    {f.status}
-                  </span>
+        Array.from(porBanco.entries()).map(([banco, faturasDoBanco]) => (
+          <div key={banco} style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx2)', margin: '12px 0 6px' }}>{banco}</div>
+            <div className="contas-section">
+              {faturasDoBanco.map(f => (
+                <div key={f.id ?? f.competencia} className="cb-conta-item">
+                  <div className="cb-conta-info">
+                    <div className="cb-conta-nome">
+                      {fmtCompetencia(f.competencia)}
+                      <span style={{
+                        marginLeft: 8, fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+                        color: STATUS_COR[f.status], border: `1px solid ${STATUS_COR[f.status]}`,
+                        borderRadius: 999, padding: '1px 8px',
+                      }}>
+                        {f.status}
+                      </span>
+                    </div>
+                    <div className="cb-conta-meta">
+                      Fecha {fmtDate(f.dataFechamento)} · Vence {fmtDate(f.dataVencimento)} · {f.quantidadeCompras} compra(s)
+                    </div>
+                    <div className="cb-conta-resumo-mes">
+                      Total: {fmtBRL(f.valorTotal)}
+                      {f.valorPago > 0 && <> · Pago: <span className="val-green">{fmtBRL(f.valorPago)}</span></>}
+                    </div>
+                  </div>
+                  <div className={`cb-conta-saldo ${f.saldoDevedor > 0 ? 'val-red' : 'val-green'}`}>
+                    {fmtBRL(f.saldoDevedor)}
+                  </div>
+                  {f.status !== 'Paga' && (
+                    <div className="cb-conta-acoes">
+                      <button className="cb-btn-editar" onClick={() => setPagarAlvo(f)}>Pagar</button>
+                    </div>
+                  )}
                 </div>
-                <div className="cb-conta-meta">
-                  Fecha {fmtDate(f.dataFechamento)} · Vence {fmtDate(f.dataVencimento)} · {f.quantidadeCompras} compra(s)
-                </div>
-                <div className="cb-conta-resumo-mes">
-                  Total: {fmtBRL(f.valorTotal)}
-                  {f.valorPago > 0 && <> · Pago: <span className="val-green">{fmtBRL(f.valorPago)}</span></>}
-                </div>
-              </div>
-              <div className={`cb-conta-saldo ${f.saldoDevedor > 0 ? 'val-red' : 'val-green'}`}>
-                {fmtBRL(f.saldoDevedor)}
-              </div>
-              {f.status !== 'Paga' && (
-                <div className="cb-conta-acoes">
-                  <button className="cb-btn-editar" onClick={() => setPagarAlvo(f)}>Pagar</button>
-                </div>
-              )}
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ))
       )}
 
       {pagarAlvo && contaId && (
@@ -157,7 +173,7 @@ function PagarFaturaModal({ contaCartaoId, fatura, contasOrigem, onClose, onPago
     if (valor <= 0) { setErro('Informe um valor maior que zero.'); return }
     setSalvando(true)
     try {
-      await pagarFatura(contaCartaoId, { contaOrigemId, data, competencia: fatura.competencia, valor })
+      await pagarFatura(contaCartaoId, { contaOrigemId, data, competencia: fatura.competencia, faturaId: fatura.id, valor })
       onPago()
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Erro ao pagar fatura.')

@@ -14,4 +14,7 @@ public class VincularPagamentoFaturaDto
     [Required] public DateOnly Data { get; set; }
     [Required] public Guid ContaCartaoId { get; set; }
     [Required] public string Competencia { get; set; } = string.Empty; // "yyyy-MM"
+    // Fatura real (Models/Fatura.cs) sendo paga — null só pro grupo "virtual" (sem Fatura real),
+    // que ainda é identificado pela Competencia.
+    public Guid? FaturaId { get; set; }
 }

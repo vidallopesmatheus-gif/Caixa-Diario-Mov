@@ -247,6 +247,53 @@ public class FaturaCartaoServiceTests
         Assert.Equal(100m, resultado.ValorPago);
     }
 
+    // Bloco 3/4 (Money Vision): quando a compra tem uma Fatura real vinculada, o pagamento tem que
+    // gravar o FaturaId real (não só a Competencia) — é isso que permite reabrir a fatura certa
+    // depois, mesmo que a mesma competência tenha faturas de bancos diferentes.
+    [Fact]
+    public async Task PagarFaturaAsync_ComFaturaReal_GravaFaturaIdNoPagamento()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        var contaOrigem = CriarConta(clienteId, "Conta Corrente", "ContaCorrente", saldoInicial: 1000m);
+        var faturaId = Guid.NewGuid();
+        var fatura = new Fatura
+        {
+            Id = faturaId, ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Nubank",
+            Competencia = "2020-01", DataVencimento = new DateOnly(2020, 1, 5),
+        };
+        var registros = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2020, 1, 1),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = -300m,
+                Saidas = new() { new ItemFinanceiroSaida { Valor = 300m, Categoria = "Software", FaturaId = faturaId } },
+            },
+        };
+        var dataPagamento = new DateOnly(2020, 2, 1);
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaOrigem.Id)).ReturnsAsync(contaOrigem);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(registros);
+        _pagamentoRepoMock.Setup(r => r.ListarPorContaCartaoAsync(contaCartao.Id)).ReturnsAsync(new List<PagamentoFatura>());
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<Fatura> { fatura });
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaOrigem.Id, dataPagamento)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaOrigem.Id)).ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCartao.Id, dataPagamento)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        PagamentoFatura? pagamentoGravado = null;
+        _pagamentoRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<PagamentoFatura>()))
+            .Callback<PagamentoFatura>(p => pagamentoGravado = p).ReturnsAsync((PagamentoFatura p) => p);
+
+        var dto = new PagarFaturaDto { ContaOrigemId = contaOrigem.Id, Data = dataPagamento, FaturaId = faturaId };
+        var resultado = await _sut.PagarFaturaAsync(contaCartao.Id, dto, clienteId, "cliente");
+
+        Assert.Equal(faturaId, resultado.FaturaId);
+        Assert.Equal(faturaId, pagamentoGravado!.FaturaId);
+    }
+
     [Fact]
     public async Task PagarFaturaAsync_ContaOrigemECartao_LancaDadosInvalidos()
     {
@@ -402,7 +449,7 @@ public class FaturaCartaoServiceTests
         Assert.Equal(300m, fatura.ValorTotal);
         Assert.Equal(100m, fatura.ValorPago);
         Assert.Equal(200m, fatura.SaldoDevedor);
-        Assert.Equal("Fechada", fatura.Status); // fechou em 15/01/2020, sempre no passado
+        Assert.Equal("Parcial", fatura.Status); // fechou em 15/01/2020 e só parte foi pago
     }
 
     [Fact]
@@ -416,6 +463,97 @@ public class FaturaCartaoServiceTests
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.CONTA_NAO_E_CARTAO, ex.Codigo);
+    }
+
+    // Bloco 3/4 (Money Vision): o bug original juntava compras de bancos/meses diferentes só pela
+    // data — aqui as duas compras caem em competências DIFERENTES pela data (ago/set), mas têm o
+    // mesmo FaturaId (mesmo arquivo importado), então têm que aparecer como UMA fatura só.
+    [Fact]
+    public async Task ListarFaturasAsync_ComprasEmMesesDiferentesComMesmoFaturaId_AgrupaNumaFaturaSo()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        var faturaId = Guid.NewGuid();
+        var fatura = new Fatura
+        {
+            Id = faturaId, ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Nubank",
+            Competencia = "2026-09", DataVencimento = new DateOnly(2026, 10, 5),
+        };
+        var registros = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 8, 20),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Valor = 100m, Categoria = "Software", FaturaId = faturaId } },
+            },
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 9, 2),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Valor = 50m, Categoria = "Software", FaturaId = faturaId } },
+            },
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(registros);
+        _pagamentoRepoMock.Setup(r => r.ListarPorContaCartaoAsync(contaCartao.Id)).ReturnsAsync(new List<PagamentoFatura>());
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<Fatura> { fatura });
+
+        var faturas = await _sut.ListarFaturasAsync(contaCartao.Id, clienteId, "cliente");
+
+        var faturaDto = Assert.Single(faturas);
+        Assert.Equal(faturaId, faturaDto.Id);
+        Assert.Equal("Nubank", faturaDto.Banco);
+        Assert.Equal(150m, faturaDto.ValorTotal);
+        Assert.Equal(2, faturaDto.QuantidadeCompras);
+    }
+
+    // ── SugerirFaturaAsync ──────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SugerirFaturaAsync_ComDuasFaturasEmAberto_PriorizaValorExatoSobreOMaisParecido()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        var faturaProxima = new Fatura
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Itaú",
+            Competencia = "2020-01", DataVencimento = new DateOnly(2020, 1, 5),
+        };
+        var faturaExata = new Fatura
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Nubank",
+            Competencia = "2020-01", DataVencimento = new DateOnly(2020, 1, 20),
+        };
+        var registros = new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2020, 1, 1),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Valor = 290m, Categoria = "Software", FaturaId = faturaProxima.Id } },
+            },
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2020, 1, 1),
+                Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+                Saidas = new() { new ItemFinanceiroSaida { Valor = 300m, Categoria = "Software", FaturaId = faturaExata.Id } },
+            },
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(registros);
+        _pagamentoRepoMock.Setup(r => r.ListarPorContaCartaoAsync(contaCartao.Id)).ReturnsAsync(new List<PagamentoFatura>());
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<Fatura> { faturaProxima, faturaExata });
+
+        // Data do pagamento mais próxima do vencimento da fatura "faturaProxima" (01/01) — mesmo
+        // assim, o valor batendo exatamente com "faturaExata" (Nubank) deve ganhar.
+        var sugestao = await _sut.SugerirFaturaAsync(contaCartao.Id, 300m, new DateOnly(2020, 1, 2), clienteId, "cliente");
+
+        Assert.NotNull(sugestao);
+        Assert.Equal(faturaExata.Id, sugestao!.Id);
+        Assert.Equal("Nubank", sugestao.Banco);
     }
 
     // ── LancarComprasParceladaAsync (item 9) ─────────────────────────────────────────────────────

@@ -19,11 +19,13 @@ public class ProjecaoControllerTests
     private readonly Mock<IContaRecorrenteRepository> _contaMock = new();
     private readonly Mock<IContaBancariaRepository> _contaBancariaMock = new();
     private readonly Mock<IPagamentoFaturaRepository> _pagamentoFaturaMock = new();
+    private readonly Mock<IFaturaRepository> _faturaMock = new();
 
     private ProjecaoController CriarSut(Guid usuarioId, string perfil)
     {
         var sut = new ProjecaoController(
-            _projecaoMock.Object, _registroMock.Object, _contaMock.Object, _contaBancariaMock.Object, _pagamentoFaturaMock.Object);
+            _projecaoMock.Object, _registroMock.Object, _contaMock.Object, _contaBancariaMock.Object,
+            _pagamentoFaturaMock.Object, _faturaMock.Object);
         var claims = new[] { new Claim("id", usuarioId.ToString()), new Claim("perfil", perfil) };
         sut.ControllerContext = new ControllerContext
         {
@@ -182,6 +184,8 @@ public class ProjecaoControllerTests
         var pagamento2 = new PagamentoFatura { Id = Guid.NewGuid(), ContaCartaoId = cartao2.Id, Competencia = "2026-01" };
         _pagamentoFaturaMock.Setup(r => r.ListarPorContaCartaoAsync(cartao1.Id)).ReturnsAsync(new List<PagamentoFatura> { pagamento1 });
         _pagamentoFaturaMock.Setup(r => r.ListarPorContaCartaoAsync(cartao2.Id)).ReturnsAsync(new List<PagamentoFatura> { pagamento2 });
+        _faturaMock.Setup(r => r.ListarPorContaAsync(cartao1.Id)).ReturnsAsync(new List<Fatura>());
+        _faturaMock.Setup(r => r.ListarPorContaAsync(cartao2.Id)).ReturnsAsync(new List<Fatura>());
 
         ProjecaoOpcoes? opcoesRecebidas = null;
         _projecaoMock.Setup(s => s.Calcular(

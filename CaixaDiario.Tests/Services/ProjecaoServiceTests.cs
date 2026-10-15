@@ -563,7 +563,7 @@ public class ProjecaoServiceTests
         registroCompra.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Compra", Valor = 300m, TipoCusto = "CustoVariavel" });
 
         var faturaEsperada = FaturaCartaoService.CalcularFaturas(
-            contaCartao, new List<RegistroDiario> { registroCompra }, new List<PagamentoFatura>(), Hoje)
+            contaCartao, new List<RegistroDiario> { registroCompra }, new List<PagamentoFatura>(), new List<Fatura>(), Hoje)
             .Single(f => f.Status != "Paga");
         Assert.True(faturaEsperada.DataVencimento > Hoje); // garantia da escolha de datas acima
 
