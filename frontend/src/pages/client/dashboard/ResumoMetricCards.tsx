@@ -3,7 +3,8 @@ import { obterEvolucao } from '../../../api/metricas'
 import type { Dre, EvolucaoMensal } from '../../../api/metricas'
 import type { Projecao } from '../../../api/projecao'
 import type { JanelaPeriodo } from '../../../utils/periodo'
-import MetricCard from './MetricCard'
+import { MvKpi, MvKpiGrid } from '../../../components/mv'
+import { fmtPct } from '../../../utils/format'
 
 interface Props {
   clienteId: string
@@ -51,37 +52,26 @@ export default function ResumoMetricCards({ clienteId, janela, dreAtual, dreAnte
   const serieSaidas = evolucao.map(e => e.custos)
   const serieProjecao = projecao ? projecao.dias.map(d => d.saldoFim) : []
 
+  // tone/delta — mesma leitura de "bom/ruim" que MetricCard fazia por cor, agora via MvKpi:
+  // corPositivo=true (padrão) → variação positiva é boa; corPositivo=false (saídas) → o contrário.
+  function delta(variacaoPct: number | null, corPositivo = true): { texto?: string; tone: 'good' | 'bad' | 'neutral' } {
+    if (variacaoPct === null) return { tone: 'neutral' }
+    const bom = corPositivo ? variacaoPct >= 0 : variacaoPct <= 0
+    const seta = variacaoPct > 0 ? '▲' : variacaoPct < 0 ? '▼' : '—'
+    return { texto: `${seta} ${fmtPct(Math.abs(variacaoPct))}`, tone: variacaoPct === 0 ? 'neutral' : bom ? 'good' : 'bad' }
+  }
+
+  const dSaldo = delta(saldoAtualVar)
+  const dEntradas = delta(entradasVar)
+  const dSaidas = delta(saidasVar, false)
+  const dProjetado = delta(saldoProjetadoVar)
+
   return (
-    <div className="resumo-cards-grid">
-      <MetricCard
-        label="Saldo Atual"
-        valor={saldoAtual}
-        variacaoPct={saldoAtualVar}
-        comparativoLabel="vs. início do período"
-        serie={serieSaldo}
-      />
-      <MetricCard
-        label={`Entradas (${janela.label})`}
-        valor={entradas}
-        variacaoPct={entradasVar}
-        comparativoLabel="vs. período anterior"
-        serie={serieEntradas}
-      />
-      <MetricCard
-        label={`Saídas (${janela.label})`}
-        valor={saidas}
-        variacaoPct={saidasVar}
-        comparativoLabel="vs. período anterior"
-        serie={serieSaidas}
-        corPositivo={false}
-      />
-      <MetricCard
-        label="Saldo Projetado (30 dias)"
-        valor={saldoProjetado}
-        variacaoPct={saldoProjetadoVar}
-        comparativoLabel="vs. saldo atual"
-        serie={serieProjecao}
-      />
-    </div>
+    <MvKpiGrid>
+      <MvKpi label="Saldo Atual" value={saldoAtual} tone={dSaldo.tone} delta={dSaldo.texto} spark={serieSaldo} />
+      <MvKpi label={`Entradas (${janela.label})`} value={entradas} tone={dEntradas.tone} delta={dEntradas.texto} spark={serieEntradas} />
+      <MvKpi label={`Saídas (${janela.label})`} value={saidas} tone={dSaidas.tone} delta={dSaidas.texto} spark={serieSaidas} />
+      <MvKpi label="Saldo Projetado (30 dias)" value={saldoProjetado} tone={dProjetado.tone} delta={dProjetado.texto} spark={serieProjecao} />
+    </MvKpiGrid>
   )
 }

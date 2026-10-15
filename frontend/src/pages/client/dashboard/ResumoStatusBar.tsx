@@ -1,6 +1,7 @@
-import { fmtBRL } from '../../../utils/format'
 import type { PeriodoOpcao } from '../../../utils/periodo'
 import type { ContaBancaria } from '../../../types'
+import { MvHero, MvTabs } from '../../../components/mv'
+import { fmtLidoEm } from '../../../utils/format'
 
 interface Props {
   contasBancarias: ContaBancaria[]
@@ -29,39 +30,39 @@ export default function ResumoStatusBar({
   const contaSelecionada = contaFiltro ? contasAtivas.find(c => c.id === contaFiltro) : null
 
   // Cartão (Bloco 3, Money Vision): saldo de cartão é dívida, nunca dinheiro — nunca soma no
-  // consolidado (mesmo sinal errado de antes da correção, ele nunca poderia entrar aqui como se
-  // fosse saldo disponível).
-  const saldoConsolidado = contaSelecionada
-    ? contaSelecionada.saldoAtual
-    : contasAtivas.filter(c => c.tipo !== 'CartaoCredito').reduce((s, c) => s + c.saldoAtual, 0)
+  // consolidado nem no patrimônio.
+  const saldoConsolidado = contasAtivas
+    .filter(c => c.tipo !== 'CartaoCredito' && c.tipo !== 'Investimento')
+    .reduce((s, c) => s + c.saldoAtual, 0)
+  const saldoInvestido = contasAtivas
+    .filter(c => c.tipo === 'Investimento')
+    .reduce((s, c) => s + c.saldoAtual, 0)
+  const patrimonio = saldoConsolidado + saldoInvestido
 
   return (
-    <div className="resumo-status-bar">
-      <div className="resumo-saldo-principal">
-        <span className="resumo-saldo-label">
-          {contaSelecionada ? `Saldo — ${contaSelecionada.nome}` : 'Saldo consolidado'}
-        </span>
-        <span className={`resumo-saldo-valor ${saldoConsolidado >= 0 ? 'val-green' : 'val-red'}`}>
-          {fmtBRL(saldoConsolidado)}
-        </span>
-        {!contaSelecionada && contasAtivas.length > 1 && (
-          <span className="resumo-saldo-sub">{contasAtivas.length} contas</span>
-        )}
-      </div>
+    <>
+      {contaSelecionada ? (
+        <MvHero
+          eyebrow={`Saldo — ${contaSelecionada.nome}`}
+          value={contaSelecionada.saldoAtual}
+          tone={contaSelecionada.saldoAtual >= 0 ? 'good' : 'bad'}
+          footnote={fmtLidoEm('saldo da conta')}
+        />
+      ) : (
+        <MvHero
+          eyebrow="Patrimônio"
+          value={patrimonio}
+          tone={patrimonio >= 0 ? 'good' : 'bad'}
+          breakdown={[
+            { label: 'Disponível', valor: saldoConsolidado },
+            { label: 'Investido', valor: saldoInvestido },
+          ]}
+          footnote={fmtLidoEm('saldo das contas bancárias')}
+        />
+      )}
 
-      <div className="resumo-controles">
-        <div className="resumo-periodo-tabs">
-          {OPCOES.map(o => (
-            <button
-              key={o.valor}
-              type="button"
-              className={`resumo-periodo-btn${periodoOpcao === o.valor ? ' active' : ''}`}
-              onClick={() => onPeriodoOpcaoChange(o.valor)}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
+      <div className="mv-controles-row">
+        <MvTabs opcoes={OPCOES} ativa={periodoOpcao} onChange={onPeriodoOpcaoChange} />
 
         {periodoOpcao === 'personalizado' && (
           <div className="resumo-periodo-datas">
@@ -75,7 +76,7 @@ export default function ResumoStatusBar({
 
         {contasAtivas.length > 1 && (
           <select
-            className="resumo-conta-select"
+            className="mv-select"
             value={contaFiltro ?? ''}
             onChange={e => onContaFiltroChange(e.target.value || null)}
           >
@@ -84,6 +85,6 @@ export default function ResumoStatusBar({
           </select>
         )}
       </div>
-    </div>
+    </>
   )
 }

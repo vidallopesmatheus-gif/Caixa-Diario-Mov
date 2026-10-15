@@ -14,13 +14,14 @@ import { obterSelicAtual } from '../../api/selic'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { obterDre, obterParaOndeFoiMeuDinheiro } from '../../api/metricas'
 import type { Dre, ParaOndeFoiMeuDinheiro } from '../../api/metricas'
-import ParaOndeFoiMeuDinheiroCard from '../../components/shared/ParaOndeFoiMeuDinheiroCard'
+import { MvPage } from '../../components/mv'
 import { obterProjecao } from '../../api/projecao'
 import type { Projecao } from '../../api/projecao'
 import OrcamentoDinamicoCard from './OrcamentoDinamicoCard'
 import MetasResumoBlock from './dashboard/MetasResumoBlock'
 import ResumoStatusBar from './dashboard/ResumoStatusBar'
 import ResumoMetricCards from './dashboard/ResumoMetricCards'
+import DinheiroFluxoCard from './dashboard/DinheiroFluxoCard'
 import AtencaoCard from './dashboard/AtencaoCard'
 import SaudeNegocioBlock from './dashboard/SaudeNegocioBlock'
 import DividasCard from './dashboard/DividasCard'
@@ -625,32 +626,36 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
           buscava a mesma lista de metas de novo, duplicando a chamada a /api/metas. */}
       {clienteId && <MetasResumoBlock clienteId={clienteId} metas={objetivos} loading={objetivosLoading} />}
 
-      {/* Bloco 5 (Money Vision), item 2: por que o saldo em conta parece baixo mesmo com receita boa. */}
-      {paraOndeFoi && <ParaOndeFoiMeuDinheiroCard dados={paraOndeFoi} />}
-
-      {/* ══ Camada 1: status — saldo consolidado + seletor de período/conta ══ */}
-      <ResumoStatusBar
-        contasBancarias={contasBancarias}
-        contaFiltro={contaFiltro}
-        onContaFiltroChange={setContaFiltro}
-        periodoOpcao={periodoOpcao}
-        onPeriodoOpcaoChange={setPeriodoOpcao}
-        personalizadoDe={personalizadoDe}
-        personalizadoAte={personalizadoAte}
-        onPersonalizadoChange={(d, a) => { setPersonalizadoDe(d); setPersonalizadoAte(a) }}
-      />
-
-      {/* ══ Camada 2: 4 cards de métricas (saldo, entradas, saídas, projeção) ══ */}
-      {clienteId && (
-        <ResumoMetricCards
-          clienteId={clienteId}
-          janela={janela}
-          dreAtual={dreLoading ? null : dreAtual}
-          dreAnterior={dreLoading ? null : dreAnterior}
-          saldoAtual={saldoAtualSelecionado}
-          projecao={projecao}
+      {/* ══ Redesign visual (Money Vision): topo do Dashboard — hero + KPIs + fluxo do dinheiro,
+          sempre no visual escuro fixo "cockpit" (MvPage), independente do tema claro/escuro. ══ */}
+      <MvPage>
+        {/* ══ Camada 1: status — saldo consolidado + seletor de período/conta ══ */}
+        <ResumoStatusBar
+          contasBancarias={contasBancarias}
+          contaFiltro={contaFiltro}
+          onContaFiltroChange={setContaFiltro}
+          periodoOpcao={periodoOpcao}
+          onPeriodoOpcaoChange={setPeriodoOpcao}
+          personalizadoDe={personalizadoDe}
+          personalizadoAte={personalizadoAte}
+          onPersonalizadoChange={(d, a) => { setPersonalizadoDe(d); setPersonalizadoAte(a) }}
         />
-      )}
+
+        {/* ══ Camada 2: 4 cards de métricas (saldo, entradas, saídas, projeção) ══ */}
+        {clienteId && (
+          <ResumoMetricCards
+            clienteId={clienteId}
+            janela={janela}
+            dreAtual={dreLoading ? null : dreAtual}
+            dreAnterior={dreLoading ? null : dreAnterior}
+            saldoAtual={saldoAtualSelecionado}
+            projecao={projecao}
+          />
+        )}
+
+        {/* Bloco 5 (Money Vision), item 2: por que o saldo em conta parece baixo mesmo com receita boa. */}
+        {paraOndeFoi && <DinheiroFluxoCard dados={paraOndeFoi} />}
+      </MvPage>
 
       {/* Item 2.9: a receber/a pagar pendentes, ao lado do resumo de saldo. */}
       <div className="stats-grid" style={{ marginBottom: 20 }}>
