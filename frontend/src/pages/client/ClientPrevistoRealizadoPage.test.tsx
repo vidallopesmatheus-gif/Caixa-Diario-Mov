@@ -24,7 +24,10 @@ function mockHooks(dados: PrevistoRealizado) {
   vi.mocked(relatoriosApi.obterPrevistoRealizado).mockResolvedValue(dados)
 }
 
-test('mostra o gráfico de linha Previsto x Realizado quando há dados', async () => {
+// Redesign visual (Money Vision): o gráfico de linha combinado deu lugar a um "bullet chart" por
+// categoria (uma linha por categoria, dentro de .mv-bullet-list) — cobertura adaptada a esse novo
+// comportamento, mantendo o foco em "os dados certos aparecem", não na estrutura antiga da tela.
+test('mostra o bullet chart por categoria quando há dados', async () => {
   mockHooks({
     linhas: [
       {
@@ -40,10 +43,10 @@ test('mostra o gráfico de linha Previsto x Realizado quando há dados', async (
   render(<ClientPrevistoRealizadoPage />)
 
   await waitFor(() => expect(screen.getAllByText('Aluguel').length).toBeGreaterThan(0))
-  expect(document.querySelector('.pj-grafico-container')).toBeInTheDocument()
+  expect(document.querySelector('.mv-bullet-list')).toBeInTheDocument()
 })
 
-test('soma previsto e realizado de várias categorias no mesmo mês para o gráfico', async () => {
+test('soma previsto e realizado de várias categorias no período, nos KPIs', async () => {
   mockHooks({
     linhas: [
       {
@@ -60,18 +63,16 @@ test('soma previsto e realizado de várias categorias no mesmo mês para o gráf
   render(<ClientPrevistoRealizadoPage />)
 
   await waitFor(() => expect(screen.getAllByText('Aluguel').length).toBeGreaterThan(0))
-  // A soma (1200 previsto, 1300 realizado) não aparece como texto isolado no gráfico em jsdom (SVG
-  // sem layout), então a cobertura de agregação fica na tabela: os dois valores individuais
-  // continuam visíveis, confirmando que nenhuma linha foi perdida ao agrupar por mês.
-  expect(screen.getByText('R$ 1.050,00')).toBeInTheDocument()
-  expect(screen.getByText('R$ 250,00')).toBeInTheDocument()
+  // Soma do período inteiro (ambas categorias, tipo Pagar): previsto 1000+200, realizado 1050+250.
+  expect(screen.getByText('R$ 1.200,00')).toBeInTheDocument()
+  expect(screen.getByText('R$ 1.300,00')).toBeInTheDocument()
 })
 
-test('sem dados, não mostra o gráfico', async () => {
+test('sem dados, não mostra o bullet chart', async () => {
   mockHooks({ linhas: [] })
 
   render(<ClientPrevistoRealizadoPage />)
 
   await screen.findByText(/Nenhuma conta fixa recorrente/)
-  expect(document.querySelector('.pj-grafico-container')).not.toBeInTheDocument()
+  expect(document.querySelector('.mv-bullet-list')).not.toBeInTheDocument()
 })
