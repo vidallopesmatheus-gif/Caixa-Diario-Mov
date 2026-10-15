@@ -359,20 +359,24 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const totalAtrasadoReceber = atrasadasReceber.reduce((s, v) => s + v.conta.valor, 0)
   const totalAtrasadoPagar = atrasadasPagar.reduce((s, v) => s + v.conta.valor, 0)
 
+  // Parte 4 (Money Vision): atrasada não "some" da lista — continua aparecendo dentro do mês do
+  // SEU vencimento (ex.: uma conta vencida em setembro, vista hoje em outubro, ainda aparece ao
+  // navegar pra setembro) e conta no total daquele mês. "Atrasadas" continua sendo o atalho pra
+  // ver todas de uma vez, independente do mês; "Tudo" continua só as ainda não vencidas.
   function filtrarPorModo(lista: ContaView[]) {
     if (modoLista === 'tudo') return lista.filter(v => !vencida(v))
     if (modoLista === 'atrasadas') return lista.filter(vencida)
-    return lista.filter(v => !vencida(v) && estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
+    return lista.filter(v => estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
   }
 
   const pendentesReceberVisiveis = filtrarPorModo(pendentesReceber)
   const pendentesPagarVisiveis = filtrarPorModo(pendentesPagar)
   // Cards de total (item 6): sempre o mês selecionado, independente do modo escolhido na lista.
   const totalMesReceber = pendentesReceber
-    .filter(v => !vencida(v) && estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
+    .filter(v => estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
     .reduce((s, v) => s + v.conta.valor, 0)
   const totalMesPagar = pendentesPagar
-    .filter(v => !vencida(v) && estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
+    .filter(v => estaNoMes(dataReferencia(v.conta.dataVencimento, v.registroData), mesSelecionado))
     .reduce((s, v) => s + v.conta.valor, 0)
 
   // Item 4: recolhidas por padrão — expande mostrando só o mês selecionado.

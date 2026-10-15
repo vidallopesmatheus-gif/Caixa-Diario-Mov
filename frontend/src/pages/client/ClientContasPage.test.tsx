@@ -64,6 +64,14 @@ function irParaAbaPagar() {
   fireEvent.click(screen.getByRole('button', { name: /A Pagar/ }))
 }
 
+// Dia `dia` do mês ANTERIOR ao atual — sempre vencido, sem depender de quando o teste roda e sem
+// cair na pegadinha de toISOString() (UTC) empurrar a data perto da virada do dia.
+function isoMesAnterior(dia: number): string {
+  const hoje = new Date(todayISO() + 'T12:00:00')
+  const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, dia, 12)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 test('exclui a conta certa quando dois registros compartilham a mesma data sem conta bancária vinculada', async () => {
   // Reproduz o bug relatado: dois RegistroDiario distintos (ids diferentes) na MESMA data, ambos
   // sem contaBancariaId (registros legados) — identificar o registro de origem por (data,
@@ -191,9 +199,13 @@ test('filtro por conta esconde pendências de outras contas', async () => {
 
 // ── Parte 3 (Money Vision): seletor de mês, atrasadas sempre no topo, pagas/recebidas recolhidas ──
 
-test('atrasada some da lista do mês e aparece só no aviso do topo e no modo "Atrasadas"', async () => {
+// Parte 4 (Money Vision): atrasada não some da lista — continua listada dentro do mês do seu
+// próprio vencimento (e conta no total daquele mês), além de continuar no aviso do topo e no
+// modo "Atrasadas".
+test('atrasada aparece dentro do mês do seu vencimento e conta no total daquele mês', async () => {
+  const vencimentoMesAnterior = isoMesAnterior(15)
   const registro = criarRegistro({
-    contasAPagar: [{ descricao: 'Conta velha', valor: 400, dataVencimento: addDays(todayISO(), -10), pago: false }],
+    contasAPagar: [{ descricao: 'Conta velha', valor: 400, dataVencimento: vencimentoMesAnterior, pago: false }],
   })
   mockHooks([registro])
 
@@ -201,9 +213,17 @@ test('atrasada some da lista do mês e aparece só no aviso do topo e no modo "A
   irParaAbaPagar()
 
   expect(await screen.findByText(/1 conta\(s\) atrasada\(s\) · R\$ 400,00/)).toBeInTheDocument()
+  // Mês atual (padrão) não é o mês do vencimento dela — ainda não aparece aqui.
   expect(screen.getByText('Nenhuma pendente.')).toBeInTheDocument()
   expect(screen.queryByText('Conta velha')).not.toBeInTheDocument()
 
+  // Navega pro mês do próprio vencimento: aparece lá, e conta no total daquele mês.
+  fireEvent.click(screen.getByRole('button', { name: '‹' }))
+  expect(await screen.findByText('Conta velha')).toBeInTheDocument()
+  const totalPagar = screen.getByText(/A pagar em/).closest('.contas-total-card') as HTMLElement
+  expect(within(totalPagar).getByText('R$ 400,00')).toBeInTheDocument()
+
+  // Continua aparecendo também no modo "Atrasadas", pra quem quer ver todas de uma vez.
   fireEvent.click(screen.getByRole('button', { name: 'Atrasadas' }))
   expect(await screen.findByText('Conta velha')).toBeInTheDocument()
 })
