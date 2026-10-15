@@ -9,14 +9,19 @@ test('mostra o fluxo Entrou → Gastou → Guardou → Ficou', () => {
   expect(screen.getByText('R$ 1.300,00')).toBeInTheDocument()
   expect(screen.getByText('R$ 6.700,00')).toBeInTheDocument()
   expect(screen.getByText(/guardou R\$ 1\.300,00 este mês/)).toBeInTheDocument()
-  expect(screen.getByText('13.0%')).toBeInTheDocument()
+  expect(screen.getByText('13,0%')).toBeInTheDocument()
+  expect(screen.getByText('Guardou')).toBeInTheDocument()
 })
 
-test('taxa negativa mostra aviso "você usou a reserva"', () => {
+test('taxa negativa mostra aviso "você usou a reserva" e vira "Resgatou" no fluxo', () => {
   render(<ParaOndeFoiMeuDinheiroCard dados={{ entrou: 5000, gastou: 4000, guardou: -500, ficou: 1500, taxaPoupancaPercentual: -10 }} />)
 
   expect(screen.getByText(/você usou a reserva/)).toBeInTheDocument()
   expect(screen.getByText(/Você resgatou R\$ 500,00 da reserva/)).toBeInTheDocument()
+  // Item 5 (Money Vision): rótulo do fluxo vira "Resgatou" (não "Guardou -R$500,00") quando negativo.
+  expect(screen.getByText('Resgatou')).toBeInTheDocument()
+  expect(screen.queryByText('Guardou')).not.toBeInTheDocument()
+  expect(screen.getByText('-10,0%')).toBeInTheDocument()
 })
 
 test('sem receita no período, não mostra a taxa de poupança', () => {

@@ -7,5 +7,6 @@ public interface ISaudeFinanceiraService
 {
     SaudeFinanceiraDto Calcular(
         List<RegistroDiario> registros,
-        List<MetaAnual> metas);
+        List<MetaAnual> metas,
+        HashSet<Guid> contasInvestimentoIds);
 }

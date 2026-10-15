@@ -48,6 +48,25 @@ test('Bloco 5: Disponível, Investido e Patrimônio aparecem separados — inves
   expect(within(resumo).getByText('R$ 12.986,48')).toBeInTheDocument() // Patrimônio total (soma)
 })
 
+// Item 5 (Money Vision): entradasMes/saidasMes excluem Transferencia por design — pra conta de
+// Investimento (que só recebe aportes/resgates via Transferencia), o card de "Este mês" tem que
+// usar aporteMesAtual/resgateMesAtual, senão mostra sempre R$ 0,00.
+test('card de conta de Investimento mostra aporte/resgate do mês, não entradasMes/saidasMes', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([
+    conta({
+      id: 'invest', nome: 'Nubank Investimento', tipo: 'Investimento', saldoAtual: 4046.68,
+      entradasMes: 0, saidasMes: 0, aporteMesAtual: 500, resgateMesAtual: 120,
+    }),
+  ])
+
+  render(<MemoryRouter><ClientBancoPage /></MemoryRouter>)
+
+  const linha = await screen.findByText('Nubank Investimento')
+  const item = linha.closest('.cb-conta-item') as HTMLElement
+  expect(within(item).getByText('+R$ 500,00')).toBeInTheDocument()
+  expect(within(item).getByText('-R$ 120,00')).toBeInTheDocument()
+})
+
 test('sem conta de investimento, o card "Investido / Reserva" não aparece', async () => {
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([
     conta({ id: 'corrente', nome: 'Nubank', tipo: 'ContaCorrente', saldoAtual: 1000 }),
