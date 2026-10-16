@@ -158,10 +158,14 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const [sugestoes, setSugestoes] = useState<SugestaoVinculo[]>([])
   const [sugestoesIgnoradas, setSugestoesIgnoradas] = useState<Set<string>>(new Set())
   const [vinculandoSugestaoId, setVinculandoSugestaoId] = useState<string | null>(null)
+  // Painéis de sugestão (vínculo e recorrência) recolhidos por padrão — listas sem limite de
+  // tamanho deixavam a tela enorme quando havia muitos candidatos detectados.
+  const [sugestoesVinculoAbertas, setSugestoesVinculoAbertas] = useState(false)
 
   // ── Item 2 do Bloco 4 ("Visão de Futuro"): padrões detectados no histórico sem recorrência ──
   const [sugestoesRecorrencia, setSugestoesRecorrencia] = useState<SugestaoRecorrencia[]>([])
   const [ignorandoRecorrenciaChave, setIgnorandoRecorrenciaChave] = useState<string | null>(null)
+  const [sugestoesRecorrenciaAbertas, setSugestoesRecorrenciaAbertas] = useState(false)
 
   useEffect(() => {
     if (!clienteId) return
@@ -222,7 +226,19 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
     setValorDisplay(fmtNum(s.valorMedio))
     setValor(s.valorMedio)
     setIsRecorrente(true)
-    setRecCategoria(s.categoria ?? '')
+    setRecDiaVencimento(s.diaTipico ? String(s.diaTipico) : '')
+    setRecValorVariavel(s.valorVariavel)
+    // A categoria vem do lançamento histórico que gerou a sugestão — se ela foi renomeada ou
+    // desativada desde então, não existe mais entre as opções do select, e preencher mesmo assim
+    // deixaria o campo com um valor que não bate com nenhuma option (parece vazio, mas não é —
+    // e submeteria uma categoria órfã). Nesse caso, mantém o campo em branco pro usuário escolher.
+    const opcoesDoTipo = s.tipo === 'Receber' ? categorias.entradas : categorias.saidas
+    const categoriaAindaAtiva = !!s.categoria && opcoesDoTipo.some(c => c.nome === s.categoria)
+    setRecCategoria(categoriaAindaAtiva ? s.categoria! : '')
+    if (s.categoria && !categoriaAindaAtiva) {
+      setMsg(`A categoria "${s.categoria}" não existe mais — selecione outra antes de confirmar.`)
+      setMsgOk(false)
+    }
     if (s.contaBancariaId) setContaSelecionadaId(s.contaBancariaId)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -977,55 +993,69 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       </div>
 
       {sugestoesVisiveis.length > 0 && (
-        <div className="contas-section">
-          <h3>💡 Possíveis pagamentos encontrados ({sugestoesVisiveis.length})</h3>
-          {sugestoesVisiveis.map(s => (
-            <div key={s.contaProvisionadaId} className="conta-item" style={{ flexWrap: 'wrap', gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <strong>{s.descricao}</strong> — {fmtBRL(s.valor)}{s.dataVencimento ? ` (venc. ${fmtDate(s.dataVencimento)})` : ''}
-                <div style={{ fontSize: 12, color: 'var(--tx3)' }}>
-                  Lançamento no extrato: {s.lancamentoDescricao} — {fmtBRL(s.lancamentoValor)} em {fmtDate(s.lancamentoData)} · {s.score}% de confiança
+        <>
+          <button type="button" className="contas-secao-header" aria-expanded={sugestoesVinculoAbertas}
+            onClick={() => setSugestoesVinculoAbertas(v => !v)}>
+            <span>{sugestoesVinculoAbertas ? '▾' : '▸'} 💡 Possíveis pagamentos encontrados ({sugestoesVisiveis.length})</span>
+          </button>
+          {sugestoesVinculoAbertas && (
+            <div className="contas-section">
+              {sugestoesVisiveis.map(s => (
+                <div key={s.contaProvisionadaId} className="conta-item" style={{ flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <strong>{s.descricao}</strong> — {fmtBRL(s.valor)}{s.dataVencimento ? ` (venc. ${fmtDate(s.dataVencimento)})` : ''}
+                    <div style={{ fontSize: 12, color: 'var(--tx3)' }}>
+                      Lançamento no extrato: {s.lancamentoDescricao} — {fmtBRL(s.lancamentoValor)} em {fmtDate(s.lancamentoData)} · {s.score}% de confiança
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn-confirm" disabled={vinculandoSugestaoId === s.contaProvisionadaId}
+                      onClick={() => vincularSugestao(s)}>
+                      {vinculandoSugestaoId === s.contaProvisionadaId ? 'Vinculando...' : '🔗 Vincular'}
+                    </button>
+                    <button className="btn-cancel" disabled={vinculandoSugestaoId === s.contaProvisionadaId}
+                      onClick={() => ignorarSugestao(s)}>
+                      Ignorar
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button className="btn-confirm" disabled={vinculandoSugestaoId === s.contaProvisionadaId}
-                  onClick={() => vincularSugestao(s)}>
-                  {vinculandoSugestaoId === s.contaProvisionadaId ? 'Vinculando...' : '🔗 Vincular'}
-                </button>
-                <button className="btn-cancel" disabled={vinculandoSugestaoId === s.contaProvisionadaId}
-                  onClick={() => ignorarSugestao(s)}>
-                  Ignorar
-                </button>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
       {sugestoesRecorrencia.length > 0 && (
-        <div className="contas-section">
-          <h3>🔁 Parece uma conta recorrente? ({sugestoesRecorrencia.length})</h3>
-          {sugestoesRecorrencia.map(s => (
-            <div key={s.chave} className="conta-item" style={{ flexWrap: 'wrap', gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <strong>{s.descricao}</strong> — {fmtBRL(s.valorMedio)}/mês ({s.tipo === 'Receber' ? 'a receber' : 'a pagar'})
-                <div style={{ fontSize: 12, color: 'var(--tx3)' }}>
-                  Apareceu em {s.quantidadeOcorrencias} meses diferentes · última vez em {fmtDate(s.ultimaOcorrencia)}
-                  {s.categoria ? ` · ${s.categoria}` : ''}
+        <>
+          <button type="button" className="contas-secao-header" aria-expanded={sugestoesRecorrenciaAbertas}
+            onClick={() => setSugestoesRecorrenciaAbertas(v => !v)}>
+            <span>{sugestoesRecorrenciaAbertas ? '▾' : '▸'} 🔁 Parece uma conta recorrente? ({sugestoesRecorrencia.length})</span>
+          </button>
+          {sugestoesRecorrenciaAbertas && (
+            <div className="contas-section">
+              {sugestoesRecorrencia.map(s => (
+                <div key={s.chave} className="conta-item" style={{ flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <strong>{s.descricao}</strong> — {fmtBRL(s.valorMedio)}/mês ({s.tipo === 'Receber' ? 'a receber' : 'a pagar'})
+                    <div style={{ fontSize: 12, color: 'var(--tx3)' }}>
+                      Apareceu em {s.quantidadeOcorrencias} meses diferentes · última vez em {fmtDate(s.ultimaOcorrencia)}
+                      {s.categoria ? ` · ${s.categoria}` : ''}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn-confirm" onClick={() => usarSugestaoRecorrencia(s)}>
+                      {s.tipo === 'Receber' ? 'Criar Conta a Receber?' : 'Criar Contas a Pagar?'}
+                    </button>
+                    <button className="btn-cancel" disabled={ignorandoRecorrenciaChave === s.chave}
+                      onClick={() => handleIgnorarSugestaoRecorrencia(s)}>
+                      {ignorandoRecorrenciaChave === s.chave ? 'Ignorando...' : 'Ignorar'}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button className="btn-confirm" onClick={() => usarSugestaoRecorrencia(s)}>
-                  {s.tipo === 'Receber' ? 'Criar Conta a Receber?' : 'Criar Contas a Pagar?'}
-                </button>
-                <button className="btn-cancel" disabled={ignorandoRecorrenciaChave === s.chave}
-                  onClick={() => handleIgnorarSugestaoRecorrencia(s)}>
-                  {ignorandoRecorrenciaChave === s.chave ? 'Ignorando...' : 'Ignorar'}
-                </button>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
       {/* Item 2 (Parte 3): atrasadas sempre no topo, num bloco próprio, até serem resolvidas —
