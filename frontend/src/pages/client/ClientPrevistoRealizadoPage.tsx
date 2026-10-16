@@ -233,7 +233,7 @@ export default function ClientPrevistoRealizadoPage() {
                       {b.linha.categoria}
                       {b.alerta && <span title="Subiu 3 meses seguidos / variação alta"> ⚠️</span>}
                     </span>
-                    <span className="mv-bullet-delta" style={{ color: b.bom ? 'var(--mv-green)' : 'var(--mv-red)' }}>
+                    <span className="mv-bullet-delta" style={{ color: b.bom ? 'var(--success)' : 'var(--danger)' }}>
                       {b.diferenca >= 0 ? '+' : ''}{fmtBRL(b.diferenca)}{pctTexto}
                     </span>
                   </div>
@@ -244,7 +244,7 @@ export default function ClientPrevistoRealizadoPage() {
                     }} />
                     <div className="mv-bullet-bar" style={{
                       width: `${Math.max(0.5, (b.realizado / maxDominio) * 100)}%`,
-                      background: b.bom ? 'var(--mv-green)' : 'var(--mv-red)',
+                      background: b.bom ? 'var(--success)' : 'var(--danger)',
                     }} />
                     <div className="mv-bullet-marker" style={{ left: `${(b.previsto / maxDominio) * 100}%` }} />
                   </div>
@@ -259,14 +259,14 @@ export default function ClientPrevistoRealizadoPage() {
                       <div style={{ height: 120 }}>
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={b.linha.meses.slice(-6).map(p => ({ mes: mesLabel(p.mes), previsto: p.previsto, realizado: p.realizado }))}>
-                            <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 10, fill: 'var(--mv-tx3)' }} axisLine={false} tickLine={false} />
+                            <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 10, fill: 'var(--tx3)' }} axisLine={false} tickLine={false} />
                             <YAxis hide domain={['auto', 'auto']} />
                             <Tooltip
                               formatter={(v, name) => [typeof v === 'number' ? fmtBRL(v) : String(v ?? ''), name === 'previsto' ? 'Previsto' : 'Realizado']}
-                              contentStyle={{ background: 'rgba(11,37,69,.96)', border: '1px solid var(--mv-glass-border)', fontSize: 12, borderRadius: 10 }}
-                              labelStyle={{ color: 'var(--mv-tx2)' }}
+                              contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', fontSize: 12, borderRadius: 10 }}
+                              labelStyle={{ color: 'var(--tx2)' }}
                             />
-                            <Line type="monotone" dataKey="previsto" stroke="var(--mv-tx3)" strokeWidth={2} strokeDasharray="4 3" dot={false} isAnimationActive={!semAnimacao} />
+                            <Line type="monotone" dataKey="previsto" stroke="var(--tx3)" strokeWidth={2} strokeDasharray="4 3" dot={false} isAnimationActive={!semAnimacao} />
                             <Line type="monotone" dataKey="realizado" stroke="var(--mv-blue-light)" strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={!semAnimacao} />
                           </LineChart>
                         </ResponsiveContainer>
@@ -297,7 +297,7 @@ export default function ClientPrevistoRealizadoPage() {
                       <td style={{ padding: '6px 10px' }}>{mesLabel(ponto.mes)}</td>
                       <td style={{ padding: '6px 10px', textAlign: 'right' }}>{fmtBRL(ponto.previsto)}</td>
                       <td style={{ padding: '6px 10px', textAlign: 'right' }}>{fmtBRL(ponto.realizado)}</td>
-                      <td style={{ padding: '6px 10px', textAlign: 'right', color: ponto.variacaoAlta ? 'var(--mv-red)' : 'inherit', fontWeight: ponto.variacaoAlta ? 600 : 400 }}>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', color: ponto.variacaoAlta ? 'var(--danger)' : 'inherit', fontWeight: ponto.variacaoAlta ? 600 : 400 }}>
                         {ponto.variacaoPercentual != null ? fmtVariacao(ponto.variacaoPercentual) : '—'}
                         {ponto.subiuTresMesesSeguidos && <span title="Subiu 3 meses seguidos"> ⚠️↑</span>}
                       </td>

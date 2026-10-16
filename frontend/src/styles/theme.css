@@ -7,18 +7,9 @@
   --mv-blue-soft:  rgba(77,163,255,0.14);
 
   /* ── Money Vision — redesign das telas de análise (Projeção/Meu Futuro/Previsto×Realizado/
-     Indicadores/topo do Dashboard). Essas telas são sempre "escuras" (visual tipo painel de
-     cockpit), independente do tema claro/escuro do resto do app — por isso usam tokens --mv-tx*
-     fixos em vez de --tx1/--tx2/--tx3 (que invertem no tema claro). ── */
-  --mv-green: #2FBF8F;
-  --mv-red:   #E5484D;
-  --mv-amber: #F5A524;
-  --mv-tx1:   #EDEDE9;
-  --mv-tx2:   #9CA3AF;
-  --mv-tx3:   #6B7280;
-  --mv-glass-bg:     rgba(255,255,255,.045);
-  --mv-glass-bg-hv:  rgba(255,255,255,.07);
-  --mv-glass-border: rgba(255,255,255,.09);
+     Indicadores/topo do Dashboard). Usam o MESMO --bg/--bg-card/--bd/--tx1/--tx2/--tx3 do resto
+     do app (invertem no tema claro, como em qualquer outra tela) — só --mv-mono (tipografia) é
+     fixo, pros rótulos de seção e o rodapé "LIDO EM". ── */
   --mv-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
 
   /* ── Backgrounds ── */

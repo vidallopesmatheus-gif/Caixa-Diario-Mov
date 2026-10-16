@@ -9,9 +9,9 @@ export function MvKpiGrid({ children }: { children: ReactNode }) {
 }
 
 const SPARK_COR: Record<MvTone, string> = {
-  good: 'var(--mv-green)',
-  bad: 'var(--mv-red)',
-  warn: 'var(--mv-amber)',
+  good: 'var(--success)',
+  bad: 'var(--danger)',
+  warn: 'var(--warning)',
   neutral: 'var(--mv-blue-light)',
 }
 

@@ -1,4 +1,4 @@
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { MvSectionLabel, MvInsight, prefereMovimentoReduzido } from '../../../components/mv'
 import { fmtBRL, fmtBRLCompacto, fmtPct } from '../../../utils/format'
 import type { ParaOndeFoiMeuDinheiro } from '../../../api/metricas'
@@ -27,14 +27,14 @@ export default function DinheiroFluxoCard({ dados }: Props) {
   const acc3 = acc2 - guardou // === ficou
 
   const barras: Barra[] = [
-    { nome: 'Entrou', base: 0, valor: acc1, cor: 'var(--mv-blue-light)' },
-    { nome: 'Gastou', base: Math.min(acc1, acc2), valor: Math.abs(gastou), cor: 'var(--mv-red)', categorias: topCategoriasGasto },
+    { nome: 'Entrou', base: 0, valor: acc1, cor: 'var(--mv-blue)' },
+    { nome: 'Gastou', base: Math.min(acc1, acc2), valor: Math.abs(gastou), cor: 'var(--danger)', categorias: topCategoriasGasto },
     {
       nome: guardou >= 0 ? 'Guardou' : 'Resgatou',
       base: Math.min(acc2, acc3), valor: Math.abs(guardou),
-      cor: guardou >= 0 ? 'var(--mv-green)' : 'var(--mv-amber)',
+      cor: guardou >= 0 ? 'var(--success)' : 'var(--warning)',
     },
-    { nome: 'Ficou na conta', base: 0, valor: acc3, cor: 'var(--mv-blue-light)' },
+    { nome: 'Ficou na conta', base: 0, valor: acc3, cor: 'var(--mv-blue)' },
   ]
 
   function tooltip(props: { active?: boolean; payload?: readonly { payload?: Barra }[] }) {
@@ -74,9 +74,10 @@ export default function DinheiroFluxoCard({ dados }: Props) {
       <div className="mv-chart-card" style={{ height: 220 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={barras} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-            <XAxis dataKey="nome" stroke="var(--mv-tx3)" tick={{ fontSize: 12, fill: 'var(--mv-tx2)' }} axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
-            <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
-            <Tooltip content={tooltip} cursor={{ fill: 'rgba(255,255,255,.04)' }} />
+            <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+            <XAxis dataKey="nome" tick={{ fontSize: 12, fill: 'var(--tx2)' }} axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: 'var(--tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
+            <Tooltip content={tooltip} cursor={{ fill: 'var(--bg-hover)' }} />
             <Bar dataKey="base" stackId="fluxo" fill="transparent" isAnimationActive={false} />
             <Bar dataKey="valor" stackId="fluxo" radius={[6, 6, 6, 6]} isAnimationActive={!semAnimacao}>
               {barras.map((b, i) => <Cell key={i} fill={b.cor} />)}

@@ -5,11 +5,11 @@ import './mv.css'
 
 export type MvTone = 'good' | 'bad' | 'warn' | 'neutral'
 
-const GLOW: Record<MvTone, string> = {
-  good: 'rgba(47, 191, 143, .35)',
-  bad: 'rgba(229, 72, 77, .35)',
-  warn: 'rgba(245, 165, 36, .35)',
-  neutral: 'rgba(77, 163, 255, .35)',
+const COR: Record<MvTone, string> = {
+  good: 'var(--success)',
+  bad: 'var(--danger)',
+  warn: 'var(--warning)',
+  neutral: 'var(--tx1)',
 }
 
 interface Contraste {
@@ -48,7 +48,7 @@ export default function MvHero({ eyebrow, value, formatter = fmtBRL, tone = 'neu
       <div className="mv-hero-bar"><span /><span /><span /><span /></div>
       <span className="mv-hero-eyebrow">{eyebrow}</span>
       <div className="mv-hero-row">
-        <span className="mv-hero-valor" style={{ textShadow: `0 0 36px ${GLOW[tone]}` }}>
+        <span className="mv-hero-valor" style={{ color: COR[tone] }}>
           {formatter(exibido ?? value)}
         </span>
         {contraste && (

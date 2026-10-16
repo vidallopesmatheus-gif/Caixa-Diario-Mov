@@ -52,7 +52,7 @@ export default function MvGauge({ value, min, max, zonas, marcador, valorFormata
 
   return (
     <svg viewBox="0 0 200 115" width="100%" height={140} role="img" aria-label={legenda ?? valorFormatado}>
-      <path d={arco(cx, cy, r, 180, 0)} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth={16} strokeLinecap="round" />
+      <path d={arco(cx, cy, r, 180, 0)} fill="none" stroke="var(--bg-hover)" strokeWidth={16} strokeLinecap="round" />
       {segmentos.map((s, i) => (
         <path key={i} d={arco(cx, cy, r, s.anguloInicio, s.anguloFim)} fill="none" stroke={s.cor} strokeWidth={16} strokeLinecap="round" />
       ))}
@@ -60,12 +60,12 @@ export default function MvGauge({ value, min, max, zonas, marcador, valorFormata
         const ang = valorParaAngulo(marcador, min, max)
         const p1 = polar(cx, cy, r - 11, ang)
         const p2 = polar(cx, cy, r + 11, ang)
-        return <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="var(--mv-tx1)" strokeWidth={2.5} />
+        return <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="var(--tx1)" strokeWidth={2.5} />
       })()}
-      <line x1={cx} y1={cy} x2={pontaAgulha.x} y2={pontaAgulha.y} stroke="var(--mv-tx1)" strokeWidth={3} strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r={5} fill="var(--mv-tx1)" />
-      <text x={cx} y={cy - 20} textAnchor="middle" fontSize={22} fontWeight={700} fill="var(--mv-tx1)">{valorFormatado}</text>
-      {legenda && <text x={cx} y={cy - 2} textAnchor="middle" fontSize={10.5} fill="var(--mv-tx2)">{legenda}</text>}
+      <line x1={cx} y1={cy} x2={pontaAgulha.x} y2={pontaAgulha.y} stroke="var(--tx1)" strokeWidth={3} strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r={5} fill="var(--tx1)" />
+      <text x={cx} y={cy - 20} textAnchor="middle" fontSize={22} fontWeight={700} fill="var(--tx1)">{valorFormatado}</text>
+      {legenda && <text x={cx} y={cy - 2} textAnchor="middle" fontSize={10.5} fill="var(--tx2)">{legenda}</text>}
     </svg>
   )
 }

@@ -10,7 +10,7 @@ import { MvPage, MvHero, MvSectionLabel, MvKpi, MvKpiGrid, MvTabs, MvInsight, Mv
 import type { Projecao, ProjecaoDia, ProjecaoItem, Trajetoria, Cenario, DespesaEstimadaCategoria } from '../../api/projecao'
 import type { ContaBancaria } from '../../types'
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip,
+  AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import './ClientProjecao.css'
@@ -245,13 +245,13 @@ export default function ClientProjecaoPage() {
         <div className="mv-chart-tooltip-label">{p.dataCompleta}</div>
         <div className="mv-chart-tooltip-row"><span>Saldo projetado</span><strong>{fmtBRL(p.saldo)}</strong></div>
         {p.totalEntradas > 0 && (
-          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-green)' }}>Entradas</span><strong>+{fmtBRL(p.totalEntradas)}</strong></div>
+          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--success)' }}>Entradas</span><strong>+{fmtBRL(p.totalEntradas)}</strong></div>
         )}
         {p.maioresEntradas.map((e, i) => (
           <div key={`e${i}`} className="mv-chart-tooltip-row"><span>· {e.descricao}</span><span>+{fmtBRL(e.valor)}</span></div>
         ))}
         {p.totalSaidas > 0 && (
-          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-red)' }}>Saídas</span><strong>-{fmtBRL(p.totalSaidas)}</strong></div>
+          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--danger)' }}>Saídas</span><strong>-{fmtBRL(p.totalSaidas)}</strong></div>
         )}
         {p.maioresSaidas.map((s, i) => (
           <div key={`s${i}`} className="mv-chart-tooltip-row"><span>· {s.descricao}</span><span>-{fmtBRL(s.valor)}</span></div>
@@ -263,8 +263,8 @@ export default function ClientProjecaoPage() {
   function pontoGrafico(props: { cx?: number; cy?: number; payload?: PontoGrafico }) {
     const { cx, cy, payload } = props
     if (!payload?.grande || cx === undefined || cy === undefined) return <circle cx={cx ?? 0} cy={cy ?? 0} r={0} />
-    const cor = payload.saldo < 0 ? 'var(--mv-red)' : 'var(--mv-blue-light)'
-    return <circle cx={cx} cy={cy} r={4.5} fill={cor} stroke="var(--mv-navy)" strokeWidth={2} />
+    const cor = payload.saldo < 0 ? 'var(--danger)' : 'var(--mv-blue)'
+    return <circle cx={cx} cy={cy} r={4.5} fill={cor} stroke="var(--bg)" strokeWidth={2} />
   }
 
   const semAnimacao = prefereMovimentoReduzido()
@@ -369,28 +369,29 @@ export default function ClientProjecaoPage() {
               <AreaChart data={dadosTrajetoria} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="gradRealizado" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--mv-blue-light)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="var(--mv-blue-light)" stopOpacity={0.02} />
+                    <stop offset="5%" stopColor="var(--mv-blue)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--mv-blue)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
-                <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
+                <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+                <XAxis dataKey="mes" tick={{ fontSize: 11, fill: 'var(--tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
                 <Tooltip
                   formatter={(v, name) => typeof v === 'number' ? [fmtBRL(v), name === 'saldoRealizado' ? 'Realizado' : 'Projetado'] : [String(v)]}
-                  contentStyle={{ background: 'rgba(11,37,69,.96)', border: '1px solid var(--mv-glass-border)', fontSize: 12, borderRadius: 10 }}
-                  labelStyle={{ color: 'var(--mv-tx2)' }}
+                  contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', fontSize: 12, borderRadius: 10 }}
+                  labelStyle={{ color: 'var(--tx2)' }}
                 />
                 {mesHojeLabel && (
-                  <ReferenceLine x={mesHojeLabel} stroke="var(--mv-tx3)" strokeDasharray="2 2" label={{ value: 'Hoje', fill: 'var(--mv-tx3)', fontSize: 11, position: 'insideTopRight' }} />
+                  <ReferenceLine x={mesHojeLabel} stroke="var(--tx3)" strokeDasharray="2 2" label={{ value: 'Hoje', fill: 'var(--tx3)', fontSize: 11, position: 'insideTopRight' }} />
                 )}
                 <Area
                   type="monotone" dataKey="saldoRealizado" name="saldoRealizado"
-                  stroke="var(--mv-blue-light)" strokeWidth={2} fill="url(#gradRealizado)"
+                  stroke="var(--mv-blue)" strokeWidth={2} fill="url(#gradRealizado)"
                   dot={false} activeDot={{ r: 4 }} connectNulls={false} isAnimationActive={!semAnimacao}
                 />
                 <Area
                   type="monotone" dataKey="saldoProjetado" name="saldoProjetado"
-                  stroke="var(--mv-blue-light)" strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7}
+                  stroke="var(--mv-blue)" strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7}
                   fill="url(#gradRealizado)" fillOpacity={0.4}
                   dot={false} activeDot={{ r: 4 }} connectNulls={false} isAnimationActive={!semAnimacao}
                 />
@@ -434,34 +435,35 @@ export default function ClientProjecaoPage() {
               <AreaChart data={dadosGrafico} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="gradSaldoPj" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="var(--mv-blue-light)" stopOpacity={0.28} />
-                    <stop offset="95%" stopColor="var(--mv-blue-light)" stopOpacity={0.02} />
+                    <stop offset="5%"  stopColor="var(--mv-blue)" stopOpacity={0.28} />
+                    <stop offset="95%" stopColor="var(--mv-blue)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="data" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
+                <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+                <XAxis dataKey="data" tick={{ fontSize: 11, fill: 'var(--tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
                 <YAxis
-                  stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }}
+                  tick={{ fontSize: 11, fill: 'var(--tx3)' }}
                   tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false}
                   domain={dominioY}
                 />
-                <Tooltip content={tooltipGrafico} cursor={{ stroke: 'var(--mv-glass-border)' }} />
+                <Tooltip content={tooltipGrafico} cursor={{ stroke: 'var(--bd)' }} />
 
                 {reservaMinima !== null && dominioY && (
                   <>
-                    <ReferenceArea y1={dominioY[0]} y2={reservaMinima} fill="var(--mv-red)" fillOpacity={0.08} ifOverflow="extendDomain" />
-                    <ReferenceLine y={reservaMinima} stroke="var(--mv-red)" strokeDasharray="4 2" strokeOpacity={0.6}
-                      label={{ value: 'Reserva mínima', fill: 'var(--mv-red)', fontSize: 10.5, position: 'insideTopLeft' }} />
+                    <ReferenceArea y1={dominioY[0]} y2={reservaMinima} fill="var(--danger)" fillOpacity={0.08} ifOverflow="extendDomain" />
+                    <ReferenceLine y={reservaMinima} stroke="var(--danger)" strokeDasharray="4 2" strokeOpacity={0.6}
+                      label={{ value: 'Reserva mínima', fill: 'var(--danger)', fontSize: 10.5, position: 'insideTopLeft' }} />
                   </>
                 )}
-                {temNegativo && <ReferenceLine y={0} stroke="var(--mv-amber)" strokeDasharray="4 2" label={{ value: 'R$ 0', fill: 'var(--mv-amber)', fontSize: 11 }} />}
+                {temNegativo && <ReferenceLine y={0} stroke="var(--warning)" strokeDasharray="4 2" label={{ value: 'R$ 0', fill: 'var(--warning)', fontSize: 11 }} />}
 
                 {/* Faixa de incerteza entre os cenários Provável e Conservador. */}
-                <Area type="monotone" dataKey="faixa" stroke="none" fill="var(--mv-blue-light)" fillOpacity={0.12} isAnimationActive={!semAnimacao} activeDot={false} />
+                <Area type="monotone" dataKey="faixa" stroke="none" fill="var(--mv-blue)" fillOpacity={0.12} isAnimationActive={!semAnimacao} activeDot={false} />
 
                 {/* Linha protagonista: 100% desse período é projeção futura, por isso sempre tracejada. */}
                 <Area
                   type="monotone" dataKey="saldo" name="Saldo"
-                  stroke="var(--mv-blue-light)" strokeWidth={2} strokeDasharray="6 4"
+                  stroke="var(--mv-blue)" strokeWidth={2} strokeDasharray="6 4"
                   fill="url(#gradSaldoPj)" dot={pontoGrafico} activeDot={{ r: 5 }} isAnimationActive={!semAnimacao}
                 />
               </AreaChart>
@@ -482,8 +484,8 @@ export default function ClientProjecaoPage() {
                     {temMovimento ? (
                       <>
                         <div className="mv-timeline-valores">
-                          {dia.entradas.length > 0 && <span style={{ color: 'var(--mv-green)' }}>↑ {fmtBRL(dia.totalEntradas)}</span>}
-                          {dia.saidas.length > 0 && <span style={{ color: 'var(--mv-red)' }}>↓ {fmtBRL(dia.totalSaidas)}</span>}
+                          {dia.entradas.length > 0 && <span style={{ color: 'var(--success)' }}>↑ {fmtBRL(dia.totalEntradas)}</span>}
+                          {dia.saidas.length > 0 && <span style={{ color: 'var(--danger)' }}>↓ {fmtBRL(dia.totalSaidas)}</span>}
                           <span className="mv-timeline-saldo">saldo <strong className={dia.saldoNegativo ? 'val-red' : undefined}>{fmtBRL(dia.saldoFim)}</strong></span>
                         </div>
                         {categorias.length > 0 && (
