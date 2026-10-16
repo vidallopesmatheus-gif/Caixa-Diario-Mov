@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { obterProjecao, obterTrajetoria, obterDespesasEstimadas } from '../../api/projecao'
+import { obterPreferenciasFuturo } from '../../api/preferenciasFuturo'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { criarContaProvisionada } from '../../api/contasProvisionadas'
-import { fmtBRL, todayISO, addDays } from '../../utils/format'
+import { fmtBRL, fmtBRLCompacto, fmtLidoEm, todayISO, addDays } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
-import type { Projecao, ProjecaoDia, Trajetoria, Cenario, DespesaEstimadaCategoria } from '../../api/projecao'
+import { MvPage, MvHero, MvSectionLabel, MvKpi, MvKpiGrid, MvTabs, MvInsight, MvDetails, prefereMovimentoReduzido } from '../../components/mv'
+import type { Projecao, ProjecaoDia, ProjecaoItem, Trajetoria, Cenario, DespesaEstimadaCategoria } from '../../api/projecao'
 import type { ContaBancaria } from '../../types'
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine,
+  AreaChart, Area, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import './ClientProjecao.css'
 
@@ -51,6 +53,30 @@ function agruparPorSemana(dias: ProjecaoDia[]): { label: string; dias: ProjecaoD
     }))
 }
 
+// Redesign visual (Money Vision): um dia entra como "movimento grande" se sua soma de
+// entradas+saídas estiver no topo 20% dos dias com movimento do período (ou todos, se houver
+// poucos) — usado pros marcadores no gráfico protagonista.
+function limiarMovimentoGrande(dias: ProjecaoDia[]): number {
+  const somas = dias
+    .map(d => d.totalEntradas + d.totalSaidas)
+    .filter(s => s > 0)
+    .sort((a, b) => a - b)
+  if (somas.length <= 3) return somas[0] ?? Infinity
+  return somas[Math.floor(somas.length * 0.8)]
+}
+
+interface PontoGrafico {
+  data: string
+  dataCompleta: string
+  saldo: number
+  faixa: [number, number]
+  totalEntradas: number
+  totalSaidas: number
+  maioresEntradas: ProjecaoItem[]
+  maioresSaidas: ProjecaoItem[]
+  grande: boolean
+}
+
 export default function ClientProjecaoPage() {
   const { user } = useAuth()
   const clienteId = user?.usuarioId ?? ''
@@ -59,6 +85,7 @@ export default function ClientProjecaoPage() {
   const [contaFiltro, setContaFiltro] = useState('')
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [projecao, setProjecao] = useState<Projecao | null>(null)
+  const [projecaoAlt, setProjecaoAlt] = useState<Projecao | null>(null)
   const [trajetoria, setTrajetoria] = useState<Trajetoria | null>(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState('')
@@ -70,6 +97,10 @@ export default function ClientProjecaoPage() {
   const [incluirReserva, setIncluirReserva] = useState(false)
   const [despesasEstimadas, setDespesasEstimadas] = useState<DespesaEstimadaCategoria[]>([])
   const [transformarAlvo, setTransformarAlvo] = useState<DespesaEstimadaCategoria | null>(null)
+  // Redesign visual (Money Vision): reserva mínima já configurada em "Meu Futuro" — reaproveitada
+  // aqui só como referência visual no gráfico (linha + área tingida), nunca entra em nenhum cálculo
+  // desta tela.
+  const [reservaMinima, setReservaMinima] = useState<number | null>(null)
 
   useEffect(() => {
     if (!clienteId) return
@@ -77,6 +108,7 @@ export default function ClientProjecaoPage() {
       .then(cs => setContas(cs.filter(c => c.ativa)))
       .catch(() => {})
     obterDespesasEstimadas(clienteId).then(setDespesasEstimadas).catch(() => {})
+    obterPreferenciasFuturo(clienteId).then(p => setReservaMinima(p.reservaMinima ?? null)).catch(() => {})
   }, [clienteId])
 
   const carregar = useCallback(async () => {
@@ -87,8 +119,13 @@ export default function ClientProjecaoPage() {
       if (janela === 'trajetoria') {
         setTrajetoria(await obterTrajetoria(clienteId, 6, 6, opcoes))
       } else {
-        const data = await obterProjecao(clienteId, janela, opcoes)
+        const cenarioAlt: Cenario = cenario === 'Provavel' ? 'Conservador' : 'Provavel'
+        const [data, dataAlt] = await Promise.all([
+          obterProjecao(clienteId, janela, opcoes),
+          obterProjecao(clienteId, janela, { ...opcoes, cenario: cenarioAlt }),
+        ])
         setProjecao(data)
+        setProjecaoAlt(dataAlt)
         setExpandidos({})
       }
     } catch (e: unknown) {
@@ -113,23 +150,50 @@ export default function ClientProjecaoPage() {
     setTransformarAlvo(null)
   }
 
-  // Dados para o gráfico — amostrar a cada N dias para não sobrecarregar
-  const dadosGrafico = useMemo(() => {
+  // Dados para o gráfico protagonista — amostra a cada N dias (pra não sobrecarregar em 60/90),
+  // mas nunca descarta um dia de "movimento grande" mesmo que caia fora do passo de amostragem.
+  const dadosGrafico = useMemo<PontoGrafico[]>(() => {
     if (!projecao) return []
     const passo = janela === 30 ? 1 : janela === 60 ? 2 : 3
+    const limiar = limiarMovimentoGrande(projecao.dias)
+    const diasAlt = projecaoAlt?.dias ?? []
     return projecao.dias
-      .filter((_, i) => i % passo === 0 || i === projecao.dias.length - 1)
-      .map(d => ({
-        data: fmtDataCurta(d.data),
-        saldo: d.saldoFim,
-        negativo: d.saldoNegativo,
-      }))
-  }, [projecao, janela])
+      .map((d, i) => ({ d, i, grande: (d.totalEntradas + d.totalSaidas) >= limiar && (d.totalEntradas + d.totalSaidas) > 0 }))
+      .filter(({ i, grande }) => i % passo === 0 || i === projecao.dias.length - 1 || grande)
+      .map(({ d, i, grande }) => {
+        const saldoAlt = diasAlt[i]?.saldoFim ?? d.saldoFim
+        return {
+          data: fmtDataCurta(d.data),
+          dataCompleta: fmtDataCompleta(d.data),
+          saldo: d.saldoFim,
+          faixa: [Math.min(d.saldoFim, saldoAlt), Math.max(d.saldoFim, saldoAlt)] as [number, number],
+          totalEntradas: d.totalEntradas,
+          totalSaidas: d.totalSaidas,
+          maioresEntradas: [...d.entradas].sort((a, b) => b.valor - a.valor).slice(0, 2),
+          maioresSaidas: [...d.saidas].sort((a, b) => b.valor - a.valor).slice(0, 2),
+          grande,
+        }
+      })
+  }, [projecao, projecaoAlt, janela])
+
+  const dominioY = useMemo(() => {
+    if (dadosGrafico.length === 0) return undefined
+    const valores = dadosGrafico.flatMap(p => [p.faixa[0], p.faixa[1]])
+    if (reservaMinima !== null) valores.push(reservaMinima)
+    const min = Math.min(...valores)
+    const max = Math.max(...valores)
+    const margem = Math.max((max - min) * 0.08, 1)
+    return [min - margem, max + margem] as [number, number]
+  }, [dadosGrafico, reservaMinima])
 
   const diasComMovimento = useMemo(
     () => projecao?.dias.filter(d => d.entradas.length > 0 || d.saidas.length > 0) ?? [],
     [projecao],
   )
+
+  // Redesign visual (Money Vision): "Próximos 7 dias" como timeline vertical — os primeiros 7 dias
+  // do período, com ou sem movimento, pra responder "o que vem por aí" de forma escaneável.
+  const proximosSete = useMemo(() => projecao?.dias.slice(0, 7) ?? [], [projecao])
 
   const semanas = useMemo(
     () => typeof janela === 'number' && janela > 30 ? agruparPorSemana(diasComMovimento) : null,
@@ -160,67 +224,95 @@ export default function ClientProjecaoPage() {
   const historicoCurto = (trajetoria?.mesesHistoricoDisponiveis ?? 6) < 3
 
   const temNegativo = projecao?.dias.some(d => d.saldoNegativo) ?? false
-  const menorSaldo  = projecao ? Math.min(...projecao.dias.map(d => d.saldoFim)) : 0
-  const maiorSaldo  = projecao ? Math.max(...projecao.dias.map(d => d.saldoFim)) : 0
+  const diasNegativos = projecao?.dias.filter(d => d.saldoNegativo).length ?? 0
+  const menorSaldoDia = projecao ? projecao.dias.reduce((pior, d) => d.saldoFim < pior.saldoFim ? d : pior, projecao.dias[0]) : undefined
+  const menorSaldo = menorSaldoDia?.saldoFim ?? 0
+  const totalEntradasPeriodo = projecao?.dias.reduce((s, d) => s + d.totalEntradas, 0) ?? 0
+  const totalSaidasPeriodo = projecao?.dias.reduce((s, d) => s + d.totalSaidas, 0) ?? 0
+  const saldoFinal = projecao?.dias.at(-1)?.saldoFim ?? projecao?.saldoAtual ?? 0
 
   function toggleDia(key: string) {
     setExpandidos(prev => ({ ...prev, [key]: !prev[key] }))
   }
 
-  return (
-    <>
-      {/* Cabeçalho */}
-      <div className="pj-header">
-        <div>
-          <h2 className="pj-titulo">🔭 Projeção de Fluxo de Caixa</h2>
-          <div className="pj-subtitulo">Simulação de saldo futuro · apenas leitura</div>
-        </div>
+  function tooltipGrafico(props: { active?: boolean; payload?: readonly { payload?: PontoGrafico }[] }) {
+    const { active, payload } = props
+    if (!active || !payload || payload.length === 0) return null
+    const p = payload[0]?.payload
+    if (!p) return null
+    return (
+      <div className="mv-chart-tooltip">
+        <div className="mv-chart-tooltip-label">{p.dataCompleta}</div>
+        <div className="mv-chart-tooltip-row"><span>Saldo projetado</span><strong>{fmtBRL(p.saldo)}</strong></div>
+        {p.totalEntradas > 0 && (
+          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-green)' }}>Entradas</span><strong>+{fmtBRL(p.totalEntradas)}</strong></div>
+        )}
+        {p.maioresEntradas.map((e, i) => (
+          <div key={`e${i}`} className="mv-chart-tooltip-row"><span>· {e.descricao}</span><span>+{fmtBRL(e.valor)}</span></div>
+        ))}
+        {p.totalSaidas > 0 && (
+          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-red)' }}>Saídas</span><strong>-{fmtBRL(p.totalSaidas)}</strong></div>
+        )}
+        {p.maioresSaidas.map((s, i) => (
+          <div key={`s${i}`} className="mv-chart-tooltip-row"><span>· {s.descricao}</span><span>-{fmtBRL(s.valor)}</span></div>
+        ))}
       </div>
+    )
+  }
 
-      {/* Controles */}
-      <div className="pj-controles">
-        <div className="pj-janela-tabs">
-          {([30, 60, 90] as Janela[]).map(j => (
-            <button
-              key={j}
-              className={`pj-janela-btn${janela === j ? ' active' : ''}`}
-              onClick={() => setJanela(j)}
-            >
-              {j} dias
-            </button>
-          ))}
-          <button
-            className={`pj-janela-btn${janela === 'trajetoria' ? ' active' : ''}`}
-            onClick={() => setJanela('trajetoria')}
-            title="Últimos 6 meses realizados + próximos 6 meses projetados"
-          >
-            6m + 6m
-          </button>
-        </div>
+  function pontoGrafico(props: { cx?: number; cy?: number; payload?: PontoGrafico }) {
+    const { cx, cy, payload } = props
+    if (!payload?.grande || cx === undefined || cy === undefined) return <circle cx={cx ?? 0} cy={cy ?? 0} r={0} />
+    const cor = payload.saldo < 0 ? 'var(--mv-red)' : 'var(--mv-blue-light)'
+    return <circle cx={cx} cy={cy} r={4.5} fill={cor} stroke="var(--mv-navy)" strokeWidth={2} />
+  }
+
+  const semAnimacao = prefereMovimentoReduzido()
+
+  return (
+    <MvPage>
+      <MvHero
+        eyebrow={typeof janela === 'number' ? `Saldo projetado em ${janela} dias` : 'Saldo projetado'}
+        value={saldoFinal}
+        tone={saldoFinal >= 0 ? 'good' : 'bad'}
+        contraste={projecao ? { valor: projecao.saldoAtual } : undefined}
+        caption={
+          projecao && (
+            temNegativo
+              ? <>Seu menor saldo é <strong>{fmtBRL(menorSaldo)}</strong>, em <strong>{menorSaldoDia && fmtDataCompleta(menorSaldoDia.data)}</strong>.</>
+              : <>Seu saldo não fica negativo em nenhum dia desse período.</>
+          )
+        }
+        footnote={fmtLidoEm(cenario === 'Provavel' ? 'cenário provável' : 'cenário conservador')}
+      />
+
+      <div className="mv-controles-row">
+        <MvTabs
+          opcoes={[
+            { valor: '30', label: '30 dias' },
+            { valor: '60', label: '60 dias' },
+            { valor: '90', label: '90 dias' },
+            { valor: 'trajetoria', label: '6m + 6m' },
+          ]}
+          ativa={String(janela)}
+          onChange={v => setJanela(v === 'trajetoria' ? 'trajetoria' : (Number(v) as Janela))}
+        />
         {contas.length > 1 && (
-          <select className="pj-select" value={contaFiltro} onChange={e => setContaFiltro(e.target.value)}>
+          <select className="mv-select" value={contaFiltro} onChange={e => setContaFiltro(e.target.value)}>
             <option value="">Todas as contas</option>
             {contas.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         )}
       </div>
 
-      {/* Bloco 2 da rodada "Visão de Futuro": cenário e reserva de investimento — valem pra */}
-      {/* qualquer janela acima, por isso ficam numa linha de filtros à parte. */}
-      <div className="pj-controles">
-        <div className="pj-janela-tabs" title="Provável segue as médias históricas; Conservador reduz recebimentos estimados e aumenta despesas estimadas, pra simular um cenário mais apertado.">
-          {(['Provavel', 'Conservador'] as Cenario[]).map(c => (
-            <button
-              key={c}
-              className={`pj-janela-btn${cenario === c ? ' active' : ''}`}
-              onClick={() => setCenario(c)}
-            >
-              {c === 'Provavel' ? 'Provável' : 'Conservador'}
-            </button>
-          ))}
-        </div>
+      <div className="mv-controles-row">
+        <MvTabs
+          opcoes={[{ valor: 'Provavel', label: 'Provável' }, { valor: 'Conservador', label: 'Conservador' }]}
+          ativa={cenario}
+          onChange={setCenario}
+        />
         <label
-          className="pj-reserva-toggle"
+          className="mv-checkbox-label"
           title={contaFiltro ? 'Só se aplica no modo "Todas as contas"' : 'Por padrão, contas de Investimento ficam de fora do saldo (reserva, não dinheiro disponível pro dia a dia).'}
         >
           <input
@@ -257,86 +349,50 @@ export default function ClientProjecaoPage() {
       {janela === 'trajetoria' && trajetoria && !loading && (
         <>
           {historicoCurto && (
-            <div className="pj-alerta" style={{ background: 'var(--warning-soft, rgba(217,119,6,.12))', borderColor: 'var(--warning)', color: 'var(--warning)' }}>
-              ⚠️ Só há {trajetoria.mesesHistoricoDisponiveis} mês(es) de histórico disponível — mostrando o período que existe, em vez de 6 meses completos.
-            </div>
+            <MvInsight tone="warn" icon="⚠️" text={`Só há ${trajetoria.mesesHistoricoDisponiveis} mês(es) de histórico disponível — mostrando o período que existe, em vez de 6 meses completos.`} />
           )}
 
-          <div className="pj-cards">
-            <div className="pj-card">
-              <span className="pj-card-label">Saldo Atual</span>
-              <span className={`pj-card-val ${trajetoria.saldoAtual >= 0 ? 'val-green' : 'val-red'}`}>
-                {fmtBRL(trajetoria.saldoAtual)}
-              </span>
-            </div>
-            <div className="pj-card">
-              <span className="pj-card-label">Variação · últimos {trajetoria.mesesHistoricoDisponiveis}m (realizado)</span>
-              <span className={`pj-card-val ${trajetoria.variacaoRealizada >= 0 ? 'val-green' : 'val-red'}`}>
-                {trajetoria.variacaoRealizada >= 0 ? '+' : ''}{fmtBRL(trajetoria.variacaoRealizada)}
-              </span>
-            </div>
-            <div className="pj-card">
-              <span className="pj-card-label">Variação · próximos 6m (projetado)</span>
-              <span className={`pj-card-val ${trajetoria.variacaoProjetada >= 0 ? 'val-green' : 'val-red'}`}>
-                {trajetoria.variacaoProjetada >= 0 ? '+' : ''}{fmtBRL(trajetoria.variacaoProjetada)}
-              </span>
-            </div>
-            <div className="pj-card">
-              <span className="pj-card-label">Projeção vs. realizado</span>
-              <span className={`pj-card-val ${trajetoria.variacaoProjetada >= trajetoria.variacaoRealizada ? 'val-green' : 'val-red'}`}>
-                {trajetoria.variacaoProjetada >= trajetoria.variacaoRealizada ? '↑ Melhor' : '↓ Pior'}
-              </span>
-            </div>
-          </div>
+          <MvKpiGrid>
+            <MvKpi label="Saldo atual" value={trajetoria.saldoAtual} tone={trajetoria.saldoAtual >= 0 ? 'good' : 'bad'} />
+            <MvKpi label={`Variação · últimos ${trajetoria.mesesHistoricoDisponiveis}m`} value={trajetoria.variacaoRealizada} tone={trajetoria.variacaoRealizada >= 0 ? 'good' : 'bad'} />
+            <MvKpi label="Variação · próximos 6m" value={trajetoria.variacaoProjetada} tone={trajetoria.variacaoProjetada >= 0 ? 'good' : 'bad'} />
+            <MvKpi
+              label="Projeção vs. realizado"
+              value={null}
+              tone={trajetoria.variacaoProjetada >= trajetoria.variacaoRealizada ? 'good' : 'bad'}
+              delta={trajetoria.variacaoProjetada >= trajetoria.variacaoRealizada ? '↑ Melhor' : '↓ Pior'}
+            />
+          </MvKpiGrid>
 
-          <div className="pj-grafico-container">
+          <div className="mv-chart-card">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dadosTrajetoria} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+              <AreaChart data={dadosTrajetoria} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="gradRealizado" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0a84ff" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#0a84ff" stopOpacity={0.02} />
+                    <stop offset="5%" stopColor="var(--mv-blue-light)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--mv-blue-light)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
-                <XAxis dataKey="mes" stroke="var(--tx3)" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                <YAxis
-                  stroke="var(--tx3)"
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`}
-                  width={60}
-                />
+                <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
+                <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
                 <Tooltip
                   formatter={(v, name) => typeof v === 'number' ? [fmtBRL(v), name === 'saldoRealizado' ? 'Realizado' : 'Projetado'] : [String(v)]}
-                  contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', fontSize: 12 }}
+                  contentStyle={{ background: 'rgba(11,37,69,.96)', border: '1px solid var(--mv-glass-border)', fontSize: 12, borderRadius: 10 }}
+                  labelStyle={{ color: 'var(--mv-tx2)' }}
                 />
                 {mesHojeLabel && (
-                  <ReferenceLine x={mesHojeLabel} stroke="var(--tx3)" strokeDasharray="2 2" label={{ value: 'Hoje', fill: 'var(--tx3)', fontSize: 11, position: 'insideTopRight' }} />
+                  <ReferenceLine x={mesHojeLabel} stroke="var(--mv-tx3)" strokeDasharray="2 2" label={{ value: 'Hoje', fill: 'var(--mv-tx3)', fontSize: 11, position: 'insideTopRight' }} />
                 )}
                 <Area
-                  type="monotone"
-                  dataKey="saldoRealizado"
-                  name="saldoRealizado"
-                  stroke="#0a84ff"
-                  strokeWidth={2}
-                  fill="url(#gradRealizado)"
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                  connectNulls={false}
+                  type="monotone" dataKey="saldoRealizado" name="saldoRealizado"
+                  stroke="var(--mv-blue-light)" strokeWidth={2} fill="url(#gradRealizado)"
+                  dot={false} activeDot={{ r: 4 }} connectNulls={false} isAnimationActive={!semAnimacao}
                 />
                 <Area
-                  type="monotone"
-                  dataKey="saldoProjetado"
-                  name="saldoProjetado"
-                  stroke="#0a84ff"
-                  strokeWidth={2}
-                  strokeDasharray="6 4"
-                  strokeOpacity={0.55}
-                  fill="url(#gradRealizado)"
-                  fillOpacity={0.4}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                  connectNulls={false}
+                  type="monotone" dataKey="saldoProjetado" name="saldoProjetado"
+                  stroke="var(--mv-blue-light)" strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7}
+                  fill="url(#gradRealizado)" fillOpacity={0.4}
+                  dot={false} activeDot={{ r: 4 }} connectNulls={false} isAnimationActive={!semAnimacao}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -346,117 +402,145 @@ export default function ClientProjecaoPage() {
 
       {janela !== 'trajetoria' && projecao && !loading && (
         <>
-          {/* Cards de resumo */}
-          <div className="pj-cards">
-            <div className="pj-card">
-              <span className="pj-card-label">Saldo Atual</span>
-              <span className={`pj-card-val ${projecao.saldoAtual >= 0 ? 'val-green' : 'val-red'}`}>
-                {fmtBRL(projecao.saldoAtual)}
-              </span>
-            </div>
-            <div className="pj-card">
-              <span className="pj-card-label">Saldo em {janela} dias</span>
-              <span className={`pj-card-val ${(projecao.dias.at(-1)?.saldoFim ?? 0) >= 0 ? 'val-green' : 'val-red'}`}>
-                {fmtBRL(projecao.dias.at(-1)?.saldoFim ?? 0)}
-              </span>
-            </div>
-            <div className="pj-card">
-              <span className="pj-card-label">Pior saldo projetado</span>
-              <span className={`pj-card-val ${menorSaldo >= 0 ? 'val-green' : 'val-red'}`}>
-                {fmtBRL(menorSaldo)}
-              </span>
-            </div>
-            <div className="pj-card">
-              <span className="pj-card-label">Melhor saldo projetado</span>
-              <span className={`pj-card-val ${maiorSaldo >= 0 ? 'val-green' : 'val-red'}`}>{fmtBRL(maiorSaldo)}</span>
-            </div>
-          </div>
+          <MvKpiGrid>
+            <MvKpi label="Entradas previstas" value={totalEntradasPeriodo} tone="good" />
+            <MvKpi label="Saídas previstas" value={totalSaidasPeriodo} tone="bad" />
+            <MvKpi
+              label="Menor saldo"
+              value={menorSaldo}
+              tone={menorSaldo >= 0 ? 'neutral' : 'bad'}
+              delta={menorSaldoDia ? fmtDataCompleta(menorSaldoDia.data) : undefined}
+            />
+            <MvKpi
+              label="Dias com saldo negativo"
+              value={diasNegativos}
+              formatter={n => `${n} dia${n === 1 ? '' : 's'}`}
+              tone={diasNegativos > 0 ? 'bad' : 'good'}
+            />
+          </MvKpiGrid>
 
-          {/* Alerta de saldo negativo */}
-          {temNegativo && (
-            <div className="pj-alerta">
-              ⚠️ Risco de caixa: saldo projetado fica negativo em algum ponto do período.
-            </div>
+          {temNegativo ? (
+            <MvInsight tone="bad" icon="⚠️" text={<>Risco de caixa: seu saldo fica negativo em <strong>{diasNegativos}</strong> dia(s) desse período.</>} />
+          ) : (
+            <MvInsight tone="good" icon="✅" text="Seu caixa se mantém positivo durante todo o período, nesse cenário." />
+          )}
+          {reservaMinima !== null && menorSaldo >= 0 && menorSaldo < reservaMinima && (
+            <MvInsight tone="warn" icon="🛟" text={<>Seu saldo mínimo projetado fica abaixo da reserva de <strong>{fmtBRL(reservaMinima)}</strong> que você definiu em "Meu Futuro".</>} />
           )}
 
-          {/* Gráfico */}
-          <div className="pj-grafico-container">
+          <MvSectionLabel>Evolução do saldo</MvSectionLabel>
+          <div className="mv-chart-card">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dadosGrafico} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+              <AreaChart data={dadosGrafico} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <defs>
-                  <linearGradient id="gradSaldo" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#0a84ff" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#0a84ff" stopOpacity={0.02} />
+                  <linearGradient id="gradSaldoPj" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="var(--mv-blue-light)" stopOpacity={0.28} />
+                    <stop offset="95%" stopColor="var(--mv-blue-light)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--bd)" />
-                <XAxis dataKey="data" stroke="var(--tx3)" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <XAxis dataKey="data" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
                 <YAxis
-                  stroke="var(--tx3)"
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`}
-                  width={60}
+                  stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }}
+                  tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false}
+                  domain={dominioY}
                 />
-                <Tooltip
-                  formatter={(v) => typeof v === 'number' ? [fmtBRL(v), 'Saldo'] : [String(v)]}
-                  contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', fontSize: 12 }}
-                />
-                {temNegativo && <ReferenceLine y={0} stroke="#ff3b30" strokeDasharray="4 2" label={{ value: 'R$ 0', fill: '#ff3b30', fontSize: 11 }} />}
+                <Tooltip content={tooltipGrafico} cursor={{ stroke: 'var(--mv-glass-border)' }} />
+
+                {reservaMinima !== null && dominioY && (
+                  <>
+                    <ReferenceArea y1={dominioY[0]} y2={reservaMinima} fill="var(--mv-red)" fillOpacity={0.08} ifOverflow="extendDomain" />
+                    <ReferenceLine y={reservaMinima} stroke="var(--mv-red)" strokeDasharray="4 2" strokeOpacity={0.6}
+                      label={{ value: 'Reserva mínima', fill: 'var(--mv-red)', fontSize: 10.5, position: 'insideTopLeft' }} />
+                  </>
+                )}
+                {temNegativo && <ReferenceLine y={0} stroke="var(--mv-amber)" strokeDasharray="4 2" label={{ value: 'R$ 0', fill: 'var(--mv-amber)', fontSize: 11 }} />}
+
+                {/* Faixa de incerteza entre os cenários Provável e Conservador. */}
+                <Area type="monotone" dataKey="faixa" stroke="none" fill="var(--mv-blue-light)" fillOpacity={0.12} isAnimationActive={!semAnimacao} activeDot={false} />
+
+                {/* Linha protagonista: 100% desse período é projeção futura, por isso sempre tracejada. */}
                 <Area
-                  type="monotone"
-                  dataKey="saldo"
-                  name="Saldo"
-                  stroke="#0a84ff"
-                  strokeWidth={2}
-                  fill="url(#gradSaldo)"
-                  dot={false}
-                  activeDot={{ r: 4 }}
+                  type="monotone" dataKey="saldo" name="Saldo"
+                  stroke="var(--mv-blue-light)" strokeWidth={2} strokeDasharray="6 4"
+                  fill="url(#gradSaldoPj)" dot={pontoGrafico} activeDot={{ r: 5 }} isAnimationActive={!semAnimacao}
                 />
               </AreaChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Lista de movimentações */}
-          <h3 className="pj-lista-titulo">Movimentações previstas</h3>
-
-          {diasComMovimento.length === 0 && (
-            <p className="pj-vazio">Nenhuma entrada ou saída prevista no período.</p>
-          )}
-
-          {/* 30 dias: lista diária | 60/90 dias: agrupada por semana */}
-          {janela === 30 || !semanas ? (
-            <div className="pj-lista">
-              {diasComMovimento.map(dia => (
-                <DiaItem
-                  key={dia.data}
-                  dia={dia}
-                  expanded={!!expandidos[dia.data]}
-                  onToggle={() => toggleDia(dia.data)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="pj-lista">
-              {semanas.map(sem => (
-                <div key={sem.label} className="pj-semana">
-                  <button className="pj-semana-header" onClick={() => toggleDia(sem.label)}>
-                    <span>{expandidos[sem.label] ? '▾' : '▸'} {sem.label}</span>
-                    <span className="pj-semana-resumo">
-                      {sem.dias.reduce((s, d) => s + d.entradas.length + d.saidas.length, 0)} lançamento(s)
-                    </span>
-                  </button>
-                  {expandidos[sem.label] && sem.dias.map(dia => (
-                    <DiaItem
-                      key={dia.data}
-                      dia={dia}
-                      expanded={!!expandidos[dia.data + '_inner']}
-                      onToggle={() => toggleDia(dia.data + '_inner')}
-                    />
-                  ))}
+          {/* Redesign visual: "Próximos 7 dias" como timeline, substituindo a antiga lista plana. */}
+          <MvSectionLabel>Próximos 7 dias</MvSectionLabel>
+          <div className="mv-timeline">
+            {proximosSete.map(dia => {
+              const temMovimento = dia.entradas.length > 0 || dia.saidas.length > 0
+              const categorias = [...new Set([...dia.entradas, ...dia.saidas].map(it => it.categoria).filter((c): c is string => !!c))]
+              return (
+                <div key={dia.data} className={`mv-timeline-item${dia.saldoNegativo ? ' mv-tone-bad' : ''}`}>
+                  <span className="mv-timeline-dot" />
+                  <div className="mv-timeline-body">
+                    <div className="mv-timeline-date">{fmtDataCompleta(dia.data)}</div>
+                    {temMovimento ? (
+                      <>
+                        <div className="mv-timeline-valores">
+                          {dia.entradas.length > 0 && <span style={{ color: 'var(--mv-green)' }}>↑ {fmtBRL(dia.totalEntradas)}</span>}
+                          {dia.saidas.length > 0 && <span style={{ color: 'var(--mv-red)' }}>↓ {fmtBRL(dia.totalSaidas)}</span>}
+                          <span className="mv-timeline-saldo">saldo <strong className={dia.saldoNegativo ? 'val-red' : undefined}>{fmtBRL(dia.saldoFim)}</strong></span>
+                        </div>
+                        {categorias.length > 0 && (
+                          <div className="mv-chips">
+                            {categorias.slice(0, 4).map(c => <span key={c} className="mv-chip">{c}</span>)}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="mv-timeline-saldo">Sem movimento previsto — saldo <strong>{fmtBRL(dia.saldoFim)}</strong></div>
+                    )}
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
+              )
+            })}
+          </div>
+
+          <MvDetails label="Ver todas as movimentações">
+            {diasComMovimento.length === 0 && (
+              <p className="pj-vazio">Nenhuma entrada ou saída prevista no período.</p>
+            )}
+
+            {/* 30 dias: lista diária | 60/90 dias: agrupada por semana */}
+            {janela === 30 || !semanas ? (
+              <div className="pj-lista">
+                {diasComMovimento.map(dia => (
+                  <DiaItem
+                    key={dia.data}
+                    dia={dia}
+                    expanded={!!expandidos[dia.data]}
+                    onToggle={() => toggleDia(dia.data)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="pj-lista">
+                {semanas.map(sem => (
+                  <div key={sem.label} className="pj-semana">
+                    <button className="pj-semana-header" onClick={() => toggleDia(sem.label)}>
+                      <span>{expandidos[sem.label] ? '▾' : '▸'} {sem.label}</span>
+                      <span className="pj-semana-resumo">
+                        {sem.dias.reduce((s, d) => s + d.entradas.length + d.saidas.length, 0)} lançamento(s)
+                      </span>
+                    </button>
+                    {expandidos[sem.label] && sem.dias.map(dia => (
+                      <DiaItem
+                        key={dia.data}
+                        dia={dia}
+                        expanded={!!expandidos[dia.data + '_inner']}
+                        onToggle={() => toggleDia(dia.data + '_inner')}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </MvDetails>
         </>
       )}
 
@@ -478,7 +562,7 @@ export default function ClientProjecaoPage() {
           </p>
         )}
       </Modal>
-    </>
+    </MvPage>
   )
 }
 

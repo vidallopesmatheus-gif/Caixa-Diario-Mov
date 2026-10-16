@@ -1,7 +1,19 @@
-import { fmtBRL, fmtPct, fmtDate, todayISO, addDays, monthLabel } from './format'
+import { fmtBRL, fmtPct, fmtDate, todayISO, addDays, monthLabel, fmtBRLCompacto } from './format'
 
 test('fmtBRL formata valor em reais', () => {
   expect(fmtBRL(1234.5)).toBe('R$ 1.234,50')
+})
+
+// toLocaleString pt-BR usa espaço NÃO separável (U+00A0) entre "R$" e o número neste ambiente de
+// teste — normaliza pra espaço comum antes de comparar (mesmo texto visualmente, bytes diferentes).
+const semNbsp = (s: string) => s.replace(/\u00A0/g, ' ')
+
+// Redesign visual (Money Vision): valor abreviado pra eixos/rótulos de gráfico.
+test('fmtBRLCompacto abrevia mil e milhão, mantém valor cheio abaixo de mil', () => {
+  expect(semNbsp(fmtBRLCompacto(500))).toBe('R$ 500,00')
+  expect(semNbsp(fmtBRLCompacto(12400))).toBe('R$ 12,4 mil')
+  expect(semNbsp(fmtBRLCompacto(-12400))).toBe('-R$ 12,4 mil')
+  expect(semNbsp(fmtBRLCompacto(3200000))).toBe('R$ 3,2 mi')
 })
 
 test('fmtDate converte ISO para dd/mm/yyyy', () => {

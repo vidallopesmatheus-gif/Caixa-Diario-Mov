@@ -245,6 +245,8 @@ export interface ParaOndeFoiMeuDinheiro {
   guardou: number
   ficou: number
   taxaPoupancaPercentual: number | null
+  // Redesign visual: as 3 maiores categorias de saída do período — só apresentação.
+  topCategoriasGasto: { nome: string; total: number }[]
 }
 
 export async function obterParaOndeFoiMeuDinheiro(clienteId: string, mes?: string): Promise<ParaOndeFoiMeuDinheiro> {

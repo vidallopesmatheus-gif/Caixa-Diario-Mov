@@ -30,7 +30,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(AuthContextModule.useAuth).mockReturnValue({ user: mockUser, login: vi.fn(), logout: vi.fn() } as never)
   vi.mocked(transferenciasApi.listarSugestoesTransferenciaSemPar).mockResolvedValue([])
-  vi.mocked(metricasApi.obterParaOndeFoiMeuDinheiro).mockResolvedValue({ entrou: 0, gastou: 0, guardou: 0, ficou: 0, taxaPoupancaPercentual: null })
+  vi.mocked(metricasApi.obterParaOndeFoiMeuDinheiro).mockResolvedValue({ entrou: 0, gastou: 0, guardou: 0, ficou: 0, taxaPoupancaPercentual: null, topCategoriasGasto: [] })
 })
 
 test('Bloco 5: Disponível, Investido e Patrimônio aparecem separados — investimento não soma no disponível', async () => {

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import ParaOndeFoiMeuDinheiroCard from './ParaOndeFoiMeuDinheiroCard'
 
 test('mostra o fluxo Entrou → Gastou → Guardou → Ficou', () => {
-  render(<ParaOndeFoiMeuDinheiroCard dados={{ entrou: 10000, gastou: 2000, guardou: 1300, ficou: 6700, taxaPoupancaPercentual: 13 }} />)
+  render(<ParaOndeFoiMeuDinheiroCard dados={{ entrou: 10000, gastou: 2000, guardou: 1300, ficou: 6700, taxaPoupancaPercentual: 13, topCategoriasGasto: [] }} />)
 
   expect(screen.getByText('R$ 10.000,00')).toBeInTheDocument()
   expect(screen.getByText('R$ 2.000,00')).toBeInTheDocument()
@@ -14,7 +14,7 @@ test('mostra o fluxo Entrou → Gastou → Guardou → Ficou', () => {
 })
 
 test('taxa negativa mostra aviso "você usou a reserva" e vira "Resgatou" no fluxo', () => {
-  render(<ParaOndeFoiMeuDinheiroCard dados={{ entrou: 5000, gastou: 4000, guardou: -500, ficou: 1500, taxaPoupancaPercentual: -10 }} />)
+  render(<ParaOndeFoiMeuDinheiroCard dados={{ entrou: 5000, gastou: 4000, guardou: -500, ficou: 1500, taxaPoupancaPercentual: -10, topCategoriasGasto: [] }} />)
 
   expect(screen.getByText(/você usou a reserva/)).toBeInTheDocument()
   expect(screen.getByText(/Você resgatou R\$ 500,00 da reserva/)).toBeInTheDocument()
@@ -25,7 +25,7 @@ test('taxa negativa mostra aviso "você usou a reserva" e vira "Resgatou" no flu
 })
 
 test('sem receita no período, não mostra a taxa de poupança', () => {
-  render(<ParaOndeFoiMeuDinheiroCard dados={{ entrou: 0, gastou: 0, guardou: 0, ficou: 0, taxaPoupancaPercentual: null }} />)
+  render(<ParaOndeFoiMeuDinheiroCard dados={{ entrou: 0, gastou: 0, guardou: 0, ficou: 0, taxaPoupancaPercentual: null, topCategoriasGasto: [] }} />)
 
   expect(screen.queryByText(/Taxa de poupança/)).not.toBeInTheDocument()
 })
