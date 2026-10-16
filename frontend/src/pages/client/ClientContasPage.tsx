@@ -1115,7 +1115,13 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
 
       {/* Rodada de ajustes Money Vision (item 3.1): as 4 seções ficam todas visíveis, cada uma
           recolhível de forma independente — cabeçalho clicável com ▾/▸ e total ao lado, estado
-          lembrado por usuário (localStorage). Antes eram abas que escondiam as outras por completo. */}
+          lembrado por usuário (localStorage). Antes eram abas que escondiam as outras por completo.
+          Ajuste seguinte: lado a lado em grid 2x2 em vez de empilhadas — os Modals continuam
+          soltos aqui no meio (entre Pagas/Recebidas e Recorrentes) sem problema, porque um Modal
+          fechado não renderiza nenhum nó (Modal.tsx: `if (!open) return null`) e, aberto, é um
+          overlay `position: fixed` — nos dois casos não ocupa célula nenhuma do grid. */}
+      <div className="contas-secoes-grid">
+      <div className="contas-secao-card">
       <button type="button" className="contas-secao-header" aria-expanded={secoesAbertas.receber} onClick={() => toggleSecao('receber')}>
         <span>{secoesAbertas.receber ? '▾' : '▸'} 📥 A Receber</span>
         <span className="contas-secao-total">{fmtBRL(totalMesReceber)}</span>
@@ -1126,7 +1132,9 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           {pendentesReceberVisiveis.map(renderConta)}
         </div>
       )}
+      </div>
 
+      <div className="contas-secao-card">
       <button type="button" className="contas-secao-header" aria-expanded={secoesAbertas.pagar} onClick={() => toggleSecao('pagar')}>
         <span>{secoesAbertas.pagar ? '▾' : '▸'} 📤 A Pagar</span>
         <span className="contas-secao-total">{fmtBRL(totalMesPagar)}</span>
@@ -1157,7 +1165,9 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           {pagarAgrupado.semGrupo.map(renderConta)}
         </div>
       )}
+      </div>
 
+      <div className="contas-secao-card">
       <button type="button" className="contas-secao-header" aria-expanded={secoesAbertas.pagas} onClick={() => toggleSecao('pagas')}>
         <span>{secoesAbertas.pagas ? '▾' : '▸'} ✅ Pagas/Recebidas</span>
         <span className="contas-secao-total">{recebidasDoMes.length + pagasDoMes.length} este mês</span>
@@ -1208,6 +1218,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           ))}
         </div>
       )}
+      </div>
 
       <Modal
         open={showDuplicateModal}
@@ -1403,6 +1414,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         )}
       </Modal>
 
+      <div className="contas-secao-card">
       <button type="button" className="contas-secao-header" aria-expanded={secoesAbertas.recorrentes} onClick={() => toggleSecao('recorrentes')}>
         <span>{secoesAbertas.recorrentes ? '▾' : '▸'} 🔁 Recorrentes</span>
         <span className="contas-secao-total">{recorrentes.length}</span>
@@ -1477,6 +1489,8 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
           ))}
         </div>
       )}
+      </div>
+      </div>
 
       <Modal
         open={!!editRec}
