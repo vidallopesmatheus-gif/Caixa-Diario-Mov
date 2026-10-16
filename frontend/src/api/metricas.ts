@@ -121,9 +121,10 @@ export interface Dre {
   despesasFixas: DreLinhaVertical
   resultadoOperacional: number
   resultadoOperacionalPercentual: number | null
-  receitaFinanceira: DreLinhaVertical
-  despesasNaoOperacionais: DreLinhaVertical
-  naoClassificado: DreLinhaVertical
+  /** Quantidade de lançamentos (entradas + saídas) sem categoria no período — alimenta o aviso
+   * "N lançamentos sem categoria" no topo da tela; "Não Classificado" não tem mais linha própria
+   * no DRE (soma dentro de Despesas Fixas). */
+  quantidadeNaoClassificados: number
   atividadesInvestimento: DreLinhaVertical
   atividadesFinanciamento: DreLinhaVertical
   retiradasSocios: DreLinhaVertical

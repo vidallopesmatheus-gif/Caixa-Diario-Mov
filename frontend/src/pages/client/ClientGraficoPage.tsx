@@ -7,7 +7,7 @@ import { useRegistros } from '../../hooks/useRegistros'
 import { leituraMargemDre, leituraPontoEquilibrio, leituraFolegoCaixa, leituraPrazoRecebimento } from '../../utils/leituras'
 import { MvPage, MvKpi, MvKpiGrid, MvInsight, MvGauge, prefereMovimentoReduzido, type MvTone } from '../../components/mv'
 import {
-  AreaChart, Area, Line, BarChart, Bar, PieChart, Pie, XAxis, YAxis, Tooltip,
+  AreaChart, Area, Line, BarChart, Bar, PieChart, Pie, CartesianGrid, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts'
 import './ClientGrafico.css'
@@ -15,7 +15,7 @@ import './ClientGrafico.css'
 interface Props { clienteIdOverride?: string }
 
 const MESES_ABREV = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-const DONUT_CORES = ['var(--mv-blue-light)', 'var(--mv-red)', 'var(--mv-amber)', 'var(--mv-green)', 'var(--mv-blue)', 'var(--mv-tx3)']
+const DONUT_CORES = ['var(--mv-blue-light)', 'var(--danger)', 'var(--warning)', 'var(--success)', 'var(--mv-blue)', 'var(--tx3)']
 
 function mesLabel(mes: string): string {
   const [ano, m] = mes.split('-')
@@ -255,7 +255,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const peAcimaDoEquilibrio = (pontoEquilibrio.distancia ?? 0) >= 0
 
   // Bloco 5 — fôlego de caixa como barra 0-12 meses.
-  const corFolego = folegoCaixa.faixa === 'critico' ? 'var(--mv-red)' : folegoCaixa.faixa === 'atencao' ? 'var(--mv-amber)' : 'var(--mv-green)'
+  const corFolego = folegoCaixa.faixa === 'critico' ? 'var(--danger)' : folegoCaixa.faixa === 'atencao' ? 'var(--warning)' : 'var(--success)'
 
   return (
     <MvPage>
@@ -273,14 +273,14 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
           <MvGauge
             value={dre.margem ?? 0}
             min={-20} max={40}
-            zonas={[{ ate: 0, cor: 'var(--mv-red)' }, { ate: 10, cor: 'var(--mv-amber)' }, { ate: 40, cor: 'var(--mv-green)' }]}
+            zonas={[{ ate: 0, cor: 'var(--danger)' }, { ate: 10, cor: 'var(--warning)' }, { ate: 40, cor: 'var(--success)' }]}
             valorFormatado={fmtPct(dre.margem)}
             legenda="margem líquida"
           />
         </div>
-        <p style={{ textAlign: 'center', fontSize: 14, color: 'var(--mv-tx2)', margin: '0 0 18px' }}>
-          De cada <strong style={{ color: 'var(--mv-tx1)' }}>R$ 100</strong> que entram, sobram{' '}
-          <strong style={{ color: (dre.margem ?? 0) >= 0 ? 'var(--mv-green)' : 'var(--mv-red)' }}>{fmtBRL(dre.margem ?? 0)}</strong>.
+        <p style={{ textAlign: 'center', fontSize: 14, color: 'var(--tx2)', margin: '0 0 18px' }}>
+          De cada <strong style={{ color: 'var(--tx1)' }}>R$ 100</strong> que entram, sobram{' '}
+          <strong style={{ color: (dre.margem ?? 0) >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(dre.margem ?? 0)}</strong>.
         </p>
 
         <MvKpiGrid>
@@ -314,15 +314,16 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
         <div className="mv-chart-card" style={{ height: 180 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={ultimos6.map(e => ({ mes: mesLabel(e.mes), lucro: e.lucro }))}>
-              <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
-              <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={60} axisLine={false} tickLine={false} />
+              <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: 'var(--tx2)' }} axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: 'var(--tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={60} axisLine={false} tickLine={false} />
               <Tooltip
                 formatter={v => typeof v === 'number' ? fmtBRL(v) : String(v)}
-                contentStyle={{ background: 'rgba(11,37,69,.96)', border: '1px solid var(--mv-glass-border)', borderRadius: 10 }}
-                labelStyle={{ color: 'var(--mv-tx2)' }}
+                contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 10 }}
+                labelStyle={{ color: 'var(--tx2)' }}
               />
               <Bar dataKey="lucro" name="Lucro" radius={[4, 4, 0, 0]} isAnimationActive={!semAnimacao}>
-                {ultimos6.map((e, i) => <Cell key={i} fill={e.lucro >= 0 ? 'var(--mv-green)' : 'var(--mv-red)'} />)}
+                {ultimos6.map((e, i) => <Cell key={i} fill={e.lucro >= 0 ? 'var(--success)' : 'var(--danger)'} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -347,7 +348,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
                   </Pie>
                   <Tooltip
                     formatter={v => typeof v === 'number' ? fmtBRL(v) : String(v)}
-                    contentStyle={{ background: 'rgba(11,37,69,.96)', border: '1px solid var(--mv-glass-border)', borderRadius: 10 }}
+                    contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 10 }}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -456,10 +457,10 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
             {indicadores.variacaoReceitaMesAnterior !== null && (
               <div style={{
                 fontSize: 22, fontWeight: 700, marginBottom: 12,
-                color: indicadores.variacaoReceitaMesAnterior >= 0 ? 'var(--mv-green)' : 'var(--mv-red)',
+                color: indicadores.variacaoReceitaMesAnterior >= 0 ? 'var(--success)' : 'var(--danger)',
               }}>
                 {indicadores.variacaoReceitaMesAnterior >= 0 ? '▲' : '▼'} {fmtPctBase(Math.abs(indicadores.variacaoReceitaMesAnterior))}
-                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--mv-tx2)' }}> vs. mês passado</span>
+                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--tx2)' }}> vs. mês passado</span>
               </div>
             )}
             <div className="mv-chart-card" style={{ height: 220 }}>
@@ -467,19 +468,20 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
                 <AreaChart data={dadosGraficoReceita}>
                   <defs>
                     <linearGradient id="gradReceitaInd" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--mv-blue-light)" stopOpacity={0.28} />
-                      <stop offset="95%" stopColor="var(--mv-blue-light)" stopOpacity={0.02} />
+                      <stop offset="5%" stopColor="var(--mv-blue)" stopOpacity={0.28} />
+                      <stop offset="95%" stopColor="var(--mv-blue)" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
-                  <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={60} axisLine={false} tickLine={false} />
+                  <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+                  <XAxis dataKey="mes" tick={{ fontSize: 11, fill: 'var(--tx2)' }} axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: 'var(--tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={60} axisLine={false} tickLine={false} />
                   <Tooltip
                     formatter={(v, name) => [typeof v === 'number' ? fmtBRL(v) : String(v ?? ''), name === 'receita' ? 'Receita' : 'Tendência']}
-                    contentStyle={{ background: 'rgba(11,37,69,.96)', border: '1px solid var(--mv-glass-border)', borderRadius: 10 }}
-                    labelStyle={{ color: 'var(--mv-tx2)' }}
+                    contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 10 }}
+                    labelStyle={{ color: 'var(--tx2)' }}
                   />
-                  <Area type="monotone" dataKey="receita" name="receita" stroke="var(--mv-blue-light)" strokeWidth={2} fill="url(#gradReceitaInd)" dot={{ r: 3 }} isAnimationActive={!semAnimacao} />
-                  <Line type="linear" dataKey="tendencia" name="tendencia" stroke="var(--mv-tx3)" strokeWidth={1.5} strokeDasharray="4 4" dot={false} isAnimationActive={!semAnimacao} />
+                  <Area type="monotone" dataKey="receita" name="receita" stroke="var(--mv-blue)" strokeWidth={2} fill="url(#gradReceitaInd)" dot={{ r: 3 }} isAnimationActive={!semAnimacao} />
+                  <Line type="linear" dataKey="tendencia" name="tendencia" stroke="var(--tx3)" strokeWidth={1.5} strokeDasharray="4 4" dot={false} isAnimationActive={!semAnimacao} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -496,19 +498,19 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
         ) : (
           <>
             <div style={{ textAlign: 'center' }}>
-              <span style={{ fontSize: 32, fontWeight: 800, color: 'var(--mv-tx1)' }}>{fmtBRL(pontoEquilibrio.valorMensal ?? 0)}</span>
-              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--mv-tx2)' }}> /mês</span>
+              <span style={{ fontSize: 32, fontWeight: 800, color: 'var(--tx1)' }}>{fmtBRL(pontoEquilibrio.valorMensal ?? 0)}</span>
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--tx2)' }}> /mês</span>
             </div>
             <div className="mv-progress-track" style={{ marginTop: 18 }}>
               <div className="mv-progress-fill" style={{
                 width: `${Math.min(100, (pontoEquilibrio.receitaAtual / peMax) * 100)}%`,
-                background: peAcimaDoEquilibrio ? 'var(--mv-green)' : 'var(--mv-red)',
+                background: peAcimaDoEquilibrio ? 'var(--success)' : 'var(--danger)',
               }} />
               <div className="mv-progress-marker" style={{ left: `${((pontoEquilibrio.valorMensal ?? 0) / peMax) * 100}%` }} />
               <div className="mv-progress-marker-label" style={{ left: `${((pontoEquilibrio.valorMensal ?? 0) / peMax) * 100}%` }}>Equilíbrio</div>
             </div>
-            <p style={{ fontSize: 12.5, color: 'var(--mv-tx2)', margin: '4px 0 0' }}>
-              Receita atual: <strong style={{ color: 'var(--mv-tx1)' }}>{fmtBRL(pontoEquilibrio.receitaAtual)}</strong>
+            <p style={{ fontSize: 12.5, color: 'var(--tx2)', margin: '4px 0 0' }}>
+              Receita atual: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(pontoEquilibrio.receitaAtual)}</strong>
               {pontoEquilibrio.valorPorDiaUtil !== null && <> · {fmtBRL(pontoEquilibrio.valorPorDiaUtil)} por dia útil ({pontoEquilibrio.diasUteisNoMes} dias úteis neste mês)</>}
             </p>
             <MvInsight text={leituraPontoEquilibrio(pontoEquilibrio)} tone={peAcimaDoEquilibrio ? 'good' : 'bad'} />
@@ -531,11 +533,11 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
             <div className="mv-progress-track" style={{ marginTop: 18 }}>
               <div className="mv-progress-fill" style={{ width: `${Math.min(100, ((folegoCaixa.meses ?? 0) / 12) * 100)}%`, background: corFolego }} />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--mv-tx3)', marginTop: 2 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--tx3)', marginTop: 2 }}>
               <span>0</span><span>12 meses</span>
             </div>
-            <p style={{ fontSize: 12.5, color: 'var(--mv-tx2)', margin: '10px 0 0' }}>
-              Saldo disponível: <strong style={{ color: 'var(--mv-tx1)' }}>{fmtBRL(folegoCaixa.saldoDisponivel)}</strong> · Custo fixo médio: <strong style={{ color: 'var(--mv-tx1)' }}>{fmtBRL(folegoCaixa.custoFixoMedioMensal ?? 0)}</strong>/mês
+            <p style={{ fontSize: 12.5, color: 'var(--tx2)', margin: '10px 0 0' }}>
+              Saldo disponível: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(folegoCaixa.saldoDisponivel)}</strong> · Custo fixo médio: <strong style={{ color: 'var(--tx1)' }}>{fmtBRL(folegoCaixa.custoFixoMedioMensal ?? 0)}</strong>/mês
             </p>
             <MvInsight text={leituraFolegoCaixa(folegoCaixa)} tone={folegoCaixa.faixa === 'critico' ? 'bad' : folegoCaixa.faixa === 'atencao' ? 'warn' : 'good'} />
           </>
@@ -555,7 +557,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
               <MvGauge
                 value={mesAtualCustoFixo?.percentual ?? 0}
                 min={0} max={100}
-                zonas={[{ ate: 40, cor: 'var(--mv-green)' }, { ate: 60, cor: 'var(--mv-amber)' }, { ate: 100, cor: 'var(--mv-red)' }]}
+                zonas={[{ ate: 40, cor: 'var(--success)' }, { ate: 60, cor: 'var(--warning)' }, { ate: 100, cor: 'var(--danger)' }]}
                 marcador={60}
                 valorFormatado={fmtPct(mesAtualCustoFixo?.percentual ?? null)}
                 legenda="custo fixo da receita"
@@ -564,14 +566,15 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
             <div className="mv-chart-card" style={{ height: 160 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={custoFixoSerieAtiva.map(m => ({ mes: mesLabel(m.mes), percentual: m.percentual }))}>
-                  <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
-                  <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => `${v}%`} width={40} axisLine={false} tickLine={false} />
+                  <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+                  <XAxis dataKey="mes" tick={{ fontSize: 11, fill: 'var(--tx2)' }} axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: 'var(--tx3)' }} tickFormatter={v => `${v}%`} width={40} axisLine={false} tickLine={false} />
                   <Tooltip
                     formatter={v => typeof v === 'number' ? fmtPctBase(v) : String(v)}
-                    contentStyle={{ background: 'rgba(11,37,69,.96)', border: '1px solid var(--mv-glass-border)', borderRadius: 10 }}
-                    labelStyle={{ color: 'var(--mv-tx2)' }}
+                    contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', borderRadius: 10 }}
+                    labelStyle={{ color: 'var(--tx2)' }}
                   />
-                  <Area type="monotone" dataKey="percentual" name="Custo fixo / receita" stroke="var(--mv-amber)" strokeWidth={2} fill="var(--mv-amber)" fillOpacity={0.12} dot={{ r: 3, fill: 'var(--mv-amber)' }} isAnimationActive={!semAnimacao} />
+                  <Area type="monotone" dataKey="percentual" name="Custo fixo / receita" stroke="var(--warning)" strokeWidth={2} fill="var(--warning)" fillOpacity={0.12} dot={{ r: 3, fill: 'var(--warning)' }} isAnimationActive={!semAnimacao} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -591,12 +594,12 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
               <MvGauge
                 value={prazoRecebimento.mediaDias ?? 0}
                 min={-10} max={30}
-                zonas={[{ ate: 0, cor: 'var(--mv-green)' }, { ate: 10, cor: 'var(--mv-amber)' }, { ate: 30, cor: 'var(--mv-red)' }]}
+                zonas={[{ ate: 0, cor: 'var(--success)' }, { ate: 10, cor: 'var(--warning)' }, { ate: 30, cor: 'var(--danger)' }]}
                 valorFormatado={`${(prazoRecebimento.mediaDias ?? 0) > 0 ? '+' : ''}${fmtNumDecimal(prazoRecebimento.mediaDias ?? 0)}d`}
                 legenda="dias de atraso médio"
               />
             </div>
-            <p style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--mv-tx2)', margin: '0 0 12px' }}>
+            <p style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--tx2)', margin: '0 0 12px' }}>
               Com base em {prazoRecebimento.quantidadeAmostras} conta(s) a receber já baixadas
             </p>
             <MvInsight text={leituraPrazoRecebimento(prazoRecebimento)} tone={(prazoRecebimento.mediaDias ?? 0) > 10 ? 'bad' : (prazoRecebimento.mediaDias ?? 0) > 0 ? 'warn' : 'good'} />

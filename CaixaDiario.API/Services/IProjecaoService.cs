@@ -41,12 +41,6 @@ public interface IProjecaoService
         Guid? contaBancariaId,
         ProjecaoOpcoes opcoes);
 
-    // Item 3 da rodada "Visão de Futuro": mesma ideia de CalcularDespesaFixaNaoCadastrada, só que
-    // quebrada por categoria (pra exibir na tela com o botão "Transformar em conta a pagar") em
-    // vez de um único valor agregado usado internamente na simulação dia a dia.
-    List<DespesaEstimadaCategoriaDto> CalcularDespesasEstimadasPorCategoria(
-        List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, DateOnly hoje);
-
     // Bloco 3 da rodada "Visão de Futuro": tela "Meu Futuro" — agrega a mesma simulação de
     // Calcular em 12 meses (Saldo inicial/A receber/A pagar/Saldo final/Precisa receber/Status) +
     // conselho em regras. ajusteReceitaPercent/atrasoRecebimentosDias são o simulador "E se...?".

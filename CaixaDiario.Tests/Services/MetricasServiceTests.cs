@@ -1010,6 +1010,9 @@ public class MetricasServiceTests
         Cat("Equipamentos", "DespesaNaoOperacional", grupo: "Investimentos"),
     };
 
+    // Rodada de ajustes Money Vision, item 4 (DRE mais enxuta): Despesas Não Operacionais e Não
+    // Classificado deixaram de ter linha própria — ambas somam dentro de Despesas Fixas (mesmo
+    // bucket que a árvore hierárquica Bloco→Grupo→Categoria já usava).
     [Fact]
     public void CalcularDre_AnaliseVertical_ClassificaCadaLinhaCorretamente()
     {
@@ -1038,29 +1041,29 @@ public class MetricasServiceTests
         Assert.Equal(660m, dre.MargemContribuicao);
         Assert.Equal(66.0m, dre.MargemContribuicaoPercentual);
 
-        Assert.Equal(400m, dre.DespesasFixas.Total);
-        Assert.Equal(260m, dre.ResultadoOperacional);
-        Assert.Equal(26.0m, dre.ResultadoOperacionalPercentual);
-
-        Assert.Equal(30m, dre.DespesasNaoOperacionais.Total);
-        Assert.Equal(10m, dre.NaoClassificado.Total);
-        Assert.Equal("Não Classificado", Assert.Single(dre.NaoClassificado.Categorias).Nome);
+        // Aluguel (400) + Notebook/DespesaNaoOperacional (30) + Sem categoria (10) — as 3 caem
+        // juntas em Despesas Fixas, nenhuma com linha própria.
+        Assert.Equal(440m, dre.DespesasFixas.Total);
+        Assert.Equal(220m, dre.ResultadoOperacional);
+        Assert.Equal(22.0m, dre.ResultadoOperacionalPercentual);
+        Assert.Equal(1, dre.QuantidadeNaoClassificados); // só a saída "Sem categoria"
 
         Assert.Equal(220m, dre.ResultadoLiquido);
         Assert.Equal(22.0m, dre.ResultadoLiquidoPercentual);
 
-        // Reconciliação: a soma das 5 linhas da análise vertical bate com o total de despesas de sempre.
-        Assert.Equal(dre.TotalDespesas, dre.Deducoes.Total + dre.CustosVariaveis.Total + dre.DespesasFixas.Total
-            + dre.DespesasNaoOperacionais.Total + dre.NaoClassificado.Total);
+        // Reconciliação: a soma das linhas visíveis bate com o total de despesas de sempre, e o
+        // resultado continua batendo com a soma das linhas (critério de aceite do item 4).
+        Assert.Equal(dre.TotalDespesas, dre.Deducoes.Total + dre.CustosVariaveis.Total + dre.DespesasFixas.Total);
         Assert.Equal(dre.Resultado, dre.ResultadoLiquido);
     }
 
-    // Item 3: "Não Classificados" precisa ser o valor LÍQUIDO (saídas sem categoria − entradas sem
-    // categoria), não só a saída — senão a entrada sem categoria fica contada a mais (uma vez cheia
-    // na Receita Bruta, sem nenhuma linha descontando ela) e a soma das linhas visíveis não bate
-    // com o Resultado Líquido.
+    // Item 3 (preservado na rodada de ajustes): "Não Classificados" precisa ser o valor LÍQUIDO
+    // (saídas sem categoria − entradas sem categoria), não só a saída — senão a entrada sem
+    // categoria fica contada a mais (uma vez cheia na Receita Bruta, sem nenhuma linha descontando
+    // ela) e a soma das linhas visíveis não bate com o Resultado Líquido. Agora esse líquido entra
+    // dentro de Despesas Fixas, não numa linha própria.
     [Fact]
-    public void CalcularDre_EntradaSemCategoria_DescontaDaReceitaBrutaEEntraNetaEmNaoClassificado()
+    public void CalcularDre_EntradaSemCategoria_DescontaDaReceitaBrutaEEntraNetaDentroDeDespesasFixas()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new()
@@ -1076,24 +1079,23 @@ public class MetricasServiceTests
 
         var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
 
-        // Receita Bruta não inclui mais o Pix sem categoria (900, não 1000).
+        // Receita Bruta não inclui o Pix sem categoria (900, não 1000).
         Assert.Equal(900m, dre.ReceitaBruta);
-        // Não Classificado = 50 (saída) − 100 (entrada) = −50 — a entrada sem categoria domina.
-        Assert.Equal(-50m, dre.NaoClassificado.Total);
+        // Despesas Fixas = 400 (Aluguel) + [50 (saída sem cat) − 100 (entrada sem cat)] = 350.
+        Assert.Equal(350m, dre.DespesasFixas.Total);
+        Assert.Equal(2, dre.QuantidadeNaoClassificados); // 1 entrada + 1 saída sem categoria
 
-        Assert.Equal(400m, dre.DespesasFixas.Total);
-        Assert.Equal(500m, dre.ResultadoOperacional); // 900 - 400
-        Assert.Equal(550m, dre.ResultadoLiquido); // 500 - (-50)
+        Assert.Equal(550m, dre.ResultadoOperacional); // 900 - 350
+        Assert.Equal(550m, dre.ResultadoLiquido);
 
         // Reconciliação: somando as linhas visíveis da cascata chega-se exatamente no Resultado Líquido.
         Assert.Equal(dre.ResultadoLiquido,
             dre.ReceitaBruta - dre.Deducoes.Total - dre.CustosVariaveis.Total - dre.DespesasFixas.Total
-            + dre.ReceitaFinanceira.Total - dre.DespesasNaoOperacionais.Total - dre.NaoClassificado.Total
             + dre.AtividadesInvestimento.Total + dre.AtividadesFinanciamento.Total - dre.RetiradasSocios.Total);
     }
 
     [Fact]
-    public void CalcularDre_CategoriaNaoCadastradaNoPlanoDeContas_VaiParaNaoClassificado()
+    public void CalcularDre_CategoriaNaoCadastradaNoPlanoDeContas_VaiParaDespesasFixas()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 500m, "Vendas", "Receita") },
@@ -1101,13 +1103,13 @@ public class MetricasServiceTests
 
         var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
 
-        Assert.Equal(0m, dre.DespesasFixas.Total);
-        Assert.Equal(50m, dre.NaoClassificado.Total);
-        Assert.Equal("Categoria Removida", Assert.Single(dre.NaoClassificado.Categorias).Nome);
+        Assert.Equal(50m, dre.DespesasFixas.Total);
+        Assert.Equal("Categoria Removida", Assert.Single(dre.DespesasFixas.Categorias).Nome);
+        Assert.Equal(0, dre.QuantidadeNaoClassificados); // tem categoria, só não está cadastrada
     }
 
     [Fact]
-    public void CalcularDre_IgnoraTransferenciasERendimento_NaoEntramNemComoNaoClassificado()
+    public void CalcularDre_IgnoraTransferencias_NaoEntramNemComoNaoClassificado()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new()
@@ -1119,14 +1121,13 @@ public class MetricasServiceTests
             {
                 Item("Aluguel", 400m, "Aluguel", "CustoFixo"),
                 Item("Aporte para investimento", 2000m, "Transferência", "Transferencia"),
-                Item("Rendimento negativo", 30m, "Rendimento", "Rendimento"),
             });
 
         var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
 
         Assert.Equal(1000m, dre.ReceitaBruta); // resgate (transferência) não entra na receita
-        Assert.Equal(400m, dre.TotalDespesas); // só o aluguel — transferência e rendimento ficam de fora
-        Assert.Equal(0m, dre.NaoClassificado.Total); // não viram "Não Classificado": são excluídos, não desconhecidos
+        Assert.Equal(400m, dre.TotalDespesas); // só o aluguel — transferência fica de fora
+        Assert.Equal(0, dre.QuantidadeNaoClassificados); // não vira "Não Classificado": é excluída, não desconhecida
         Assert.Equal(600m, dre.Resultado);
     }
 
@@ -1147,13 +1148,17 @@ public class MetricasServiceTests
         var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
 
         Assert.Equal(400m, dre.TotalDespesas); // só o aluguel — o ajuste de saldo não conta
-        Assert.Equal(0m, dre.NaoClassificado.Total);
+        Assert.Equal(0, dre.QuantidadeNaoClassificados);
         Assert.Equal(0m, dre.Deducoes.Total); // "Devoluções" normalmente cairia em Deduções, mas não aqui
         Assert.Equal(600m, dre.Resultado);
     }
 
+    // Rodada de ajustes Money Vision, item 4: Receita Financeira deixou de ser uma linha própria
+    // depois do Resultado Operacional — rendimento de investimento agora soma direto na Receita
+    // Operacional (metodologia simplificada: dinheiro que entrou é receita), por isso também muda
+    // o Resultado Operacional/Margem, não só o Resultado Líquido final.
     [Fact]
-    public void CalcularDre_ComRendimento_MostraReceitaFinanceiraSeparadaEForaDaReceitaOperacional()
+    public void CalcularDre_ComRendimento_SomaNaReceitaOperacionalComoOutrasReceitas()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new()
@@ -1169,10 +1174,10 @@ public class MetricasServiceTests
 
         var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
 
-        Assert.Equal(1000m, dre.ReceitaBruta); // rendimento não entra na receita operacional
-        Assert.Equal(600m, dre.ResultadoOperacional); // 1000 - 400, sem o rendimento
-        Assert.Equal(80m, dre.ReceitaFinanceira.Total); // 100 (rendimento) - 20 (rendimento negativo)
-        Assert.Equal(680m, dre.ResultadoLiquido); // 600 (operacional) + 80 (financeira)
+        // 1000 (vendas) + [100 (rendimento) - 20 (rendimento negativo)] = 1080.
+        Assert.Equal(1080m, dre.ReceitaBruta);
+        Assert.Equal(680m, dre.ResultadoOperacional); // 1080 - 400, rendimento já dentro da receita
+        Assert.Equal(680m, dre.ResultadoLiquido);
     }
 
     [Fact]
@@ -1338,6 +1343,31 @@ public class MetricasServiceTests
         Assert.Equal(-40m, financiamento.Total);
     }
 
+    // Rodada de ajustes Money Vision, item 4: na árvore hierárquica, rendimento de investimento
+    // também passa a entrar em Receitas Operacionais (grupo "Outras receitas"), não mais num grupo
+    // próprio dentro de Atividades de Investimento.
+    [Fact]
+    public void CalcularDre_Blocos_Rendimento_EntraEmReceitasOperacionaisComoOutrasReceitas()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new()
+            {
+                Item("Venda", 1000m, "Vendas", "Receita"),
+                Item("Rendimento CDI", 100m, "Rendimento", "Rendimento"),
+            },
+            new() { Item("Rendimento negativo", 20m, "Rendimento", "Rendimento") });
+
+        var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
+
+        var receitas = dre.Blocos.Single(b => b.Bloco == Blocos.ReceitasOperacionais);
+        Assert.Equal(1080m, receitas.Total); // 1000 (vendas) + 80 (rendimento líquido)
+        var grupoOutrasReceitas = Assert.Single(receitas.Grupos, g => g.Nome == "Outras receitas");
+        Assert.Equal(80m, grupoOutrasReceitas.Total);
+
+        var investimento = dre.Blocos.Single(b => b.Bloco == Blocos.AtividadesDeInvestimento);
+        Assert.Equal(0m, investimento.Total); // rendimento não aparece mais aqui
+    }
+
     [Fact]
     public void CalcularDre_Blocos_LancamentoSemCategoria_VaiParaNaoClassificadoDentroDoBloco()
     {
@@ -1355,9 +1385,9 @@ public class MetricasServiceTests
     // Item A3 do bundle D6JWEAJa: a entrada sem categoria era lançada em cheio dentro de Receitas
     // Operacionais (inflando a receita) e o grupo "Não Classificado" de Despesas Operacionais só
     // mostrava a saída bruta — as duas pontas nunca se encontravam na visão por blocos, mesmo a
-    // análise vertical (dre.NaoClassificado) já estando líquida. Agora a entrada sem categoria cai
-    // no MESMO grupo "Não Classificado" de Despesas Operacionais, como crédito, e Receitas
-    // Operacionais só soma entrada já classificada.
+    // análise vertical já estando líquida (hoje, dentro de DespesasFixas). Agora a entrada sem
+    // categoria cai no MESMO grupo "Não Classificado" de Despesas Operacionais, como crédito, e
+    // Receitas Operacionais só soma entrada já classificada.
     [Fact]
     public void CalcularDre_Blocos_EntradaSemCategoria_NetaNoMesmoGrupoDeDespesasOperacionais()
     {

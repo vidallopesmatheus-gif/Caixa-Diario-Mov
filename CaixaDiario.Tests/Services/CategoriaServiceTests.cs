@@ -36,6 +36,50 @@ public class CategoriaServiceTests
         Assert.Equal(Blocos.AtividadesDeInvestimento, criada.Bloco);
     }
 
+    [Theory]
+    [InlineData(Blocos.ReceitasOperacionais, "Entrada")]
+    [InlineData(Blocos.CustosOperacionais, "Saida")]
+    [InlineData(Blocos.DespesasOperacionais, "Saida")]
+    [InlineData(Blocos.RetiradasSocios, "Saida")]
+    [InlineData(Blocos.AtividadesDeInvestimento, "Ambos")]
+    [InlineData(Blocos.AtividadesDeFinanciamento, "Ambos")]
+    [InlineData(Blocos.DeducoesDaReceita, "Ambos")]
+    public async Task CriarAsync_SemTipoMovimentoExplicito_DerivaPadraoDoBlocoDoGrupo(string bloco, string tipoMovimentoEsperado)
+    {
+        var grupo = Grupo("Grupo de teste", bloco);
+        _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<Categoria>())).ReturnsAsync((Categoria c) => c);
+
+        var criada = await _sut.CriarAsync(_clienteId, new CriarCategoriaDto { Nome = "X", GrupoId = grupo.Id }, _clienteId, "cliente");
+
+        Assert.Equal(tipoMovimentoEsperado, criada.TipoMovimento);
+    }
+
+    [Fact]
+    public async Task CriarAsync_ComTipoMovimentoExplicito_SobrepoeOPadraoDoBloco()
+    {
+        var grupo = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
+        _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
+        _repoMock.Setup(r => r.AdicionarAsync(It.IsAny<Categoria>())).ReturnsAsync((Categoria c) => c);
+
+        var criada = await _sut.CriarAsync(
+            _clienteId, new CriarCategoriaDto { Nome = "Aluguel", GrupoId = grupo.Id, TipoMovimento = "Ambos" }, _clienteId, "cliente");
+
+        Assert.Equal("Ambos", criada.TipoMovimento);
+    }
+
+    [Fact]
+    public async Task CriarAsync_ComTipoMovimentoInvalido_LancaDadosInvalidos()
+    {
+        var grupo = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
+        _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.CriarAsync(
+            _clienteId, new CriarCategoriaDto { Nome = "X", GrupoId = grupo.Id, TipoMovimento = "Invalido" }, _clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+    }
+
     [Fact]
     public async Task CriarAsync_ComGrupoInexistente_LancaNaoEncontrado()
     {
@@ -81,7 +125,7 @@ public class CategoriaServiceTests
         var grupoNovo = Grupo("Despesas com Marketing", Blocos.DespesasOperacionais);
         var categoria = new Categoria
         {
-            Id = Guid.NewGuid(), Nome = "Publicidade", Tipo = "CustoVariavel",
+            Id = Guid.NewGuid(), Nome = "Publicidade", Tipo = "CustoVariavel", TipoMovimento = "Saida",
             GrupoId = grupoAntigo.Id, Grupo = grupoAntigo, Ativa = true, ClienteId = _clienteId,
         };
         _repoMock.Setup(r => r.ObterPorIdAsync(categoria.Id)).ReturnsAsync(categoria);
@@ -93,6 +137,46 @@ public class CategoriaServiceTests
 
         Assert.Equal("CustoFixo", atualizada.Tipo);
         Assert.Equal(grupoNovo.Id, atualizada.GrupoId);
+    }
+
+    [Fact]
+    public async Task AtualizarAsync_SemMudarGrupoNemTipoMovimento_PreservaOTipoMovimentoAtual()
+    {
+        // Ajuste manual anterior (ex.: via relatório de reclassificação por uso) não pode ser
+        // perdido só porque o usuário editou o nome da categoria sem mexer no grupo.
+        var grupo = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
+        var categoria = new Categoria
+        {
+            Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", TipoMovimento = "Ambos",
+            GrupoId = grupo.Id, Grupo = grupo, Ativa = true, ClienteId = _clienteId,
+        };
+        _repoMock.Setup(r => r.ObterPorIdAsync(categoria.Id)).ReturnsAsync(categoria);
+        _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<Categoria>())).ReturnsAsync((Categoria c) => c);
+
+        var atualizada = await _sut.AtualizarAsync(
+            _clienteId, categoria.Id, new AtualizarCategoriaDto { Nome = "Aluguel Loja", GrupoId = grupo.Id, Ativa = true }, _clienteId, "cliente");
+
+        Assert.Equal("Ambos", atualizada.TipoMovimento);
+    }
+
+    [Fact]
+    public async Task AtualizarAsync_ComTipoMovimentoExplicito_SobrepoeMesmoSemMudarGrupo()
+    {
+        var grupo = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
+        var categoria = new Categoria
+        {
+            Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", TipoMovimento = "Saida",
+            GrupoId = grupo.Id, Grupo = grupo, Ativa = true, ClienteId = _clienteId,
+        };
+        _repoMock.Setup(r => r.ObterPorIdAsync(categoria.Id)).ReturnsAsync(categoria);
+        _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<Categoria>())).ReturnsAsync((Categoria c) => c);
+
+        var atualizada = await _sut.AtualizarAsync(
+            _clienteId, categoria.Id, new AtualizarCategoriaDto { Nome = "Aluguel", GrupoId = grupo.Id, Ativa = true, TipoMovimento = "Ambos" }, _clienteId, "cliente");
+
+        Assert.Equal("Ambos", atualizada.TipoMovimento);
     }
 
     [Fact]
@@ -118,9 +202,9 @@ public class CategoriaServiceTests
         var grupoDespesa = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
         var ativas = new List<Categoria>
         {
-            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", Grupo = grupoReceita, Ativa = true, ClienteId = _clienteId },
-            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
-            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", Grupo = grupoInvest, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", TipoMovimento = "Entrada", Grupo = grupoReceita, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", TipoMovimento = "Saida", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", TipoMovimento = "Ambos", Grupo = grupoInvest, Ativa = true, ClienteId = _clienteId },
         };
         _repoMock.Setup(r => r.ListarAtivasPorClienteAsync(_clienteId)).ReturnsAsync(ativas);
 
@@ -144,8 +228,8 @@ public class CategoriaServiceTests
         var grupoDespesa = Grupo("Despesas com Ocupação", Blocos.DespesasOperacionais);
         var ativas = new List<Categoria>
         {
-            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", Grupo = grupoDevolucao, Ativa = true, ClienteId = _clienteId },
-            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", TipoMovimento = "Ambos", Grupo = grupoDevolucao, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", TipoMovimento = "Saida", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
         };
         _repoMock.Setup(r => r.ListarAtivasPorClienteAsync(_clienteId)).ReturnsAsync(ativas);
 
@@ -167,10 +251,10 @@ public class CategoriaServiceTests
         var grupoInvest = Grupo("Imobilizado", Blocos.AtividadesDeInvestimento);
         var todas = new List<Categoria>
         {
-            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", Grupo = grupoReceita, Ativa = true, ClienteId = _clienteId },
-            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", Grupo = grupoDevolucao, Ativa = true, ClienteId = _clienteId },
-            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
-            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", Grupo = grupoInvest, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Vendas", Tipo = "Receita", TipoMovimento = "Entrada", Grupo = grupoReceita, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Devoluções", Tipo = "CustoFixo", TipoMovimento = "Ambos", Grupo = grupoDevolucao, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", TipoMovimento = "Saida", Grupo = grupoDespesa, Ativa = true, ClienteId = _clienteId },
+            new() { Id = Guid.NewGuid(), Nome = "Equipamentos", Tipo = "Investimento", TipoMovimento = "Ambos", Grupo = grupoInvest, Ativa = true, ClienteId = _clienteId },
         };
         _repoMock.Setup(r => r.ListarTodasPorClienteAsync(_clienteId)).ReturnsAsync(todas);
 

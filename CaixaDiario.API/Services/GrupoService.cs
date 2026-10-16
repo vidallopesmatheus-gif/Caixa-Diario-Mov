@@ -60,7 +60,8 @@ public class GrupoService : IGrupoService
         if (existente is not null && existente.Id != id)
             throw new ApiException(409, CodigoRetorno.GRUPO_DUPLICADO, "Já existe um grupo com esse nome.");
 
-        var blocoMudou = grupo.Bloco != dto.Bloco;
+        var blocoAntigo = grupo.Bloco;
+        var blocoMudou = blocoAntigo != dto.Bloco;
         grupo.Nome = nome;
         grupo.Bloco = dto.Bloco;
         grupo.Ativo = dto.Ativo;
@@ -71,11 +72,23 @@ public class GrupoService : IGrupoService
         if (blocoMudou)
         {
             var novoTipo = Blocos.TipoPadrao(dto.Bloco);
+            // TipoMovimento é editável pelo usuário (diferente de Tipo) — só recalcula o padrão do
+            // Bloco novo pra quem ainda estava no padrão do Bloco antigo (nunca foi customizado à
+            // mão); uma categoria com TipoMovimento ajustado manualmente mantém o ajuste.
+            var tipoMovimentoPadraoAntigo = CategoriaService.TipoMovimentoPadrao(new Grupo { Bloco = blocoAntigo });
+            var tipoMovimentoPadraoNovo = CategoriaService.TipoMovimentoPadrao(atualizado);
             var categorias = await _categoriaRepo.ListarTodasAsync();
-            foreach (var categoria in categorias.Where(c => c.GrupoId == id && c.Tipo != novoTipo))
+            foreach (var categoria in categorias.Where(c => c.GrupoId == id))
             {
-                categoria.Tipo = novoTipo;
-                await _categoriaRepo.AtualizarAsync(categoria);
+                var precisaAtualizar = false;
+                if (categoria.Tipo != novoTipo) { categoria.Tipo = novoTipo; precisaAtualizar = true; }
+                if (categoria.TipoMovimento == tipoMovimentoPadraoAntigo && categoria.TipoMovimento != tipoMovimentoPadraoNovo)
+                {
+                    categoria.TipoMovimento = tipoMovimentoPadraoNovo;
+                    precisaAtualizar = true;
+                }
+                if (precisaAtualizar)
+                    await _categoriaRepo.AtualizarAsync(categoria);
             }
         }
 

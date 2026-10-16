@@ -29,6 +29,9 @@ public interface ICategoriaRepository
     /// <summary>Conta lançamentos (entradas/saídas não excluídos) do cliente que usam a categoria pelo nome.</summary>
     Task<int> ContarUsoAsync(Guid clienteId, string nome);
 
+    /// <summary>Quantidade de lançamentos (entradas/saídas não excluídos) do cliente, por nome de categoria — uma consulta só, pra relatórios que olham todas as categorias de uma vez (ver ReclassificacaoCategoriasService).</summary>
+    Task<Dictionary<string, (int Entradas, int Saidas)>> ContarUsoPorCategoriaAsync(Guid clienteId);
+
     /// <summary>Reatribui, só dentro do cliente, todos os lançamentos que usam <paramref name="nomeOrigem"/> para a categoria de destino.</summary>
     Task MigrarUsoAsync(Guid clienteId, string nomeOrigem, string nomeDestino, string tipoDestino);
 }

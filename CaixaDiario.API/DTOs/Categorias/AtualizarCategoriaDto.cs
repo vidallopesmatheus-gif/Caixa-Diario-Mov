@@ -7,4 +7,7 @@ public class AtualizarCategoriaDto
     [Required, MaxLength(100)] public string Nome { get; set; } = string.Empty;
     [Required] public Guid GrupoId { get; set; }
     public bool Ativa { get; set; } = true;
+    // "Entrada" | "Saida" | "Ambos" — opcional; se omitido, preserva o valor atual (ou recalcula o
+    // padrão do grupo novo, se o grupo mudou — ver CategoriaService.AtualizarAsync).
+    public string? TipoMovimento { get; set; }
 }

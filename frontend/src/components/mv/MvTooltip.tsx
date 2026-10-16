@@ -28,7 +28,7 @@ export default function MvTooltip({ active, label, payload, valueFormatter = fmt
       {label && <div className="mv-chart-tooltip-label">{label}</div>}
       {linhas.map((p, i) => (
         <div key={i} className="mv-chart-tooltip-row">
-          <span style={{ color: p.color ?? 'var(--mv-tx2)' }}>{p.name}</span>
+          <span style={{ color: p.color ?? 'var(--tx2)' }}>{p.name}</span>
           <strong>{typeof p.value === 'number' ? valueFormatter(p.value) : String(p.value ?? '—')}</strong>
         </div>
       ))}

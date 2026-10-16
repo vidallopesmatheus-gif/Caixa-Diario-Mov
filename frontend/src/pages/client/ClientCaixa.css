@@ -4,7 +4,7 @@
    "ações" é sua própria coluna de grid, nunca compartilhada com a categoria. */
 .lancamento-row {
   display: grid;
-  grid-template-columns: 1fr 140px minmax(100px,160px) auto;
+  grid-template-columns: 1fr 120px minmax(140px, 1fr) auto;
   grid-template-areas: "desc valor cat acoes";
   gap: 8px; margin-bottom: 8px; align-items: center;
 }
@@ -15,7 +15,12 @@
 .lanc-desc { grid-area: desc; min-width: 0; }
 .lanc-valor { grid-area: valor; min-width: 0; }
 .lanc-cat { grid-area: cat; position: relative; min-width: 0; }
-.lanc-acoes { grid-area: acoes; display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* O CategoriaCombobox tem min-width:170px por padrão (bom em telas soltas) — aqui dentro do grid
+   da linha de lançamento ele precisa poder encolher até a célula, senão ultrapassa a coluna e fica
+   por cima do botão de transferência/ações ao lado. */
+.lanc-cat .cc-wrapper { min-width: 0; width: 100%; }
+/* Ações nunca encolhem — 3 botões de 36px sempre inteiros, nunca comprimidos pela categoria. */
+.lanc-acoes { grid-area: acoes; display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 0; }
 
 .lancamento-desc {
   padding: 9px 12px; background: var(--bg-input);
@@ -171,13 +176,12 @@
 /* ── Responsividade mobile (item 6): [descrição] / [valor][ações] / [categoria em largura total] ──
    Categoria dividindo linha com valor (110px fixos) vazava rolagem horizontal em telas de 375px —
    nome de categoria longo não cabe em 110px. Categoria ganha linha própria, largura total. */
-@media (max-width: 540px) {
+@media (max-width: 600px) {
   .lancamento-row {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr 128px;
     grid-template-areas:
-      "desc desc"
-      "valor acoes"
-      "cat cat";
+      "desc valor"
+      "cat acoes";
     row-gap: 6px;
   }
   .lanc-acoes { justify-content: flex-end; }

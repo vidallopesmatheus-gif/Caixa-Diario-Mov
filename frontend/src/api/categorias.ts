@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Categorias, CategoriaAdmin, ApiResponse, Grupo, Bloco } from '../types'
+import type { Categorias, CategoriaAdmin, ApiResponse, Grupo, Bloco, TipoMovimento } from '../types'
 
 // Correção de integridade (Parte 1): categoria deixou de ser global — o cache agora é por
 // cliente (nunca compartilhado entre clientes), e é invalidado sempre que o cliente muda.
@@ -26,19 +26,23 @@ export async function listarCategoriasParaGerenciar(clienteId: string): Promise<
   return res.dados
 }
 
-export async function criarCategoria(clienteId: string, nome: string, grupoId: string): Promise<CategoriaAdmin> {
+export async function criarCategoria(
+  clienteId: string, nome: string, grupoId: string, tipoMovimento?: TipoMovimento,
+): Promise<CategoriaAdmin> {
   const res = await apiFetch<ApiResponse<CategoriaAdmin>>(`/api/clientes/${clienteId}/categorias`, {
     method: 'POST',
-    body: JSON.stringify({ nome, grupoId }),
+    body: JSON.stringify({ nome, grupoId, tipoMovimento }),
   })
   resetCategoriaCache()
   return res.dados
 }
 
-export async function atualizarCategoria(clienteId: string, id: string, nome: string, grupoId: string, ativa: boolean): Promise<CategoriaAdmin> {
+export async function atualizarCategoria(
+  clienteId: string, id: string, nome: string, grupoId: string, ativa: boolean, tipoMovimento?: TipoMovimento,
+): Promise<CategoriaAdmin> {
   const res = await apiFetch<ApiResponse<CategoriaAdmin>>(`/api/clientes/${clienteId}/categorias/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ nome, grupoId, ativa }),
+    body: JSON.stringify({ nome, grupoId, ativa, tipoMovimento }),
   })
   resetCategoriaCache()
   return res.dados

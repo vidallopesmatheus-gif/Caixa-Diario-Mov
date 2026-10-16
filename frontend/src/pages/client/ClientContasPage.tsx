@@ -1,5 +1,4 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
@@ -11,7 +10,6 @@ import { listarContasBancarias } from '../../api/contasBancarias'
 import { criarContaProvisionada, atualizarContaProvisionada, excluirContaProvisionada } from '../../api/contasProvisionadas'
 import { listarSugestoesVinculo, ignorarSugestaoVinculo, type SugestaoVinculo } from '../../api/conciliacao'
 import { listarCategorias } from '../../api/categorias'
-import { listarFaturasCartao, type FaturaCartao } from '../../api/faturasCartao'
 import Modal from '../../components/shared/Modal'
 import type { ContaProvisionada, ContaRecorrente, ContaBancaria, Categorias } from '../../types'
 import { mesAtualISO, deslocarMes, labelMes, calcularDiasAtraso, dataReferencia, estaNoMes } from '../../utils/contasPagarReceber'
@@ -22,6 +20,26 @@ interface Props { clienteIdOverride?: string }
 
 type AbaContas = 'receber' | 'pagar' | 'pagas' | 'recorrentes'
 type ModoLista = 'mes' | 'atrasadas' | 'tudo'
+
+// Rodada de ajustes Money Vision (item 3.1): as 4 seções ficam todas visíveis, cada uma
+// recolhível de forma independente, lembrando o estado aberto/fechado por usuário (localStorage)
+// — "A receber" e "A pagar" abertas por padrão, "Pagas/Recebidas" e "Recorrentes" fechadas.
+const SECAO_PADRAO: Record<AbaContas, boolean> = { receber: true, pagar: true, pagas: false, recorrentes: false }
+
+function chaveSecaoAberta(clienteId: string | null, secao: AbaContas): string {
+  return `contas-secao-aberta::${clienteId ?? 'anon'}::${secao}`
+}
+
+function lerSecoesAbertas(clienteId: string | null): Record<AbaContas, boolean> {
+  const resultado = { ...SECAO_PADRAO }
+  for (const secao of Object.keys(SECAO_PADRAO) as AbaContas[]) {
+    try {
+      const salvo = localStorage.getItem(chaveSecaoAberta(clienteId, secao))
+      if (salvo !== null) resultado[secao] = salvo === '1'
+    } catch { /* localStorage indisponível (ex.: modo privado) — usa o padrão */ }
+  }
+  return resultado
+}
 
 interface ContaView {
   registroData: string
@@ -51,14 +69,8 @@ function parseBRL(s: string): number {
 
 export default function ClientContasPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
-  const navigate = useNavigate()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, salvar, recarregar, loading } = useRegistros(clienteId)
-
-  // Item 6 (Money Vision): faturas de cartão em aberto também aparecem aqui, não só em
-  // Projeção/Meu Futuro/"A pagar em cartões" — informativo (pagamento continua pela tela de
-  // Faturas, já que quitar uma fatura não é um "pagar" genérico como as contas abaixo).
-  const [faturasCartaoAbertas, setFaturasCartaoAbertas] = useState<(FaturaCartao & { contaCartaoId: string; contaCartaoNome: string })[]>([])
 
   // Formulário unificado
   const [tipo, setTipo] = useState<'receber' | 'pagar'>('receber')
@@ -154,15 +166,7 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   useEffect(() => {
     if (!clienteId) return
     listarContasRecorrentes(clienteId).then(setRecorrentes).catch(console.error)
-    listarContasBancarias(clienteId).then(cs => {
-      setContasBancarias(cs)
-      const cartoes = cs.filter(c => c.ativa && c.tipo === 'CartaoCredito')
-      Promise.all(cartoes.map(c => listarFaturasCartao(c.id).then(fs => fs
-        .filter(f => f.status !== 'Paga')
-        .map(f => ({ ...f, contaCartaoId: c.id, contaCartaoNome: c.nome })))))
-        .then(porCartao => setFaturasCartaoAbertas(porCartao.flat()))
-        .catch(console.error)
-    }).catch(console.error)
+    listarContasBancarias(clienteId).then(setContasBancarias).catch(console.error)
     listarCategorias(clienteId).then(setCategorias).catch(console.error)
     listarSugestoesRecorrencia(clienteId).then(setSugestoesRecorrencia).catch(console.error)
   }, [clienteId])
@@ -358,11 +362,27 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
   const pagasList = contasFiltradas.filter(c => c.tipo === 'pagar' && c.conta.pago)
   const contaSelecionada = contasBancarias.find(c => c.id === contaSelecionadaId)
 
-  // ── Parte 3 (Money Vision): a tela não para de crescer — seletor de mês + abas + "atrasadas"
+  // ── Parte 3 (Money Vision): a tela não para de crescer — seletor de mês + seções + "atrasadas"
   // sempre visíveis no topo, em vez de listar tudo desde sempre. ──────────────────────────────
-  const [abaAtiva, setAbaAtiva] = useState<AbaContas>('receber')
+  const [secoesAbertas, setSecoesAbertas] = useState<Record<AbaContas, boolean>>(() => lerSecoesAbertas(clienteId))
   const [mesSelecionado, setMesSelecionado] = useState(mesAtualISO())
   const [modoLista, setModoLista] = useState<ModoLista>('mes')
+
+  function toggleSecao(secao: AbaContas) {
+    setSecoesAbertas(prev => {
+      const next = { ...prev, [secao]: !prev[secao] }
+      try { localStorage.setItem(chaveSecaoAberta(clienteId, secao), next[secao] ? '1' : '0') } catch { /* ok */ }
+      return next
+    })
+  }
+  function abrirSecao(secao: AbaContas) {
+    setSecoesAbertas(prev => {
+      if (prev[secao]) return prev
+      const next = { ...prev, [secao]: true }
+      try { localStorage.setItem(chaveSecaoAberta(clienteId, secao), '1') } catch { /* ok */ }
+      return next
+    })
+  }
 
   function irParaMes(delta: number) {
     setMesSelecionado(m => deslocarMes(m, delta))
@@ -1011,37 +1031,13 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
       {/* Item 2 (Parte 3): atrasadas sempre no topo, num bloco próprio, até serem resolvidas —
           independente do mês selecionado ou da aba aberta. */}
       {(atrasadasReceber.length + atrasadasPagar.length) > 0 && (
-        <button type="button" className="contas-atrasadas-aviso" onClick={() => { setModoLista('atrasadas'); setAbaAtiva(atrasadasPagar.length >= atrasadasReceber.length ? 'pagar' : 'receber') }}>
+        <button type="button" className="contas-atrasadas-aviso" onClick={() => { setModoLista('atrasadas'); abrirSecao(atrasadasPagar.length >= atrasadasReceber.length ? 'pagar' : 'receber') }}>
           ⚠️ {atrasadasReceber.length + atrasadasPagar.length} conta(s) atrasada(s) · {fmtBRL(totalAtrasadoReceber + totalAtrasadoPagar)}
         </button>
       )}
 
-      {/* Item 6 (Money Vision): faturas de cartão em aberto — informativo; pagamento é sempre
-          pela tela de Faturas (nunca pelo fluxo genérico de baixa abaixo, que não sabe quitar
-          fatura por match valor+banco). */}
-      {faturasCartaoAbertas.length > 0 && (
-        <div className="contas-section">
-          <h3>💳 Faturas de cartão em aberto ({faturasCartaoAbertas.length})</h3>
-          {faturasCartaoAbertas.map(f => (
-            <button
-              key={f.id ?? `${f.contaCartaoId}-${f.competencia}`}
-              type="button"
-              className="conta-item"
-              style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }}
-              onClick={() => navigate(`/banco/${f.contaCartaoId}/faturas`)}
-            >
-              <div className="conta-info">
-                <div className="conta-desc">{f.banco ? `${f.banco} — ${f.contaCartaoNome}` : f.contaCartaoNome}</div>
-                <div className="conta-meta">
-                  Vence: {fmtDate(f.dataVencimento)} · {f.status}
-                  {f.valorPago > 0 && ` · pago ${fmtBRL(f.valorPago)}`}
-                </div>
-              </div>
-              <div className="conta-valor pagar">{fmtBRL(f.saldoDevedor)}</div>
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Rodada de ajustes Money Vision: o bloco de faturas de cartão saiu daqui — o cartão fica
+          só dentro da própria conta "Cartões" (extrato + Ver faturas), nunca duplicado em Contas. */}
 
       {/* Item 1 (Parte 3): seletor de mês + atalhos — filtra os pendentes do mês nas abas abaixo. */}
       <div className="contas-mes-seletor">
@@ -1087,30 +1083,25 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         )}
       </div>
 
-      {/* Item 5 (Parte 3): abas no topo, cada uma com o total do mês. */}
-      <div className="contas-abas">
-        <button type="button" className={`contas-aba ${abaAtiva === 'receber' ? 'ativa' : ''}`} onClick={() => setAbaAtiva('receber')}>
-          📥 A Receber <span className="contas-aba-total">{fmtBRL(totalMesReceber)}</span>
-        </button>
-        <button type="button" className={`contas-aba ${abaAtiva === 'pagar' ? 'ativa' : ''}`} onClick={() => setAbaAtiva('pagar')}>
-          📤 A Pagar <span className="contas-aba-total">{fmtBRL(totalMesPagar)}</span>
-        </button>
-        <button type="button" className={`contas-aba ${abaAtiva === 'pagas' ? 'ativa' : ''}`} onClick={() => setAbaAtiva('pagas')}>
-          ✅ Pagas/Recebidas
-        </button>
-        <button type="button" className={`contas-aba ${abaAtiva === 'recorrentes' ? 'ativa' : ''}`} onClick={() => setAbaAtiva('recorrentes')}>
-          🔁 Recorrentes {recorrentes.length > 0 && `(${recorrentes.length})`}
-        </button>
-      </div>
-
-      {abaAtiva === 'receber' && (
+      {/* Rodada de ajustes Money Vision (item 3.1): as 4 seções ficam todas visíveis, cada uma
+          recolhível de forma independente — cabeçalho clicável com ▾/▸ e total ao lado, estado
+          lembrado por usuário (localStorage). Antes eram abas que escondiam as outras por completo. */}
+      <button type="button" className="contas-secao-header" aria-expanded={secoesAbertas.receber} onClick={() => toggleSecao('receber')}>
+        <span>{secoesAbertas.receber ? '▾' : '▸'} 📥 A Receber</span>
+        <span className="contas-secao-total">{fmtBRL(totalMesReceber)}</span>
+      </button>
+      {secoesAbertas.receber && (
         <div className="contas-section">
           {pendentesReceberVisiveis.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma pendente.</p>}
           {pendentesReceberVisiveis.map(renderConta)}
         </div>
       )}
 
-      {abaAtiva === 'pagar' && (
+      <button type="button" className="contas-secao-header" aria-expanded={secoesAbertas.pagar} onClick={() => toggleSecao('pagar')}>
+        <span>{secoesAbertas.pagar ? '▾' : '▸'} 📤 A Pagar</span>
+        <span className="contas-secao-total">{fmtBRL(totalMesPagar)}</span>
+      </button>
+      {secoesAbertas.pagar && (
         <div className="contas-section">
           {pendentesPagarVisiveis.length === 0 && <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma pendente.</p>}
           {[...pagarAgrupado.grupos.entries()].map(([financiamentoId, views]) => {
@@ -1137,7 +1128,11 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         </div>
       )}
 
-      {abaAtiva === 'pagas' && (
+      <button type="button" className="contas-secao-header" aria-expanded={secoesAbertas.pagas} onClick={() => toggleSecao('pagas')}>
+        <span>{secoesAbertas.pagas ? '▾' : '▸'} ✅ Pagas/Recebidas</span>
+        <span className="contas-secao-total">{recebidasDoMes.length + pagasDoMes.length} este mês</span>
+      </button>
+      {secoesAbertas.pagas && (
         <div className="contas-section">
           {([['receber', recebidasDoMes, recebidasList], ['pagar', pagasDoMes, pagasList]] as const).map(([t, doMes, todas]) => (
             <div key={t} className="contas-pagas-bloco">
@@ -1378,15 +1373,19 @@ export default function ClientContasPage({ clienteIdOverride }: Props) {
         )}
       </Modal>
 
-      {abaAtiva === 'recorrentes' && recorrentes.length === 0 && (
+      <button type="button" className="contas-secao-header" aria-expanded={secoesAbertas.recorrentes} onClick={() => toggleSecao('recorrentes')}>
+        <span>{secoesAbertas.recorrentes ? '▾' : '▸'} 🔁 Recorrentes</span>
+        <span className="contas-secao-total">{recorrentes.length}</span>
+      </button>
+
+      {secoesAbertas.recorrentes && recorrentes.length === 0 && (
         <div className="contas-section">
           <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma recorrência ativa.</p>
         </div>
       )}
 
-      {abaAtiva === 'recorrentes' && recorrentes.length > 0 && (
+      {secoesAbertas.recorrentes && recorrentes.length > 0 && (
         <div className="contas-section">
-          <h3>🔁 Recorrentes Ativas ({recorrentes.length})</h3>
           {recorrentes.some(r => !r.categoria) && (
             <p className="rec-sem-categoria-aviso">
               ⚠️ {recorrentes.filter(r => !r.categoria).length} recorrência(s) antiga(s) sem categoria — complete abaixo pra entrarem certo nos relatórios.

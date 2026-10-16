@@ -337,56 +337,6 @@ public class ProjecaoService : IProjecaoService
         };
     }
 
-    // Item 3: despesas fixas recorrentes por categoria que o cliente nunca cadastrou como
-    // ContaRecorrente — mesma ideia de CalcularDespesaFixaNaoCadastrada, quebrada por categoria em
-    // vez de um único total, pra virar uma lista com botão "Transformar em conta a pagar" na tela.
-    // Pode não bater exatamente com a soma do valor agregado (ali a média/dedução é sobre o total;
-    // aqui é categoria por categoria) — são dois usos diferentes: o agregado alimenta a simulação
-    // dia a dia, esta lista é pra decisão do usuário.
-    public List<DespesaEstimadaCategoriaDto> CalcularDespesasEstimadasPorCategoria(
-        List<RegistroDiario> registros, List<ContaRecorrente> recorrentes, DateOnly hoje)
-    {
-        var recorrentesPagar = recorrentes.Where(r => r.Tipo == "Pagar" && r.Ativo).ToList();
-
-        var porCategoriaPorMes = Enumerable.Range(1, 3)
-            .Select(i => hoje.AddMonths(-i))
-            .Select(m => registros
-                .Where(r => r.Data.Year == m.Year && r.Data.Month == m.Month)
-                .SelectMany(r => r.Saidas)
-                .Where(s => s.TipoCusto == "CustoFixo")
-                .GroupBy(s => string.IsNullOrWhiteSpace(s.Categoria) ? "Não Classificado" : s.Categoria)
-                .ToDictionary(g => g.Key, g => g.Sum(s => s.Valor)))
-            .ToList();
-
-        var categorias = porCategoriaPorMes.SelectMany(m => m.Keys).Distinct().ToList();
-
-        var recorrentePorCategoriaEm30Dias = new Dictionary<string, decimal>();
-        for (var d = 1; d <= 30; d++)
-        {
-            var dia = hoje.AddDays(d);
-            foreach (var rec in recorrentesPagar.Where(r => RecorrenciaService.OcorreEm(r, dia)))
-            {
-                var cat = string.IsNullOrWhiteSpace(rec.Categoria) ? "Não Classificado" : rec.Categoria;
-                recorrentePorCategoriaEm30Dias[cat] = recorrentePorCategoriaEm30Dias.GetValueOrDefault(cat)
-                    + RecorrenciaService.CalcularValorPrevisto(rec, registros);
-            }
-        }
-
-        var resultado = new List<DespesaEstimadaCategoriaDto>();
-        foreach (var cat in categorias)
-        {
-            var valoresNosMeses = porCategoriaPorMes.Select(m => m.GetValueOrDefault(cat, 0m)).Where(v => v > 0).ToList();
-            if (valoresNosMeses.Count == 0) continue;
-            var media = valoresNosMeses.Average();
-            var jaCoberta = recorrentePorCategoriaEm30Dias.GetValueOrDefault(cat, 0m);
-            var estimativa = Math.Round(Math.Max(0m, media - jaCoberta), 2);
-            if (estimativa <= 0) continue;
-            resultado.Add(new DespesaEstimadaCategoriaDto { Categoria = cat, ValorEstimado = estimativa });
-        }
-
-        return resultado.OrderByDescending(r => r.ValorEstimado).ToList();
-    }
-
     // Bloco 3 da rodada "Visão de Futuro": agrega a mesma simulação diária de Calcular em meses
     // calendário — nenhuma lógica de simulação duplicada (atrasados, recorrências, despesa não
     // cadastrada, fatura, cenário e reserva já vêm prontos de Calcular).

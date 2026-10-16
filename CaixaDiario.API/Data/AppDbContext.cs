@@ -342,6 +342,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Nome).HasColumnName("nome").IsRequired();
             entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired();
+            entity.Property(e => e.TipoMovimento).HasColumnName("tipo_movimento").IsRequired().HasDefaultValue("Ambos");
             entity.Property(e => e.GrupoId).HasColumnName("grupo_id");
             entity.Property(e => e.Ordem).HasColumnName("ordem").HasDefaultValue(0);
             entity.Property(e => e.Ativa).HasColumnName("ativa").HasDefaultValue(true);

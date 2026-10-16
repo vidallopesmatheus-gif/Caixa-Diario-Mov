@@ -14,7 +14,7 @@ import {
 } from '../../../api/categorias'
 import Modal from '../../../components/shared/Modal'
 import { useAuth } from '../../../contexts/AuthContext'
-import type { CategoriaAdmin, Grupo, Bloco } from '../../../types'
+import type { CategoriaAdmin, Grupo, Bloco, TipoMovimento } from '../../../types'
 import { BLOCOS_ORDEM } from '../../../types'
 import '../ClientContasBancarias.css'
 import './Categorias.css'
@@ -59,11 +59,14 @@ export default function CategoriasPage() {
   // '' = nada carregado ainda, '__novo__' = criar grupo novo neste bloco, senão id de um grupo existente.
   const [novoGrupoId, setNovoGrupoId] = useState('')
   const [novoGrupoNovoNome, setNovoGrupoNovoNome] = useState('')
+  // '' = automático (deixa o backend derivar do Bloco do grupo escolhido).
+  const [novoTipoMovimento, setNovoTipoMovimento] = useState<TipoMovimento | ''>('')
   const [criando, setCriando] = useState(false)
 
   const [editId, setEditId] = useState<string | null>(null)
   const [editNome, setEditNome] = useState('')
   const [editGrupoId, setEditGrupoId] = useState('')
+  const [editTipoMovimento, setEditTipoMovimento] = useState<TipoMovimento>('Ambos')
   const [salvandoEdit, setSalvandoEdit] = useState(false)
 
   const [emUso, setEmUso] = useState<{ categoria: CategoriaAdmin; quantidade: number } | null>(null)
@@ -181,9 +184,10 @@ export default function CategoriasPage() {
         const grupoCriado = await criarGrupo(novoGrupoNovoNome.trim(), novoBloco)
         grupoId = grupoCriado.id
       }
-      await criarCategoria(clienteId, novoNome.trim(), grupoId)
+      await criarCategoria(clienteId, novoNome.trim(), grupoId, novoTipoMovimento || undefined)
       setNovoNome('')
       setNovoGrupoNovoNome('')
+      setNovoTipoMovimento('')
       showMsg('Categoria criada com sucesso!')
       carregar()
     } catch (e: unknown) {
@@ -197,13 +201,14 @@ export default function CategoriasPage() {
     setEditId(c.id)
     setEditNome(c.nome)
     setEditGrupoId(c.grupoId)
+    setEditTipoMovimento(c.tipoMovimento)
   }
 
   async function handleSalvarEdit() {
     if (!editId || !editGrupoId) return
     setSalvandoEdit(true)
     try {
-      await atualizarCategoria(clienteId, editId, editNome.trim(), editGrupoId, true)
+      await atualizarCategoria(clienteId, editId, editNome.trim(), editGrupoId, true, editTipoMovimento)
       setEditId(null)
       showMsg('Categoria atualizada!')
       carregar()
@@ -227,7 +232,7 @@ export default function CategoriasPage() {
 
   async function handleReativar(c: CategoriaAdmin) {
     try {
-      await atualizarCategoria(clienteId, c.id, c.nome, c.grupoId, true)
+      await atualizarCategoria(clienteId, c.id, c.nome, c.grupoId, true, c.tipoMovimento)
       showMsg('Categoria reativada.')
       carregar()
     } catch (e: unknown) {
@@ -346,6 +351,16 @@ export default function CategoriasPage() {
           <select value={editGrupoId} onChange={e => setEditGrupoId(e.target.value)} style={{ flex: 1, minWidth: 220 }}>
             {gruposAtivos.map(g => <option key={g.id} value={g.id}>{BLOCO_LABEL[g.bloco]} · {g.nome}</option>)}
           </select>
+          <select
+            value={editTipoMovimento}
+            onChange={e => setEditTipoMovimento(e.target.value as TipoMovimento)}
+            style={{ flex: 1, minWidth: 150 }}
+            title="Em que lado do combobox de lançamento ela aparece"
+          >
+            <option value="Entrada">↓ Só entrada</option>
+            <option value="Saida">↑ Só saída</option>
+            <option value="Ambos">↕ Entrada e saída</option>
+          </select>
           <button className="btn-add-conta" onClick={handleSalvarEdit} disabled={salvandoEdit}>
             {salvandoEdit ? 'Salvando...' : '✔ Salvar'}
           </button>
@@ -413,6 +428,17 @@ export default function CategoriasPage() {
               autoFocus
             />
           )}
+          <select
+            value={novoTipoMovimento}
+            onChange={e => setNovoTipoMovimento(e.target.value as TipoMovimento | '')}
+            style={{ flex: 1, minWidth: 170 }}
+            title="Em que lado do combobox de lançamento ela aparece"
+          >
+            <option value="">Automático (padrão do bloco)</option>
+            <option value="Entrada">↓ Só entrada</option>
+            <option value="Saida">↑ Só saída</option>
+            <option value="Ambos">↕ Entrada e saída</option>
+          </select>
           <button
             className="btn-add-conta"
             onClick={handleCriar}

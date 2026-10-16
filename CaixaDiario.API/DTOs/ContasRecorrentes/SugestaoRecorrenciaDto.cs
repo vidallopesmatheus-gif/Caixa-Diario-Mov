@@ -13,6 +13,12 @@ public class SugestaoRecorrenciaDto
     public int QuantidadeOcorrencias { get; set; }
     public Guid? ContaBancariaId { get; set; }
     public DateOnly UltimaOcorrencia { get; set; }
+    // Rodada de ajustes Money Vision, item 5: dia do mês mais comum entre as ocorrências — pré-
+    // preenche "Dia de vencimento" no formulário de recorrente.
+    public int DiaTipico { get; set; }
+    // true quando o valor variou entre as ocorrências (dentro da tolerância, mas não idêntico) —
+    // pré-marca "valor variável" no formulário, em vez do cliente ter que perceber sozinho.
+    public bool ValorVariavel { get; set; }
 }
 
 public class IgnorarSugestaoRecorrenciaDto

@@ -105,20 +105,6 @@ public class ProjecaoController : ControllerBase
         return Ok(new ApiResponse<TrajetoriaDto> { Dados = resultado });
     }
 
-    // Item 3 da rodada "Visão de Futuro": despesas fixas estimadas por categoria (não cadastradas
-    // como recorrência), pra tela mostrar "Transformar em conta a pagar" por categoria.
-    [HttpGet("{clienteId:guid}/despesas-estimadas")]
-    public async Task<IActionResult> ObterDespesasEstimadas(Guid clienteId)
-    {
-        if (ObterPerfil() == "cliente" && ObterUsuarioId() != clienteId)
-            throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
-
-        var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
-        var recorrentes = await _recorrenteRepo.ListarAtivasPorClienteAsync(clienteId);
-        var resultado = _projecaoService.CalcularDespesasEstimadasPorCategoria(registros, recorrentes, DataLocalHelper.Hoje());
-        return Ok(new ApiResponse<List<DespesaEstimadaCategoriaDto>> { Dados = resultado });
-    }
-
     // Bloco 3 da rodada "Visão de Futuro": tela "Meu Futuro" — 12 meses + conselho em regras.
     // ajusteReceitaPercent/atrasoRecebimentosDias são o simulador "E se...?" (0 = sem ajuste).
     [HttpGet("{clienteId:guid}/meu-futuro")]

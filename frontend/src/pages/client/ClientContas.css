@@ -34,14 +34,16 @@
 }
 .contas-mes-atalhos button.ativo { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-.contas-abas { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; border-bottom: 1px solid var(--bd); }
-.contas-aba {
-  display: flex; align-items: center; gap: 6px; padding: 10px 14px; border: none; background: none;
-  color: var(--tx3); font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;
+/* Item 3.1 (rodada de ajustes Money Vision): seções recolhíveis — cabeçalho clicável com ▾/▸ e
+   total ao lado, no lugar das abas antigas (que escondiam as outras seções por completo). */
+.contas-secao-header {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  padding: 12px 14px; margin-bottom: 8px; border-radius: 10px;
+  background: var(--bg-card); border: 1px solid var(--bd);
+  color: var(--tx1); font-size: 13px; font-weight: 700; cursor: pointer;
 }
-.contas-aba.ativa { color: var(--tx1); border-bottom-color: var(--accent); }
-.contas-aba-total { font-size: 11px; font-weight: 700; color: var(--tx3); }
-.contas-aba.ativa .contas-aba-total { color: var(--accent); }
+.contas-secao-header:hover { background: var(--bg-hover); }
+.contas-secao-total { font-size: 12px; font-weight: 700; color: var(--tx3); }
 
 .contas-pagas-bloco { margin-bottom: 14px; }
 .contas-pagas-resumo {
@@ -69,8 +71,6 @@
 
 @media (max-width: 480px) {
   .contas-mes-atalhos { margin-left: 0; width: 100%; }
-  .contas-abas { overflow-x: auto; flex-wrap: nowrap; }
-  .contas-aba { white-space: nowrap; }
 }
 
 .contas-filtros {

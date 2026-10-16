@@ -7,7 +7,7 @@ import { MvPage, MvHero, MvSectionLabel, MvKpi, MvKpiGrid, MvInsight, MvDetails,
 import type { MeuFuturo, MeuFuturoMes } from '../../api/projecao'
 import type { PreferenciasFuturo } from '../../api/preferenciasFuturo'
 import {
-  ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import './ClientMeuFuturo.css'
 
@@ -126,11 +126,11 @@ export default function ClientMeuFuturoPage() {
     return (
       <div className="mv-chart-tooltip">
         <div className="mv-chart-tooltip-label">{p.mes} · {STATUS_LABEL[p.status]}</div>
-        <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-green)' }}>A receber</span><strong>+{fmtBRL(p.aReceber)}</strong></div>
-        <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-red)' }}>A pagar</span><strong>-{fmtBRL(Math.abs(p.aPagar))}</strong></div>
+        <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--success)' }}>A receber</span><strong>+{fmtBRL(p.aReceber)}</strong></div>
+        <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--danger)' }}>A pagar</span><strong>-{fmtBRL(Math.abs(p.aPagar))}</strong></div>
         <div className="mv-chart-tooltip-row"><span>Saldo final</span><strong>{fmtBRL(p.saldoFinal)}</strong></div>
         {p.precisaReceber > 0 && (
-          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-amber)' }}>Precisa receber</span><strong>{fmtBRL(p.precisaReceber)}</strong></div>
+          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--warning)' }}>Precisa receber</span><strong>{fmtBRL(p.precisaReceber)}</strong></div>
         )}
       </div>
     )
@@ -142,9 +142,9 @@ export default function ClientMeuFuturoPage() {
     if (payload?.status !== 'Risco') return <circle cx={cx} cy={cy} r={2.5} fill="var(--mv-blue)" />
     return (
       <g>
-        <circle cx={cx} cy={cy} r={9} fill="var(--mv-red)" opacity={0.18} />
-        <circle cx={cx} cy={cy} r={4.5} fill="var(--mv-red)" stroke="var(--mv-navy)" strokeWidth={2} />
-        <text x={cx} y={cy - 14} textAnchor="middle" fontSize={10.5} fontWeight={700} fill="var(--mv-red)">
+        <circle cx={cx} cy={cy} r={9} fill="var(--danger)" opacity={0.18} />
+        <circle cx={cx} cy={cy} r={4.5} fill="var(--danger)" stroke="var(--bg)" strokeWidth={2} />
+        <text x={cx} y={cy - 14} textAnchor="middle" fontSize={10.5} fontWeight={700} fill="var(--danger)">
           precisa de {fmtBRLCompacto(payload.precisaReceber)}
         </text>
       </g>
@@ -153,6 +153,17 @@ export default function ClientMeuFuturoPage() {
 
   const mesDetalhe = meuFuturo?.meses.find(m => m.mes === mesSelecionado)
   const semAnimacao = prefereMovimentoReduzido()
+  const reservaMinima = preferencias.reservaMinima ?? null
+
+  const dominioY = useMemo(() => {
+    if (dadosGrafico.length === 0) return undefined
+    const valores = dadosGrafico.map(p => p.saldoFinal)
+    if (reservaMinima !== null) valores.push(reservaMinima)
+    const min = Math.min(...valores)
+    const max = Math.max(...valores)
+    const margem = Math.max((max - min) * 0.1, 1)
+    return [min - margem, max + margem] as [number, number]
+  }, [dadosGrafico, reservaMinima])
 
   return (
     <MvPage>
@@ -233,17 +244,36 @@ export default function ClientMeuFuturoPage() {
             <MvInsight key={i} icon="💬" text={c} tone="neutral" />
           ))}
 
-          <MvSectionLabel>Entradas, saídas e saldo acumulado — 12 meses</MvSectionLabel>
+          {/* Redesign (item 6, rodada de ajustes): gráfico principal só com o saldo acumulado —
+              entradas/saídas do mês saem daqui e vão pro card de detalhe da pill (abaixo). No
+              máximo 2 cores: azul de marca pro saldo, vermelho só nos meses de risco. */}
+          <MvSectionLabel>Saldo acumulado — 12 meses</MvSectionLabel>
           <div className="mv-chart-card">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={dadosGrafico} margin={{ top: 24, right: 8, bottom: 0, left: 0 }}>
-                <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
-                <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
-                <Tooltip content={tooltipGrafico} cursor={{ fill: 'rgba(255,255,255,.04)' }} />
-                <Bar dataKey="aReceber" fill="var(--mv-blue-light)" radius={[4, 4, 0, 0]} isAnimationActive={!semAnimacao} />
-                <Bar dataKey="aPagar" fill="var(--mv-red)" radius={[0, 0, 4, 4]} isAnimationActive={!semAnimacao} />
-                <Line type="monotone" dataKey="saldoFinal" stroke="var(--mv-blue)" strokeWidth={2} dot={pontoLinha} activeDot={{ r: 5 }} isAnimationActive={!semAnimacao} />
-              </ComposedChart>
+              <AreaChart data={dadosGrafico} margin={{ top: 24, right: 8, bottom: 0, left: 0 }}>
+                <defs>
+                  <linearGradient id="gradSaldoMf" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="var(--mv-blue)" stopOpacity={0.28} />
+                    <stop offset="95%" stopColor="var(--mv-blue)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+                <XAxis dataKey="mes" tick={{ fontSize: 11, fill: 'var(--tx2)' }} axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} domain={dominioY} />
+                <Tooltip content={tooltipGrafico} cursor={{ stroke: 'var(--bd)' }} />
+                {reservaMinima !== null && dominioY && (
+                  <>
+                    <ReferenceArea y1={dominioY[0]} y2={reservaMinima} fill="var(--danger)" fillOpacity={0.08} ifOverflow="extendDomain" />
+                    <ReferenceLine y={reservaMinima} stroke="var(--danger)" strokeDasharray="4 2" strokeOpacity={0.6}
+                      label={{ value: 'Reserva mínima', fill: 'var(--danger)', fontSize: 10.5, position: 'insideTopLeft' }} />
+                  </>
+                )}
+                <Area
+                  type="monotone" dataKey="saldoFinal" name="Saldo"
+                  stroke="var(--mv-blue)" strokeWidth={2} strokeDasharray="6 4"
+                  fill="url(#gradSaldoMf)" dot={pontoLinha} activeDot={{ r: 5 }} isAnimationActive={!semAnimacao}
+                />
+              </AreaChart>
             </ResponsiveContainer>
           </div>
 
@@ -269,21 +299,21 @@ export default function ClientMeuFuturoPage() {
               <div className="mv-mes-detalhe-grid">
                 <div className="mv-mes-detalhe-item">
                   <span className="mv-mes-detalhe-label">Recebe</span>
-                  <span className="mv-mes-detalhe-valor" style={{ color: 'var(--mv-green)' }}>+{fmtBRL(mesDetalhe.aReceber)}</span>
+                  <span className="mv-mes-detalhe-valor" style={{ color: 'var(--success)' }}>+{fmtBRL(mesDetalhe.aReceber)}</span>
                 </div>
                 <div className="mv-mes-detalhe-item">
                   <span className="mv-mes-detalhe-label">Paga</span>
-                  <span className="mv-mes-detalhe-valor" style={{ color: 'var(--mv-red)' }}>-{fmtBRL(mesDetalhe.aPagar)}</span>
+                  <span className="mv-mes-detalhe-valor" style={{ color: 'var(--danger)' }}>-{fmtBRL(mesDetalhe.aPagar)}</span>
                 </div>
                 <div className="mv-mes-detalhe-item">
                   <span className="mv-mes-detalhe-label">Sobra no mês</span>
-                  <span className="mv-mes-detalhe-valor" style={{ color: (mesDetalhe.aReceber - mesDetalhe.aPagar) >= 0 ? 'var(--mv-green)' : 'var(--mv-red)' }}>
+                  <span className="mv-mes-detalhe-valor" style={{ color: (mesDetalhe.aReceber - mesDetalhe.aPagar) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                     {fmtBRL(mesDetalhe.aReceber - mesDetalhe.aPagar)}
                   </span>
                 </div>
                 <div className="mv-mes-detalhe-item">
                   <span className="mv-mes-detalhe-label">Precisa receber</span>
-                  <span className="mv-mes-detalhe-valor" style={{ color: mesDetalhe.precisaReceber > 0 ? 'var(--mv-amber)' : 'var(--mv-tx2)' }}>
+                  <span className="mv-mes-detalhe-valor" style={{ color: mesDetalhe.precisaReceber > 0 ? 'var(--warning)' : 'var(--tx2)' }}>
                     {mesDetalhe.precisaReceber > 0 ? fmtBRL(mesDetalhe.precisaReceber) : '—'}
                   </span>
                 </div>

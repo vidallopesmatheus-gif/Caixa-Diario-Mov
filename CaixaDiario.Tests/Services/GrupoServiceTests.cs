@@ -76,6 +76,49 @@ public class GrupoServiceTests
     }
 
     [Fact]
+    public async Task AtualizarAsync_MudaBloco_RecalculaTipoMovimentoDeQuemAindaEstavaNoPadraoAntigo()
+    {
+        var grupoId = Guid.NewGuid();
+        var grupo = new Grupo { Id = grupoId, Nome = "Marketing", Bloco = Blocos.CustosOperacionais, Ativo = true };
+        _repoMock.Setup(r => r.ObterPorIdAsync(grupoId)).ReturnsAsync(grupo);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<Grupo>())).ReturnsAsync((Grupo g) => g);
+
+        // CustosOperacionais → padrão "Saida"; nunca foi mexido manualmente.
+        var categoriaNoPadrao = new Categoria { Id = Guid.NewGuid(), Nome = "Publicidade", Tipo = "CustoVariavel", TipoMovimento = "Saida", GrupoId = grupoId, Ativa = true };
+        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria> { categoriaNoPadrao });
+        _categoriaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<Categoria>())).ReturnsAsync((Categoria c) => c);
+
+        // Move pro Bloco de Investimento, cujo padrão é "Ambos" — diferente do padrão antigo
+        // ("Saida"), então dá pra distinguir "recalculou" de "não mudou nada".
+        var dto = new AtualizarGrupoDto { Nome = "Imobilizado", Bloco = Blocos.AtividadesDeInvestimento, Ativo = true };
+        await _sut.AtualizarAsync(grupoId, dto);
+
+        _categoriaRepoMock.Verify(r => r.AtualizarAsync(It.Is<Categoria>(c => c.Id == categoriaNoPadrao.Id && c.TipoMovimento == "Ambos")), Times.Once);
+    }
+
+    [Fact]
+    public async Task AtualizarAsync_MudaBloco_PreservaTipoMovimentoCustomizadoManualmente()
+    {
+        var grupoId = Guid.NewGuid();
+        var grupo = new Grupo { Id = grupoId, Nome = "Marketing", Bloco = Blocos.CustosOperacionais, Ativo = true };
+        _repoMock.Setup(r => r.ObterPorIdAsync(grupoId)).ReturnsAsync(grupo);
+        _repoMock.Setup(r => r.AtualizarAsync(It.IsAny<Grupo>())).ReturnsAsync((Grupo g) => g);
+
+        // Padrão de CustosOperacionais seria "Saida", mas o usuário ajustou manualmente pra
+        // "Entrada" — diferente tanto do padrão antigo quanto do novo (Investimento → "Ambos"),
+        // então qualquer recálculo automático seria visivelmente errado aqui.
+        var categoriaCustomizada = new Categoria { Id = Guid.NewGuid(), Nome = "Publicidade", Tipo = "CustoVariavel", TipoMovimento = "Entrada", GrupoId = grupoId, Ativa = true };
+        _categoriaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<Categoria> { categoriaCustomizada });
+        _categoriaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<Categoria>())).ReturnsAsync((Categoria c) => c);
+
+        var dto = new AtualizarGrupoDto { Nome = "Imobilizado", Bloco = Blocos.AtividadesDeInvestimento, Ativo = true };
+        await _sut.AtualizarAsync(grupoId, dto);
+
+        // Tipo (DRE) muda de qualquer forma — TipoMovimento (ajuste manual) fica intacto.
+        _categoriaRepoMock.Verify(r => r.AtualizarAsync(It.Is<Categoria>(c => c.Id == categoriaCustomizada.Id && c.Tipo == "Investimento" && c.TipoMovimento == "Entrada")), Times.Once);
+    }
+
+    [Fact]
     public async Task AtualizarAsync_SemMudarBloco_NaoTocaCategorias()
     {
         var grupoId = Guid.NewGuid();

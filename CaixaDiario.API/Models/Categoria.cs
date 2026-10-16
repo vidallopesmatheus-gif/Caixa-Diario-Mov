@@ -8,6 +8,11 @@ public class Categoria
     // Derivado automaticamente do Bloco do Grupo escolhido (ver Blocos.TipoPadrao) — não é mais
     // escolhido diretamente na criação da categoria.
     public string Tipo { get; set; } = string.Empty;
+    // "Entrada" | "Saida" | "Ambos" — rodada de ajustes Money Vision (item 8): em que lado do
+    // combobox de lançamento a categoria aparece. Tem um padrão derivado do Bloco do Grupo (ver
+    // CategoriaService.TipoMovimentoPadrao) aplicado na criação, mas o usuário pode sobrescrever —
+    // diferente de Tipo acima, que é sempre automático.
+    public string TipoMovimento { get; set; } = string.Empty;
     public Guid GrupoId { get; set; }
     public int Ordem { get; set; }
     public bool Ativa { get; set; } = true;

@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { obterProjecao, obterTrajetoria, obterDespesasEstimadas } from '../../api/projecao'
+import { obterProjecao, obterTrajetoria } from '../../api/projecao'
 import { obterPreferenciasFuturo } from '../../api/preferenciasFuturo'
 import { listarContasBancarias } from '../../api/contasBancarias'
-import { criarContaProvisionada } from '../../api/contasProvisionadas'
-import { fmtBRL, fmtBRLCompacto, fmtLidoEm, todayISO, addDays } from '../../utils/format'
+import { listarCategorias } from '../../api/categorias'
+import { listarSugestoesRecorrencia, ignorarSugestaoRecorrencia, criarContaRecorrente, type SugestaoRecorrencia } from '../../api/contasRecorrentes'
+import { fmtBRL, fmtBRLCompacto, fmtLidoEm, todayISO } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
 import { MvPage, MvHero, MvSectionLabel, MvKpi, MvKpiGrid, MvTabs, MvInsight, MvDetails, prefereMovimentoReduzido } from '../../components/mv'
-import type { Projecao, ProjecaoDia, ProjecaoItem, Trajetoria, Cenario, DespesaEstimadaCategoria } from '../../api/projecao'
-import type { ContaBancaria } from '../../types'
+import type { Projecao, ProjecaoDia, ProjecaoItem, Trajetoria, Cenario } from '../../api/projecao'
+import type { ContaBancaria, Categorias } from '../../types'
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip,
+  AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import './ClientProjecao.css'
@@ -31,6 +32,14 @@ function fmtDataCurta(iso: string): string {
 function fmtDataCompleta(iso: string): string {
   const d = new Date(iso + 'T12:00:00')
   return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+}
+
+function fmtNum(n: number) {
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function parseBRL(s: string): number {
+  const n = parseFloat(s.replace(/\./g, '').replace(',', '.'))
+  return Number.isFinite(n) ? n : 0
 }
 
 // Agrupa dias por semana ISO para a lista de detalhes (evita 90 linhas abertas)
@@ -95,8 +104,21 @@ export default function ClientProjecaoPage() {
   // janela (30/60/90 ou trajetória) — por isso ficam fora do tipo Janela, como filtros à parte.
   const [cenario, setCenario] = useState<Cenario>('Provavel')
   const [incluirReserva, setIncluirReserva] = useState(false)
-  const [despesasEstimadas, setDespesasEstimadas] = useState<DespesaEstimadaCategoria[]>([])
-  const [transformarAlvo, setTransformarAlvo] = useState<DespesaEstimadaCategoria | null>(null)
+  // Item 5 (rodada de ajustes Money Vision): sugestão por FAVORECIDO identificado (descrição
+  // normalizada), não mais por categoria — dentro de uma categoria como "Salários/Folha" há vários
+  // favorecidos diferentes, cada um sua própria recorrência. Reaproveita o mesmo motor de detecção
+  // já usado em Contas ("🔁 Parece uma conta recorrente?"), só filtrado a Pagar.
+  const [sugestoesPagar, setSugestoesPagar] = useState<SugestaoRecorrencia[]>([])
+  const [categorias, setCategorias] = useState<Categorias>({ entradas: [], saidas: [] })
+  const [sugestaoAlvo, setSugestaoAlvo] = useState<SugestaoRecorrencia | null>(null)
+  const [formCategoria, setFormCategoria] = useState('')
+  const [formValorDisplay, setFormValorDisplay] = useState('')
+  const [formValor, setFormValor] = useState(0)
+  const [formDiaVencimento, setFormDiaVencimento] = useState('')
+  const [formContaId, setFormContaId] = useState('')
+  const [formValorVariavel, setFormValorVariavel] = useState(false)
+  const [salvandoSugestao, setSalvandoSugestao] = useState(false)
+  const [ignorandoChave, setIgnorandoChave] = useState<string | null>(null)
   // Redesign visual (Money Vision): reserva mínima já configurada em "Meu Futuro" — reaproveitada
   // aqui só como referência visual no gráfico (linha + área tingida), nunca entra em nenhum cálculo
   // desta tela.
@@ -107,7 +129,10 @@ export default function ClientProjecaoPage() {
     listarContasBancarias(clienteId)
       .then(cs => setContas(cs.filter(c => c.ativa)))
       .catch(() => {})
-    obterDespesasEstimadas(clienteId).then(setDespesasEstimadas).catch(() => {})
+    listarSugestoesRecorrencia(clienteId)
+      .then(s => setSugestoesPagar(s.filter(x => x.tipo === 'Pagar')))
+      .catch(() => {})
+    listarCategorias(clienteId).then(setCategorias).catch(() => {})
     obterPreferenciasFuturo(clienteId).then(p => setReservaMinima(p.reservaMinima ?? null)).catch(() => {})
   }, [clienteId])
 
@@ -137,18 +162,64 @@ export default function ClientProjecaoPage() {
 
   useEffect(() => { carregar() }, [carregar])
 
-  async function confirmarTransformarEmContaAPagar() {
-    if (!transformarAlvo || !clienteId) return
-    const contaPadrao = contas.find(c => c.tipo === 'Caixa') ?? contas[0]
-    if (!contaPadrao) return
-    await criarContaProvisionada({
-      clienteId, contaBancariaId: contaPadrao.id, tipo: 'Pagar',
-      descricao: transformarAlvo.categoria, valor: transformarAlvo.valorEstimado,
-      dataVencimento: addDays(todayISO(), 30), categoria: transformarAlvo.categoria,
-    })
-    setDespesasEstimadas(prev => prev.filter(d => d.categoria !== transformarAlvo.categoria))
-    setTransformarAlvo(null)
+  // Item 5.2: abre o formulário de recorrente já preenchido com descrição = favorecido, categoria,
+  // valor médio, dia típico, conta bancária e "valor variável" marcado se houver variação — o
+  // cliente só confirma, nunca cadastra do zero.
+  function abrirSugestaoPagar(s: SugestaoRecorrencia) {
+    const contaPadrao = contas.find(c => c.id === s.contaBancariaId) ?? contas.find(c => c.tipo === 'Caixa') ?? contas[0]
+    setSugestaoAlvo(s)
+    setFormCategoria(s.categoria ?? '')
+    setFormValor(s.valorMedio)
+    setFormValorDisplay(fmtNum(s.valorMedio))
+    setFormDiaVencimento(String(s.diaTipico))
+    setFormContaId(contaPadrao?.id ?? '')
+    setFormValorVariavel(s.valorVariavel)
   }
+
+  async function confirmarCriarRecorrentePagar() {
+    if (!sugestaoAlvo || !clienteId || !formContaId || !formCategoria) return
+    setSalvandoSugestao(true)
+    try {
+      await criarContaRecorrente({
+        clienteId, descricao: sugestaoAlvo.descricao, valor: formValor, categoria: formCategoria,
+        tipo: 'Pagar', dataInicio: todayISO(), periodicidade: 'Mensal',
+        contaBancariaId: formContaId, valorVariavel: formValorVariavel,
+        diaVencimento: formDiaVencimento ? Number(formDiaVencimento) : undefined,
+      })
+      setSugestoesPagar(prev => prev.filter(s => s.chave !== sugestaoAlvo.chave))
+      setSugestaoAlvo(null)
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : 'Erro ao criar conta recorrente.')
+    } finally {
+      setSalvandoSugestao(false)
+    }
+  }
+
+  // Item 5.4: "Não sugerir mais" vale por favorecido (a chave já é tipo+descrição normalizada).
+  async function ignorarSugestaoPagar(s: SugestaoRecorrencia) {
+    if (!clienteId) return
+    setIgnorandoChave(s.chave)
+    try {
+      await ignorarSugestaoRecorrencia(clienteId, s.chave)
+      setSugestoesPagar(prev => prev.filter(x => x.chave !== s.chave))
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : 'Erro ao ignorar sugestão.')
+    } finally {
+      setIgnorandoChave(null)
+    }
+  }
+
+  // Item 5.3: agrupamento visual por categoria (cabeçalho "Salários/Folha" com os favorecidos
+  // embaixo) — a ação continua sempre por favorecido.
+  const sugestoesPagarPorCategoria = useMemo(() => {
+    const grupos = new Map<string, SugestaoRecorrencia[]>()
+    for (const s of sugestoesPagar) {
+      const cat = s.categoria ?? 'Sem categoria'
+      if (!grupos.has(cat)) grupos.set(cat, [])
+      grupos.get(cat)!.push(s)
+    }
+    return [...grupos.entries()].sort(([, a], [, b]) => b.length - a.length)
+  }, [sugestoesPagar])
 
   // Dados para o gráfico protagonista — amostra a cada N dias (pra não sobrecarregar em 60/90),
   // mas nunca descarta um dia de "movimento grande" mesmo que caia fora do passo de amostragem.
@@ -245,13 +316,13 @@ export default function ClientProjecaoPage() {
         <div className="mv-chart-tooltip-label">{p.dataCompleta}</div>
         <div className="mv-chart-tooltip-row"><span>Saldo projetado</span><strong>{fmtBRL(p.saldo)}</strong></div>
         {p.totalEntradas > 0 && (
-          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-green)' }}>Entradas</span><strong>+{fmtBRL(p.totalEntradas)}</strong></div>
+          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--success)' }}>Entradas</span><strong>+{fmtBRL(p.totalEntradas)}</strong></div>
         )}
         {p.maioresEntradas.map((e, i) => (
           <div key={`e${i}`} className="mv-chart-tooltip-row"><span>· {e.descricao}</span><span>+{fmtBRL(e.valor)}</span></div>
         ))}
         {p.totalSaidas > 0 && (
-          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--mv-red)' }}>Saídas</span><strong>-{fmtBRL(p.totalSaidas)}</strong></div>
+          <div className="mv-chart-tooltip-row"><span style={{ color: 'var(--danger)' }}>Saídas</span><strong>-{fmtBRL(p.totalSaidas)}</strong></div>
         )}
         {p.maioresSaidas.map((s, i) => (
           <div key={`s${i}`} className="mv-chart-tooltip-row"><span>· {s.descricao}</span><span>-{fmtBRL(s.valor)}</span></div>
@@ -263,8 +334,8 @@ export default function ClientProjecaoPage() {
   function pontoGrafico(props: { cx?: number; cy?: number; payload?: PontoGrafico }) {
     const { cx, cy, payload } = props
     if (!payload?.grande || cx === undefined || cy === undefined) return <circle cx={cx ?? 0} cy={cy ?? 0} r={0} />
-    const cor = payload.saldo < 0 ? 'var(--mv-red)' : 'var(--mv-blue-light)'
-    return <circle cx={cx} cy={cy} r={4.5} fill={cor} stroke="var(--mv-navy)" strokeWidth={2} />
+    const cor = payload.saldo < 0 ? 'var(--danger)' : 'var(--mv-blue)'
+    return <circle cx={cx} cy={cy} r={4.5} fill={cor} stroke="var(--bg)" strokeWidth={2} />
   }
 
   const semAnimacao = prefereMovimentoReduzido()
@@ -328,19 +399,35 @@ export default function ClientProjecaoPage() {
       {loading && <p className="pj-loading">Calculando projeção...</p>}
       {erro    && <p className="pj-erro">{erro}</p>}
 
-      {despesasEstimadas.length > 0 && (
+      {sugestoesPagar.length > 0 && (
         <div className="pj-despesas-estimadas">
-          <h3 className="pj-lista-titulo">Despesas fixas estimadas (não cadastradas)</h3>
+          <h3 className="pj-lista-titulo">Pagamentos recorrentes identificados (não cadastrados)</h3>
           <p className="pj-despesas-estimadas-dica">
-            Categorias com gasto fixo recorrente nos últimos meses, mas sem conta recorrente cadastrada.
+            Mesmo favorecido, valor parecido, em pelo menos 2 dos últimos 3 meses — ainda sem conta recorrente cadastrada.
           </p>
-          {despesasEstimadas.map(d => (
-            <div key={d.categoria} className="pj-despesa-estimada-item">
-              <span className="pj-despesa-estimada-cat">{d.categoria}</span>
-              <span className="pj-despesa-estimada-valor">{fmtBRL(d.valorEstimado)}/mês</span>
-              <button className="pj-despesa-estimada-btn" onClick={() => setTransformarAlvo(d)}>
-                Transformar em conta a pagar
-              </button>
+          {sugestoesPagarPorCategoria.map(([categoria, itens]) => (
+            <div key={categoria} className="pj-despesa-estimada-grupo">
+              <div className="pj-despesa-estimada-grupo-titulo">{categoria}</div>
+              {itens.map(s => (
+                <div key={s.chave} className="pj-despesa-estimada-item">
+                  <span className="pj-despesa-estimada-cat">{s.descricao}</span>
+                  <span className="pj-despesa-estimada-valor">
+                    {s.valorVariavel ? '~' : ''}{fmtBRL(s.valorMedio)}/mês · dia {s.diaTipico}
+                  </span>
+                  <button className="pj-despesa-estimada-btn" onClick={() => abrirSugestaoPagar(s)}>
+                    Transformar em conta a pagar
+                  </button>
+                  <button
+                    className="pj-despesa-estimada-ignorar" disabled={ignorandoChave === s.chave}
+                    onClick={() => ignorarSugestaoPagar(s)}
+                  >
+                    {ignorandoChave === s.chave ? 'Ignorando...' : 'Não sugerir mais'}
+                  </button>
+                  <span className="pj-despesa-estimada-sub">
+                    Apareceu em {s.quantidadeOcorrencias} dos últimos 3 meses · última vez em {fmtDataCompleta(s.ultimaOcorrencia)}
+                  </span>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -369,28 +456,29 @@ export default function ClientProjecaoPage() {
               <AreaChart data={dadosTrajetoria} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="gradRealizado" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--mv-blue-light)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="var(--mv-blue-light)" stopOpacity={0.02} />
+                    <stop offset="5%" stopColor="var(--mv-blue)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--mv-blue)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="mes" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
-                <YAxis stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
+                <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+                <XAxis dataKey="mes" tick={{ fontSize: 11, fill: 'var(--tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: 'var(--tx3)' }} tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false} />
                 <Tooltip
                   formatter={(v, name) => typeof v === 'number' ? [fmtBRL(v), name === 'saldoRealizado' ? 'Realizado' : 'Projetado'] : [String(v)]}
-                  contentStyle={{ background: 'rgba(11,37,69,.96)', border: '1px solid var(--mv-glass-border)', fontSize: 12, borderRadius: 10 }}
-                  labelStyle={{ color: 'var(--mv-tx2)' }}
+                  contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--bd)', fontSize: 12, borderRadius: 10 }}
+                  labelStyle={{ color: 'var(--tx2)' }}
                 />
                 {mesHojeLabel && (
-                  <ReferenceLine x={mesHojeLabel} stroke="var(--mv-tx3)" strokeDasharray="2 2" label={{ value: 'Hoje', fill: 'var(--mv-tx3)', fontSize: 11, position: 'insideTopRight' }} />
+                  <ReferenceLine x={mesHojeLabel} stroke="var(--tx3)" strokeDasharray="2 2" label={{ value: 'Hoje', fill: 'var(--tx3)', fontSize: 11, position: 'insideTopRight' }} />
                 )}
                 <Area
                   type="monotone" dataKey="saldoRealizado" name="saldoRealizado"
-                  stroke="var(--mv-blue-light)" strokeWidth={2} fill="url(#gradRealizado)"
+                  stroke="var(--mv-blue)" strokeWidth={2} fill="url(#gradRealizado)"
                   dot={false} activeDot={{ r: 4 }} connectNulls={false} isAnimationActive={!semAnimacao}
                 />
                 <Area
                   type="monotone" dataKey="saldoProjetado" name="saldoProjetado"
-                  stroke="var(--mv-blue-light)" strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7}
+                  stroke="var(--mv-blue)" strokeWidth={2} strokeDasharray="6 4" strokeOpacity={0.7}
                   fill="url(#gradRealizado)" fillOpacity={0.4}
                   dot={false} activeDot={{ r: 4 }} connectNulls={false} isAnimationActive={!semAnimacao}
                 />
@@ -434,34 +522,35 @@ export default function ClientProjecaoPage() {
               <AreaChart data={dadosGrafico} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="gradSaldoPj" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="var(--mv-blue-light)" stopOpacity={0.28} />
-                    <stop offset="95%" stopColor="var(--mv-blue-light)" stopOpacity={0.02} />
+                    <stop offset="5%"  stopColor="var(--mv-blue)" stopOpacity={0.28} />
+                    <stop offset="95%" stopColor="var(--mv-blue)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="data" stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--mv-glass-border)' }} tickLine={false} />
+                <CartesianGrid stroke="var(--tx2)" strokeOpacity={0.12} vertical={false} />
+                <XAxis dataKey="data" tick={{ fontSize: 11, fill: 'var(--tx2)' }} interval="preserveStartEnd" axisLine={{ stroke: 'var(--tx2)', strokeOpacity: 0.3 }} tickLine={false} />
                 <YAxis
-                  stroke="var(--mv-tx3)" tick={{ fontSize: 11, fill: 'var(--mv-tx3)' }}
+                  tick={{ fontSize: 11, fill: 'var(--tx3)' }}
                   tickFormatter={v => fmtBRLCompacto(v)} width={64} axisLine={false} tickLine={false}
                   domain={dominioY}
                 />
-                <Tooltip content={tooltipGrafico} cursor={{ stroke: 'var(--mv-glass-border)' }} />
+                <Tooltip content={tooltipGrafico} cursor={{ stroke: 'var(--bd)' }} />
 
                 {reservaMinima !== null && dominioY && (
                   <>
-                    <ReferenceArea y1={dominioY[0]} y2={reservaMinima} fill="var(--mv-red)" fillOpacity={0.08} ifOverflow="extendDomain" />
-                    <ReferenceLine y={reservaMinima} stroke="var(--mv-red)" strokeDasharray="4 2" strokeOpacity={0.6}
-                      label={{ value: 'Reserva mínima', fill: 'var(--mv-red)', fontSize: 10.5, position: 'insideTopLeft' }} />
+                    <ReferenceArea y1={dominioY[0]} y2={reservaMinima} fill="var(--danger)" fillOpacity={0.08} ifOverflow="extendDomain" />
+                    <ReferenceLine y={reservaMinima} stroke="var(--danger)" strokeDasharray="4 2" strokeOpacity={0.6}
+                      label={{ value: 'Reserva mínima', fill: 'var(--danger)', fontSize: 10.5, position: 'insideTopLeft' }} />
                   </>
                 )}
-                {temNegativo && <ReferenceLine y={0} stroke="var(--mv-amber)" strokeDasharray="4 2" label={{ value: 'R$ 0', fill: 'var(--mv-amber)', fontSize: 11 }} />}
+                {temNegativo && <ReferenceLine y={0} stroke="var(--warning)" strokeDasharray="4 2" label={{ value: 'R$ 0', fill: 'var(--warning)', fontSize: 11 }} />}
 
                 {/* Faixa de incerteza entre os cenários Provável e Conservador. */}
-                <Area type="monotone" dataKey="faixa" stroke="none" fill="var(--mv-blue-light)" fillOpacity={0.12} isAnimationActive={!semAnimacao} activeDot={false} />
+                <Area type="monotone" dataKey="faixa" stroke="none" fill="var(--mv-blue)" fillOpacity={0.12} isAnimationActive={!semAnimacao} activeDot={false} />
 
                 {/* Linha protagonista: 100% desse período é projeção futura, por isso sempre tracejada. */}
                 <Area
                   type="monotone" dataKey="saldo" name="Saldo"
-                  stroke="var(--mv-blue-light)" strokeWidth={2} strokeDasharray="6 4"
+                  stroke="var(--mv-blue)" strokeWidth={2} strokeDasharray="6 4"
                   fill="url(#gradSaldoPj)" dot={pontoGrafico} activeDot={{ r: 5 }} isAnimationActive={!semAnimacao}
                 />
               </AreaChart>
@@ -482,8 +571,8 @@ export default function ClientProjecaoPage() {
                     {temMovimento ? (
                       <>
                         <div className="mv-timeline-valores">
-                          {dia.entradas.length > 0 && <span style={{ color: 'var(--mv-green)' }}>↑ {fmtBRL(dia.totalEntradas)}</span>}
-                          {dia.saidas.length > 0 && <span style={{ color: 'var(--mv-red)' }}>↓ {fmtBRL(dia.totalSaidas)}</span>}
+                          {dia.entradas.length > 0 && <span style={{ color: 'var(--success)' }}>↑ {fmtBRL(dia.totalEntradas)}</span>}
+                          {dia.saidas.length > 0 && <span style={{ color: 'var(--danger)' }}>↓ {fmtBRL(dia.totalSaidas)}</span>}
                           <span className="mv-timeline-saldo">saldo <strong className={dia.saldoNegativo ? 'val-red' : undefined}>{fmtBRL(dia.saldoFim)}</strong></span>
                         </div>
                         {categorias.length > 0 && (
@@ -545,21 +634,73 @@ export default function ClientProjecaoPage() {
       )}
 
       <Modal
-        open={!!transformarAlvo}
-        title="Transformar em conta a pagar"
-        onClose={() => setTransformarAlvo(null)}
+        open={!!sugestaoAlvo}
+        title="Transformar em conta a pagar recorrente"
+        onClose={() => setSugestaoAlvo(null)}
         footer={
           <>
-            <button className="btn-cancel" onClick={() => setTransformarAlvo(null)}>Cancelar</button>
-            <button className="btn-confirm" onClick={confirmarTransformarEmContaAPagar}>Confirmar</button>
+            <button className="btn-cancel" onClick={() => setSugestaoAlvo(null)} disabled={salvandoSugestao}>Cancelar</button>
+            <button
+              className="btn-confirm" onClick={confirmarCriarRecorrentePagar}
+              disabled={salvandoSugestao || !formContaId || !formCategoria || !formValor}
+            >
+              {salvandoSugestao ? 'Salvando...' : 'Confirmar'}
+            </button>
           </>
         }
       >
-        {transformarAlvo && (
-          <p style={{ color: 'var(--tx3)' }}>
-            Criar uma conta a pagar de <strong>{fmtBRL(transformarAlvo.valorEstimado)}</strong> para{' '}
-            <strong>{transformarAlvo.categoria}</strong>, com vencimento em {addDays(todayISO(), 30).split('-').reverse().join('/')}?
-          </p>
+        {sugestaoAlvo && (
+          <>
+            <div className="inp-group">
+              <label>Descrição (favorecido)</label>
+              <input value={sugestaoAlvo.descricao} disabled />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Categoria</label>
+              <select value={formCategoria} onChange={e => setFormCategoria(e.target.value)}>
+                <option value="">Selecione...</option>
+                {categorias.saidas.map(c => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+              </select>
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Valor médio</label>
+              <div className="val-input-wrap">
+                <span className="val-prefix">R$</span>
+                <input
+                  type="text" inputMode="decimal"
+                  value={formValorDisplay}
+                  onChange={e => {
+                    const raw = e.target.value.replace(/[^\d,]/g, '')
+                    setFormValorDisplay(raw)
+                    setFormValor(parseBRL(raw))
+                  }}
+                  onBlur={() => setFormValorDisplay(formValor ? fmtNum(formValor) : '')}
+                />
+              </div>
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Dia de vencimento (dia típico identificado)</label>
+              <input type="number" min="1" max="31" value={formDiaVencimento} onChange={e => setFormDiaVencimento(e.target.value)} />
+            </div>
+            <div className="inp-group" style={{ marginTop: 12 }}>
+              <label>Conta bancária</label>
+              <select value={formContaId} onChange={e => setFormContaId(e.target.value)}>
+                {contas.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </div>
+            <div className="inp-group" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                id="pj-sugestao-valor-variavel" type="checkbox" checked={formValorVariavel}
+                onChange={e => setFormValorVariavel(e.target.checked)}
+              />
+              <label htmlFor="pj-sugestao-valor-variavel" style={{ margin: 0, fontSize: 13 }}>
+                Valor variável {sugestaoAlvo.valorVariavel && '(detectamos variação nas últimas ocorrências)'}
+              </label>
+            </div>
+            <p style={{ color: 'var(--tx3)', fontSize: 12, marginTop: 12 }}>
+              Apareceu em {sugestaoAlvo.quantidadeOcorrencias} dos últimos 3 meses, última vez em {fmtDataCompleta(sugestaoAlvo.ultimaOcorrencia)}.
+            </p>
+          </>
         )}
       </Modal>
     </MvPage>

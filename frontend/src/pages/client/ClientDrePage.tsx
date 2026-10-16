@@ -98,33 +98,20 @@ interface Drill {
   categoriaNome: string
 }
 
-type LinhaTipo = 'bloco' | 'subtotal' | 'vertical'
-type VerticalKey = 'receitaFinanceira' | 'despesasNaoOperacionais' | 'naoClassificado'
+type LinhaTipo = 'bloco' | 'subtotal'
 interface LinhaDre {
   key: string
   tipo: LinhaTipo
   label: string
   bloco?: Bloco
-  verticalKey?: VerticalKey
   final?: boolean
 }
 
-// Receita Financeira/Despesas Não Operacionais/Não Classificado entram aqui, na mesma ordem da
-// fórmula do backend (resultadoOperacional + receitaFinanceira - despesasNaoOperacionais -
-// naoClassificado + atividadesInvestimento + atividadesFinanciamento) — sem elas a soma das
-// linhas visíveis não batia com o Resultado Líquido (item 1.1). "Não Classificado" nunca é
-// omitido mesmo zerado, pro usuário ver de cara que não há lançamento sem categoria no período.
-const VERTICAL_COR: Record<VerticalKey, string> = {
-  receitaFinanceira: '#63e6be',
-  despesasNaoOperacionais: '#ff6b6b',
-  naoClassificado: '#ffd43b',
-}
-const VERTICAL_PREFIXO: Record<VerticalKey, string> = {
-  receitaFinanceira: '(+) ',
-  despesasNaoOperacionais: '(-) ',
-  naoClassificado: '(-) ',
-}
-
+// Rodada de ajustes Money Vision, item 4 (DRE mais enxuta): Receita Financeira, Despesas Não
+// Operacionais e Não Classificados deixaram de ser linhas próprias — a primeira soma em Receitas
+// Operacionais (como "Outras receitas"), as outras duas em Despesas Operacionais. O aviso de
+// lançamentos sem categoria (dre.quantidadeNaoClassificados) cobre o alerta ao usuário sem
+// precisar de uma linha no demonstrativo.
 const LINHAS: LinhaDre[] = [
   { key: 'RECEITAS OPERACIONAIS', tipo: 'bloco', label: 'Receitas Operacionais', bloco: 'RECEITAS OPERACIONAIS' },
   { key: 'DEDUÇÕES DA RECEITA', tipo: 'bloco', label: 'Deduções da Receita', bloco: 'DEDUÇÕES DA RECEITA' },
@@ -132,9 +119,6 @@ const LINHAS: LinhaDre[] = [
   { key: 'margemContribuicao', tipo: 'subtotal', label: 'Margem de Contribuição' },
   { key: 'DESPESAS OPERACIONAIS', tipo: 'bloco', label: 'Despesas Operacionais', bloco: 'DESPESAS OPERACIONAIS' },
   { key: 'resultadoOperacional', tipo: 'subtotal', label: 'Resultado Operacional' },
-  { key: 'receitaFinanceira', tipo: 'vertical', label: 'Receita Financeira', verticalKey: 'receitaFinanceira' },
-  { key: 'despesasNaoOperacionais', tipo: 'vertical', label: 'Despesas Não Operacionais', verticalKey: 'despesasNaoOperacionais' },
-  { key: 'naoClassificado', tipo: 'vertical', label: 'Não Classificados', verticalKey: 'naoClassificado' },
   { key: 'ATIVIDADES DE INVESTIMENTO', tipo: 'bloco', label: 'Atividades de Investimento', bloco: 'ATIVIDADES DE INVESTIMENTO' },
   { key: 'ATIVIDADES DE FINANCIAMENTO', tipo: 'bloco', label: 'Atividades de Financiamento', bloco: 'ATIVIDADES DE FINANCIAMENTO' },
   // Pró-labore/retiradas dos sócios: última dedução antes do Resultado Líquido, depois de
@@ -492,33 +476,6 @@ export default function ClientDrePage() {
         continue
       }
 
-      if (l.tipo === 'vertical') {
-        const vKey = l.verticalKey!
-        const linhasPorPeriodo = periodosComDre.map(p => p.dre[vKey])
-        const vazio = linhasPorPeriodo.every(x => x.categorias.length === 0)
-        const chaveExpand = `vertical::${vKey}`
-        const expandido = gruposExpandidos.has(chaveExpand)
-        linhas.push({
-          key: l.key, nivel: 0, label: `${VERTICAL_PREFIXO[vKey]}${l.label.toUpperCase()}`, cor: VERTICAL_COR[vKey],
-          expandavel: !vazio, expandido, vazio, onToggle: () => toggleGrupo(chaveExpand),
-          valores: linhasPorPeriodo.map(x => ({ total: x.total, percentual: x.percentual })),
-        })
-        if (expandido && !vazio) {
-          for (const nome of unionNomes(linhasPorPeriodo.map(x => x.categorias))) {
-            const valores = linhasPorPeriodo.map(lp => {
-              const cat = lp.categorias.find(c => c.nome === nome)
-              return cat ? { total: cat.total, percentual: cat.percentual } : { total: 0, percentual: null }
-            })
-            linhas.push({
-              key: `${l.key}::${nome}`, nivel: 2, label: nome, expandavel: false, expandido: false, vazio: false,
-              destaqueAlerta: nome === 'Não Classificado', valores,
-              onClickCelula: idx => abrirLancamentos(periodosComDre[idx].periodo, nome),
-            })
-          }
-        }
-        continue
-      }
-
       const bloco = l.bloco!
       const blocosPorPeriodo = periodosComDre.map(p => encontrarBloco(p.dre, bloco))
       const vazio = blocosPorPeriodo.every(b => b.grupos.length === 0)
@@ -572,14 +529,11 @@ export default function ClientDrePage() {
   const janelaInicio = usaJanelaMobile ? Math.min(janelaMobile, periodosComDre.length - 2) : 0
   const indicesVisiveis = usaJanelaMobile ? [janelaInicio, janelaInicio + 1] : periodosComDre.map((_, i) => i)
 
-  const naoClassificadoTotal = todasCarregadas
-    ? periodosComDre.reduce((acc, p) => {
-        const soma = p.dre.blocos
-          .flatMap(b => b.grupos)
-          .filter(g => g.nome === 'Não Classificado')
-          .reduce((s, g) => s + Math.abs(g.total), 0)
-        return acc + soma
-      }, 0)
+  // Item 4 (rodada de ajustes Money Vision): "Não Classificados" não tem mais linha própria no
+  // demonstrativo — vira só este aviso no topo, com a contagem de lançamentos pendentes de
+  // categorização (quantidadeNaoClassificados), não o valor líquido.
+  const quantidadeNaoClassificados = todasCarregadas
+    ? periodosComDre.reduce((acc, p) => acc + p.dre.quantidadeNaoClassificados, 0)
     : 0
 
   return (
@@ -650,9 +604,9 @@ export default function ClientDrePage() {
       {loading && <p className="dre-loading">Calculando...</p>}
       {erro && <p className="dre-erro">{erro}</p>}
 
-      {todasCarregadas && !loading && naoClassificadoTotal > 0 && (
+      {todasCarregadas && !loading && quantidadeNaoClassificados > 0 && (
         <div className="dre-alerta-global">
-          ⚠ Há lançamentos <strong>Não Classificados</strong> somando {fmtBRL(naoClassificadoTotal)} no período — categorize-os em "Categorizar Lançamentos" para um DRE mais preciso.
+          ⚠ {quantidadeNaoClassificados} lançamento{quantidadeNaoClassificados === 1 ? '' : 's'} sem categoria no período · Categorize-o{quantidadeNaoClassificados === 1 ? '' : 's'} em "Categorizar Lançamentos" (dentro de cada conta, em Banco) para um DRE mais preciso.
         </div>
       )}
 
@@ -770,51 +724,6 @@ export default function ClientDrePage() {
                     <span className="dre-linha-valor" style={linha.final ? { color: corPositivoNegativo } : undefined}>{fmtBRL(total)}</span>
                     <span className="dre-linha-pct">{fmtPctOuTraco(percentual)}</span>
                   </span>
-                </div>
-              )
-            }
-
-            if (linha.tipo === 'vertical') {
-              const vKey = linha.verticalKey!
-              const cor = VERTICAL_COR[vKey]
-              const l = periodosComDre[0].dre[vKey]
-              const chaveExpand = `vertical::${vKey}`
-              const expandido = gruposExpandidos.has(chaveExpand)
-              const vazio = l.categorias.length === 0
-
-              return (
-                <div key={linha.key} className="dre-bloco-wrap">
-                  <div
-                    className={`dre-linha dre-linha-bloco${vazio ? ' dre-linha-vazia' : ''}`}
-                    style={{ borderLeft: `4px solid ${cor}` }}
-                    onClick={vazio ? undefined : () => toggleGrupo(chaveExpand)}
-                    role={vazio ? undefined : 'button'}
-                  >
-                    <span className="dre-linha-label">
-                      {!vazio && <span className="dre-expand">{expandido ? '▾' : '▸'}</span>}
-                      <span className="dre-bloco-nome" style={{ color: cor }}>{VERTICAL_PREFIXO[vKey]}{linha.label.toUpperCase()}</span>
-                    </span>
-                    <span className="dre-linha-valor">{fmtBRL(l.total)}</span>
-                    <span className="dre-linha-pct">{fmtPctOuTraco(l.percentual)}</span>
-                  </div>
-
-                  {expandido && !vazio && (
-                    <div className="dre-expand-bloco">
-                      <div className="dre-cat-lista">
-                        {l.categorias.map(cat => (
-                          <button
-                            key={cat.nome}
-                            className={`dre-cat-btn${cat.nome === 'Não Classificado' ? ' dre-cat-btn-alerta' : ''}`}
-                            onClick={() => abrirLancamentos(periodosComDre[0].periodo, cat.nome)}
-                          >
-                            <span className="dre-cat-nome">{cat.nome}</span>
-                            <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
-                            <span className="dre-cat-pct">{fmtPctOuTraco(cat.percentual)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )
             }

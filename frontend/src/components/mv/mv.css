@@ -1,66 +1,11 @@
 /* Money Vision — biblioteca de componentes das telas de análise (Projeção, Meu Futuro,
-   Previsto × Realizado, Indicadores, topo do Dashboard). Visual fixo "escuro", independente do
-   tema claro/escuro do resto do app — ver tokens --mv-* em styles/theme.css. */
+   Previsto × Realizado, Indicadores, topo do Dashboard). Usa o MESMO fundo e os mesmos cards do
+   resto do app (--bg, --bg-card, --bd, --tx1/2/3) — nenhum fundo/gradiente próprio, pra não dar
+   sensação de "outro sistema" ao navegar entre essas telas e o resto (Caixa, Banco, Contas, DRE).
+   Os tokens --mv-blue/--mv-blue-light seguem fixos (cor de marca) — ver styles/theme.css. */
 
 .mv-page {
-  position: relative;
-  background: var(--mv-navy);
-  border-radius: 20px;
-  padding: 24px 20px 32px;
   margin: 0 0 20px;
-  overflow: hidden;
-  isolation: isolate;
-
-  /* Qualquer componente pré-existente (fora da família Mv*) que use essas variáveis "de tema"
-     (que normalmente invertem claro/escuro) passa a herdar os tokens fixos --mv-* aqui dentro —
-     assim ele fica legível no fundo navy sem precisar ser reescrito, mesmo se o app estiver no
-     tema claro por fora do MvPage. */
-  --tx1: var(--mv-tx1);
-  --tx2: var(--mv-tx2);
-  --tx3: var(--mv-tx3);
-  --bg: var(--mv-navy-2);
-  --bg-card: var(--mv-glass-bg);
-  --bd: var(--mv-glass-border);
-  --bd-sub: var(--mv-glass-border);
-  --bd-str: var(--mv-glass-border);
-  --success: var(--mv-green);
-  --success-soft: rgba(47, 191, 143, .12);
-  --danger: var(--mv-red);
-  --danger-soft: rgba(229, 72, 77, .10);
-  --warning: var(--mv-amber);
-  --warning-soft: rgba(245, 165, 36, .12);
-}
-
-.mv-page::before {
-  /* Gradiente radial azul suave no canto superior direito. */
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 88% -10%, rgba(77, 163, 255, .22), transparent 55%),
-              radial-gradient(circle at -5% 105%, rgba(30, 111, 217, .14), transparent 50%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.mv-page::after {
-  /* Grade sutil — puramente decorativa. */
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
-  background-size: 28px 28px;
-  opacity: .4;
-  mask-image: linear-gradient(to bottom, rgba(0,0,0,.9), transparent 70%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.mv-page > * { position: relative; z-index: 1; }
-
-@media (max-width: 480px) {
-  .mv-page { padding: 18px 14px 24px; border-radius: 16px; }
 }
 
 /* ── MvSectionLabel ───────────────────────────────────────────────────────────────────────── */
@@ -70,7 +15,7 @@
   font-weight: 600;
   letter-spacing: .18em;
   text-transform: uppercase;
-  color: var(--mv-tx2);
+  color: var(--tx2);
   margin: 28px 0 12px;
   display: block;
 }
@@ -119,10 +64,9 @@
   font-size: clamp(40px, 8vw, 68px);
   font-weight: 700;
   line-height: 1;
-  color: var(--mv-tx1);
+  color: var(--tx1);
   font-variant-numeric: tabular-nums;
   letter-spacing: -.02em;
-  text-shadow: 0 0 36px rgba(77, 163, 255, .35);
 }
 
 .mv-hero-contraste {
@@ -131,7 +75,7 @@
   gap: 8px;
   font-size: clamp(18px, 3vw, 24px);
   font-weight: 600;
-  color: var(--mv-tx3);
+  color: var(--tx3);
   font-variant-numeric: tabular-nums;
 }
 .mv-hero-contraste .mv-hero-vs {
@@ -139,33 +83,33 @@
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .1em;
-  color: var(--mv-tx3);
+  color: var(--tx3);
 }
 
 .mv-hero-breakdown {
   margin-top: 10px;
   font-size: 14px;
-  color: var(--mv-tx2);
+  color: var(--tx2);
   font-variant-numeric: tabular-nums;
 }
-.mv-hero-breakdown strong { color: var(--mv-tx1); font-weight: 700; }
-.mv-hero-breakdown-dot { margin: 0 8px; color: var(--mv-tx3); }
+.mv-hero-breakdown strong { color: var(--tx1); font-weight: 700; }
+.mv-hero-breakdown-dot { margin: 0 8px; color: var(--tx3); }
 
 .mv-hero-caption {
   margin-top: 10px;
   font-size: 15px;
-  color: var(--mv-tx2);
+  color: var(--tx2);
   max-width: 56ch;
   line-height: 1.5;
 }
-.mv-hero-caption strong { color: var(--mv-tx1); font-weight: 700; }
+.mv-hero-caption strong { color: var(--tx1); font-weight: 700; }
 
 .mv-hero-footnote {
   margin-top: 18px;
   font-family: var(--mv-mono);
   font-size: 10.5px;
   letter-spacing: .06em;
-  color: var(--mv-tx3);
+  color: var(--tx3);
   opacity: .8;
 }
 
@@ -182,12 +126,10 @@
 
 .mv-kpi {
   position: relative;
-  background: var(--mv-glass-bg);
-  border: 1px solid var(--mv-glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
   border-radius: 16px;
   padding: 14px 16px 16px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -207,7 +149,7 @@
 
 .mv-kpi-label {
   font-size: 12px;
-  color: var(--mv-tx2);
+  color: var(--tx2);
   font-weight: 500;
 }
 
@@ -221,7 +163,7 @@
 .mv-kpi-valor {
   font-size: clamp(18px, 2.4vw, 23px);
   font-weight: 700;
-  color: var(--mv-tx1);
+  color: var(--tx1);
   font-variant-numeric: tabular-nums;
   letter-spacing: -.01em;
 }
@@ -236,9 +178,9 @@
 .mv-kpi-spark { margin-top: 2px; opacity: .85; }
 
 /* Tons semânticos — definem a cor da barra/valor conforme o significado do número. */
-.mv-tone-good    { --mv-kpi-tone: var(--mv-green); }
-.mv-tone-bad     { --mv-kpi-tone: var(--mv-red); }
-.mv-tone-warn    { --mv-kpi-tone: var(--mv-amber); }
+.mv-tone-good    { --mv-kpi-tone: var(--success); }
+.mv-tone-bad     { --mv-kpi-tone: var(--danger); }
+.mv-tone-warn    { --mv-kpi-tone: var(--warning); }
 .mv-tone-neutral { --mv-kpi-tone: var(--mv-blue-light); }
 
 /* ── MvTabs ───────────────────────────────────────────────────────────────────────────────── */
@@ -256,15 +198,15 @@
   flex: 0 0 auto;
   padding: 8px 16px;
   border-radius: 999px;
-  border: 1px solid var(--mv-glass-border);
-  background: var(--mv-glass-bg);
-  color: var(--mv-tx2);
+  border: 1px solid var(--bd);
+  background: var(--bg-card);
+  color: var(--tx2);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   transition: background .15s, color .15s, border-color .15s;
 }
-.mv-tab:hover { background: var(--mv-glass-bg-hv); }
+.mv-tab:hover { background: var(--bg-hover); }
 .mv-tab.mv-tab-ativa {
   background: linear-gradient(135deg, var(--mv-blue), var(--mv-blue-light));
   border-color: transparent;
@@ -280,22 +222,22 @@
   padding: 11px 14px;
   border-radius: 10px;
   border-left: 3px solid var(--mv-insight-tone, var(--mv-blue-light));
-  background: var(--mv-glass-bg);
+  background: var(--bg-card);
   font-size: 13.5px;
   line-height: 1.5;
-  color: var(--mv-tx1);
+  color: var(--tx1);
   margin-bottom: 8px;
 }
 .mv-insight-icon { font-size: 16px; line-height: 1.4; flex-shrink: 0; }
-.mv-insight.mv-tone-good    { --mv-insight-tone: var(--mv-green); }
-.mv-insight.mv-tone-bad     { --mv-insight-tone: var(--mv-red); }
-.mv-insight.mv-tone-warn    { --mv-insight-tone: var(--mv-amber); }
+.mv-insight.mv-tone-good    { --mv-insight-tone: var(--success); }
+.mv-insight.mv-tone-bad     { --mv-insight-tone: var(--danger); }
+.mv-insight.mv-tone-warn    { --mv-insight-tone: var(--warning); }
 .mv-insight.mv-tone-neutral { --mv-insight-tone: var(--mv-blue-light); }
 
 /* ── MvDetails ────────────────────────────────────────────────────────────────────────────── */
 .mv-details {
   margin-top: 22px;
-  border-top: 1px solid var(--mv-glass-border);
+  border-top: 1px solid var(--bd);
   padding-top: 4px;
 }
 .mv-details-toggle {
@@ -306,35 +248,31 @@
   padding: 12px 2px;
   background: none;
   border: none;
-  color: var(--mv-tx2);
+  color: var(--tx2);
   font-size: 13px;
   font-weight: 600;
   font-family: var(--mv-mono);
   letter-spacing: .04em;
   text-transform: uppercase;
 }
-.mv-details-toggle:hover { color: var(--mv-tx1); }
+.mv-details-toggle:hover { color: var(--tx1); }
 .mv-details-caret { transition: transform .15s; font-size: 11px; }
 .mv-details-caret.mv-aberto { transform: rotate(90deg); }
 .mv-details-body {
   padding: 4px 0 8px;
-  /* --tx1/--bg-card/etc já vêm fixos do .mv-page ancestral — aqui só ajusta o --bg-card local
-     pra ficar um pouco mais sutil que o dos cards (tabela "quieta" dentro do accordion). */
-  --bg-card: rgba(255,255,255,.03);
-  color: var(--mv-tx1);
 }
 
 /* ── Gráfico / tooltip compartilhado ──────────────────────────────────────────────────────── */
 .mv-chart-tooltip {
-  background: rgba(11, 37, 69, .96);
-  border: 1px solid var(--mv-glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
   border-radius: 10px;
   padding: 8px 12px;
   font-size: 12.5px;
-  color: var(--mv-tx1);
+  color: var(--tx1);
   box-shadow: 0 8px 24px rgba(0,0,0,.4);
 }
-.mv-chart-tooltip-label { color: var(--mv-tx2); font-size: 11px; margin-bottom: 4px; font-family: var(--mv-mono); }
+.mv-chart-tooltip-label { color: var(--tx2); font-size: 11px; margin-bottom: 4px; font-family: var(--mv-mono); }
 .mv-chart-tooltip-row { display: flex; justify-content: space-between; gap: 12px; }
 
 .mv-chart-card { width: 100%; height: 260px; margin: 4px 0; }
@@ -351,10 +289,10 @@
 
 .mv-select {
   padding: 8px 12px;
-  background: var(--mv-glass-bg);
-  border: 1px solid var(--mv-glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
   border-radius: 10px;
-  color: var(--mv-tx1);
+  color: var(--tx1);
   font-size: 13px;
   cursor: pointer;
 }
@@ -364,7 +302,7 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--mv-tx2);
+  color: var(--tx2);
   cursor: pointer;
 }
 .mv-checkbox-label input[type="checkbox"] { accent-color: var(--mv-blue-light); }
@@ -378,7 +316,7 @@
   align-items: flex-start;
   gap: 12px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--mv-glass-border);
+  border-bottom: 1px solid var(--bd);
 }
 .mv-timeline-item:last-child { border-bottom: none; }
 
@@ -390,14 +328,14 @@
   margin-top: 5px;
   background: var(--mv-blue-light);
 }
-.mv-timeline-item.mv-tone-bad .mv-timeline-dot { background: var(--mv-red); }
+.mv-timeline-item.mv-tone-bad .mv-timeline-dot { background: var(--danger); }
 
 .mv-timeline-body { flex: 1; min-width: 0; }
 
 .mv-timeline-date {
   font-size: 13px;
   font-weight: 600;
-  color: var(--mv-tx1);
+  color: var(--tx1);
   margin-bottom: 4px;
 }
 
@@ -411,18 +349,18 @@
   margin-bottom: 6px;
 }
 
-.mv-timeline-saldo { color: var(--mv-tx2); }
-.mv-timeline-saldo strong { color: var(--mv-tx1); }
+.mv-timeline-saldo { color: var(--tx2); }
+.mv-timeline-saldo strong { color: var(--tx1); }
 
 .mv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .mv-chip {
   padding: 3px 9px;
   border-radius: 999px;
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--mv-glass-border);
+  background: var(--bg-hover);
+  border: 1px solid var(--bd);
   font-size: 11.5px;
-  color: var(--mv-tx2);
+  color: var(--tx2);
   white-space: nowrap;
 }
 
@@ -445,23 +383,23 @@
   gap: 4px;
   padding: 12px 10px;
   border-radius: 14px;
-  background: var(--mv-glass-bg);
-  border: 1px solid var(--mv-glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
   cursor: pointer;
   transition: border-color .15s, background .15s;
 }
-.mv-pill-mes:hover { background: var(--mv-glass-bg-hv); }
-.mv-pill-mes.mv-pill-selecionada { border-color: var(--mv-blue-light); background: var(--mv-glass-bg-hv); }
+.mv-pill-mes:hover { background: var(--bg-hover); }
+.mv-pill-mes.mv-pill-selecionada { border-color: var(--mv-blue-light); background: var(--bg-hover); }
 .mv-pill-mes.mv-tone-bad { box-shadow: 0 0 0 1px rgba(229,72,77,.4) inset; }
 .mv-pill-mes.mv-tone-warn { box-shadow: 0 0 0 1px rgba(245,165,36,.4) inset; }
 
 .mv-pill-status { font-size: 15px; line-height: 1; }
-.mv-pill-mes-label { font-size: 12px; font-weight: 600; color: var(--mv-tx1); }
-.mv-pill-mes-valor { font-size: 11.5px; color: var(--mv-tx2); font-variant-numeric: tabular-nums; }
+.mv-pill-mes-label { font-size: 12px; font-weight: 600; color: var(--tx1); }
+.mv-pill-mes-valor { font-size: 11.5px; color: var(--tx2); font-variant-numeric: tabular-nums; }
 
 .mv-mes-detalhe {
-  background: var(--mv-glass-bg);
-  border: 1px solid var(--mv-glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
   border-radius: 14px;
   padding: 16px 18px;
   margin: 4px 0 18px;
@@ -469,7 +407,7 @@
 .mv-mes-detalhe-titulo {
   font-size: 14px;
   font-weight: 700;
-  color: var(--mv-tx1);
+  color: var(--tx1);
   margin-bottom: 12px;
 }
 .mv-mes-detalhe-grid {
@@ -478,8 +416,8 @@
   gap: 12px;
 }
 .mv-mes-detalhe-item { display: flex; flex-direction: column; gap: 2px; }
-.mv-mes-detalhe-label { font-size: 11px; color: var(--mv-tx3); text-transform: uppercase; letter-spacing: .06em; }
-.mv-mes-detalhe-valor { font-size: 16px; font-weight: 700; color: var(--mv-tx1); font-variant-numeric: tabular-nums; }
+.mv-mes-detalhe-label { font-size: 11px; color: var(--tx3); text-transform: uppercase; letter-spacing: .06em; }
+.mv-mes-detalhe-valor { font-size: 16px; font-weight: 700; color: var(--tx1); font-variant-numeric: tabular-nums; }
 
 /* ── Bullet chart por categoria (ex.: Previsto × Realizado) ──────────────────────────────────── */
 .mv-bullet-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 8px; }
@@ -489,7 +427,7 @@
   text-align: left;
   background: none;
   border: none;
-  border-bottom: 1px solid var(--mv-glass-border);
+  border-bottom: 1px solid var(--bd);
   padding: 12px 4px;
   cursor: pointer;
   display: flex;
@@ -497,7 +435,7 @@
   gap: 7px;
 }
 .mv-bullet-row:last-child { border-bottom: none; }
-.mv-bullet-row:hover { background: rgba(255,255,255,.03); }
+.mv-bullet-row:hover { background: var(--bg-hover); }
 
 .mv-bullet-header {
   display: flex;
@@ -506,19 +444,19 @@
   gap: 10px;
   font-size: 13px;
 }
-.mv-bullet-categoria { font-weight: 600; color: var(--mv-tx1); }
+.mv-bullet-categoria { font-weight: 600; color: var(--tx1); }
 .mv-bullet-delta { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12.5px; }
 
 .mv-bullet-track {
   position: relative;
   height: 18px;
-  background: rgba(255,255,255,.04);
+  background: var(--bg-hover);
   border-radius: 5px;
 }
 .mv-bullet-band {
   position: absolute;
   top: 0; bottom: 0;
-  background: rgba(255,255,255,.08);
+  background: var(--bd-str);
   border-radius: 5px;
 }
 .mv-bullet-bar {
@@ -532,13 +470,13 @@
   position: absolute;
   top: -3px; bottom: -3px;
   width: 2px;
-  background: var(--mv-tx1);
+  background: var(--tx1);
 }
 
 .mv-bullet-expandida {
   margin-top: 4px;
   padding: 10px 12px;
-  background: rgba(255,255,255,.03);
+  background: var(--bg-hover);
   border-radius: 10px;
   cursor: default;
 }
@@ -550,13 +488,13 @@
   font-size: 12.5px;
 }
 .mv-bullet-expandida-grid > div { display: flex; flex-direction: column; gap: 2px; }
-.mv-bullet-expandida-grid span:first-child { color: var(--mv-tx3); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
-.mv-bullet-expandida-grid strong { color: var(--mv-tx1); font-variant-numeric: tabular-nums; }
+.mv-bullet-expandida-grid span:first-child { color: var(--tx3); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.mv-bullet-expandida-grid strong { color: var(--tx1); font-variant-numeric: tabular-nums; }
 
 /* ── Answer card (Indicadores) — cada uma das 7 perguntas vira um card autocontido ───────────── */
 .mv-answer-card {
-  background: var(--mv-glass-bg);
-  border: 1px solid var(--mv-glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--bd);
   border-radius: 18px;
   padding: 20px 20px 22px;
   margin: 0 0 20px;
@@ -564,7 +502,7 @@
 .mv-answer-pergunta {
   font-size: 15px;
   font-weight: 700;
-  color: var(--mv-tx1);
+  color: var(--tx1);
   margin: 0 0 14px;
 }
 
@@ -574,13 +512,13 @@
 .mv-progress-track {
   position: relative;
   height: 22px;
-  background: rgba(255,255,255,.04);
+  background: var(--bg-hover);
   border-radius: 6px;
   margin: 10px 0 6px;
 }
 .mv-progress-fill { position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 4px; min-width: 2px; transition: width .3s; }
-.mv-progress-marker { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--mv-tx1); }
-.mv-progress-marker-label { position: absolute; top: -20px; transform: translateX(-50%); font-size: 10.5px; color: var(--mv-tx2); white-space: nowrap; }
+.mv-progress-marker { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--tx1); }
+.mv-progress-marker-label { position: absolute; top: -20px; transform: translateX(-50%); font-size: 10.5px; color: var(--tx2); white-space: nowrap; }
 
 /* ── Donut com total no centro (categoria que mais custa) ────────────────────────────────────── */
 .mv-donut-wrap { position: relative; width: 100%; height: 190px; }
@@ -591,8 +529,8 @@
   text-align: center;
   pointer-events: none;
 }
-.mv-donut-centro-valor { font-size: 19px; font-weight: 700; color: var(--mv-tx1); font-variant-numeric: tabular-nums; }
-.mv-donut-centro-label { font-size: 10.5px; color: var(--mv-tx3); text-transform: uppercase; letter-spacing: .05em; }
+.mv-donut-centro-valor { font-size: 19px; font-weight: 700; color: var(--tx1); font-variant-numeric: tabular-nums; }
+.mv-donut-centro-label { font-size: 10.5px; color: var(--tx3); text-transform: uppercase; letter-spacing: .05em; }
 
 /* Rede de segurança: além do count-up (useCountUp) e do isAnimationActive dos gráficos Recharts
    (checados em cada tela via prefereMovimentoReduzido), qualquer transição/animação puramente CSS
@@ -603,4 +541,3 @@
     animation-duration: .001ms !important;
   }
 }
-.mv-bullet-expandida-grid strong { color: var(--mv-tx1); font-variant-numeric: tabular-nums; }

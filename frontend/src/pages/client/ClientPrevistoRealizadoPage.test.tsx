@@ -24,52 +24,52 @@ function mockHooks(dados: PrevistoRealizado) {
   vi.mocked(relatoriosApi.obterPrevistoRealizado).mockResolvedValue(dados)
 }
 
-// Redesign visual (Money Vision): o gráfico de linha combinado deu lugar a um "bullet chart" por
-// categoria (uma linha por categoria, dentro de .mv-bullet-list) — cobertura adaptada a esse novo
-// comportamento, mantendo o foco em "os dados certos aparecem", não na estrutura antiga da tela.
-test('mostra o bullet chart por categoria quando há dados', async () => {
+// Rodada de ajustes Money Vision (item 7): "Previsto × Realizado" por ITEM (favorecido), com a tela
+// por padrão mostrando o filtro "Só entradas" (tipo Receber) — cobertura adaptada a esse formato.
+test('mostra a lista de itens quando há dados', async () => {
   mockHooks({
-    linhas: [
+    itens: [
       {
-        tipo: 'Pagar', categoria: 'Aluguel',
-        meses: [
-          { mes: '2026-09', previsto: 1000, realizado: 1000, variacaoAlta: false, subiuTresMesesSeguidos: false },
-          { mes: '2026-10', previsto: 1000, realizado: 1100, variacaoAlta: false, subiuTresMesesSeguidos: false },
-        ],
+        chave: 'Receber:CLIENTE A', nome: 'Cliente A', tipo: 'Receber', categoria: 'Vendas',
+        previsto: 1000, realizado: 1050, diferenca: 50, diferencaPercentual: 0.05, status: 'Parcial', dataVencimento: '2026-10-05',
       },
     ],
+    acumuladoReceber: [],
+    acumuladoPagar: [],
   })
 
   render(<ClientPrevistoRealizadoPage />)
 
-  await waitFor(() => expect(screen.getAllByText('Aluguel').length).toBeGreaterThan(0))
+  await waitFor(() => expect(screen.getAllByText('Cliente A').length).toBeGreaterThan(0))
   expect(document.querySelector('.mv-bullet-list')).toBeInTheDocument()
 })
 
-test('soma previsto e realizado de várias categorias no período, nos KPIs', async () => {
+test('soma previsto e realizado dos itens visíveis, nos KPIs', async () => {
   mockHooks({
-    linhas: [
+    itens: [
       {
-        tipo: 'Pagar', categoria: 'Aluguel',
-        meses: [{ mes: '2026-10', previsto: 1000, realizado: 1050, variacaoAlta: false, subiuTresMesesSeguidos: false }],
+        chave: 'Receber:CLIENTE A', nome: 'Cliente A', tipo: 'Receber', categoria: 'Vendas',
+        previsto: 1000, realizado: 1050, diferenca: 50, diferencaPercentual: 0.05, status: 'Parcial', dataVencimento: '2026-10-05',
       },
       {
-        tipo: 'Pagar', categoria: 'Energia',
-        meses: [{ mes: '2026-10', previsto: 200, realizado: 250, variacaoAlta: false, subiuTresMesesSeguidos: false }],
+        chave: 'Receber:CLIENTE B', nome: 'Cliente B', tipo: 'Receber', categoria: 'Vendas',
+        previsto: 200, realizado: 250, diferenca: 50, diferencaPercentual: 0.25, status: 'Parcial', dataVencimento: '2026-10-10',
       },
     ],
+    acumuladoReceber: [],
+    acumuladoPagar: [],
   })
 
   render(<ClientPrevistoRealizadoPage />)
 
-  await waitFor(() => expect(screen.getAllByText('Aluguel').length).toBeGreaterThan(0))
-  // Soma do período inteiro (ambas categorias, tipo Pagar): previsto 1000+200, realizado 1050+250.
+  await waitFor(() => expect(screen.getAllByText('Cliente A').length).toBeGreaterThan(0))
+  // Soma dos dois itens (tipo Receber, filtro padrão): previsto 1000+200, realizado 1050+250.
   expect(screen.getByText('R$ 1.200,00')).toBeInTheDocument()
   expect(screen.getByText('R$ 1.300,00')).toBeInTheDocument()
 })
 
-test('sem dados, não mostra o bullet chart', async () => {
-  mockHooks({ linhas: [] })
+test('sem dados, não mostra a lista de itens', async () => {
+  mockHooks({ itens: [], acumuladoReceber: [], acumuladoPagar: [] })
 
   render(<ClientPrevistoRealizadoPage />)
 
