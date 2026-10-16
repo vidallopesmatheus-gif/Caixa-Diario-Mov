@@ -129,6 +129,13 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("text")
                         .HasColumnName("tipo");
 
+                    b.Property<string>("TipoMovimento")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Ambos")
+                        .HasColumnName("tipo_movimento");
+
                     b.HasKey("Id");
 
                     b.HasIndex("GrupoId");

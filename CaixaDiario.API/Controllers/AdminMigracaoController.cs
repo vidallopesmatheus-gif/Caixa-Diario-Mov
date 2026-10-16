@@ -14,9 +14,15 @@ namespace CaixaDiario.API.Controllers;
 public class AdminMigracaoController : ControllerBase
 {
     private readonly IMigracaoRecorrenciasService _migracaoRecorrenciasService;
+    private readonly IReclassificacaoCategoriasService _reclassificacaoCategoriasService;
 
-    public AdminMigracaoController(IMigracaoRecorrenciasService migracaoRecorrenciasService) =>
+    public AdminMigracaoController(
+        IMigracaoRecorrenciasService migracaoRecorrenciasService,
+        IReclassificacaoCategoriasService reclassificacaoCategoriasService)
+    {
         _migracaoRecorrenciasService = migracaoRecorrenciasService;
+        _reclassificacaoCategoriasService = reclassificacaoCategoriasService;
+    }
 
     private void VerificarAdmin()
     {
@@ -32,5 +38,17 @@ public class AdminMigracaoController : ControllerBase
         VerificarAdmin();
         var resultado = await _migracaoRecorrenciasService.MigrarOcorrenciasSemContaCorretaAsync(confirmar);
         return Ok(new ApiResponse<MigracaoRecorrenciasResultDto> { Dados = resultado });
+    }
+
+    // Item 8 da rodada de ajustes Money Vision: "migrar categorias existentes por padrão de uso,
+    // gerando um relatório antes de aplicar". Sem "confirmar" (ou confirmar=false): só relatório,
+    // nada é gravado. Rodar assim primeiro, revisar o relatório, só então repetir com
+    // ?confirmar=true pra aplicar de verdade.
+    [HttpPost("categorias-reclassificar-por-uso")]
+    public async Task<IActionResult> ReclassificarCategoriasPorUso([FromQuery] bool confirmar = false)
+    {
+        VerificarAdmin();
+        var resultado = await _reclassificacaoCategoriasService.ReclassificarPorUsoAsync(confirmar);
+        return Ok(new ApiResponse<ReclassificacaoCategoriasResultDto> { Dados = resultado });
     }
 }

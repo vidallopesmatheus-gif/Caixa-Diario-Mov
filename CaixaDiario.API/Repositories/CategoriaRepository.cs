@@ -95,6 +95,27 @@ public class CategoriaRepository : ICategoriaRepository
             r.Saidas.Count(s => s.Categoria == nome));
     }
 
+    public async Task<Dictionary<string, (int Entradas, int Saidas)>> ContarUsoPorCategoriaAsync(Guid clienteId)
+    {
+        var registros = await _context.RegistrosDiarios.Where(r => r.ClienteId == clienteId && !r.Excluido).ToListAsync();
+        var resultado = new Dictionary<string, (int Entradas, int Saidas)>();
+
+        foreach (var registro in registros)
+        {
+            foreach (var entrada in registro.Entradas.Where(e => !string.IsNullOrEmpty(e.Categoria)))
+            {
+                var (qtdEntradas, qtdSaidas) = resultado.TryGetValue(entrada.Categoria!, out var atual) ? atual : (0, 0);
+                resultado[entrada.Categoria!] = (qtdEntradas + 1, qtdSaidas);
+            }
+            foreach (var saida in registro.Saidas.Where(s => !string.IsNullOrEmpty(s.Categoria)))
+            {
+                var (qtdEntradas, qtdSaidas) = resultado.TryGetValue(saida.Categoria!, out var atual) ? atual : (0, 0);
+                resultado[saida.Categoria!] = (qtdEntradas, qtdSaidas + 1);
+            }
+        }
+        return resultado;
+    }
+
     public async Task MigrarUsoAsync(Guid clienteId, string nomeOrigem, string nomeDestino, string tipoDestino)
     {
         var registros = await _context.RegistrosDiarios.Where(r => r.ClienteId == clienteId && !r.Excluido).ToListAsync();

@@ -67,6 +67,7 @@ public class UsuarioService : IUsuarioService
                 Id = Guid.NewGuid(),
                 Nome = c.Nome,
                 Tipo = c.Tipo,
+                TipoMovimento = c.TipoMovimento,
                 GrupoId = c.GrupoId,
                 Ordem = c.Ordem,
                 Ativa = true,

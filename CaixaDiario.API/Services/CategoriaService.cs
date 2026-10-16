@@ -9,23 +9,35 @@ namespace CaixaDiario.API.Services;
 public class CategoriaService : ICategoriaService
 {
     // Investimento/Financiamento podem ser lançados como entrada (captação, rendimento) ou saída
-    // (amortização, aquisição) — por isso aparecem nos dois lados do combobox, diferente dos
-    // outros tipos que só existem de um lado.
+    // (amortização, aquisição) — por isso o padrão é aparecer nos dois lados do combobox, diferente
+    // dos outros tipos que só existem de um lado.
     private static readonly HashSet<string> TiposDeEntrada = new() { "Receita", "Investimento", "Financiamento" };
     private static readonly HashSet<string> TiposDeSaida = new()
     {
         "CustoVariavel", "CustoFixo", "DespesaNaoOperacional", "Investimento", "Financiamento", "RetiradaSocios",
     };
+
+    // Rodada de ajustes Money Vision (item 8): Categoria.TipoMovimento ("Entrada"/"Saida"/"Ambos")
+    // é agora a ÚNICA fonte de EhEntrada/EhSaida — um campo de verdade, editável pelo usuário em
+    // Configurações > Plano de Contas, não mais só derivado de Tipo+Bloco toda vez que lê. Esse
+    // método só calcula o PADRÃO usado quando a categoria é criada (ou quando o Bloco do grupo
+    // muda) — a mesma regra que antes vivia em EhEntrada/EhSaida computados em tempo de leitura.
     // Categoria.Tipo por si só não distingue "Deduções da Receita" (bloco DeducoesDaReceita) de
     // despesa comum (bloco DespesasOperacionais) — os dois mapeiam pra "CustoFixo" (ver
     // Blocos.TipoPadrao, usado no cálculo do DRE). Na prática devolução/estorno pode ser um
     // reembolso que sai da conta (saída) ou um valor que volta pra conta (entrada) — por isso, tal
-    // como Investimento/Financiamento, uma categoria desse bloco entra nos dois lados do combobox.
-    // EhEntrada/EhSaida são a única fonte dessa regra — ListarAgrupadasAsync e MapToDto usam os
-    // dois, pra não duplicar o cálculo de novo (foi exatamente essa duplicação, entre backend e
-    // frontend, que causou o bug de "Devoluções" sumindo do combobox de entradas).
-    private static bool EhEntrada(Categoria c) => TiposDeEntrada.Contains(c.Tipo) || c.Grupo.Bloco == Blocos.DeducoesDaReceita;
-    private static bool EhSaida(Categoria c) => TiposDeSaida.Contains(c.Tipo);
+    // como Investimento/Financiamento, o padrão desse bloco é aparecer nos dois lados do combobox.
+    public static string TipoMovimentoPadrao(Grupo grupo)
+    {
+        var tipo = Blocos.TipoPadrao(grupo.Bloco);
+        var ehEntrada = TiposDeEntrada.Contains(tipo) || grupo.Bloco == Blocos.DeducoesDaReceita;
+        var ehSaida = TiposDeSaida.Contains(tipo);
+        if (ehEntrada && ehSaida) return "Ambos";
+        return ehEntrada ? "Entrada" : "Saida";
+    }
+
+    private static bool EhEntrada(Categoria c) => c.TipoMovimento is "Entrada" or "Ambos";
+    private static bool EhSaida(Categoria c) => c.TipoMovimento is "Saida" or "Ambos";
 
     private readonly ICategoriaRepository _repo;
     private readonly IGrupoRepository _grupoRepo;
@@ -68,6 +80,7 @@ public class CategoriaService : ICategoriaService
             Id = Guid.NewGuid(),
             Nome = nome,
             Tipo = Blocos.TipoPadrao(grupo.Bloco),
+            TipoMovimento = ValidarOuNulo(dto.TipoMovimento) ?? TipoMovimentoPadrao(grupo),
             GrupoId = grupo.Id,
             Ordem = maiorOrdem + 1,
             Ativa = true,
@@ -92,9 +105,15 @@ public class CategoriaService : ICategoriaService
         if (existente is not null && existente.Id != id)
             throw new ApiException(409, CodigoRetorno.CATEGORIA_DUPLICADA, "Já existe uma categoria com esse nome.");
 
+        var mudouDeGrupo = categoria.GrupoId != grupo.Id;
         categoria.Nome = nome;
         categoria.GrupoId = grupo.Id;
         categoria.Tipo = Blocos.TipoPadrao(grupo.Bloco);
+        // Se o usuário mandou um TipoMovimento explícito, vale sempre. Senão: manteve o grupo, não
+        // mexe (preserva um ajuste manual anterior); mudou de grupo, recalcula o padrão do grupo
+        // novo (senão a categoria carregaria um TipoMovimento que não faz mais sentido pro Bloco novo).
+        categoria.TipoMovimento = ValidarOuNulo(dto.TipoMovimento)
+            ?? (mudouDeGrupo ? TipoMovimentoPadrao(grupo) : categoria.TipoMovimento);
         categoria.Ativa = dto.Ativa;
         var atualizada = await _repo.AtualizarAsync(categoria);
         atualizada.Grupo = grupo;
@@ -165,6 +184,16 @@ public class CategoriaService : ICategoriaService
         await _grupoRepo.ObterPorIdAsync(grupoId)
             ?? throw new ApiException(404, CodigoRetorno.GRUPO_NAO_ENCONTRADO, "Grupo não encontrado.");
 
+    private static readonly HashSet<string> TiposMovimentoValidos = new() { "Entrada", "Saida", "Ambos" };
+
+    private static string? ValidarOuNulo(string? tipoMovimento)
+    {
+        if (string.IsNullOrWhiteSpace(tipoMovimento)) return null;
+        if (!TiposMovimentoValidos.Contains(tipoMovimento))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Tipo de movimento inválido — use Entrada, Saida ou Ambos.", "tipoMovimento");
+        return tipoMovimento;
+    }
+
     private static CategoriaItemDto MapToItemDto(Categoria c) => new()
     {
         Nome = c.Nome,
@@ -177,6 +206,7 @@ public class CategoriaService : ICategoriaService
         Id = c.Id,
         Nome = c.Nome,
         Tipo = c.Tipo,
+        TipoMovimento = c.TipoMovimento,
         GrupoId = c.GrupoId,
         GrupoNome = c.Grupo.Nome,
         Bloco = c.Grupo.Bloco,

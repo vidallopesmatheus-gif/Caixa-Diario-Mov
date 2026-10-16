@@ -13,6 +13,11 @@ export type TipoCusto =
   | 'Receita' | 'CustoFixo' | 'CustoVariavel' | 'DespesaNaoOperacional' | 'Investimento' | 'Financiamento'
   | 'RetiradaSocios'
 
+// Rodada de ajustes Money Vision (item 8): de que lado do combobox de lançamento a categoria
+// aparece — tem um padrão derivado do Bloco (ver backend CategoriaService.TipoMovimentoPadrao),
+// mas é editável em Configurações > Plano de Contas.
+export type TipoMovimento = 'Entrada' | 'Saida' | 'Ambos'
+
 // Os 7 blocos são fixos na estrutura do demonstrativo — não são cadastráveis, só os Grupos dentro
 // de cada um são (ver Configurações → Plano de Contas).
 export type Bloco =
@@ -263,6 +268,7 @@ export interface CategoriaAdmin {
   id: string
   nome: string
   tipo: TipoCusto
+  tipoMovimento: TipoMovimento
   grupoId: string
   grupoNome: string
   bloco: Bloco
