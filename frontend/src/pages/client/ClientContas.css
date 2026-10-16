@@ -45,6 +45,14 @@
 .contas-secao-header:hover { background: var(--bg-hover); }
 .contas-secao-total { font-size: 12px; font-weight: 700; color: var(--tx3); }
 
+/* As 4 seções (A Receber/A Pagar/Pagas-Recebidas/Recorrentes) lado a lado em grid 2x2 — cada
+   card com sua própria altura (align-items: start), nunca esticado pelo vizinho mais alto. Cai
+   pra 1 coluna sozinho em telas estreitas via auto-fit, sem precisar de media query. */
+.contas-secoes-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; margin-bottom: 16px; }
+.contas-secao-card { min-width: 0; }
+.contas-secao-card .contas-secao-header { margin-bottom: 8px; }
+.contas-secao-card .contas-section { margin-bottom: 0; }
+
 .contas-pagas-bloco { margin-bottom: 14px; }
 .contas-pagas-resumo {
   display: block; width: 100%; text-align: left; padding: 10px 14px; background: var(--bg-card);
