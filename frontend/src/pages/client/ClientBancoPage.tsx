@@ -58,18 +58,17 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
 
   const ativas = contas.filter(c => c.ativa)
   const inativas = contas.filter(c => !c.ativa)
-  // Cartão de crédito é dívida, não dinheiro disponível — não entra em nenhum dos 3 cards abaixo.
-  // Ver card "A pagar em cartões" à parte, com a soma dos saldos devedores.
-  const cartoes = ativas.filter(c => c.tipo === 'CartaoCredito')
   // Bloco 5, item 1 (Money Vision): "Disponível" deixou de somar investimento junto com conta
   // corrente — era exatamente isso que dava a falsa impressão de "sem dinheiro" quando na
   // verdade o saldo só estava guardado, não gasto. Agora são 3 cards: disponível, investido, patrimônio.
+  // Cartão de crédito é dívida, não dinheiro disponível — não entra em nenhum dos cards do topo.
+  // Rodada de ajustes Money Vision: o resumo de cartão sai do topo do Banco — fica só dentro da
+  // própria conta "Cartões" (extrato + Ver faturas), evitando duplicar o mesmo dado em dois lugares.
   const contasDisponiveis = ativas.filter(c => c.tipo === 'ContaCorrente' || c.tipo === 'Caixa')
   const contasInvestimento = ativas.filter(c => c.tipo === 'Investimento')
   const saldoDisponivel = contasDisponiveis.reduce((s, c) => s + c.saldoAtual, 0)
   const saldoInvestido = contasInvestimento.reduce((s, c) => s + c.saldoAtual, 0)
   const patrimonioTotal = saldoDisponivel + saldoInvestido
-  const totalAPagarCartoes = cartoes.reduce((s, c) => s + (c.saldoDevedor ?? 0), 0)
 
   if (loading) return <p style={{ color: 'var(--tx3)' }}>Carregando...</p>
 
@@ -94,12 +93,6 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
           <span className="cb-resumo-label">Patrimônio total</span>
           <span className="cb-resumo-val">{fmtBRL(patrimonioTotal)}</span>
         </div>
-        {cartoes.length > 0 && (
-          <div className="cb-resumo-item">
-            <span className="cb-resumo-label">A pagar em cartões</span>
-            <span className="cb-resumo-val val-red">{fmtBRL(totalAPagarCartoes)}</span>
-          </div>
-        )}
       </div>
 
       {paraOndeFoi && <ParaOndeFoiMeuDinheiroCard dados={paraOndeFoi} />}

@@ -7,7 +7,6 @@ import * as contasRecorrentesApi from '../../api/contasRecorrentes'
 import * as contasBancariasApi from '../../api/contasBancarias'
 import * as categoriasApi from '../../api/categorias'
 import { addDays, todayISO } from '../../utils/format'
-import * as faturasCartaoApi from '../../api/faturasCartao'
 import type { ContaBancaria, Registro } from '../../types'
 
 vi.mock('../../contexts/AuthContext', async (importOriginal) => {
@@ -18,16 +17,24 @@ vi.mock('../../hooks/useRegistros')
 vi.mock('../../api/contasRecorrentes')
 vi.mock('../../api/contasBancarias')
 vi.mock('../../api/categorias')
-vi.mock('../../api/faturasCartao')
-// Item 6 (Money Vision): useNavigate passou a ser usado pra abrir "Ver Faturas" a partir desta
-// tela — precisa de um Router de verdade só pra navegação de fato; stub evita envolver TODO
-// render(<ClientContasPage />) existente num <MemoryRouter>.
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return { ...actual, useNavigate: () => vi.fn() }
-})
 
 const mockUser = { usuarioId: 'u1', nomeUsuario: 'cli1', perfil: 'cliente' as const, nomeCompleto: 'Cliente Um', nomeEstabelecimento: '', token: 'tok' }
+
+// bare `localStorage` não está disponível neste ambiente de teste (jsdom/vitest) — stub simples
+// em memória, consistente com o que ConquistarMetaModal.test.tsx já usa. Rodada de ajustes Money
+// Vision (item 3.1): o estado aberto/fechado de cada seção persiste em localStorage por cliente —
+// sem recriar a cada teste, um teste que abre/fecha uma seção vazaria esse estado pro próximo
+// (mesmo clienteId mockado em todos).
+function criarLocalStorageFake() {
+  const dados = new Map<string, string>()
+  return {
+    getItem: (k: string) => dados.get(k) ?? null,
+    setItem: (k: string, v: string) => { dados.set(k, v) },
+    removeItem: (k: string) => { dados.delete(k) },
+    clear: () => { dados.clear() },
+  }
+}
+beforeEach(() => { vi.stubGlobal('localStorage', criarLocalStorageFake()) })
 
 function mockHooks(registros: Registro[], overrides: Partial<ReturnType<typeof useRegistrosHook.useRegistros>> = {}) {
   vi.mocked(AuthContextModule.useAuth).mockReturnValue({
@@ -39,7 +46,6 @@ function mockHooks(registros: Registro[], overrides: Partial<ReturnType<typeof u
   vi.mocked(contasRecorrentesApi.listarSugestoesRecorrencia).mockResolvedValue([])
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([])
   vi.mocked(categoriasApi.listarCategorias).mockResolvedValue({ entradas: [], saidas: [] })
-  vi.mocked(faturasCartaoApi.listarFaturasCartao).mockResolvedValue([])
   vi.mocked(useRegistrosHook.useRegistros).mockReturnValue({
     registros,
     loading: false,
@@ -68,10 +74,6 @@ function criarRegistro(overrides: Partial<Registro>): Registro {
     criadoEm: '2026-09-10T00:00:00Z',
     ...overrides,
   }
-}
-
-function irParaAbaPagar() {
-  fireEvent.click(screen.getByRole('button', { name: /A Pagar/ }))
 }
 
 // Dia `dia` do mês ANTERIOR ao atual — sempre vencido, sem depender de quando o teste roda e sem
@@ -141,7 +143,6 @@ test('conta a pagar vencida aparece destacada com "atrasada há X dias"', async 
   mockHooks([registro])
 
   render(<ClientContasPage />)
-  irParaAbaPagar()
   // Vencida: só aparece no modo "Atrasadas" (o modo "mês" tira as atrasadas pra não duplicar
   // com o aviso vermelho do topo — Parte 3, item 2).
   fireEvent.click(screen.getByRole('button', { name: 'Atrasadas' }))
@@ -159,7 +160,6 @@ test('conta pendente com vencimento hoje não é marcada como atrasada', async (
   mockHooks([registro])
 
   render(<ClientContasPage />)
-  irParaAbaPagar()
 
   const linha = await screen.findByText('Vence hoje')
   expect(linha.closest('.conta-item')).not.toHaveClass('vencida')
@@ -184,24 +184,6 @@ test('mostra os totais pendentes do mês a receber e a pagar no topo', async () 
   expect(within(totalPagar).getByText('R$ 300,00')).toBeInTheDocument()
 })
 
-// Item 6 (Money Vision): faturas de cartão em aberto aparecem aqui também, não só em
-// Projeção/Meu Futuro/"A pagar em cartões".
-test('mostra faturas de cartão em aberto, mas não as já pagas', async () => {
-  const cartao = criarConta({ id: 'cartao-1', nome: 'Nubank', tipo: 'CartaoCredito' })
-  mockHooks([])
-  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([cartao])
-  vi.mocked(faturasCartaoApi.listarFaturasCartao).mockResolvedValue([
-    { id: 'f1', banco: 'Nubank', competencia: '2026-10', dataFechamento: '2026-10-01', dataVencimento: '2026-10-10', valorTotal: 500, valorPago: 0, saldoDevedor: 500, quantidadeCompras: 3, status: 'Fechada' },
-    { id: 'f2', banco: 'Nubank', competencia: '2026-09', dataFechamento: '2026-09-01', dataVencimento: '2026-09-10', valorTotal: 300, valorPago: 300, saldoDevedor: 0, quantidadeCompras: 1, status: 'Paga' },
-  ])
-
-  render(<ClientContasPage />)
-
-  expect(await screen.findByText('Nubank — Nubank')).toBeInTheDocument()
-  expect(screen.getByText('R$ 500,00')).toBeInTheDocument()
-  expect(screen.getByText('💳 Faturas de cartão em aberto (1)')).toBeInTheDocument()
-})
-
 test('filtro por conta esconde pendências de outras contas', async () => {
   const contaA = criarConta({ id: 'conta-A', nome: 'Conta A' })
   const contaB = criarConta({ id: 'conta-B', nome: 'Conta B' })
@@ -215,7 +197,6 @@ test('filtro por conta esconde pendências de outras contas', async () => {
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaA, contaB])
 
   render(<ClientContasPage />)
-  irParaAbaPagar()
   await screen.findByText('Da conta A')
   expect(screen.getByText('Da conta B')).toBeInTheDocument()
 
@@ -238,11 +219,12 @@ test('atrasada aparece dentro do mês do seu vencimento e conta no total daquele
   mockHooks([registro])
 
   render(<ClientContasPage />)
-  irParaAbaPagar()
 
   expect(await screen.findByText(/1 conta\(s\) atrasada\(s\) · R\$ 400,00/)).toBeInTheDocument()
-  // Mês atual (padrão) não é o mês do vencimento dela — ainda não aparece aqui.
-  expect(screen.getByText('Nenhuma pendente.')).toBeInTheDocument()
+  // Mês atual (padrão) não é o mês do vencimento dela — ainda não aparece aqui. "A Receber" e "A
+  // Pagar" ficam ambas abertas por padrão (item 3.1) — sem contas a receber no fixture, as duas
+  // seções mostram "Nenhuma pendente.".
+  expect(screen.getAllByText('Nenhuma pendente.')).toHaveLength(2)
   expect(screen.queryByText('Conta velha')).not.toBeInTheDocument()
 
   // Navega pro mês do próprio vencimento: aparece lá, e conta no total daquele mês.
@@ -264,8 +246,9 @@ test('pendente de um mês futuro não aparece no modo "mês atual", mas aparece 
   mockHooks([registro])
 
   render(<ClientContasPage />)
-  irParaAbaPagar()
-  expect(await screen.findByText('Nenhuma pendente.')).toBeInTheDocument()
+  // "A Receber" e "A Pagar" ficam ambas abertas por padrão (item 3.1) — sem contas a receber no
+  // fixture, as duas seções mostram "Nenhuma pendente.".
+  await waitFor(() => expect(screen.getAllByText('Nenhuma pendente.')).toHaveLength(2))
   expect(screen.queryByText('Pagamento futuro distante')).not.toBeInTheDocument()
 
   fireEvent.click(screen.getByRole('button', { name: 'Tudo' }))
