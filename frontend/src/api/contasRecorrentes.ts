@@ -114,6 +114,10 @@ export interface SugestaoRecorrencia {
   quantidadeOcorrencias: number
   contaBancariaId?: string
   ultimaOcorrencia: string
+  /** Dia do mês mais comum entre as ocorrências — pré-preenche "Dia de vencimento" (item 5). */
+  diaTipico: number
+  /** true quando o valor variou entre as ocorrências — pré-marca "valor variável" (item 5). */
+  valorVariavel: boolean
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,6 +126,7 @@ function mapSugestaoRecorrencia(raw: any): SugestaoRecorrencia {
     chave: raw.chave, descricao: raw.descricao, categoria: raw.categoria ?? undefined,
     tipo: raw.tipo, valorMedio: raw.valorMedio, quantidadeOcorrencias: raw.quantidadeOcorrencias,
     contaBancariaId: raw.contaBancariaId ?? undefined, ultimaOcorrencia: raw.ultimaOcorrencia,
+    diaTipico: raw.diaTipico, valorVariavel: raw.valorVariavel ?? false,
   }
 }
 

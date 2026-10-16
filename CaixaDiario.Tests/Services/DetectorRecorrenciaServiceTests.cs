@@ -74,8 +74,10 @@ public class DetectorRecorrenciaServiceTests
         Assert.Equal("Receber", sugestao.Tipo);
     }
 
+    // Rodada de ajustes Money Vision, item 5: 2 dos últimos 3 meses já basta (antes exigia os 3) —
+    // esperar o 3º mês atrasava demais a primeira sugestão de um pagamento genuinamente recorrente.
     [Fact]
-    public async Task ListarSugestoesAsync_ComApenas2MesesDistintos_NaoSugere()
+    public async Task ListarSugestoesAsync_ComApenas2MesesDistintos_JaSugere()
     {
         var clienteId = Guid.NewGuid();
         var registros = new List<RegistroDiario>();
@@ -89,7 +91,80 @@ public class DetectorRecorrenciaServiceTests
 
         var resultado = await _sut.ListarSugestoesAsync(clienteId, clienteId, "cliente");
 
+        var sugestao = Assert.Single(resultado);
+        Assert.Equal(2, sugestao.QuantidadeOcorrencias);
+    }
+
+    [Fact]
+    public async Task ListarSugestoesAsync_ComApenas1MesDistinto_NaoSugere()
+    {
+        var clienteId = Guid.NewGuid();
+        var registros = new List<RegistroDiario> { CriarRegistro(Hoje) };
+        registros[0].Saidas.Add(new ItemFinanceiroSaida { Descricao = "Internet Fibra", Categoria = "Energia/Água/Internet", Valor = 100m, TipoCusto = "CustoFixo" });
+        ConfigurarRegistros(clienteId, registros);
+
+        var resultado = await _sut.ListarSugestoesAsync(clienteId, clienteId, "cliente");
+
         Assert.Empty(resultado);
+    }
+
+    // Item 5: tolerância apertou de ±30% pra ±20% — um desvio de ~23,5% (dentro do antigo, fora do
+    // novo) não deve mais sugerir.
+    [Fact]
+    public async Task ListarSugestoesAsync_ComDesvioDe23Porcento_NaoSugereMais()
+    {
+        var clienteId = Guid.NewGuid();
+        var valores = new[] { 100m, 100m, 140m }; // média 113,33 — desvio máx ≈ 23,5%: >20%, <30%
+        var registros = new List<RegistroDiario>();
+        for (var i = 0; i < 3; i++)
+        {
+            var reg = CriarRegistro(Hoje.AddMonths(-i));
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Fornecedor X", Categoria = "Insumos/Mercadoria", Valor = valores[i], TipoCusto = "CustoFixo" });
+            registros.Add(reg);
+        }
+        ConfigurarRegistros(clienteId, registros);
+
+        var resultado = await _sut.ListarSugestoesAsync(clienteId, clienteId, "cliente");
+
+        Assert.Empty(resultado);
+    }
+
+    [Fact]
+    public async Task ListarSugestoesAsync_ValorIdenticoTodoMes_ValorVariavelFalse()
+    {
+        var clienteId = Guid.NewGuid();
+        var registros = new List<RegistroDiario>();
+        for (var i = 0; i < 3; i++)
+        {
+            var reg = CriarRegistro(new DateOnly(Hoje.AddMonths(-i).Year, Hoje.AddMonths(-i).Month, 5));
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aluguel Loja", Categoria = "Despesas Administrativas", Valor = 1800m, TipoCusto = "CustoFixo" });
+            registros.Add(reg);
+        }
+        ConfigurarRegistros(clienteId, registros);
+
+        var sugestao = Assert.Single(await _sut.ListarSugestoesAsync(clienteId, clienteId, "cliente"));
+
+        Assert.False(sugestao.ValorVariavel);
+        Assert.Equal(5, sugestao.DiaTipico);
+    }
+
+    [Fact]
+    public async Task ListarSugestoesAsync_ValorComVariacaoDentroDaTolerancia_ValorVariavelTrue()
+    {
+        var clienteId = Guid.NewGuid();
+        var valores = new[] { 100m, 110m, 95m }; // dentro de ±20%, mas não idêntico
+        var registros = new List<RegistroDiario>();
+        for (var i = 0; i < 3; i++)
+        {
+            var reg = CriarRegistro(Hoje.AddMonths(-i));
+            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Conta de Luz", Categoria = "Energia/Água/Internet", Valor = valores[i], TipoCusto = "CustoFixo" });
+            registros.Add(reg);
+        }
+        ConfigurarRegistros(clienteId, registros);
+
+        var sugestao = Assert.Single(await _sut.ListarSugestoesAsync(clienteId, clienteId, "cliente"));
+
+        Assert.True(sugestao.ValorVariavel);
     }
 
     [Fact]

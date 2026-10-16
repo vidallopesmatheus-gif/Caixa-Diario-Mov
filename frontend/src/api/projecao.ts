@@ -86,20 +86,6 @@ export async function obterTrajetoria(
   return res.dados
 }
 
-// Item 3 da rodada "Visão de Futuro": despesas fixas estimadas por categoria, não cadastradas
-// como recorrência — cada uma pronta pra "Transformar em conta a pagar".
-export interface DespesaEstimadaCategoria {
-  categoria: string
-  valorEstimado: number
-}
-
-export async function obterDespesasEstimadas(clienteId: string): Promise<DespesaEstimadaCategoria[]> {
-  const res = await apiFetch<ApiResponse<DespesaEstimadaCategoria[]>>(
-    `/api/projecao/${clienteId}/despesas-estimadas`,
-  )
-  return res.dados ?? []
-}
-
 // Bloco 3 da rodada "Visão de Futuro": tela "Meu Futuro" — 12 meses + conselho em regras.
 export interface MeuFuturoMes {
   mes: string // "yyyy-MM"

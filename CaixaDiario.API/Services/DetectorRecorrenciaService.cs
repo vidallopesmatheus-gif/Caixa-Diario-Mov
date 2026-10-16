@@ -7,21 +7,26 @@ using CaixaDiario.API.Repositories.Interfaces;
 namespace CaixaDiario.API.Services;
 
 /// <summary>
-/// Item 2 do Bloco 4 ("Visão de Futuro"): analisa o histórico de Entradas/Saídas (últimos 3 meses
-/// fechados + o atual) procurando descrições que se repetem em pelo menos 3 meses distintos com
-/// valor parecido (±30%) e que AINDA não têm uma ContaRecorrente correspondente — candidatas a
-/// "isso parece uma conta recorrente, quer cadastrar?". Mesmo espírito de ConciliacaoService
-/// (motor de detecção + "ignorar" persistido), só que o padrão aqui é a descrição normalizada +
-/// tipo, não um par título×lançamento.
+/// Item 2 do Bloco 4 ("Visão de Futuro"), ajustado na rodada Money Vision item 5: analisa o
+/// histórico de Entradas/Saídas (últimos 3 meses) procurando descrições que se repetem em pelo
+/// menos 2 meses distintos com valor parecido (±20%) e que AINDA não têm uma ContaRecorrente
+/// correspondente — candidatas a "isso parece uma conta recorrente, quer cadastrar?". Mesmo
+/// espírito de ConciliacaoService (motor de detecção + "ignorar" persistido), só que o padrão aqui
+/// é a descrição normalizada (o favorecido) + tipo, nunca a categoria — dentro de uma categoria
+/// como "Salários/Folha" há vários favorecidos diferentes, cada um sua própria recorrência.
 /// </summary>
 public class DetectorRecorrenciaService : IDetectorRecorrenciaService
 {
-    // Em pelo menos 3 meses civis distintos pra ser considerado "recorrente" — 1 ou 2 ocorrências
-    // isoladas são coincidência (ex.: duas compras parecidas no mesmo mês).
-    private const int MesesMinimos = 3;
-    // Valores dentro de ±30% da média — fora disso, provavelmente não é a mesma conta recorrendo
-    // (ex.: conta de luz que varia MUITO mês a mês não serve de candidata confiável).
-    private const decimal ToleranciaValor = 0.30m;
+    // Em pelo menos 2 dos últimos 3 meses civis — 1 ocorrência isolada é coincidência (ex.: duas
+    // compras parecidas no mesmo mês), mas exigir os 3 meses cheios atrasava demais a primeira
+    // sugestão de um pagamento genuinamente recorrente.
+    private const int MesesMinimos = 2;
+    // Valores dentro de ±20% da média — fora disso, provavelmente não é o mesmo favorecido
+    // recorrendo (ex.: conta de luz que varia MUITO mês a mês não serve de candidata confiável).
+    private const decimal ToleranciaValor = 0.20m;
+    // Acima disso, considera "valor variável" (marca o checkbox no formulário pré-preenchido) —
+    // abaixo, é só arredondamento/centavos e o valor é tratado como fixo.
+    private const decimal ToleranciaValorFixo = 0.02m;
 
     private readonly IRegistroRepository _registroRepo;
     private readonly IContaRecorrenteRepository _recorrenteRepo;
@@ -109,6 +114,14 @@ public class DetectorRecorrenciaService : IDetectorRecorrenciaService
             if (maiorDesvio > ToleranciaValor) continue;
 
             var ultimo = grupo.OrderByDescending(c => c.Data).First();
+            // Dia típico: o dia-do-mês que mais se repete entre as ocorrências; empate resolvido
+            // pela ocorrência mais recente (critério simples e previsível).
+            var diaTipico = grupo
+                .GroupBy(c => c.Data.Day)
+                .OrderByDescending(g => g.Count())
+                .ThenByDescending(g => g.Max(c => c.Data))
+                .First().Key;
+
             resultado.Add(new SugestaoRecorrenciaDto
             {
                 Chave = chave,
@@ -119,6 +132,8 @@ public class DetectorRecorrenciaService : IDetectorRecorrenciaService
                 QuantidadeOcorrencias = grupo.Select(c => (c.Data.Year, c.Data.Month)).Distinct().Count(),
                 ContaBancariaId = ultimo.ContaBancariaId,
                 UltimaOcorrencia = ultimo.Data,
+                DiaTipico = diaTipico,
+                ValorVariavel = maiorDesvio > ToleranciaValorFixo,
             });
         }
         return resultado;

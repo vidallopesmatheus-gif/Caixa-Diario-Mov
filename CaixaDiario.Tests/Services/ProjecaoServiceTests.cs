@@ -635,47 +635,6 @@ public class ProjecaoServiceTests
         Assert.DoesNotContain(resultado.Dias.SelectMany(d => d.Saidas), s => s.Origem == "Fatura");
     }
 
-    [Fact]
-    public void CalcularDespesasEstimadasPorCategoria_ComCategoriaSemRecorrenciaCadastrada_RetornaMediaDosUltimos3Meses()
-    {
-        var contaA = Guid.NewGuid();
-        var historico = new List<RegistroDiario>();
-        for (int i = 1; i <= 3; i++)
-        {
-            var reg = CriarRegistro(contaA, Hoje.AddMonths(-i), 1000m);
-            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Internet", Valor = 100m + i * 10, Categoria = "Energia/Água/Internet", TipoCusto = "CustoFixo" });
-            historico.Add(reg);
-        }
-
-        var resultado = _sut.CalcularDespesasEstimadasPorCategoria(historico, new List<ContaRecorrente>(), Hoje);
-
-        var item = Assert.Single(resultado);
-        Assert.Equal("Energia/Água/Internet", item.Categoria);
-        Assert.Equal(120m, item.ValorEstimado); // média de 110, 120, 130
-    }
-
-    [Fact]
-    public void CalcularDespesasEstimadasPorCategoria_ComRecorrenciaJaCobrindoACategoria_NaoARetorna()
-    {
-        var contaA = Guid.NewGuid();
-        var recorrencia = new ContaRecorrente
-        {
-            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), Descricao = "Internet", Valor = 200m, Categoria = "Energia/Água/Internet",
-            Tipo = "Pagar", Ativo = true, Periodicidade = "Mensal", DataInicio = Hoje.AddDays(-40), CriadoEm = DateTime.UtcNow,
-        };
-        var historico = new List<RegistroDiario>();
-        for (int i = 1; i <= 3; i++)
-        {
-            var reg = CriarRegistro(contaA, Hoje.AddMonths(-i), 1000m);
-            reg.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Internet", Valor = 100m, Categoria = "Energia/Água/Internet", TipoCusto = "CustoFixo" });
-            historico.Add(reg);
-        }
-
-        var resultado = _sut.CalcularDespesasEstimadasPorCategoria(historico, new List<ContaRecorrente> { recorrencia }, Hoje);
-
-        Assert.Empty(resultado);
-    }
-
     // ── Bloco 3 da rodada "Visão de Futuro": CalcularMeuFuturo ───────────────────────────────────
 
     [Fact]
