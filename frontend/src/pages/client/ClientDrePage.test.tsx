@@ -45,9 +45,7 @@ function mockDre(receitaBruta: number): Dre {
     despesasFixas: { total: 0, percentual: 0, categorias: [] },
     resultadoOperacional: receitaBruta,
     resultadoOperacionalPercentual: 100,
-    receitaFinanceira: { total: 0, percentual: 0, categorias: [] },
-    despesasNaoOperacionais: { total: 0, percentual: 0, categorias: [] },
-    naoClassificado: { total: 0, percentual: 0, categorias: [] },
+    quantidadeNaoClassificados: 0,
     atividadesInvestimento: { total: 0, percentual: 0, categorias: [] },
     atividadesFinanciamento: { total: 0, percentual: 0, categorias: [] },
     retiradasSocios: { total: 0, percentual: 0, categorias: [] },
@@ -237,26 +235,25 @@ test('Comparar períodos: Variação do mês em andamento usa selo "parcial" e o
   expect(celulaVariacao.querySelector('.dre-tabela-cel-valor')?.textContent).toContain(fmtBRL(rsEsperado))
 })
 
-// Item 1 da Parte 3 (Money Vision): "Não Classificados" nunca pode desaparecer da tela — mesmo
-// com total zerado (sem lançamento sem categoria no período), a linha continua visível mostrando
-// R$ 0,00, tanto no período único quanto em "Comparar períodos".
-test('"Não Classificados" continua visível (R$ 0,00) quando não há lançamento sem categoria', async () => {
+// Item 4 da rodada de ajustes Money Vision (DRE mais enxuta): "Não Classificados" deixou de ser
+// uma linha do demonstrativo — vira só o aviso no topo, com a contagem de lançamentos pendentes
+// de categorização (quantidadeNaoClassificados), nunca uma linha "(-) NÃO CLASSIFICADOS".
+test('sem lançamento sem categoria: nem a linha nem o aviso aparecem', async () => {
   mockHooks([registro('2026-10-01')])
   render(<ClientDrePage />)
 
-  const label = await screen.findByText('(-) NÃO CLASSIFICADOS')
-  const linha = label.closest('.dre-linha-bloco') as HTMLElement
-  expect(within(linha).getByText('R$ 0,00')).toBeInTheDocument()
+  await screen.findByText('RECEITAS OPERACIONAIS')
+  expect(screen.queryByText(/NÃO CLASSIFICADOS/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/sem categoria/)).not.toBeInTheDocument()
 })
 
-test('Comparar períodos: "Não Classificados" continua visível (R$ 0,00) em todos os períodos', async () => {
+test('com lançamento sem categoria: mostra o aviso com a contagem, sem linha própria no demonstrativo', async () => {
   mockHooks([registro('2026-10-01')])
-  const user = userEvent.setup()
+  vi.mocked(metricasApi.obterDre).mockImplementation(async (_clienteId, de) =>
+    ({ ...mockDre(de.endsWith('-01') ? 500 : 0), quantidadeNaoClassificados: de.endsWith('-01') ? 3 : 0 }))
+
   render(<ClientDrePage />)
 
-  await user.click(await screen.findByLabelText('Comparar períodos'))
-
-  const label = await screen.findByText('(-) NÃO CLASSIFICADOS')
-  const linha = label.closest('.dre-tabela-linha') as HTMLElement
-  expect(within(linha).getAllByText('R$ 0,00').length).toBeGreaterThan(0)
+  expect(await screen.findByText(/3 lançamentos sem categoria no período/)).toBeInTheDocument()
+  expect(screen.queryByText(/NÃO CLASSIFICADOS/)).not.toBeInTheDocument()
 })

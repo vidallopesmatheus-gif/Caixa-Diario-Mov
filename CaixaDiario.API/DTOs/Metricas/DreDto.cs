@@ -59,11 +59,13 @@ public class DreDto
     public DreLinhaVerticalDto DespesasFixas { get; set; } = new();
     public decimal ResultadoOperacional { get; set; }
     public decimal? ResultadoOperacionalPercentual { get; set; }
-    // Receita financeira (rendimento de investimento): nunca soma na receita operacional nem na
-    // margem operacional — entra só aqui, depois do Resultado Operacional, e flui pro Resultado Líquido.
-    public DreLinhaVerticalDto ReceitaFinanceira { get; set; } = new();
-    public DreLinhaVerticalDto DespesasNaoOperacionais { get; set; } = new();
-    public DreLinhaVerticalDto NaoClassificado { get; set; } = new();
+    // Rodada de ajustes Money Vision, item 4 (DRE mais enxuta): Receita Financeira (rendimento de
+    // investimento) e Despesas Não Operacionais deixaram de ser linhas próprias — a primeira soma
+    // em ReceitaBruta como "Outras receitas", a segunda soma em DespesasFixas, ambas antes do
+    // Resultado Operacional. "Não Classificado" também deixou de ter linha própria (some dentro de
+    // DespesasFixas) — QuantidadeNaoClassificados alimenta o aviso "N lançamentos sem categoria" no
+    // topo da tela, sem precisar de uma linha no demonstrativo.
+    public int QuantidadeNaoClassificados { get; set; }
     // Sinal líquido (entrada − saída) por natureza — podem ser positivos (captação, rendimento) ou
     // negativos (amortização, aquisição de imobilizado); nunca assumidos como saída.
     public DreLinhaVerticalDto AtividadesInvestimento { get; set; } = new();

@@ -220,22 +220,24 @@ public class MetricasService : IMetricasService
         var saidasOperacionais = registros.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).ToList();
         var entradasOperacionais = registros.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).ToList();
         // Entrada sem categoria (ainda pendente de classificação) não é receita confirmada — fica de
-        // fora da Receita Bruta e entra, negativa, na linha "Não Classificados" (valor líquido junto
-        // com as saídas sem categoria). Sem isso esse dinheiro contaria a mais no Resultado Líquido:
-        // uma vez cheio na Receita Bruta, e nenhuma outra linha o desconta.
+        // fora da Receita Bruta e entra, negativa, dentro de Despesas Operacionais (valor líquido
+        // junto com as saídas sem categoria — ver "Não Classificado" abaixo). Sem isso esse dinheiro
+        // contaria a mais no Resultado Líquido: uma vez cheio na Receita Bruta, e nenhuma outra linha
+        // o desconta.
         var entradasNaoClassificadasTotal = entradasOperacionais
             .Where(e => string.IsNullOrWhiteSpace(e.Categoria))
             .Sum(e => e.Valor);
-        var receitaBruta = entradasOperacionais.Sum(e => e.Valor) - entradasNaoClassificadasTotal;
 
-        // Receita financeira (rendimento de investimento): fato modificativo, mas não é receita
-        // operacional — nunca soma em receitaBruta. Correções negativas de rendimento são lançadas
-        // como saída com o mesmo TipoCusto e reduzem esta linha.
-        var receitaFinanceiraCats = new Dictionary<string, decimal>();
-        foreach (var entrada in registros.SelectMany(r => r.Entradas).Where(e => e.TipoCusto == LancamentoFiltro.TipoRendimento))
-            receitaFinanceiraCats["Rendimento"] = (receitaFinanceiraCats.TryGetValue("Rendimento", out var vEnt) ? vEnt : 0m) + entrada.Valor;
-        foreach (var saidaRend in registros.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == LancamentoFiltro.TipoRendimento))
-            receitaFinanceiraCats["Rendimento"] = (receitaFinanceiraCats.TryGetValue("Rendimento", out var vSai) ? vSai : 0m) - saidaRend.Valor;
+        // Rodada de ajustes Money Vision, item 4 (DRE mais enxuta): Receita Financeira deixou de ser
+        // uma linha própria depois do Resultado Operacional — rendimento de investimento agora soma
+        // direto na Receita Operacional, como "Outras receitas" (decisão explícita do usuário:
+        // simplificar a metodologia, dinheiro que entrou é receita, ponto). Correções negativas de
+        // rendimento (lançadas como saída com o mesmo TipoCusto) continuam reduzindo o total.
+        const string nomeOutrasReceitas = "Outras receitas";
+        var receitaFinanceiraTotal = registros.SelectMany(r => r.Entradas).Where(e => e.TipoCusto == LancamentoFiltro.TipoRendimento).Sum(e => e.Valor)
+            - registros.SelectMany(r => r.Saidas).Where(s => s.TipoCusto == LancamentoFiltro.TipoRendimento).Sum(s => s.Valor);
+
+        var receitaBruta = entradasOperacionais.Sum(e => e.Valor) - entradasNaoClassificadasTotal + receitaFinanceiraTotal;
 
         // Metadados de grupo/ordem: vêm do Plano de Contas (Configurações) quando disponível;
         // caem para os mapas fixos históricos quando não (ex.: chamadas antigas/testes sem categorias).
@@ -309,14 +311,15 @@ public class MetricasService : IMetricasService
         // ---- Análise vertical: mesma lista de saídas, agora em cascata por Tipo ----
         // (-) Deduções/Impostos → grupo "Impostos" (reaproveita o Grupo já existente no Plano de Contas)
         // (-) Custos Variáveis → Tipo == CustoVariavel
-        // (-) Despesas Fixas → Tipo == CustoFixo (exceto o que já caiu em Deduções)
-        // (-) Despesas Não Operacionais → Tipo == DespesaNaoOperacional
-        // (-) Não Classificado → categoria ausente/não cadastrada ou sem Tipo reconhecido (regra: nunca omitir)
+        // (-) Despesas Fixas → Tipo == CustoFixo, DespesaNaoOperacional (legado) e Não Classificado
+        //     (rodada de ajustes Money Vision, item 4: nenhuma das duas tem mais linha própria —
+        //     "Despesas Não Operacionais" sempre caiu em Despesas Operacionais na árvore hierárquica
+        //     Bloco→Grupo→Categoria, ver MontarBlocos; agora a análise vertical faz o mesmo. "Não
+        //     Classificado" continua contado — só não aparece mais como linha própria no waterfall;
+        //     o aviso "N lançamentos sem categoria" no topo da tela cobre o alerta ao usuário.)
         var deducoesCats = new Dictionary<string, decimal>();
         var custosVariaveisCats = new Dictionary<string, decimal>();
         var despesasFixasCats = new Dictionary<string, decimal>();
-        var despesasNaoOperacionaisCats = new Dictionary<string, decimal>();
-        var naoClassificadoCats = new Dictionary<string, decimal>();
         // Correção de integridade (Parte 1, item 6): Pró-labore/retiradas dos sócios — nunca foi
         // despesa fixa nem atividade de investimento/financiamento; é a última linha antes do
         // Resultado Líquido (decisão explícita do usuário), nunca "Não classificado".
@@ -335,26 +338,23 @@ public class MetricasService : IMetricasService
             // cai no critério histórico por Tipo + nome de grupo "Impostos".
             var bucket = bloco == Blocos.DeducoesDaReceita ? deducoesCats
                 : bloco == Blocos.CustosOperacionais ? custosVariaveisCats
-                : bloco == Blocos.DespesasOperacionais ? despesasFixasCats
                 : bloco == Blocos.RetiradasSocios ? retiradasSociosCats
-                : bloco != null ? naoClassificadoCats
                 : string.Equals(grupo, "Impostos", StringComparison.OrdinalIgnoreCase) ? deducoesCats
                 : tipo == "CustoVariavel" ? custosVariaveisCats
-                : tipo == "CustoFixo" ? despesasFixasCats
-                : tipo == "DespesaNaoOperacional" ? despesasNaoOperacionaisCats
                 : tipo == "RetiradaSocios" ? retiradasSociosCats
-                : naoClassificadoCats;
+                : despesasFixasCats;
 
             bucket[nomeCat] = (bucket.TryGetValue(nomeCat, out var v) ? v : 0m) + saida.Valor;
         }
 
-        // Entrada sem categoria entra NEGATIVA no mesmo bucket "Não Classificado" — a linha vira o
-        // valor líquido (saídas sem categoria − entradas sem categoria), e o valor já foi retirado
-        // da Receita Bruta acima (ver entradasNaoClassificadasTotal), então não é contado duas vezes.
+        // Entrada sem categoria entra NEGATIVA no mesmo bucket "Não Classificado" dentro de Despesas
+        // Operacionais — a linha vira o valor líquido (saídas sem categoria − entradas sem categoria),
+        // e o valor já foi retirado da Receita Bruta acima (ver entradasNaoClassificadasTotal), então
+        // não é contado duas vezes.
         foreach (var entrada in entradasOperacionais.Where(e => string.IsNullOrWhiteSpace(e.Categoria)))
         {
             const string nomeCat = "Não Classificado";
-            naoClassificadoCats[nomeCat] = (naoClassificadoCats.TryGetValue(nomeCat, out var v) ? v : 0m) - entrada.Valor;
+            despesasFixasCats[nomeCat] = (despesasFixasCats.TryGetValue(nomeCat, out var v) ? v : 0m) - entrada.Valor;
         }
 
         // ---- Atividades de Investimento / Financiamento: fato modificativo pós-operacional ----
@@ -412,20 +412,25 @@ public class MetricasService : IMetricasService
         var margemContribuicao = receitaLiquida - custosVariaveis.Total;
         var despesasFixas = MontarLinhaVertical(despesasFixasCats);
         var resultadoOperacional = margemContribuicao - despesasFixas.Total;
-        var receitaFinanceira = MontarLinhaVertical(receitaFinanceiraCats);
-        var despesasNaoOperacionais = MontarLinhaVertical(despesasNaoOperacionaisCats);
-        var naoClassificado = MontarLinhaVertical(naoClassificadoCats);
         var atividadesInvestimento = MontarLinhaAtividade(LancamentoFiltro.TipoInvestimento);
         var atividadesFinanciamento = MontarLinhaAtividade(LancamentoFiltro.TipoFinanciamento);
         // Pró-labore/retiradas dos sócios: decisão explícita do usuário — última dedução antes do
         // Resultado Líquido, depois de Investimento e Financiamento (não é despesa fixa nem atividade).
         var retiradasSocios = MontarLinhaVertical(retiradasSociosCats);
-        var resultadoLiquido = resultadoOperacional + receitaFinanceira.Total - despesasNaoOperacionais.Total
-            - naoClassificado.Total + atividadesInvestimento.Total + atividadesFinanciamento.Total - retiradasSocios.Total;
+        // Receita Financeira e Despesas Não Operacionais já entraram em receitaBruta/despesasFixas
+        // acima (item 4) — não somam de novo aqui. Não Classificado idem (dentro de despesasFixas).
+        var resultadoLiquido = resultadoOperacional + atividadesInvestimento.Total + atividadesFinanciamento.Total - retiradasSocios.Total;
 
         var blocos = MontarBlocos(
             entradasOperacionais, saidasOperacionais, receitaBruta, mapaBloco, mapaGrupo, mapaOrdem,
-            receitaFinanceiraCats, atividadesInvestimento, atividadesFinanciamento);
+            receitaFinanceiraTotal, nomeOutrasReceitas, atividadesInvestimento, atividadesFinanciamento);
+
+        // Aviso "N lançamentos sem categoria" no topo da tela (item 4) — conta entradas+saídas
+        // operacionais sem categoria, não só o valor líquido (que pode ser pequeno ou zero mesmo
+        // com vários lançamentos pendentes de classificação).
+        var quantidadeNaoClassificados =
+            entradasOperacionais.Count(e => string.IsNullOrWhiteSpace(e.Categoria))
+            + saidasOperacionais.Count(s => string.IsNullOrWhiteSpace(s.Categoria));
 
         return new DreDto
         {
@@ -445,9 +450,7 @@ public class MetricasService : IMetricasService
             DespesasFixas = despesasFixas,
             ResultadoOperacional = resultadoOperacional,
             ResultadoOperacionalPercentual = Percentual(resultadoOperacional),
-            ReceitaFinanceira = receitaFinanceira,
-            DespesasNaoOperacionais = despesasNaoOperacionais,
-            NaoClassificado = naoClassificado,
+            QuantidadeNaoClassificados = quantidadeNaoClassificados,
             AtividadesInvestimento = atividadesInvestimento,
             AtividadesFinanciamento = atividadesFinanciamento,
             RetiradasSocios = retiradasSocios,
@@ -461,7 +464,7 @@ public class MetricasService : IMetricasService
     private static List<DreBlocoDto> MontarBlocos(
         List<ItemFinanceiro> entradasOperacionais, List<ItemFinanceiroSaida> saidasOperacionais, decimal receitaBruta,
         Dictionary<string, string> mapaBloco, Dictionary<string, string> mapaGrupo, Dictionary<string, int>? mapaOrdem,
-        Dictionary<string, decimal> receitaFinanceiraCats,
+        decimal receitaFinanceiraTotal, string nomeOutrasReceitas,
         DreLinhaVerticalDto atividadesInvestimento, DreLinhaVerticalDto atividadesFinanciamento)
     {
         decimal? Percentual(decimal valor) => receitaBruta > 0 ? Math.Round(valor / receitaBruta * 100, 1) : null;
@@ -503,14 +506,15 @@ public class MetricasService : IMetricasService
                     : Blocos.DespesasOperacionais;
             Lancar(bloco, saida.Categoria, -saida.Valor);
         }
-        // Rendimento de investimento entra como grupo dedicado dentro de Atividades de Investimento —
-        // mesma fonte de dado da linha ReceitaFinanceira, só reorganizada na árvore hierárquica.
-        foreach (var (nome, valor) in receitaFinanceiraCats)
+        // Rendimento de investimento (item 4): entra direto em Receitas Operacionais, como grupo
+        // "Outras receitas" — não tem mais grupo próprio dentro de Atividades de Investimento, e não
+        // usa o Lancar() genérico porque "Outras receitas" não é uma Categoria real (não existe no
+        // mapaGrupo, cairia em "Não Classificado" por engano).
+        if (receitaFinanceiraTotal != 0m)
         {
-            var porGrupo = porBloco[Blocos.AtividadesDeInvestimento];
-            const string grupoRendimento = "Rendimento de Investimentos";
-            if (!porGrupo.TryGetValue(grupoRendimento, out var cats)) { cats = new(); porGrupo[grupoRendimento] = cats; }
-            cats[nome] = (cats.TryGetValue(nome, out var v) ? v : 0m) + valor;
+            var porGrupoReceitas = porBloco[Blocos.ReceitasOperacionais];
+            if (!porGrupoReceitas.TryGetValue(nomeOutrasReceitas, out var catsReceitas)) { catsReceitas = new(); porGrupoReceitas[nomeOutrasReceitas] = catsReceitas; }
+            catsReceitas[nomeOutrasReceitas] = (catsReceitas.TryGetValue(nomeOutrasReceitas, out var v) ? v : 0m) + receitaFinanceiraTotal;
         }
         foreach (var cat in atividadesInvestimento.Categorias)
             Lancar(Blocos.AtividadesDeInvestimento, cat.Nome, cat.Total);
