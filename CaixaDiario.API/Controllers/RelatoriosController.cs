@@ -26,4 +26,13 @@ public class RelatoriosController : ControllerBase
         var resultado = await _service.ObterAsync(clienteId, meses, ObterUsuarioId(), ObterPerfil(), incluirAvulsosVinculados);
         return Ok(new ApiResponse<PrevistoRealizadoDto> { Dados = resultado });
     }
+
+    // Item 7, ponto 5 (rodada de ajustes Money Vision): "tocar num item mostra o histórico dele".
+    [HttpGet("{clienteId:guid}/previsto-realizado/historico")]
+    public async Task<IActionResult> ObterHistoricoItem(
+        Guid clienteId, [FromQuery] string chave, [FromQuery] int meses = 6, [FromQuery] bool incluirAvulsosVinculados = false)
+    {
+        var resultado = await _service.ObterHistoricoItemAsync(clienteId, chave, meses, ObterUsuarioId(), ObterPerfil(), incluirAvulsosVinculados);
+        return Ok(new ApiResponse<HistoricoItemPrevistoRealizadoDto> { Dados = resultado });
+    }
 }

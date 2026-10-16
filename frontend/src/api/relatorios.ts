@@ -1,23 +1,34 @@
 import { apiFetch } from './client'
 import type { ApiResponse } from '../types'
 
-export interface PontoPrevistoRealizado {
-  mes: string // "yyyy-MM"
+// Item 7 da rodada de ajustes Money Vision: "Previsto × Realizado" por ITEM (favorecido), não mais
+// por categoria — uma categoria como "Salários/Folha" mistura vários favorecidos diferentes.
+export type StatusPrevistoRealizado = 'Realizado' | 'Parcial' | 'NaoAconteceu' | 'Atrasado'
+
+export interface ItemPrevistoRealizado {
+  chave: string
+  nome: string
+  tipo: 'Receber' | 'Pagar'
+  categoria?: string
   previsto: number
   realizado: number
-  variacaoPercentual?: number
-  variacaoAlta: boolean
-  subiuTresMesesSeguidos: boolean
+  diferenca: number
+  diferencaPercentual?: number
+  status: StatusPrevistoRealizado
+  dataVencimento?: string
 }
 
-export interface LinhaPrevistoRealizado {
-  categoria: string
-  tipo: 'Receber' | 'Pagar'
-  meses: PontoPrevistoRealizado[]
+export interface PontoAcumuladoPrevistoRealizado {
+  // "yyyy-MM-dd" (mês atual, meses=1) ou "yyyy-MM" (3/6/12 meses).
+  data: string
+  previstoAcumulado: number
+  realizadoAcumulado: number
 }
 
 export interface PrevistoRealizado {
-  linhas: LinhaPrevistoRealizado[]
+  itens: ItemPrevistoRealizado[]
+  acumuladoReceber: PontoAcumuladoPrevistoRealizado[]
+  acumuladoPagar: PontoAcumuladoPrevistoRealizado[]
 }
 
 // Fase 1.5: por padrão só contas ligadas a uma recorrência entram (são as únicas com um "previsto"
@@ -29,6 +40,29 @@ export async function obterPrevistoRealizado(
 ): Promise<PrevistoRealizado> {
   const res = await apiFetch<ApiResponse<PrevistoRealizado>>(
     `/api/relatorios/${clienteId}/previsto-realizado?meses=${meses}&incluirAvulsosVinculados=${incluirAvulsosVinculados}`,
+  )
+  return res.dados
+}
+
+export interface PontoHistoricoPrevistoRealizado {
+  mes: string // "yyyy-MM"
+  previsto: number
+  realizado: number
+  variacaoPercentual?: number
+}
+
+export interface HistoricoItemPrevistoRealizado {
+  nome: string
+  meses: PontoHistoricoPrevistoRealizado[]
+}
+
+// Item 7, ponto 5: "tocar num item mostra o histórico dele" — previsto × realizado dos últimos
+// meses, só desse favorecido (mesma chave vinda de ItemPrevistoRealizado.chave).
+export async function obterHistoricoItemPrevistoRealizado(
+  clienteId: string, chave: string, meses = 6, incluirAvulsosVinculados = false,
+): Promise<HistoricoItemPrevistoRealizado> {
+  const res = await apiFetch<ApiResponse<HistoricoItemPrevistoRealizado>>(
+    `/api/relatorios/${clienteId}/previsto-realizado/historico?chave=${encodeURIComponent(chave)}&meses=${meses}&incluirAvulsosVinculados=${incluirAvulsosVinculados}`,
   )
   return res.dados
 }
