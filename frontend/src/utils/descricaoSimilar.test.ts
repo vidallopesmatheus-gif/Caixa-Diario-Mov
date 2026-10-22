@@ -1,4 +1,4 @@
-import { agruparPorDescricaoSimilar, mascararDocumentos } from './descricaoSimilar'
+import { agruparPorDescricaoSimilar, mascararDocumentos, criterioRegra } from './descricaoSimilar'
 
 interface Item {
   id: string
@@ -110,5 +110,28 @@ describe('mascararDocumentos', () => {
   test('mascara CNPJ e CPF presentes na mesma string, sem interferência entre os dois', () => {
     const resultado = mascararDocumentos('De 12.345.678/0001-90 para 111.222.333-44')
     expect(resultado).toBe('De ••.345.678/0001-•• para •••.222.333-••')
+  })
+})
+
+describe('criterioRegra', () => {
+  test('usa o documento como chave quando a descrição tem CNPJ/CPF', () => {
+    const chave = criterioRegra('Saida', 'Pagamento Fornecedor 12.345.678/0001-90 ref 08/2026')
+    expect(chave).toBe('Saida::DOC:12345678000190')
+  })
+
+  test('duas descrições com o mesmo documento mas texto diferente geram a mesma chave', () => {
+    const chave1 = criterioRegra('Saida', 'Pagamento Fornecedor 12.345.678/0001-90 ref 08/2026')
+    const chave2 = criterioRegra('Saida', 'Pagamento Fornecedor 12.345.678/0001-90 ref 09/2026')
+    expect(chave1).toBe(chave2)
+  })
+
+  test('usa a descrição normalizada (maiúscula, sem espaço nas pontas) quando não há documento', () => {
+    expect(criterioRegra('Entrada', '  aplicação rdb  ')).toBe('Entrada::APLICAÇÃO RDB')
+  })
+
+  test('mesmo critério com tipos diferentes (Entrada vs Saida) gera chaves diferentes', () => {
+    const chaveEntrada = criterioRegra('Entrada', 'Tarifa')
+    const chaveSaida = criterioRegra('Saida', 'Tarifa')
+    expect(chaveEntrada).not.toBe(chaveSaida)
   })
 })
