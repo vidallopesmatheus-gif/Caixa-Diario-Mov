@@ -20,6 +20,7 @@ public class ImportacaoServiceTests
     private readonly Mock<ITransferenciaService> _transferenciaServiceMock = new();
     private readonly Mock<IConciliacaoService> _conciliacaoServiceMock = new();
     private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
+    private readonly Mock<IParcelamentoDeteccaoService> _parcelamentoDeteccaoServiceMock = new();
     private readonly ImportacaoService _sut;
 
     public ImportacaoServiceTests()
@@ -44,8 +45,18 @@ public class ImportacaoServiceTests
             It.IsAny<Guid>(), It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>()))
             .ReturnsAsync(new List<CaixaDiario.API.DTOs.Conciliacao.SugestaoVinculoDto>());
         _faturaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Fatura>())).ReturnsAsync((Fatura f) => f);
+        // Fallback padrão pra detecção de parcelamento — a maioria dos testes não liga pra qual
+        // Parcelamento foi resolvido, só não pode quebrar com NullReferenceException.
+        _parcelamentoDeteccaoServiceMock.Setup(s => s.ProcessarParcelaDetectadaAsync(
+            It.IsAny<ContaBancaria>(), It.IsAny<DateOnly>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<decimal>()))
+            .ReturnsAsync((ContaBancaria conta, DateOnly _, string comerciante, string? categoria, int numero, int total, decimal valor) => new Parcelamento
+            {
+                Id = Guid.NewGuid(), ClienteId = conta.ClienteId, ContaCartaoId = conta.Id, DescricaoBase = comerciante,
+                Categoria = categoria, ValorParcela = valor, TotalParcelas = total, Status = "Ativo", CriadoEm = DateTime.UtcNow,
+            });
         _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object, _categoriaRepoMock.Object,
-            _regraRepoMock.Object, _transferenciaServiceMock.Object, _conciliacaoServiceMock.Object, _faturaRepoMock.Object);
+            _regraRepoMock.Object, _transferenciaServiceMock.Object, _conciliacaoServiceMock.Object, _faturaRepoMock.Object,
+            _parcelamentoDeteccaoServiceMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid contaId, Guid clienteId, decimal saldoInicial = 0m, string tipo = "ContaCorrente") => new()
@@ -402,6 +413,67 @@ public class ImportacaoServiceTests
         var naoParcelada = criado.Saidas.Single(s => s.Descricao == "Apple.Com/Bill");
         Assert.Null(naoParcelada.NumeroParcela);
         Assert.Null(naoParcelada.TotalParcelas);
+    }
+
+    // Rodada de ajustes "parcelamentos": a compra parcelada detectada aciona a resolução/criação do
+    // Parcelamento (ver ParcelamentoDeteccaoService) e grava o Id dele na parcela real importada.
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_CompraParcelada_ResolveParcelamentoEGravaOIdNaParcela()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var parcelamentoId = Guid.NewGuid();
+        _parcelamentoDeteccaoServiceMock.Setup(s => s.ProcessarParcelaDetectadaAsync(
+            It.IsAny<ContaBancaria>(), new DateOnly(2026, 8, 10), "Trocafone", It.IsAny<string?>(), 1, 10, 100m))
+            .ReturnsAsync(new Parcelamento { Id = parcelamentoId, Status = "Ativo" });
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Trocafone - Parcela 1/10;100,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "Nubank", dataVencimentoFatura: new DateOnly(2026, 8, 10));
+
+        var parcelada = Assert.Single(criado!.Saidas);
+        Assert.Equal(parcelamentoId, parcelada.ParcelamentoId);
+        _parcelamentoDeteccaoServiceMock.Verify(s => s.ProcessarParcelaDetectadaAsync(
+            It.IsAny<ContaBancaria>(), new DateOnly(2026, 8, 10), "Trocafone", It.IsAny<string?>(), 1, 10, 100m), Times.Once);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_CompraParcelada_ResumoListaOParcelamentoDetectado()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var parcelamentoId = Guid.NewGuid();
+        _parcelamentoDeteccaoServiceMock.Setup(s => s.ProcessarParcelaDetectadaAsync(
+            It.IsAny<ContaBancaria>(), It.IsAny<DateOnly>(), "Trocafone", It.IsAny<string?>(), 1, 10, 100m))
+            .ReturnsAsync(new Parcelamento { Id = parcelamentoId, Status = "Ativo" });
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Trocafone - Parcela 1/10;100,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "Nubank", dataVencimentoFatura: new DateOnly(2026, 8, 10));
+
+        var resumo = Assert.Single(resultado.ParcelamentosDetectados);
+        Assert.Equal(parcelamentoId, resumo.ParcelamentoId);
+        Assert.Equal("Trocafone", resumo.Comerciante);
+        Assert.Equal(1, resumo.NumeroParcela);
+        Assert.Equal(10, resumo.TotalParcelas);
+        Assert.Equal(9, resumo.ParcelasRestantes);
+        Assert.Equal(900m, resumo.ValorRestante);
+        Assert.Equal("Ativo", resumo.Status);
     }
 
     [Fact]

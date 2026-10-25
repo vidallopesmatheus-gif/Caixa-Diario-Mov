@@ -29,6 +29,7 @@ public class AppDbContext : DbContext
     public DbSet<SugestaoVinculoIgnorada> SugestoesVinculoIgnoradas { get; set; }
     public DbSet<SugestaoRecorrenciaIgnorada> SugestoesRecorrenciaIgnoradas { get; set; }
     public DbSet<Financiamento> Financiamentos { get; set; }
+    public DbSet<Parcelamento> Parcelamentos { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -227,6 +228,25 @@ public class AppDbContext : DbContext
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
             // Uma ocorrência específica (recorrência + vencimento) só pode ser dispensada uma vez.
             entity.HasIndex(e => new { e.RecorrenciaId, e.DataVencimento }).IsUnique();
+        });
+
+        modelBuilder.Entity<Parcelamento>(entity =>
+        {
+            entity.ToTable("parcelamentos");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaCartaoId).HasColumnName("conta_cartao_id");
+            entity.Property(e => e.DescricaoBase).HasColumnName("descricao_base").IsRequired();
+            entity.Property(e => e.Categoria).HasColumnName("categoria");
+            entity.Property(e => e.ValorParcela).HasColumnName("valor_parcela").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TotalParcelas).HasColumnName("total_parcelas");
+            entity.Property(e => e.DataPrimeira).HasColumnName("data_primeira");
+            entity.Property(e => e.ValorTotal).HasColumnName("valor_total").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.MetaId).HasColumnName("meta_id");
+            entity.Property(e => e.Status).HasColumnName("status").IsRequired().HasDefaultValue("Ativo");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.HasIndex(e => new { e.ClienteId, e.ContaCartaoId, e.Status });
         });
 
         modelBuilder.Entity<DuplicataDispensada>(entity =>

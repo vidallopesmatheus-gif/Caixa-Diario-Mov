@@ -1,7 +1,21 @@
 import { apiFetch } from './client'
 import type {
   ApiResponse, ResumoImportacao, ResultadoImportacao, PendenteCategorizacao, DuplicataManual, DuplicataEntreArquivos,
+  ParcelamentoDetectadoResumo,
 } from '../types'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapParcelamentoDetectado(raw: any): ParcelamentoDetectadoResumo {
+  return {
+    parcelamentoId: raw.parcelamentoId,
+    comerciante: raw.comerciante ?? '',
+    numeroParcela: raw.numeroParcela ?? 0,
+    totalParcelas: raw.totalParcelas ?? 0,
+    parcelasRestantes: raw.parcelasRestantes ?? 0,
+    valorRestante: raw.valorRestante ?? 0,
+    status: raw.status ?? '',
+  }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapDuplicataManual(raw: any): DuplicataManual {
@@ -137,6 +151,8 @@ export const importarExtrato = async (
     totalDuplicatasEntreArquivosIgnoradas: Number(d.totalDuplicatasEntreArquivosIgnoradas ?? 0),
     totalSugestoesVinculo: Number(d.totalSugestoesVinculo ?? 0),
     faturaId: (d.faturaId as string | null) ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parcelamentosDetectados: ((d.parcelamentosDetectados as any[]) ?? []).map(mapParcelamentoDetectado),
   }
 }
 

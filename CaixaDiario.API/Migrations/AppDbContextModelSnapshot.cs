@@ -802,6 +802,70 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("pagamentos_fatura", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.Parcelamento", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Categoria")
+                        .HasColumnType("text")
+                        .HasColumnName("categoria");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<Guid>("ContaCartaoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_cartao_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateOnly>("DataPrimeira")
+                        .HasColumnType("date")
+                        .HasColumnName("data_primeira");
+
+                    b.Property<string>("DescricaoBase")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("descricao_base");
+
+                    b.Property<Guid?>("MetaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("meta_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Ativo")
+                        .HasColumnName("status");
+
+                    b.Property<int>("TotalParcelas")
+                        .HasColumnType("integer")
+                        .HasColumnName("total_parcelas");
+
+                    b.Property<decimal>("ValorParcela")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor_parcela");
+
+                    b.Property<decimal>("ValorTotal")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("valor_total");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClienteId", "ContaCartaoId", "Status");
+
+                    b.ToTable("parcelamentos", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.RegistroDiario", b =>
                 {
                     b.Property<Guid>("Id")

@@ -405,6 +405,18 @@ export interface ResultadoImportacao {
   totalSugestoesVinculo: number
   // Cartão (Bloco 2): preenchido só quando a conta é CartaoCredito — a fatura criada por esta importação.
   faturaId: string | null
+  // Rodada "parcelamentos": um item por Parcelamento resolvido/criado nesta importação.
+  parcelamentosDetectados: ParcelamentoDetectadoResumo[]
+}
+
+export interface ParcelamentoDetectadoResumo {
+  parcelamentoId: string
+  comerciante: string
+  numeroParcela: number
+  totalParcelas: number
+  parcelasRestantes: number
+  valorRestante: number
+  status: string
 }
 
 /** Lançamento já real (afeta saldo) que ainda não tem categoria. */

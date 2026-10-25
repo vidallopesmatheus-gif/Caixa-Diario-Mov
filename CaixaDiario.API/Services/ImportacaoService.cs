@@ -19,6 +19,7 @@ public class ImportacaoService : IImportacaoService
     private readonly ITransferenciaService _transferenciaService;
     private readonly IConciliacaoService _conciliacaoService;
     private readonly IFaturaRepository _faturaRepo;
+    private readonly IParcelamentoDeteccaoService _parcelamentoDeteccaoService;
 
     public ImportacaoService(
         IContaBancariaRepository contaRepo,
@@ -28,7 +29,8 @@ public class ImportacaoService : IImportacaoService
         IRegraCategorizacaoRepository regraRepo,
         ITransferenciaService transferenciaService,
         IConciliacaoService conciliacaoService,
-        IFaturaRepository faturaRepo)
+        IFaturaRepository faturaRepo,
+        IParcelamentoDeteccaoService parcelamentoDeteccaoService)
     {
         _contaRepo = contaRepo;
         _importRepo = importRepo;
@@ -38,6 +40,7 @@ public class ImportacaoService : IImportacaoService
         _transferenciaService = transferenciaService;
         _conciliacaoService = conciliacaoService;
         _faturaRepo = faturaRepo;
+        _parcelamentoDeteccaoService = parcelamentoDeteccaoService;
     }
 
     // Compra no cartão é sempre SAÍDA (dívida), estorno/crédito é sempre ENTRADA — mas bancos
@@ -405,6 +408,7 @@ public class ImportacaoService : IImportacaoService
         var categorizadasPorRegra = 0;
         var conciliadasTransferencia = 0;
         var ambiguasTransferencia = 0;
+        var parcelamentosDetectados = new List<ParcelamentoDetectadoResumoDto>();
 
         // Provisórias já existentes nesta conta (contrapartida de Transferência criada antes do
         // extrato real chegar — ver TransferenciaService.ConverterLancamentoAsync). Cada uma só pode
@@ -610,10 +614,33 @@ public class ImportacaoService : IImportacaoService
                     // variável no DRE mesmo tendo uma categoria "certa" atribuída.
                     tipoCustoFinal = !string.IsNullOrEmpty(categoriaFinal) && categoriasPorNome.TryGetValue(categoriaFinal, out var tc) ? tc : null;
 
-                    // Item 7 (Bloco 5, opcional): cartão formata compra parcelada como "<comerciante> -
-                    // Parcela N/M" no próprio extrato — grava N/M pra Projeção/Meu Futuro projetarem as
-                    // parcelas futuras (ainda sem fatura real) até a fatura real de cada mês chegar.
+                    // Item 7 (Bloco 5) + rodada de parcelamentos: cartão formata compra parcelada
+                    // como "<comerciante> - Parcela N/M" (ou variações — ver ParcelaDescricaoParser)
+                    // no próprio extrato. Resolve/cria o Parcelamento, troca a prevista desta parcela
+                    // por real (se havia uma) e gera as previstas que ainda faltam em Contas a Pagar
+                    // — elas que fazem a Projeção/Meu Futuro já contarem com as parcelas futuras,
+                    // até a fatura real de cada mês chegar e substituir cada uma por vez.
                     var parcelaDetectada = conta.Tipo == "CartaoCredito" ? ParcelaDescricaoParser.TentarExtrair(t.Descricao) : null;
+                    Guid? parcelamentoId = null;
+                    if (parcelaDetectada != null)
+                    {
+                        var parcelamento = await _parcelamentoDeteccaoService.ProcessarParcelaDetectadaAsync(
+                            conta, dataVencimentoFatura!.Value, parcelaDetectada.Comerciante, categoriaFinal,
+                            parcelaDetectada.Numero, parcelaDetectada.Total, t.Valor);
+                        parcelamentoId = parcelamento.Id;
+
+                        var restantes = parcelaDetectada.Total - parcelaDetectada.Numero;
+                        parcelamentosDetectados.Add(new ParcelamentoDetectadoResumoDto
+                        {
+                            ParcelamentoId = parcelamento.Id,
+                            Comerciante = parcelaDetectada.Comerciante,
+                            NumeroParcela = parcelaDetectada.Numero,
+                            TotalParcelas = parcelaDetectada.Total,
+                            ParcelasRestantes = restantes,
+                            ValorRestante = restantes * t.Valor,
+                            Status = parcelamento.Status,
+                        });
+                    }
 
                     registro.Saidas.Add(new ItemFinanceiroSaida
                     {
@@ -628,6 +655,7 @@ public class ImportacaoService : IImportacaoService
                         PendenteCategorizacao = pendente,
                         CategoriaSugerida = sugerida,
                         FaturaId = fatura?.Id,
+                        ParcelamentoId = parcelamentoId,
                         NumeroParcela = parcelaDetectada?.Numero,
                         TotalParcelas = parcelaDetectada?.Total,
                     });
@@ -740,6 +768,7 @@ public class ImportacaoService : IImportacaoService
             TotalDuplicatasEntreArquivosIgnoradas = totalDuplicatasEntreArquivosIgnoradas,
             TotalSugestoesVinculo = totalSugestoesVinculo,
             FaturaId = fatura?.Id,
+            ParcelamentosDetectados = parcelamentosDetectados,
         };
     }
 
