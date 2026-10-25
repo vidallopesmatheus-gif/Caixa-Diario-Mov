@@ -90,6 +90,7 @@ builder.Services.AddScoped<IImportacaoService, ImportacaoService>();
 builder.Services.AddScoped<IContaRecorrenteRepository, ContaRecorrenteRepository>();
 builder.Services.AddScoped<IMigracaoRecorrenciasService, MigracaoRecorrenciasService>();
 builder.Services.AddScoped<IReclassificacaoCategoriasService, ReclassificacaoCategoriasService>();
+builder.Services.AddScoped<ILimpezaTransferenciasService, LimpezaTransferenciasService>();
 builder.Services.AddScoped<IContaProvisionadaService, ContaProvisionadaService>();
 builder.Services.AddScoped<IOcorrenciaRecorrenteDispensadaRepository, OcorrenciaRecorrenteDispensadaRepository>();
 builder.Services.AddScoped<IDuplicataDispensadaRepository, DuplicataDispensadaRepository>();

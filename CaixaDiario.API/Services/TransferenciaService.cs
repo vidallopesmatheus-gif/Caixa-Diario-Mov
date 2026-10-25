@@ -43,12 +43,15 @@ public class TransferenciaService : ITransferenciaService
             .ToList();
     }
 
-    // Reverte a classificação — nunca apaga o lançamento em si. Os dois lados (origem e destino) só
-    // existem hoje porque foram uma reclassificação de algo que já estava no extrato (ver
-    // ConverterLancamentoAsync) — apagar o item, como esta rotina fazia antes, destruiria dinheiro
-    // que realmente se moveu no banco (a saída/entrada continua tendo acontecido, só a classificação
-    // como "Transferência" que estava errada). Volta a ficar sem categoria, pendente, pronto pra
-    // reclassificar direito. Saldo não muda: o valor do lançamento nunca foi alterado, só o rótulo.
+    // Reverte a classificação. Dois casos bem diferentes, segundo Provisoria:
+    // - Provisoria=false: o lado já existia antes de virar Transferência (veio de um extrato real
+    //   já importado, ou foi reconciliado depois — ver ImportacaoService.ReconciliarProvisoria).
+    //   Apagar destruiria dinheiro que realmente se moveu no banco — só tira o rótulo, volta a
+    //   "Sem categoria", pendente. Saldo não muda: o valor do lançamento nunca foi alterado.
+    // - Provisoria=true: o lado foi inventado do zero pelo próprio app só pra existir a contrapartida
+    //   (ver ConverterLancamentoAsync/CriarAsync) — nunca existiu no extrato real. Desfazer tem que
+    //   apagar ele mesmo, senão sobra um lançamento fantasma "Sem categoria" que nunca aconteceu, com
+    //   o saldo do dia ainda contando o efeito dele (bug: saldo errado depois de desfazer).
     public async Task DesfazerClassificacaoAsync(Guid id, Guid usuarioLogadoId, string perfil)
     {
         var transferencia = await _transferenciaRepo.ObterPorIdAsync(id)
@@ -67,13 +70,21 @@ public class TransferenciaService : ITransferenciaService
         var itemOrigem = regOrigem?.Saidas.FirstOrDefault(s => s.TransferenciaId == transferencia.Id);
         if (regOrigem != null && itemOrigem != null)
         {
-            itemOrigem.Categoria = string.Empty;
-            itemOrigem.TipoCusto = null;
-            itemOrigem.TransferenciaId = null;
-            itemOrigem.PendenteCategorizacao = true;
-            // Reatribui a lista — Entradas/Saidas são jsonb sem value comparer configurado, então o
-            // EF só detecta a mudança se a referência da lista mudar, não se um item dela for mutado.
-            regOrigem.Saidas = new List<ItemFinanceiroSaida>(regOrigem.Saidas);
+            if (itemOrigem.Provisoria)
+            {
+                regOrigem.Saidas = regOrigem.Saidas.Where(s => s.Id != itemOrigem.Id).ToList();
+                regOrigem.SaldoFinal += itemOrigem.Valor;
+            }
+            else
+            {
+                itemOrigem.Categoria = string.Empty;
+                itemOrigem.TipoCusto = null;
+                itemOrigem.TransferenciaId = null;
+                itemOrigem.PendenteCategorizacao = true;
+                // Reatribui a lista — Entradas/Saidas são jsonb sem value comparer configurado, então
+                // o EF só detecta a mudança se a referência da lista mudar, não se um item for mutado.
+                regOrigem.Saidas = new List<ItemFinanceiroSaida>(regOrigem.Saidas);
+            }
             regOrigem.SalvoEm = DateTime.UtcNow;
             await _registroRepo.AtualizarAsync(regOrigem);
         }
@@ -82,17 +93,39 @@ public class TransferenciaService : ITransferenciaService
         var itemDestino = regDestino?.Entradas.FirstOrDefault(e => e.TransferenciaId == transferencia.Id);
         if (regDestino != null && itemDestino != null)
         {
-            itemDestino.Categoria = null;
-            itemDestino.TipoCusto = null;
-            itemDestino.TransferenciaId = null;
-            itemDestino.PendenteCategorizacao = true;
-            regDestino.Entradas = new List<ItemFinanceiro>(regDestino.Entradas);
+            if (itemDestino.Provisoria)
+            {
+                regDestino.Entradas = regDestino.Entradas.Where(e => e.Id != itemDestino.Id).ToList();
+                regDestino.SaldoFinal -= itemDestino.Valor;
+            }
+            else
+            {
+                itemDestino.Categoria = null;
+                itemDestino.TipoCusto = null;
+                itemDestino.TransferenciaId = null;
+                itemDestino.PendenteCategorizacao = true;
+                regDestino.Entradas = new List<ItemFinanceiro>(regDestino.Entradas);
+            }
             regDestino.SalvoEm = DateTime.UtcNow;
             await _registroRepo.AtualizarAsync(regDestino);
         }
 
         await _transferenciaRepo.RemoverAsync(transferencia);
         if (transacao != null) await transacao.CommitAsync();
+
+        // Cascata de saldo nas duas contas — essencial quando uma contrapartida provisória foi
+        // apagada acima (muda SaldoFinal do dia); inofensiva no caso "só desvinculou" (delta zero,
+        // RecalcularDiasSeguintesAsync para na primeira divergência zerada, não escreve nada à toa).
+        if (regOrigem != null && itemOrigem != null)
+        {
+            var registrosOrigem = await _registroRepo.ListarPorContaAsync(transferencia.ContaOrigemId);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaOrigemId, transferencia.Data, regOrigem.SaldoFinal, registrosOrigem);
+        }
+        if (regDestino != null && itemDestino != null)
+        {
+            var registrosDestino = await _registroRepo.ListarPorContaAsync(transferencia.ContaDestinoId);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaDestinoId, transferencia.Data, regDestino.SaldoFinal, registrosDestino);
+        }
 
         await _auditService.LogAsync(transferencia.ClienteId, usuarioLogadoId, "Transferencia", "DesfazerClassificacao",
             transferencia.Id.ToString(), JsonSerializer.Serialize(transferencia), null);
@@ -132,6 +165,20 @@ public class TransferenciaService : ITransferenciaService
 
         await _transferenciaRepo.RemoverAsync(transferencia);
         if (transacao != null) await transacao.CommitAsync();
+
+        // Cascata de saldo nas duas contas — sem isso, qualquer dia seguinte já existente (mesma
+        // conta) ficava com um Inicio/SaldoFinal baseado num valor que não existe mais depois da
+        // exclusão (mesma garantia que CriarAsync já aplica na criação).
+        if (regOrigem != null && itemOrigem != null)
+        {
+            var registrosOrigem = await _registroRepo.ListarPorContaAsync(transferencia.ContaOrigemId);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaOrigemId, transferencia.Data, regOrigem.SaldoFinal, registrosOrigem);
+        }
+        if (regDestino != null && itemDestino != null)
+        {
+            var registrosDestino = await _registroRepo.ListarPorContaAsync(transferencia.ContaDestinoId);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaDestinoId, transferencia.Data, regDestino.SaldoFinal, registrosDestino);
+        }
 
         await _auditService.LogAsync(transferencia.ClienteId, usuarioLogadoId, "Transferencia", "Exclusao",
             transferencia.Id.ToString(), JsonSerializer.Serialize(transferencia), null);
