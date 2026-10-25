@@ -118,9 +118,13 @@ public class ContasBancariasController : ControllerBase
     [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
     public async Task<IActionResult> PreviewExtrato(
         Guid contaId, IFormFile arquivo,
-        [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim)
+        [FromForm] DateOnly? dataInicio, [FromForm] DateOnly? dataFim,
+        // Escape hatch pra conta CartaoCredito quando a detecção automática de sinal erra o
+        // formato do arquivo — ver ImportacaoService.NormalizarSinalParaCartao.
+        [FromForm] bool? inverterSinaisManualmente = null)
     {
-        var preview = await _importacaoService.PreviewAsync(contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim);
+        var preview = await _importacaoService.PreviewAsync(
+            contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim, inverterSinaisManualmente);
         return Ok(new ApiResponse<PreviewImportacaoDto> { Dados = preview });
     }
 
@@ -134,7 +138,8 @@ public class ContasBancariasController : ControllerBase
         [FromForm] string? resolucoesDuplicatasJson = null,
         // Cartão (Bloco 2): obrigatórios só quando a conta é CartaoCredito — ver ImportacaoService.
         [FromForm] string? banco = null, [FromForm] DateOnly? dataVencimentoFatura = null,
-        [FromForm] DateOnly? dataFechamentoFatura = null, [FromForm] string? competenciaFatura = null)
+        [FromForm] DateOnly? dataFechamentoFatura = null, [FromForm] string? competenciaFatura = null,
+        [FromForm] bool? inverterSinaisManualmente = null)
     {
         List<ResolucaoDuplicataDto>? resolucoes = null;
         if (!string.IsNullOrWhiteSpace(resolucoesDuplicatasJson))
@@ -153,7 +158,7 @@ public class ContasBancariasController : ControllerBase
 
         var resultado = await _importacaoService.ImportarArquivoAsync(
             contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim, resolucoes,
-            banco, dataVencimentoFatura, dataFechamentoFatura, competenciaFatura);
+            banco, dataVencimentoFatura, dataFechamentoFatura, competenciaFatura, inverterSinaisManualmente);
         return Ok(new ApiResponse<ResultadoImportacaoDto> { Dados = resultado });
     }
 

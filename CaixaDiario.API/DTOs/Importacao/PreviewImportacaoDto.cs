@@ -15,6 +15,12 @@ public class PreviewImportacaoDto
     public int TotalConciliarAoImportar { get; set; }
     public decimal TotalEntradas { get; set; }
     public decimal TotalSaidas { get; set; }
+    public int QuantidadeEntradas { get; set; }
+    public int QuantidadeSaidas { get; set; }
+    // Só relevante pra conta CartaoCredito: true quando o sinal bruto do arquivo foi invertido
+    // (automaticamente, por detecção de maioria, ou forçado via inverterSinaisManualmente) pra
+    // chegar na convenção "compra = saída" — ver ImportacaoService.NormalizarSinalParaCartao.
+    public bool SinalInvertidoParaCartao { get; set; }
     // Menor/maior data do arquivo INTEIRO (sem aplicar dataInicio/dataFim) — usado só pra
     // pré-preencher o seletor de intervalo no frontend.
     public string DataInicioArquivo { get; set; } = string.Empty;

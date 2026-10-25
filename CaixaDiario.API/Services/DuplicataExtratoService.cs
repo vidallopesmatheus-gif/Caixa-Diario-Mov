@@ -95,17 +95,25 @@ public class DuplicataExtratoService : IDuplicataExtratoService
 
     // Pool em memória: cada lançamento só pode aparecer em UM par (o de maior score), pra não
     // sugerir o mesmo item pra duas suspeitas diferentes.
+    //
+    // Ordena por data antes de comparar — como um par só é válido dentro de JanelaDias, uma vez
+    // ordenados, assim que a diferença de data passa da janela nenhum "j" seguinte vai satisfazer
+    // também (só cresce), então dá pra interromper o laço interno (break) em vez de testar cada par
+    // contra todos os outros. Sem isso, uma conta com muito histórico (ex.: cartão de crédito com
+    // anos de compras parceladas) virava uma busca O(n²) de verdade, lenta o bastante pra estourar
+    // timeout e cair como erro genérico na tela "Revisar duplicatas".
     private static List<DuplicataProvavelDto> EncontrarPares(List<Item> itens, string tipo)
     {
+        var ordenados = itens.OrderBy(i => i.Data.DayNumber).ToList();
         var candidatos = new List<(Item A, Item B, int Score)>();
-        for (var i = 0; i < itens.Count; i++)
+        for (var i = 0; i < ordenados.Count; i++)
         {
-            for (var j = i + 1; j < itens.Count; j++)
+            for (var j = i + 1; j < ordenados.Count; j++)
             {
-                var a = itens[i];
-                var b = itens[j];
+                var a = ordenados[i];
+                var b = ordenados[j];
+                if (b.Data.DayNumber - a.Data.DayNumber > JanelaDias) break;
                 if (Math.Abs(a.Valor - b.Valor) > ToleranciaValor) continue;
-                if (Math.Abs(a.Data.DayNumber - b.Data.DayNumber) > JanelaDias) continue;
 
                 var score = CalcularScoreDescricao(a.Descricao, b.Descricao);
                 if (score < ScoreMinimo) continue;

@@ -89,6 +89,9 @@ export default function ClientContaDetalhePage() {
   const [dataFimImport, setDataFimImport] = useState('')
   const [importando, setImportando] = useState(false)
   const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
+  // Cartão: undefined = detecção automática (padrão); true/false = usuário forçou via "Inverter
+  // sinais" — escape hatch pra formato de banco que a heurística de maioria não acerta.
+  const [inverterSinaisManualmente, setInverterSinaisManualmente] = useState<boolean | undefined>(undefined)
   // Fase 1.7: decisão por linha pra duplicata manual (índice ausente = Mesclar, padrão).
   // Fase 3.1: mesmo mapa pra duplicata entre arquivos (índice ausente = Ignorar, padrão).
   const [resolucoesDuplicatas, setResolucoesDuplicatas] = useState<Record<number, 'Mesclar' | 'ImportarComoNovo' | 'Ignorar' | 'Importar'>>({})
@@ -244,6 +247,7 @@ export default function ClientContaDetalhePage() {
     setDataFechamentoFatura('')
     setCompetenciaFatura('')
     setCompetenciaEditadaManualmente(false)
+    setInverterSinaisManualmente(undefined)
     try {
       const resumo = await previewExtrato(contaId, arquivo)
       setDataInicioImport(resumo.dataInicioArquivo || todayISO())
@@ -274,9 +278,26 @@ export default function ClientContaDetalhePage() {
     setPreviewCarregando(true)
     try {
       setResolucoesDuplicatas({})
-      setResumoImportacao(await previewExtrato(contaId, arquivoImportar, { dataInicio: novoInicio, dataFim: novoFim }))
+      setResumoImportacao(await previewExtrato(contaId, arquivoImportar, {
+        dataInicio: novoInicio, dataFim: novoFim, inverterSinaisManualmente,
+      }))
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao calcular resumo da importação.')
+    } finally {
+      setPreviewCarregando(false)
+    }
+  }
+
+  async function handleAlterarInverterSinais(valor: boolean | undefined) {
+    setInverterSinaisManualmente(valor)
+    if (!contaId || !arquivoImportar) return
+    setPreviewCarregando(true)
+    try {
+      setResumoImportacao(await previewExtrato(contaId, arquivoImportar, {
+        dataInicio: dataInicioImport, dataFim: dataFimImport, inverterSinaisManualmente: valor,
+      }))
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao recalcular o resumo da importação.')
     } finally {
       setPreviewCarregando(false)
     }
@@ -295,6 +316,7 @@ export default function ClientContaDetalhePage() {
         dataInicio: dataInicioImport,
         dataFim: dataFimImport,
         resolucoesDuplicatas: resolucoes,
+        inverterSinaisManualmente,
         ...(conta?.tipo === 'CartaoCredito' ? {
           banco: bancoFatura,
           dataVencimentoFatura,
@@ -307,6 +329,7 @@ export default function ClientContaDetalhePage() {
       setArquivoImportar(null)
       setResumoImportacao(null)
       setResolucoesDuplicatas({})
+      setInverterSinaisManualmente(undefined)
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
@@ -1663,12 +1686,37 @@ export default function ClientContaDetalhePage() {
             </p>
             <p>
               <strong style={{ color: '#34c759' }}>{resumoImportacao.totalNovas}</strong> serão importadas agora
-              {resumoImportacao.totalNovas > 0 && (
+              {resumoImportacao.totalNovas > 0 && conta?.tipo === 'CartaoCredito' ? (
+                <>
+                  {' · '}
+                  <span className="val-red">Compras: -{fmtBRL(resumoImportacao.totalSaidas)} ({resumoImportacao.quantidadeSaidas})</span>
+                  {' · '}
+                  <span className="val-green">Estornos: {fmtBRL(resumoImportacao.totalEntradas)} ({resumoImportacao.quantidadeEntradas})</span>
+                </>
+              ) : resumoImportacao.totalNovas > 0 && (
                 <> · <span className="val-green">+{fmtBRL(resumoImportacao.totalEntradas)}</span> em entradas · <span className="val-red">-{fmtBRL(resumoImportacao.totalSaidas)}</span> em saídas</>
               )}.
             </p>
             {resumoImportacao.totalNovas > 0 && (
               <p style={{ fontSize: 12 }}>Entram como <strong>pendentes de categorização</strong> — categorize depois na tela de categorização.</p>
+            )}
+            {conta?.tipo === 'CartaoCredito' && (
+              <div style={{ marginTop: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={inverterSinaisManualmente ?? resumoImportacao.sinalInvertidoParaCartao}
+                    onChange={e => handleAlterarInverterSinais(e.target.checked)}
+                  />
+                  Inverter sinais (compra entrou como estorno, ou vice-versa?)
+                </label>
+                {inverterSinaisManualmente !== undefined && (
+                  <button type="button" className="btn-cancel" style={{ fontSize: 11, padding: '2px 8px', marginTop: 4 }}
+                    onClick={() => handleAlterarInverterSinais(undefined)}>
+                    Voltar pra detecção automática
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
