@@ -65,6 +65,8 @@ public class TransferenciaServiceTests
         _transferenciaRepoMock.Setup(r => r.ObterPorIdAsync(transferenciaId)).ReturnsAsync(transferencia);
         _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(origemId, data)).ReturnsAsync(regOrigem);
         _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(destinoId, data)).ReturnsAsync(regDestino);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(origemId)).ReturnsAsync(new List<RegistroDiario> { regOrigem });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(destinoId)).ReturnsAsync(new List<RegistroDiario> { regDestino });
 
         await _sut.DesfazerClassificacaoAsync(transferenciaId, clienteId, "cliente");
 
@@ -89,6 +91,107 @@ public class TransferenciaServiceTests
     }
 
     [Fact]
+    public async Task DesfazerClassificacaoAsync_ContrapartidaProvisoria_ApagaEAjustaSaldoDasDuasContas()
+    {
+        // Caso real reportado: "Pix recebido" (R$520) virou transferência pra Investimento Nubank
+        // sem contrapartida pré-existente — o app criou a saída −520 do zero (Provisoria=true) lá.
+        // Desfazer tem que apagar essa saída fantasma, não só tirar o rótulo.
+        var clienteId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        var origemId = Guid.NewGuid(); // Investimento Nubank — de onde "saiu" o dinheiro provisório
+        var destinoId = Guid.NewGuid(); // conta corrente — onde o Pix realmente foi recebido
+        var data = new DateOnly(2026, 10, 15);
+
+        var transferencia = new Transferencia
+        {
+            Id = transferenciaId, ClienteId = clienteId, ContaOrigemId = origemId, ContaDestinoId = destinoId,
+            Data = data, Valor = 520m, CriadoEm = DateTime.UtcNow,
+        };
+
+        var regOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = origemId, Data = data, Inicio = 1335.53m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 815.53m,
+            Saidas = new() { new ItemFinanceiroSaida { Descricao = "Pix recebido", Valor = 520m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId, Provisoria = true } },
+        };
+        // Lançamento real que já estava no extrato da conta de destino — esse não é provisório.
+        var regDestino = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = destinoId, Data = data, Inicio = 0m,
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 520m,
+            Entradas = new() { new ItemFinanceiro { Descricao = "Pix recebido", Valor = 520m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId, Provisoria = false } },
+        };
+
+        _transferenciaRepoMock.Setup(r => r.ObterPorIdAsync(transferenciaId)).ReturnsAsync(transferencia);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(origemId, data)).ReturnsAsync(regOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(destinoId, data)).ReturnsAsync(regDestino);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(origemId)).ReturnsAsync(new List<RegistroDiario> { regOrigem });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(destinoId)).ReturnsAsync(new List<RegistroDiario> { regDestino });
+
+        await _sut.DesfazerClassificacaoAsync(transferenciaId, clienteId, "cliente");
+
+        // A contrapartida provisória (fantasma) some de vez — não vira "Sem categoria" órfã.
+        Assert.Empty(regOrigem.Saidas);
+        Assert.Equal(1335.53m, regOrigem.SaldoFinal); // 815.53 + 520 — volta ao estado anterior
+
+        // A ponta real (não provisória) só é desvinculada, exatamente como antes.
+        var entradaRevertida = Assert.Single(regDestino.Entradas);
+        Assert.Null(entradaRevertida.TransferenciaId);
+        Assert.True(entradaRevertida.PendenteCategorizacao);
+        Assert.Equal(520m, regDestino.SaldoFinal); // inalterado — era um lançamento real
+
+        _transferenciaRepoMock.Verify(r => r.RemoverAsync(transferencia), Times.Once);
+    }
+
+    [Fact]
+    public async Task DesfazerClassificacaoAsync_RecalculaCadeiaDeSaldoDosDiasSeguintes()
+    {
+        var clienteId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        var origemId = Guid.NewGuid();
+        var destinoId = Guid.NewGuid();
+        var data = new DateOnly(2026, 10, 15);
+        var diaSeguinte = data.AddDays(1);
+
+        var transferencia = new Transferencia
+        {
+            Id = transferenciaId, ClienteId = clienteId, ContaOrigemId = origemId, ContaDestinoId = destinoId,
+            Data = data, Valor = 520m, CriadoEm = DateTime.UtcNow,
+        };
+        var regOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = origemId, Data = data, Inicio = 1335.53m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 815.53m,
+            Saidas = new() { new ItemFinanceiroSaida { Descricao = "Pix recebido", Valor = 520m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId, Provisoria = true } },
+        };
+        var regDestino = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = destinoId, Data = data, Inicio = 0m,
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 520m,
+            Entradas = new() { new ItemFinanceiro { Descricao = "Pix recebido", Valor = 520m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId, Provisoria = false } },
+        };
+        // Dia seguinte da conta de origem já existia com um saldo que ainda assume os −520
+        // fantasmas (Inicio = 815.53, o SaldoFinal de regOrigem ANTES de desfazer).
+        var regOrigemDiaSeguinte = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = origemId, Data = diaSeguinte,
+            Inicio = 815.53m, SaldoFinal = 815.53m, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+
+        _transferenciaRepoMock.Setup(r => r.ObterPorIdAsync(transferenciaId)).ReturnsAsync(transferencia);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(origemId, data)).ReturnsAsync(regOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(destinoId, data)).ReturnsAsync(regDestino);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(origemId)).ReturnsAsync(new List<RegistroDiario> { regOrigem, regOrigemDiaSeguinte });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(destinoId)).ReturnsAsync(new List<RegistroDiario> { regDestino });
+
+        await _sut.DesfazerClassificacaoAsync(transferenciaId, clienteId, "cliente");
+
+        // A cadeia propagou o delta (+520, de 815.53 pra 1335.53) pro dia seguinte da mesma conta.
+        Assert.Equal(1335.53m, regOrigemDiaSeguinte.Inicio);
+        Assert.Equal(1335.53m, regOrigemDiaSeguinte.SaldoFinal);
+    }
+
+    [Fact]
     public async Task DesfazerClassificacaoAsync_TransferenciaInexistente_LancaNaoEncontrada()
     {
         _transferenciaRepoMock.Setup(r => r.ObterPorIdAsync(It.IsAny<Guid>())).ReturnsAsync((Transferencia?)null);
@@ -97,6 +200,95 @@ public class TransferenciaServiceTests
 
         Assert.Equal(404, ex.StatusCode);
         Assert.Equal(CodigoRetorno.TRANSFERENCIA_NAO_ENCONTRADA, ex.Codigo);
+    }
+
+    // ── ExcluirAsync: exclui de verdade as duas pontas (ação "Excluir" num item do extrato) ──────
+
+    [Fact]
+    public async Task ExcluirAsync_RemoveAsDuasPontasEAjustaOsSaldos()
+    {
+        var clienteId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        var origemId = Guid.NewGuid();
+        var destinoId = Guid.NewGuid();
+        var data = new DateOnly(2026, 10, 15);
+
+        var transferencia = new Transferencia
+        {
+            Id = transferenciaId, ClienteId = clienteId, ContaOrigemId = origemId, ContaDestinoId = destinoId,
+            Data = data, Valor = 520m, CriadoEm = DateTime.UtcNow,
+        };
+        var regOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = origemId, Data = data, Inicio = 1335.53m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 815.53m,
+            Saidas = new() { new ItemFinanceiroSaida { Descricao = "Pix recebido", Valor = 520m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId } },
+        };
+        var regDestino = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = destinoId, Data = data, Inicio = 0m,
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 520m,
+            Entradas = new() { new ItemFinanceiro { Descricao = "Pix recebido", Valor = 520m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId } },
+        };
+
+        _transferenciaRepoMock.Setup(r => r.ObterPorIdAsync(transferenciaId)).ReturnsAsync(transferencia);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(origemId, data)).ReturnsAsync(regOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(destinoId, data)).ReturnsAsync(regDestino);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(origemId)).ReturnsAsync(new List<RegistroDiario> { regOrigem });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(destinoId)).ReturnsAsync(new List<RegistroDiario> { regDestino });
+
+        await _sut.ExcluirAsync(transferenciaId, clienteId, "cliente");
+
+        Assert.Empty(regOrigem.Saidas);
+        Assert.Equal(1335.53m, regOrigem.SaldoFinal);
+        Assert.Empty(regDestino.Entradas);
+        Assert.Equal(0m, regDestino.SaldoFinal);
+        _transferenciaRepoMock.Verify(r => r.RemoverAsync(transferencia), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExcluirAsync_RecalculaCadeiaDeSaldoDosDiasSeguintes()
+    {
+        var clienteId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        var origemId = Guid.NewGuid();
+        var destinoId = Guid.NewGuid();
+        var data = new DateOnly(2026, 10, 15);
+        var diaSeguinte = data.AddDays(1);
+
+        var transferencia = new Transferencia
+        {
+            Id = transferenciaId, ClienteId = clienteId, ContaOrigemId = origemId, ContaDestinoId = destinoId,
+            Data = data, Valor = 520m, CriadoEm = DateTime.UtcNow,
+        };
+        var regOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = origemId, Data = data, Inicio = 1335.53m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 815.53m,
+            Saidas = new() { new ItemFinanceiroSaida { Descricao = "Pix recebido", Valor = 520m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId } },
+        };
+        var regDestino = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = destinoId, Data = data, Inicio = 0m,
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 520m,
+            Entradas = new() { new ItemFinanceiro { Descricao = "Pix recebido", Valor = 520m, Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId } },
+        };
+        var regOrigemDiaSeguinte = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = origemId, Data = diaSeguinte,
+            Inicio = 815.53m, SaldoFinal = 815.53m, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+
+        _transferenciaRepoMock.Setup(r => r.ObterPorIdAsync(transferenciaId)).ReturnsAsync(transferencia);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(origemId, data)).ReturnsAsync(regOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(destinoId, data)).ReturnsAsync(regDestino);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(origemId)).ReturnsAsync(new List<RegistroDiario> { regOrigem, regOrigemDiaSeguinte });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(destinoId)).ReturnsAsync(new List<RegistroDiario> { regDestino });
+
+        await _sut.ExcluirAsync(transferenciaId, clienteId, "cliente");
+
+        Assert.Equal(1335.53m, regOrigemDiaSeguinte.Inicio);
+        Assert.Equal(1335.53m, regOrigemDiaSeguinte.SaldoFinal);
     }
 
     // ── ConverterLancamentoAsync: reclassifica um lançamento já real como Transferência ──────────

@@ -349,7 +349,7 @@ export default function ClientContaDetalhePage() {
   }
 
   async function handleDesfazerTransferencia(transferenciaId: string) {
-    if (!confirm('Desfazer esta classificação como Transferência? O lançamento volta a ficar sem categoria (pendente) — o dinheiro continua lançado, só a classificação muda.')) return
+    if (!confirm('Desfazer esta classificação como Transferência? Se a contrapartida na outra conta veio de um lançamento real (extrato já importado), ela volta a ficar sem categoria, pendente — o dinheiro continua lançado, só a classificação muda. Se ela foi criada automaticamente só pra essa transferência e nunca foi confirmada pelo extrato, ela é removida e os saldos das duas contas são recalculados.')) return
     setMsg('')
     try {
       await desfazerClassificacaoTransferencia(transferenciaId)

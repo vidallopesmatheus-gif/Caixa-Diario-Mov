@@ -60,4 +60,7 @@ public class RegistroRepository : IRegistroRepository
             .Where(r => r.ClienteId == clienteId && !r.Excluido && r.Data >= de && r.Data <= ate)
             .OrderBy(r => r.Data)
             .ToListAsync();
+
+    public async Task<List<RegistroDiario>> ListarTodosNaoExcluidosAsync() =>
+        await _context.RegistrosDiarios.Where(r => !r.Excluido).ToListAsync();
 }

@@ -50,6 +50,9 @@ public class FinanciamentoServiceTests
 
         public Task<int> ContarTodosPorContaAsync(Guid contaBancariaId) =>
             Task.FromResult(Registros.Count(r => r.ContaBancariaId == contaBancariaId));
+
+        public Task<List<RegistroDiario>> ListarTodosNaoExcluidosAsync() =>
+            Task.FromResult(Registros.Where(r => !r.Excluido).ToList());
     }
 
     private readonly Mock<IFinanciamentoRepository> _financiamentoRepoMock = new();

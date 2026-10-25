@@ -178,7 +178,10 @@ public class PrevistoRealizadoServiceTests
         registro.ContasReceber.Add(new ContaProvisionada
         {
             Descricao = "Mensalidade", Valor = 200m, Pago = false,
-            DataVencimento = MesAtual.AddDays(20), Categoria = "Receita", RecorrenciaId = recorrenciaId,
+            // Vencimento = hoje (nunca "< hoje", então nunca Atrasado) — precisa ficar dentro do mês
+            // atual (a janela filtrada abaixo) em qualquer dia do mês em que o teste rodar, então não
+            // dá pra usar um deslocamento fixo tipo "dia 20" (quebra se o teste rodar depois do dia 20).
+            DataVencimento = Hoje, Categoria = "Receita", RecorrenciaId = recorrenciaId,
         });
         ConfigurarRegistros(clienteId, new List<RegistroDiario> { registro });
 
