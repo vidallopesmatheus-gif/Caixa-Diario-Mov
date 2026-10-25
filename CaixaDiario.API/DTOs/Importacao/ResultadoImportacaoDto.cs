@@ -29,4 +29,18 @@ public class ResultadoImportacaoDto
     // Cartão (Bloco 2): preenchido só quando a conta é CartaoCredito — a fatura criada por esta
     // importação, pra tela redirecionar pra "Ver faturas" ou pra abrir ela direto.
     public Guid? FaturaId { get; set; }
+    // Rodada de "parcelamentos": um item por Parcelamento resolvido/criado nesta importação — a
+    // tela mostra "Encontrei N parcelamentos: Trocafone 1/10 (faltam 9 · R$ 1.792,44)...".
+    public List<ParcelamentoDetectadoResumoDto> ParcelamentosDetectados { get; set; } = new();
+}
+
+public class ParcelamentoDetectadoResumoDto
+{
+    public Guid ParcelamentoId { get; set; }
+    public string Comerciante { get; set; } = string.Empty;
+    public int NumeroParcela { get; set; }
+    public int TotalParcelas { get; set; }
+    public int ParcelasRestantes { get; set; }
+    public decimal ValorRestante { get; set; }
+    public string Status { get; set; } = string.Empty;
 }

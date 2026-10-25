@@ -47,4 +47,12 @@ public class ContaProvisionada
     public Guid? LancamentoJurosId { get; set; }
     public Guid? LancamentoAmortizacaoId { get; set; }
     public Guid? LancamentoEncargosId { get; set; }
+
+    // ── Money Vision: parcela futura de um parcelamento de cartão, ainda só prevista ───────────
+    // Preenchido quando esta conta a pagar é uma parcela de Parcelamento ainda não confirmada por
+    // nenhuma fatura real (ver ImportacaoService.ProcessarParcelaDetectadaAsync). Quando a fatura
+    // do mês correspondente chega e traz essa mesma parcela real, esta linha é removida (nunca
+    // fica paga/baixada — a parcela real em ItemFinanceiroSaida é que passa a representar o gasto).
+    public Guid? ParcelamentoId { get; set; }
+    public int? NumeroParcela { get; set; }
 }

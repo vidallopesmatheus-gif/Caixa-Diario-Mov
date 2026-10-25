@@ -460,7 +460,7 @@ test('conta Cartão de crédito: confirmar importação envia banco, vencimento 
     totalImportadas: 2, totalPendentesCategorizacao: 2, totalCategorizadasPorRegra: 0,
     totalConciliadasTransferencia: 0, totalAmbiguasTransferencia: 0, totalEntradas: 0, totalSaidas: 150,
     totalMescladasComManual: 0, totalDuplicatasEntreArquivosSinalizadas: 0, totalDuplicatasEntreArquivosIgnoradas: 0,
-    totalSugestoesVinculo: 0, faturaId: 'fatura-1',
+    totalSugestoesVinculo: 0, faturaId: 'fatura-1', parcelamentosDetectados: [],
   })
   const user = userEvent.setup()
   renderPagina()

@@ -34,6 +34,30 @@ public class ParcelaDescricaoParserTests
         Assert.Null(ParcelaDescricaoParser.TentarExtrair(descricao));
     }
 
+    // Rodada de ajustes de parcelamentos: outros formatos de banco além de "Parcela N/M".
+    [Theory]
+    [InlineData("Magazine Luiza PARC 02/08", "Magazine Luiza", 2, 8)]
+    [InlineData("Magazine Luiza PARC.02/08", "Magazine Luiza", 2, 8)]
+    [InlineData("Casas Bahia (3 de 12)", "Casas Bahia", 3, 12)]
+    [InlineData("Trocafone 1/10", "Trocafone", 1, 10)]
+    public void TentarExtrair_OutrosFormatosDeBanco_ExtraiComercianteNumeroETotal(
+        string descricao, string comercianteEsperado, int numeroEsperado, int totalEsperado)
+    {
+        var resultado = ParcelaDescricaoParser.TentarExtrair(descricao);
+
+        Assert.NotNull(resultado);
+        Assert.Equal(comercianteEsperado, resultado!.Comerciante);
+        Assert.Equal(numeroEsperado, resultado.Numero);
+        Assert.Equal(totalEsperado, resultado.Total);
+    }
+
+    [Fact]
+    public void TentarExtrair_UmaDeUma_RetornaNulo()
+    {
+        // "1/1" não é parcelamento de verdade — mesmo com o padrão explícito "Parcela".
+        Assert.Null(ParcelaDescricaoParser.TentarExtrair("Loja - Parcela 1/1"));
+    }
+
     [Theory]
     [InlineData("Loja - Parcela 0/5")] // numero < 1
     [InlineData("Loja - Parcela 7/5")] // numero > total

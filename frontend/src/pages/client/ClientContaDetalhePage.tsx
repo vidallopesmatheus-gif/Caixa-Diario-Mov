@@ -1095,6 +1095,22 @@ export default function ClientContaDetalhePage() {
         </div>
       )}
 
+      {resultadoImportacao && resultadoImportacao.parcelamentosDetectados.length > 0 && (
+        <div className="cd-msg" style={{ marginTop: -8, marginBottom: 16, fontSize: 13 }}>
+          🔁 Encontrei {resultadoImportacao.parcelamentosDetectados.length} parcelamento(s):{' '}
+          {resultadoImportacao.parcelamentosDetectados.map((p, i) => (
+            <span key={p.parcelamentoId}>
+              {i > 0 && ', '}
+              <strong>{p.comerciante} {p.numeroParcela}/{p.totalParcelas}</strong>
+              {p.status === 'Quitado'
+                ? ' (quitado)'
+                : ` (faltam ${p.parcelasRestantes} · ${fmtBRL(p.valorRestante)})`}
+            </span>
+          ))}
+          . ✓ parcelas futuras criadas em Contas a Pagar.
+        </div>
+      )}
+
       {resultadoImportacao && resultadoImportacao.totalSugestoesVinculo > 0 && !sugestoesConfirmadas && (
         <div className="cd-msg" style={{ marginTop: -8, marginBottom: 16 }}>
           💡 {resultadoImportacao.totalSugestoesVinculo} conta(s) prevista(s) encontrada(s) no extrato importado.{' '}

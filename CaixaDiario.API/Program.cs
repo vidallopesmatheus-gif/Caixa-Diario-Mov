@@ -121,6 +121,8 @@ builder.Services.AddScoped<ILinkConciliacaoService, LinkConciliacaoService>();
 builder.Services.AddScoped<IConciliacaoPublicaService, ConciliacaoPublicaService>();
 builder.Services.AddScoped<IPagamentoFaturaRepository, PagamentoFaturaRepository>();
 builder.Services.AddScoped<IFaturaRepository, FaturaRepository>();
+builder.Services.AddScoped<IParcelamentoRepository, ParcelamentoRepository>();
+builder.Services.AddScoped<IParcelamentoDeteccaoService, ParcelamentoDeteccaoService>();
 builder.Services.AddScoped<IFaturaCartaoService, FaturaCartaoService>();
 builder.Services.AddScoped<IConciliacaoService, ConciliacaoService>();
 builder.Services.AddScoped<IPrevistoRealizadoService, PrevistoRealizadoService>();
