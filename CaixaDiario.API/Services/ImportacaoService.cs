@@ -40,14 +40,48 @@ public class ImportacaoService : IImportacaoService
         _faturaRepo = faturaRepo;
     }
 
-    // Cartão (Bloco 2, Money Vision): a fatura/extrato de cartão representa compras como valores
-    // POSITIVOS (é um extrato de dívida, não de conta corrente) — os parsers assumem a convenção
-    // contrária (positivo = Entrada, convenção de conta corrente/caixa), então pra conta
-    // CartaoCredito o sentido é invertido: positivo vira compra (Saída/dívida), negativo vira
-    // estorno/crédito (Entrada). Sem isso o saldo da conta Cartões nascia positivo (como se fosse
-    // dinheiro) em vez de negativo (dívida).
-    private static List<TransacaoParseada> InverterSinalParaCartao(List<TransacaoParseada> parseadas) =>
-        parseadas.Select(t => t with { Tipo = t.Tipo == "Entrada" ? "Saida" : "Entrada" }).ToList();
+    // Compra no cartão é sempre SAÍDA (dívida), estorno/crédito é sempre ENTRADA — mas bancos
+    // divergem em que sinal bruto usam pra representar isso no arquivo (alguns exportam compra como
+    // positivo, outros como negativo). Inverter sempre (como era antes) acertava uns bancos e
+    // errava outros na mesma direção oposta. Decide pela MAIORIA: olha só as linhas que não parecem
+    // pagamento/estorno (essas nunca invertem — são sempre Entrada) e vê se a maioria delas leu como
+    // Entrada ou Saída na heurística genérica (sinal bruto do valor); se maioria leu Entrada, o
+    // arquivo usa "positivo=compra" e precisa inverter; se maioria já leu Saída, o arquivo já usa a
+    // convenção certa e não mexe.
+    private static readonly string[] PalavrasPagamentoOuEstorno =
+        { "PAGAMENTO", "PAGTO", "ESTORNO", "CREDITO", "CRÉDITO", "DEVOLUCAO", "DEVOLUÇÃO" };
+
+    private static bool EhPossivelPagamentoOuEstorno(string descricao)
+    {
+        var upper = descricao.ToUpperInvariant();
+        return PalavrasPagamentoOuEstorno.Any(upper.Contains);
+    }
+
+    // inverterManualmente: null = detecção automática (padrão); true/false = força o sentido,
+    // ignorando a detecção — escape hatch pro usuário ("Inverter sinais" no preview) pra formatos
+    // que a heurística de maioria não acerta.
+    private static (List<TransacaoParseada> Parseadas, bool Inverteu) NormalizarSinalParaCartao(
+        List<TransacaoParseada> parseadas, bool? inverterManualmente)
+    {
+        bool inverter;
+        if (inverterManualmente.HasValue)
+        {
+            inverter = inverterManualmente.Value;
+        }
+        else
+        {
+            var comuns = parseadas.Where(t => !EhPossivelPagamentoOuEstorno(t.Descricao)).ToList();
+            inverter = comuns.Count(t => t.Tipo == "Entrada") > comuns.Count(t => t.Tipo == "Saida");
+        }
+
+        var normalizadas = parseadas.Select(t =>
+        {
+            if (EhPossivelPagamentoOuEstorno(t.Descricao)) return t with { Tipo = "Entrada" };
+            return inverter ? t with { Tipo = t.Tipo == "Entrada" ? "Saida" : "Entrada" } : t;
+        }).ToList();
+
+        return (normalizadas, inverter);
+    }
 
     // Representação unificada de uma linha do arquivo, independente do formato de origem.
     // Indice = posição no arquivo, na mesma ordem em que o parser encontrou.
@@ -56,11 +90,13 @@ public class ImportacaoService : IImportacaoService
     // ── Preview (não persiste nada) — resumo agregado, sem listar linha por linha ────────────
     public async Task<PreviewImportacaoDto> PreviewAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
-        DateOnly? dataInicio, DateOnly? dataFim)
+        DateOnly? dataInicio, DateOnly? dataFim, bool? inverterSinaisManualmente = null)
     {
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
         var todasParseadas = ParsearArquivoValidando(arquivo);
-        if (conta.Tipo == "CartaoCredito") todasParseadas = InverterSinalParaCartao(todasParseadas);
+        var sinalInvertido = false;
+        if (conta.Tipo == "CartaoCredito")
+            (todasParseadas, sinalInvertido) = NormalizarSinalParaCartao(todasParseadas, inverterSinaisManualmente);
 
         var dataInicioArquivo = todasParseadas.Min(t => t.Data);
         var dataFimArquivo = todasParseadas.Max(t => t.Data);
@@ -73,10 +109,9 @@ public class ImportacaoService : IImportacaoService
             .Where(r => !r.Excluido)
             .ToList();
         var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
-        var ignoradas = historico.Where(t => t.Status == "Ignorada").ToList();
         var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
-        var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos, ignoradas);
+        var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos);
         var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
         var conciliaveis = IdentificarConciliaveis(novas, registrosAtivos);
         var consumidoPelaHeuristica = ContarConsumidoPelaHeuristica(parseadas, jaImportadas);
@@ -92,6 +127,9 @@ public class ImportacaoService : IImportacaoService
             TotalConciliarAoImportar = conciliaveis.Count,
             TotalEntradas = novas.Where(t => t.Tipo == "Entrada").Sum(t => t.Valor),
             TotalSaidas = novas.Where(t => t.Tipo == "Saida").Sum(t => t.Valor),
+            QuantidadeEntradas = novas.Count(t => t.Tipo == "Entrada"),
+            QuantidadeSaidas = novas.Count(t => t.Tipo == "Saida"),
+            SinalInvertidoParaCartao = sinalInvertido,
             DataInicioArquivo = dataInicioArquivo.ToString("yyyy-MM-dd"),
             DataFimArquivo = dataFimArquivo.ToString("yyyy-MM-dd"),
             DuplicatasManuais = MapearDuplicatasManuais(novas, candidatosDuplicata),
@@ -292,11 +330,11 @@ public class ImportacaoService : IImportacaoService
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
         DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null,
         string? banco = null, DateOnly? dataVencimentoFatura = null, DateOnly? dataFechamentoFatura = null,
-        string? competenciaFatura = null)
+        string? competenciaFatura = null, bool? inverterSinaisManualmente = null)
     {
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
         var parseadas = ParsearArquivoValidando(arquivo);
-        if (conta.Tipo == "CartaoCredito") parseadas = InverterSinalParaCartao(parseadas);
+        if (conta.Tipo == "CartaoCredito") (parseadas, _) = NormalizarSinalParaCartao(parseadas, inverterSinaisManualmente);
 
         if (dataInicio.HasValue) parseadas = parseadas.Where(t => t.Data >= dataInicio.Value).ToList();
         if (dataFim.HasValue) parseadas = parseadas.Where(t => t.Data <= dataFim.Value).ToList();
@@ -332,10 +370,9 @@ public class ImportacaoService : IImportacaoService
             .Where(r => !r.Excluido)
             .ToList();
         var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
-        var ignoradas = historico.Where(t => t.Status == "Ignorada").ToList();
         var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
-        var jaImportadas = IdentificarJaImportadas(parseadas, registros, ignoradas);
+        var jaImportadas = IdentificarJaImportadas(parseadas, registros);
         var aImportar = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
 
         if (aImportar.Count == 0)
@@ -902,6 +939,8 @@ public class ImportacaoService : IImportacaoService
             await _registroRepo.AtualizarAsync(r);
         }
 
+        // Excluir o lançamento libera a reimportação do mesmo arquivo (ver IdentificarJaImportadas)
+        // — não marca mais nada como "Ignorada" no histórico de importação pra bloquear isso depois.
         if (saida != null)
         {
             registro.Saidas = registro.Saidas.Where(s => s.Id != dto.Id).ToList();
@@ -922,10 +961,11 @@ public class ImportacaoService : IImportacaoService
         return new ExcluirLancamentoResultDto { TituloReaberto = tituloReaberto };
     }
 
-    // Marca a transação de origem como "Ignorada" no histórico de importação (TransacaoImportada),
-    // se houver uma — é o que impede o item excluído de "ressuscitar" numa reimportação do mesmo
-    // arquivo (ver IdentificarJaImportadas). Sem FitId (CSV/XLSX), casa pela mesma heurística de
-    // data+tipo+valor+descrição normalizada usada no resto da deduplicação.
+    // Só mantém o registro em TransacaoImportada marcado como histórico — "Ignorada" aqui é
+    // puramente informativo (auditoria/suporte: "essa linha foi importada e depois excluída pelo
+    // usuário"), nunca mais lido por IdentificarJaImportadas pra bloquear reimportação (era isso
+    // que deixava a exclusão de um lançamento importado errado — ex.: com o sinal trocado —
+    // irreversível: tentar importar o arquivo certo de novo ficava bloqueado pra sempre).
     private async Task MarcarIgnoradaSeImportadaAsync(
         Guid contaBancariaId, DateOnly data, string tipo, decimal valor, string descricao, string? fitId)
     {
@@ -1148,9 +1188,15 @@ public class ImportacaoService : IImportacaoService
         return parseadas;
     }
 
-    // "Já importada" é decidido contra o LANÇAMENTO REAL (Entradas/Saidas dos registros não
-    // excluídos), nunca contra um histórico à parte — assim, se o registro foi excluído (o usuário
-    // desfez o dia), a transação deixa de contar como já importada e pode ser trazida de novo.
+    // "Já importada" é decidido SÓ contra o LANÇAMENTO REAL (Entradas/Saidas dos registros não
+    // excluídos) — nunca contra um histórico à parte (TransacaoImportada é só auditoria, nunca
+    // trava reimportação). Antes existia um terceiro bloco que também bloqueava contra o histórico
+    // de transações marcadas "Ignorada" em ExcluirLancamentoAsync — só que isso tornava a exclusão
+    // de um lançamento importado irreversível pra fins de reimportação (nada nunca tirava o status
+    // "Ignorada" de volta): excluir um lançamento errado (ex.: importado com o sinal trocado) e
+    // tentar importar o arquivo certo de novo ficava bloqueado pra sempre. Removido — se o usuário
+    // excluiu o lançamento, ele não existe mais no razão, e os dois blocos abaixo já bastam pra
+    // decidir isso sozinhos.
     //
     // OFX: mesmo FITID já presente num lançamento real (identificador único — não precisa de mais nada).
     //
@@ -1161,8 +1207,7 @@ public class ImportacaoService : IImportacaoService
     // como novas transações. Um `.Any()` simples (o que existia antes) marcaria a segunda
     // ocorrência legítima como duplicata só por ela parecer com a primeira — a diferença de
     // quantidade (multiset) é o que resolve isso sem precisar perguntar nada ao usuário.
-    private static HashSet<int> IdentificarJaImportadas(
-        List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos, List<TransacaoImportada> ignoradas)
+    private static HashSet<int> IdentificarJaImportadas(List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos)
     {
         var jaImportadas = new HashSet<int>();
 
@@ -1191,19 +1236,6 @@ public class ImportacaoService : IImportacaoService
                 disponivelNoRazao[chave] = restante - 1;
                 jaImportadas.Add(t.Indice);
             }
-        }
-
-        // Lançamentos que o usuário excluiu do extrato não contam mais como "no razão" (os dois
-        // blocos acima não os encontram mais), mas continuam marcados "Ignorada" no histórico de
-        // importação justamente pra não reaparecer aqui — ver ExcluirLancamentoAsync.
-        foreach (var t in parseadas.Where(t => !jaImportadas.Contains(t.Indice)))
-        {
-            var ignorada = t.FitId != null
-                ? ignoradas.Any(i => i.FitId == t.FitId)
-                : ignoradas.Any(i => i.FitId == null && i.Data == t.Data && i.Tipo == t.Tipo
-                    && Math.Round(i.Valor, 2) == Math.Round(t.Valor, 2)
-                    && NormalizarDescricao(i.Descricao) == NormalizarDescricao(t.Descricao));
-            if (ignorada) jaImportadas.Add(t.Indice);
         }
 
         return jaImportadas;

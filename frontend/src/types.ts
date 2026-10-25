@@ -381,6 +381,10 @@ export interface ResumoImportacao {
   totalNovas: number
   totalEntradas: number
   totalSaidas: number
+  quantidadeEntradas: number
+  quantidadeSaidas: number
+  // Só relevante pra conta CartaoCredito — ver ImportacaoService.NormalizarSinalParaCartao.
+  sinalInvertidoParaCartao: boolean
   dataInicioArquivo: string
   dataFimArquivo: string
   duplicatasManuais: DuplicataManual[]

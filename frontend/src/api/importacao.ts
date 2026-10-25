@@ -38,6 +38,9 @@ function mapResumo(raw: any): ResumoImportacao {
     totalNovas: raw.totalNovas ?? 0,
     totalEntradas: raw.totalEntradas ?? 0,
     totalSaidas: raw.totalSaidas ?? 0,
+    quantidadeEntradas: raw.quantidadeEntradas ?? 0,
+    quantidadeSaidas: raw.quantidadeSaidas ?? 0,
+    sinalInvertidoParaCartao: raw.sinalInvertidoParaCartao ?? false,
     dataInicioArquivo: raw.dataInicioArquivo ?? '',
     dataFimArquivo: raw.dataFimArquivo ?? '',
     duplicatasManuais: (raw.duplicatasManuais ?? []).map(mapDuplicataManual),
@@ -65,12 +68,15 @@ function mapPendente(raw: any): PendenteCategorizacao {
 export const previewExtrato = async (
   contaId: string,
   arquivo: File,
-  opcoes?: { dataInicio?: string; dataFim?: string },
+  opcoes?: { dataInicio?: string; dataFim?: string; inverterSinaisManualmente?: boolean },
 ): Promise<ResumoImportacao> => {
   const form = new FormData()
   form.append('arquivo', arquivo)
   if (opcoes?.dataInicio) form.append('dataInicio', opcoes.dataInicio)
   if (opcoes?.dataFim) form.append('dataFim', opcoes.dataFim)
+  if (opcoes?.inverterSinaisManualmente !== undefined) {
+    form.append('inverterSinaisManualmente', String(opcoes.inverterSinaisManualmente))
+  }
   const res = await apiFetch<ApiResponse<unknown>>(
     `/api/contas-bancarias/${contaId}/preview-extrato`,
     { method: 'POST', body: form },
@@ -92,6 +98,9 @@ export const importarExtrato = async (
     dataInicio?: string; dataFim?: string; resolucoesDuplicatas?: ResolucaoDuplicata[]
     // Cartão (Bloco 2): obrigatórios só quando a conta é CartaoCredito — ver ImportacaoService.
     banco?: string; dataVencimentoFatura?: string; dataFechamentoFatura?: string; competenciaFatura?: string
+    // Mesmo valor usado no preview precisa ser reenviado aqui, senão a decisão de inverter ou não
+    // o sinal é recalculada do zero (ver ImportacaoService.NormalizarSinalParaCartao).
+    inverterSinaisManualmente?: boolean
   },
 ): Promise<ResultadoImportacao> => {
   const form = new FormData()
@@ -106,6 +115,9 @@ export const importarExtrato = async (
   if (opcoes?.dataVencimentoFatura) form.append('dataVencimentoFatura', opcoes.dataVencimentoFatura)
   if (opcoes?.dataFechamentoFatura) form.append('dataFechamentoFatura', opcoes.dataFechamentoFatura)
   if (opcoes?.competenciaFatura) form.append('competenciaFatura', opcoes.competenciaFatura)
+  if (opcoes?.inverterSinaisManualmente !== undefined) {
+    form.append('inverterSinaisManualmente', String(opcoes.inverterSinaisManualmente))
+  }
 
   const res = await apiFetch<ApiResponse<unknown>>(
     `/api/contas-bancarias/${contaId}/importar-extrato`,

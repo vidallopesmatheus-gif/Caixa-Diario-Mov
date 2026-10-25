@@ -403,6 +403,7 @@ test('recebível com vencimento no mês atual aparece na aba Recebíveis sem pre
 function mockResumoImportacao(overrides: Partial<ResumoImportacao> = {}): ResumoImportacao {
   return {
     totalEncontradas: 2, totalJaImportadas: 0, totalNovas: 2, totalEntradas: 0, totalSaidas: 150,
+    quantidadeEntradas: 0, quantidadeSaidas: 2, sinalInvertidoParaCartao: false,
     dataInicioArquivo: '2026-10-01', dataFimArquivo: '2026-10-05',
     duplicatasManuais: [], duplicatasEntreArquivos: [],
     ...overrides,

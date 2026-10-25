@@ -486,6 +486,90 @@ public class ImportacaoServiceTests
 
         Assert.Equal(150m, resultado.TotalSaidas);
         Assert.Equal(0m, resultado.TotalEntradas);
+        Assert.True(resultado.SinalInvertidoParaCartao);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ContaCartaoCredito_ArquivoJaUsaNegativoParaCompra_NaoInverte()
+    {
+        // Bug reportado: a inversão antiga era cega (sempre inverte) — bancos cujo arquivo já
+        // exporta compra como negativo (convenção igual a conta corrente) tinham o sinal virado
+        // errado. A maioria das linhas sem palavra-chave de pagamento/estorno já leu como Saída
+        // (negativo) na heurística genérica, então não deve inverter nada.
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Compra A;-100,00\n26/07/2026;Compra B;-50,00\n26/07/2026;Compra C;30,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Equal(150m, resultado.TotalSaidas); // A + B, compras, continuam saída
+        Assert.Equal(30m, resultado.TotalEntradas); // C, já era a minoria positiva
+        Assert.False(resultado.SinalInvertidoParaCartao);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ContaCartaoCredito_LinhaDePagamentoOuEstorno_SempreEntradaIndependenteDaMaioria()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+
+        // Maioria das compras (sem palavra-chave) é positiva → heurística decide inverter. A linha
+        // de pagamento vem negativa no arquivo, mas tem que entrar como Entrada de qualquer jeito.
+        var csv = "Data;Descricao;Valor\n26/07/2026;Compra Mercado;100,00\n26/07/2026;Compra Padaria;50,00\n26/07/2026;Pagamento recebido;-150,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo, null, null);
+
+        Assert.Equal(150m, resultado.TotalSaidas); // Mercado + Padaria, invertidas pra saída
+        Assert.Equal(150m, resultado.TotalEntradas); // Pagamento recebido, forçada entrada
+    }
+
+    [Fact]
+    public async Task PreviewAsync_ContaCartaoCredito_InverterSinaisManualmente_ForcaOSentido()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>());
+
+        // Maioria já é negativa (a detecção automática não inverteria), mas o usuário força inverter.
+        var csv = "Data;Descricao;Valor\n26/07/2026;Compra A;-100,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo, null, null, inverterSinaisManualmente: true);
+
+        Assert.Equal(0m, resultado.TotalSaidas);
+        Assert.Equal(100m, resultado.TotalEntradas);
+        Assert.True(resultado.SinalInvertidoParaCartao);
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaCartaoCredito_InverterSinaisManualmente_ForcaOSentido()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        RegistroDiario? criado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => criado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Compra A;-100,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "Nubank", dataVencimentoFatura: new DateOnly(2026, 8, 10), inverterSinaisManualmente: true);
+
+        var entrada = Assert.Single(criado!.Entradas);
+        Assert.Equal(100m, entrada.Valor);
+        Assert.Empty(criado.Saidas);
     }
 
     [Fact]
@@ -1430,10 +1514,12 @@ public class ImportacaoServiceTests
     }
 
     [Fact]
-    public async Task PreviewAsync_TransacaoMarcadaComoIgnorada_NaoContaComoNova()
+    public async Task PreviewAsync_TransacaoMarcadaComoIgnorada_ContaComoNovaDeNovo()
     {
-        // Simula a reimportação do mesmo arquivo depois que o usuário excluiu o lançamento do
-        // extrato — a transação não pode "ressuscitar" como nova (ver ExcluirLancamentoAsync).
+        // Bug reportado: reimportar o mesmo arquivo depois que o usuário excluiu o lançamento do
+        // extrato (ex.: porque entrou com o sinal errado) ficava bloqueado pra sempre — o histórico
+        // "Ignorada" (ver ExcluirLancamentoAsync) não pode mais contar como "já importada" aqui,
+        // só serve de auditoria. "Já importada" é decidido só contra o lançamento ATIVO.
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
@@ -1450,8 +1536,8 @@ public class ImportacaoServiceTests
         var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", arquivo, null, null);
 
         Assert.Equal(1, resultado.TotalEncontradas);
-        Assert.Equal(1, resultado.TotalJaImportadas);
-        Assert.Equal(0, resultado.TotalNovas);
+        Assert.Equal(0, resultado.TotalJaImportadas);
+        Assert.Equal(1, resultado.TotalNovas);
     }
 
     // ── Conciliação com contrapartida provisória de Transferência (Bloco 3C: bug do Pix duplicado) ──
