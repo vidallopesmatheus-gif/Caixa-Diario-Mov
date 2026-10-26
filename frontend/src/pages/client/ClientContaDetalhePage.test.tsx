@@ -192,12 +192,14 @@ test('filtro "Só sem categoria" mostra só os lançamentos pendentes', async ()
   expect(screen.getAllByText('Débito · Farmácia').length).toBeGreaterThan(0)
 })
 
-test('selecionar lançamentos mostra a barra de lote e excluir em lote chama a API pra cada um', async () => {
+test('selecionar lançamentos mostra a barra de lote e excluir em lote chama o endpoint de lote uma única vez', async () => {
   vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([
     lancamento({ id: 'a', descricao: 'Compra no débito - Uber', data: '2026-10-08' }),
     lancamento({ id: 'b', descricao: 'Compra no débito - Farmácia', data: '2026-10-07', saldoAcumulado: 50 }),
   ])
-  vi.mocked(importacaoApi.excluirLancamento).mockResolvedValue({ transferenciaExcluida: false, tituloReaberto: null })
+  vi.mocked(importacaoApi.excluirLote).mockResolvedValue({
+    totalExcluidos: 2, transferenciasExcluidas: 0, titulosReabertos: [], contasRecalculadas: ['conta-1'],
+  })
   const user = userEvent.setup()
   renderPagina()
 
@@ -214,12 +216,18 @@ test('selecionar lançamentos mostra a barra de lote e excluir em lote chama a A
 
   await user.click(screen.getByRole('button', { name: 'Excluir' }))
   // Depois de abrir o modal, "Excluir" aparece 2x (botão da barra de lote + botão vermelho de
-  // confirmação) — escopa pelo texto do modal pra achar o botão certo.
-  const aviso = await screen.findByText('Excluir 2 lançamento(s) selecionado(s)? Essa ação não pode ser desfeita.')
+  // confirmação) — escopa pelo texto do modal pra achar o botão certo. O modal agora mostra o
+  // valor total envolvido (soma assinada dos itens selecionados), não só a quantidade.
+  const aviso = await screen.findByText(/Excluir 2 lançamento\(s\)\? Total:/)
   const modal = aviso.closest('.modal') as HTMLElement
   await user.click(within(modal).getByRole('button', { name: 'Excluir' }))
 
-  await waitFor(() => expect(importacaoApi.excluirLancamento).toHaveBeenCalledTimes(2))
+  // Uma chamada só, em lote — não é mais N chamadas de excluirLancamento em sequência.
+  await waitFor(() => expect(importacaoApi.excluirLote).toHaveBeenCalledTimes(1))
+  expect(importacaoApi.excluirLote).toHaveBeenCalledWith('conta-1', [
+    { id: 'a', data: '2026-10-08' },
+    { id: 'b', data: '2026-10-07' },
+  ])
 })
 
 test('categorizar via chip oferece aplicar a todos e criar regra quando há lançamentos parecidos', async () => {
