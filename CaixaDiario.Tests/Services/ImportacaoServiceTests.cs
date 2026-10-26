@@ -1,17 +1,25 @@
 using System.Text;
 using ClosedXML.Excel;
+using CaixaDiario.API.Data;
 using CaixaDiario.API.DTOs.Importacao;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
 using CaixaDiario.API.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Moq;
 
 namespace CaixaDiario.Tests.Services;
 
 public class ImportacaoServiceTests
 {
+    // InMemory não é relacional — o serviço detecta isso (Database.IsRelational()) e não tenta abrir
+    // transação em ExcluirLoteAsync, então os testes continuam simulando só via mocks dos repositórios.
+    private static AppDbContext CriarContexto() =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
     private readonly Mock<IContaBancariaRepository> _contaRepoMock = new();
     private readonly Mock<ITransacaoImportadaRepository> _importRepoMock = new();
     private readonly Mock<IRegistroRepository> _registroRepoMock = new();
@@ -56,7 +64,7 @@ public class ImportacaoServiceTests
             });
         _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object, _categoriaRepoMock.Object,
             _regraRepoMock.Object, _transferenciaServiceMock.Object, _conciliacaoServiceMock.Object, _faturaRepoMock.Object,
-            _parcelamentoDeteccaoServiceMock.Object);
+            _parcelamentoDeteccaoServiceMock.Object, CriarContexto());
     }
 
     private static ContaBancaria CriarConta(Guid contaId, Guid clienteId, decimal saldoInicial = 0m, string tipo = "ContaCorrente") => new()
@@ -1416,6 +1424,7 @@ public class ImportacaoServiceTests
         };
         _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
         _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
 
         RegistroDiario? atualizado = null;
         _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
@@ -1449,6 +1458,7 @@ public class ImportacaoServiceTests
         };
         _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
         _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
 
         RegistroDiario? atualizado = null;
         _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
@@ -1530,6 +1540,7 @@ public class ImportacaoServiceTests
         };
         _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
         _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
 
         var atualizados = new List<RegistroDiario>();
         _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()))
@@ -1565,6 +1576,7 @@ public class ImportacaoServiceTests
         };
         _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
         _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
         _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
 
         var transacaoOriginal = new TransacaoImportada
@@ -1583,6 +1595,167 @@ public class ImportacaoServiceTests
 
         Assert.NotNull(atualizada);
         Assert.Equal("Ignorada", atualizada!.Status);
+    }
+
+    // ── ExcluirLoteAsync: "excluir em massa" (rodada de ajustes Money Vision) ────────────────────
+
+    [Fact]
+    public async Task ExcluirLoteAsync_DoisItensEmDatasDiferentes_RemoveOsDoisERecalculaUmaVezSoAPartirDaMaisAntiga()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var dataAntiga = new DateOnly(2026, 7, 20);
+        var dataNova = new DateOnly(2026, 7, 25);
+        var itemAntigoId = Guid.NewGuid();
+        var itemNovoId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        // Dados internamente consistentes (Inicio do dia seguinte = SaldoFinal do dia anterior) —
+        // é essa consistência que deixa claro o que a cascata de recálculo realmente faz: excluir o
+        // item de 20/07 libera +150 que se propaga pro Inicio/SaldoFinal de 25/07 também, além do
+        // próprio ajuste direto de 25/07 (-300, pela exclusão do item de lá).
+        var registroAntigo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataAntiga, Inicio = 1000m,
+            Entradas = new(), Saidas = new() { new() { Id = itemAntigoId, Descricao = "Posto", Valor = 150m } },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = 850m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        var registroNovo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dataNova, Inicio = 850m,
+            Entradas = new() { new() { Id = itemNovoId, Descricao = "Venda", Valor = 300m } }, Saidas = new(),
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1150m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        var todosOsRegistros = new List<RegistroDiario> { registroAntigo, registroNovo };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, dataAntiga)).ReturnsAsync(registroAntigo);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, dataNova)).ReturnsAsync(registroNovo);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(todosOsRegistros);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(todosOsRegistros);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var resultado = await _sut.ExcluirLoteAsync(contaId, clienteId, "cliente", new ExcluirLoteDto
+        {
+            Itens = new()
+            {
+                new() { Id = itemAntigoId, Data = "2026-07-20" },
+                new() { Id = itemNovoId, Data = "2026-07-25" },
+            },
+        });
+
+        Assert.Equal(2, resultado.TotalExcluidos);
+        Assert.Equal(0, resultado.TransferenciasExcluidas);
+        Assert.Empty(registroAntigo.Saidas);
+        Assert.Empty(registroNovo.Entradas);
+        Assert.Equal(1000m, registroAntigo.SaldoFinal); // 850 + 150 restituído
+        // 1150 (original) - 300 (removido direto) + 150 (cascata propagada do dia anterior) = 1000.
+        Assert.Equal(1000m, registroNovo.Inicio);
+        Assert.Equal(1000m, registroNovo.SaldoFinal);
+        Assert.Equal(new List<Guid> { contaId }, resultado.ContasRecalculadas);
+    }
+
+    [Fact]
+    public async Task ExcluirLoteAsync_IncluiPontaDeTransferencia_DelegaEContaNoResultado()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        var itemTransfId = Guid.NewGuid();
+        var itemComumId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(),
+            Saidas = new()
+            {
+                new() { Id = itemTransfId, Descricao = "Transferência enviada", Valor = 500m, TransferenciaId = transferenciaId, Categoria = "Transferência" },
+                new() { Id = itemComumId, Descricao = "Posto", Valor = 150m },
+            },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = 350m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _transferenciaServiceMock.Setup(t => t.ExcluirAsync(transferenciaId, clienteId, "cliente")).Returns(Task.CompletedTask);
+
+        var resultado = await _sut.ExcluirLoteAsync(contaId, clienteId, "cliente", new ExcluirLoteDto
+        {
+            Itens = new()
+            {
+                new() { Id = itemTransfId, Data = "2026-07-20" },
+                new() { Id = itemComumId, Data = "2026-07-20" },
+            },
+        });
+
+        Assert.Equal(2, resultado.TotalExcluidos);
+        Assert.Equal(1, resultado.TransferenciasExcluidas);
+        _transferenciaServiceMock.Verify(t => t.ExcluirAsync(transferenciaId, clienteId, "cliente"), Times.Once);
+        Assert.Single(registro.Saidas); // só o comum foi removido daqui — a transferência é responsabilidade do TransferenciaService
+    }
+
+    [Fact]
+    public async Task ExcluirLoteAsync_ListaVazia_LancaDadosInvalidos()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.ExcluirLoteAsync(contaId, clienteId, "cliente", new ExcluirLoteDto { Itens = new() }));
+
+        Assert.Equal(400, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExcluirLoteAsync_IdNaoEncontradoNestaConta_LancaNaoEncontradoENaoAplicaMais()
+    {
+        // Garante a regra de segurança: um id que não existe NESTA conta (ex.: de outro cliente, ou
+        // só inválido) derruba o lote inteiro em vez de ignorar silenciosamente — nunca é possível
+        // excluir algo fora da conta validada.
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var data = new DateOnly(2026, 7, 20);
+        var itemValidoId = Guid.NewGuid();
+        var itemInexistenteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Entradas = new(), Saidas = new() { new() { Id = itemValidoId, Descricao = "Posto", Valor = 150m } },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = 850m, CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaId, data)).ReturnsAsync(registro);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirLoteAsync(contaId, clienteId, "cliente", new ExcluirLoteDto
+        {
+            Itens = new()
+            {
+                new() { Id = itemInexistenteId, Data = "2026-07-20" },
+                new() { Id = itemValidoId, Data = "2026-07-20" },
+            },
+        }));
+
+        Assert.Equal(404, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExcluirLoteAsync_ClienteDeOutraConta_LancaAcessoNegado()
+    {
+        var contaId = Guid.NewGuid();
+        var donoId = Guid.NewGuid();
+        var outroClienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, donoId));
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirLoteAsync(contaId, outroClienteId, "cliente", new ExcluirLoteDto
+        {
+            Itens = new() { new() { Id = Guid.NewGuid(), Data = "2026-07-20" } },
+        }));
+
+        Assert.Equal(403, ex.StatusCode);
     }
 
     [Fact]

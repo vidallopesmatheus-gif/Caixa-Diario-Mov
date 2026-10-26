@@ -1,3 +1,4 @@
+using CaixaDiario.API.Data;
 using CaixaDiario.API.DTOs.Importacao;
 using CaixaDiario.API.DTOs.Transferencias;
 using CaixaDiario.API.Enums;
@@ -6,6 +7,7 @@ using CaixaDiario.API.Models;
 using CaixaDiario.API.Repositories.Interfaces;
 using CaixaDiario.API.Services.Parsers;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 
 namespace CaixaDiario.API.Services;
 
@@ -20,6 +22,7 @@ public class ImportacaoService : IImportacaoService
     private readonly IConciliacaoService _conciliacaoService;
     private readonly IFaturaRepository _faturaRepo;
     private readonly IParcelamentoDeteccaoService _parcelamentoDeteccaoService;
+    private readonly AppDbContext _context;
 
     public ImportacaoService(
         IContaBancariaRepository contaRepo,
@@ -30,7 +33,8 @@ public class ImportacaoService : IImportacaoService
         ITransferenciaService transferenciaService,
         IConciliacaoService conciliacaoService,
         IFaturaRepository faturaRepo,
-        IParcelamentoDeteccaoService parcelamentoDeteccaoService)
+        IParcelamentoDeteccaoService parcelamentoDeteccaoService,
+        AppDbContext context)
     {
         _contaRepo = contaRepo;
         _importRepo = importRepo;
@@ -41,6 +45,7 @@ public class ImportacaoService : IImportacaoService
         _conciliacaoService = conciliacaoService;
         _faturaRepo = faturaRepo;
         _parcelamentoDeteccaoService = parcelamentoDeteccaoService;
+        _context = context;
     }
 
     // Compra no cartão é sempre SAÍDA (dívida), estorno/crédito é sempre ENTRADA — mas bancos
@@ -922,21 +927,104 @@ public class ImportacaoService : IImportacaoService
         if (!DateOnly.TryParse(dto.Data, out var data))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Data inválida.", "data");
 
-        var registro = await _registroRepo.ObterPorContaEDataAsync(contaBancariaId, data)
+        var item = await ExcluirUmLancamentoInternoAsync(conta, dto.Id, data, usuarioLogadoId, perfil)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
 
-        var saida = registro.Saidas.FirstOrDefault(s => s.Id == dto.Id);
-        var entrada = saida == null ? registro.Entradas.FirstOrDefault(e => e.Id == dto.Id) : null;
-        if (saida == null && entrada == null)
-            throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+        // Cascata de saldo nos dias seguintes da mesma conta — faltava aqui (a exclusão só ajustava
+        // o SaldoFinal do próprio dia); sem isso, um dia futuro já existente ficava com Inicio
+        // baseado num saldo que não existe mais depois da exclusão.
+        if (item.RegistroAlterado != null)
+        {
+            var registrosDaConta = await _registroRepo.ListarPorContaAsync(conta.Id);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, conta.Id, data, item.RegistroAlterado.SaldoFinal, registrosDaConta);
+        }
+
+        return new ExcluirLancamentoResultDto { TransferenciaExcluida = item.TransferenciaExcluida, TituloReaberto = item.TituloReaberto };
+    }
+
+    // Money Vision: "excluir em massa" na tela de categorização — mesma lógica de sempre (ponta de
+    // transferência exclui as duas pontas, título vinculado reabre, histórico de importação é
+    // liberado pra reimportar), só que numa transação só (tudo ou nada) e com a cascata de saldo
+    // rodando uma vez por conta afetada no final, não uma vez por item (evita recalcular a mesma
+    // cadeia várias vezes seguidas quando o lote tem vários itens na mesma conta/período).
+    public async Task<ExcluirLoteResultDto> ExcluirLoteAsync(
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, ExcluirLoteDto dto)
+    {
+        var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
+        if (dto.Itens == null || dto.Itens.Count == 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe ao menos um lançamento.", "itens");
+
+        var datasInvalidas = dto.Itens.Where(i => !DateOnly.TryParse(i.Data, out _)).ToList();
+        if (datasInvalidas.Count > 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Data inválida.", "data");
+
+        await using var transacao = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
+        var resultado = new ExcluirLoteResultDto();
+        // Por conta afetada, todos os RegistroDiario que esta chamada editou diretamente (exclui
+        // transferência, que já recalcula sozinha as duas contas dela) — usado só pra achar a data
+        // MAIS ANTIGA de cada conta depois, que é de onde a cascata de saldo precisa partir.
+        var registrosAlteradosPorConta = new Dictionary<Guid, List<RegistroDiario>>();
+
+        foreach (var itemDto in dto.Itens)
+        {
+            var data = DateOnly.Parse(itemDto.Data);
+            // Falha o lote inteiro (nunca ignora silenciosamente) se algum id não existir NESTA
+            // conta — é o que garante que um id de outro cliente nunca é aceito aqui: lançamentos
+            // só são resolvidos dentro do RegistroDiario desta conta, nunca por busca global.
+            var item = await ExcluirUmLancamentoInternoAsync(conta, itemDto.Id, data, usuarioLogadoId, perfil)
+                ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO,
+                    $"Lançamento {itemDto.Id} não encontrado nesta conta na data informada.", "itens");
+
+            resultado.TotalExcluidos++;
+            if (item.TransferenciaExcluida) resultado.TransferenciasExcluidas++;
+            if (item.TituloReaberto != null) resultado.TitulosReabertos.Add(item.TituloReaberto);
+            if (item.RegistroAlterado != null)
+            {
+                var contaId = item.RegistroAlterado.ContaBancariaId!.Value;
+                if (!registrosAlteradosPorConta.TryGetValue(contaId, out var lista))
+                    registrosAlteradosPorConta[contaId] = lista = new List<RegistroDiario>();
+                lista.Add(item.RegistroAlterado);
+            }
+        }
+
+        foreach (var (contaId, alterados) in registrosAlteradosPorConta)
+        {
+            var maisAntigo = alterados.OrderBy(r => r.Data).First();
+            var registrosDaConta = await _registroRepo.ListarPorContaAsync(contaId);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, contaId, maisAntigo.Data, maisAntigo.SaldoFinal, registrosDaConta);
+        }
+
+        if (transacao != null) await transacao.CommitAsync();
+
+        resultado.ContasRecalculadas = registrosAlteradosPorConta.Keys.ToList();
+        return resultado;
+    }
+
+    private sealed record ItemExcluidoInterno(bool TransferenciaExcluida, string? TituloReaberto, RegistroDiario? RegistroAlterado);
+
+    // Núcleo compartilhado entre ExcluirLancamentoAsync e ExcluirLoteAsync — null quando o item não
+    // existe nesta conta/data (quem chama decide se isso falha a operação inteira ou só esse item).
+    private async Task<ItemExcluidoInterno?> ExcluirUmLancamentoInternoAsync(
+        ContaBancaria conta, Guid itemId, DateOnly data, Guid usuarioLogadoId, string perfil)
+    {
+        var registro = await _registroRepo.ObterPorContaEDataAsync(conta.Id, data);
+        if (registro == null) return null;
+
+        var saida = registro.Saidas.FirstOrDefault(s => s.Id == itemId);
+        var entrada = saida == null ? registro.Entradas.FirstOrDefault(e => e.Id == itemId) : null;
+        if (saida == null && entrada == null) return null;
 
         // Ponta de Transferência: as duas pontas são o mesmo evento financeiro — excluir só uma
-        // deixaria a outra órfã, então delega pro TransferenciaService excluir as duas juntas.
+        // deixaria a outra órfã, então delega pro TransferenciaService excluir as duas juntas (que
+        // já recalcula a cascata de saldo nas duas contas sozinho).
         var transferenciaId = saida?.TransferenciaId ?? entrada?.TransferenciaId;
         if (transferenciaId.HasValue)
         {
             await _transferenciaService.ExcluirAsync(transferenciaId.Value, usuarioLogadoId, perfil);
-            return new ExcluirLancamentoResultDto { TransferenciaExcluida = true };
+            return new ItemExcluidoInterno(true, null, null);
         }
 
         // Reabre qualquer título (em qualquer conta do cliente) cuja baixa foi vinculada a este
@@ -944,8 +1032,8 @@ public class ImportacaoService : IImportacaoService
         string? tituloReaberto = null;
         foreach (var r in await _registroRepo.ListarPorClienteAsync(conta.ClienteId))
         {
-            var pendenciaReceber = r.ContasReceber.FirstOrDefault(p => p.LancamentoVinculadoId == dto.Id);
-            var pendenciaPagar = r.ContasPagar.FirstOrDefault(p => p.LancamentoVinculadoId == dto.Id);
+            var pendenciaReceber = r.ContasReceber.FirstOrDefault(p => p.LancamentoVinculadoId == itemId);
+            var pendenciaPagar = r.ContasPagar.FirstOrDefault(p => p.LancamentoVinculadoId == itemId);
             if (pendenciaReceber == null && pendenciaPagar == null) continue;
 
             if (pendenciaReceber != null)
@@ -972,22 +1060,22 @@ public class ImportacaoService : IImportacaoService
         // — não marca mais nada como "Ignorada" no histórico de importação pra bloquear isso depois.
         if (saida != null)
         {
-            registro.Saidas = registro.Saidas.Where(s => s.Id != dto.Id).ToList();
+            registro.Saidas = registro.Saidas.Where(s => s.Id != itemId).ToList();
             registro.SaldoFinal += saida.Valor;
-            await MarcarIgnoradaSeImportadaAsync(contaBancariaId, data, "Saida", saida.Valor, saida.Descricao, saida.FitId);
+            await MarcarIgnoradaSeImportadaAsync(conta.Id, data, "Saida", saida.Valor, saida.Descricao, saida.FitId);
         }
         else
         {
-            registro.Entradas = registro.Entradas.Where(e => e.Id != dto.Id).ToList();
+            registro.Entradas = registro.Entradas.Where(e => e.Id != itemId).ToList();
             registro.SaldoFinal -= entrada!.Valor;
-            await MarcarIgnoradaSeImportadaAsync(contaBancariaId, data, "Entrada", entrada.Valor, entrada.Descricao, entrada.FitId);
+            await MarcarIgnoradaSeImportadaAsync(conta.Id, data, "Entrada", entrada.Valor, entrada.Descricao, entrada.FitId);
         }
 
         registro.SalvoEm = DateTime.UtcNow;
         registro.AtualizadoEm = DateTime.UtcNow;
         await _registroRepo.AtualizarAsync(registro);
 
-        return new ExcluirLancamentoResultDto { TituloReaberto = tituloReaberto };
+        return new ItemExcluidoInterno(false, tituloReaberto, registro);
     }
 
     // Só mantém o registro em TransacaoImportada marcado como histórico — "Ignorada" aqui é

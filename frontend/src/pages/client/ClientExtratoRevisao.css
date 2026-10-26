@@ -162,6 +162,36 @@
   border-color: rgba(220,38,38,.3);
 }
 
+.er-btn-toggle.er-btn-excluir {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: rgba(220,38,38,.3);
+  font-weight: 700;
+}
+.er-btn-toggle.er-btn-excluir:disabled {
+  background: var(--bg-card);
+  color: var(--tx3);
+  border-color: var(--bd);
+}
+
+/* Celular: a barra de ações em lote vira fixa no rodapé enquanto há seleção, pro botão Excluir
+   ficar sempre visível sem precisar rolar até o topo. */
+@media (max-width: 640px) {
+  .er-acoes-lote {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    margin: 0;
+    padding: 10px 14px;
+    background: var(--bg);
+    border-top: 1px solid var(--bd);
+    box-shadow: 0 -2px 12px rgba(0,0,0,.2);
+    flex-wrap: wrap;
+  }
+}
+
 .er-vazio {
   text-align: center;
   padding: 40px 20px;

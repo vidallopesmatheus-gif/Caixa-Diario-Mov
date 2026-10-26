@@ -12,7 +12,7 @@ import {
   manterDuplicata,
   obterHistoricoSaldoMensal,
 } from '../../api/contasBancarias'
-import { previewExtrato, importarExtrato, categorizarPendentes, excluirLancamento } from '../../api/importacao'
+import { previewExtrato, importarExtrato, categorizarPendentes, excluirLancamento, excluirLote } from '../../api/importacao'
 import type { DuplicataProvavel, SaldoMensal } from '../../api/contasBancarias'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import type { ResolucaoDuplicata } from '../../api/importacao'
@@ -872,11 +872,12 @@ export default function ClientContaDetalhePage() {
     setProcessandoLote(true)
     setMsg('')
     try {
-      for (const l of itensSelecionados) {
-        if (!l.id) continue
-        await excluirLancamento(contaId, { id: l.id, data: l.data })
-      }
-      setMsg(`${itensSelecionados.length} lançamento(s) excluído(s).`)
+      const itens = itensSelecionados.filter(l => l.id).map(l => ({ id: l.id!, data: l.data }))
+      const resultado = await excluirLote(contaId, itens)
+      setMsg(
+        `${resultado.totalExcluidos} lançamento(s) excluído(s).`
+        + (resultado.titulosReabertos.length > 0 ? ` ${resultado.titulosReabertos.length} título(s) voltaram a ficar em aberto.` : ''),
+      )
       setLoteExcluirAberta(false)
       limparSelecao()
       carregarConta()
@@ -1977,9 +1978,28 @@ export default function ClientContaDetalhePage() {
           </>
         }
       >
-        <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
-          Excluir {itensSelecionados.length} lançamento(s) selecionado(s)? Essa ação não pode ser desfeita.
-        </p>
+        {(() => {
+          const total = itensSelecionados.reduce((s, l) => s + l.valor, 0)
+          const transferencias = itensSelecionados.filter(l => l.categoria === 'Transferência').length
+          return (
+            <>
+              <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+                Excluir {itensSelecionados.length} lançamento(s)? Total: {total >= 0 ? '+' : '−'}{fmtBRL(Math.abs(total))}. Essa ação não pode ser desfeita.
+              </p>
+              <ul style={{ fontSize: 12, color: 'var(--tx3)', margin: '8px 0', paddingLeft: 18 }}>
+                {itensSelecionados.slice(0, 5).map((l, i) => <li key={i}>{l.descricao}</li>)}
+              </ul>
+              {itensSelecionados.length > 5 && (
+                <p style={{ fontSize: 12, color: 'var(--tx3)' }}>+ {itensSelecionados.length - 5} outros</p>
+              )}
+              {transferencias > 0 && (
+                <p style={{ fontSize: 12, color: 'var(--warning)' }}>
+                  ⚠ {transferencias} transferência(s) — a contrapartida na outra conta também será excluída.
+                </p>
+              )}
+            </>
+          )
+        })()}
       </Modal>
 
       {/* Item 8, Bloco 2: depois de categorizar manualmente, oferece aplicar a todos os parecidos

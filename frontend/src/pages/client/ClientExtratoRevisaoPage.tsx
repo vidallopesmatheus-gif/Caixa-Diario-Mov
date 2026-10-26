@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { listarPendentesCategorizacao, categorizarPendentes } from '../../api/importacao'
+import { listarPendentesCategorizacao, categorizarPendentes, excluirLote } from '../../api/importacao'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { listarCategorias } from '../../api/categorias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
@@ -44,6 +44,10 @@ export default function ClientExtratoRevisaoPage() {
   const [msg, setMsg] = useState('')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [categoriaLote, setCategoriaLote] = useState('')
+
+  // ── Excluir em lote (rodada de ajustes Money Vision) ──────────────────────────────────────────
+  const [loteExcluirAberto, setLoteExcluirAberto] = useState(false)
+  const [excluindoLote, setExcluindoLote] = useState(false)
 
   // ── Reclassificar como Transferência (fato permutativo — não é receita nem despesa) ──────────
   const [itemParaTransferencia, setItemParaTransferencia] = useState<PendenteCategorizacao | null>(null)
@@ -229,6 +233,27 @@ export default function ClientExtratoRevisaoPage() {
     const itens = pendentes.filter(p => selecionados.has(p.id))
     aplicarCategoria(itens, categoriaLote)
     setCategoriaLote('')
+  }
+
+  async function confirmarLoteExcluir() {
+    if (!contaId || selecionados.size === 0) return
+    setExcluindoLote(true)
+    setMsg('')
+    try {
+      const itens = pendentes.filter(p => selecionados.has(p.id)).map(p => ({ id: p.id, data: p.data }))
+      const resultado = await excluirLote(contaId, itens)
+      setMsg(
+        `${resultado.totalExcluidos} lançamento(s) excluído(s).`
+        + (resultado.titulosReabertos.length > 0 ? ` ${resultado.titulosReabertos.length} título(s) voltaram a ficar em aberto.` : ''),
+      )
+      setLoteExcluirAberto(false)
+      desmarcarTodos()
+      carregar()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao excluir em lote.')
+    } finally {
+      setExcluindoLote(false)
+    }
   }
 
   function handleCategoriaCriada(nova: CategoriaAdmin) {
@@ -475,7 +500,7 @@ export default function ClientExtratoRevisaoPage() {
           <div className="er-sticky-bar">
             <div className="er-sticky-contador">
               <strong>{pendentes.length}</strong> lançamento(s) aguardando categoria
-              {selecionados.size > 0 && <> · <strong>{selecionados.size}</strong> selecionado(s)</>}
+              {selecionados.size > 0 && <> · <strong>{selecionados.size}</strong> selecionado(s) de {ordemFoco.length} visíveis</>}
             </div>
             <div className="er-sticky-selecao">
               <button type="button" className="er-btn-toggle" onClick={selecionarTodos} disabled={selecionados.size === ordemFoco.length}>
@@ -514,6 +539,15 @@ export default function ClientExtratoRevisaoPage() {
               title="Marcar todas as selecionadas como transferência entre contas"
             >
               🔁 Marcar {selecionados.size} selecionada(s) como Transferência
+            </button>
+            <button
+              type="button"
+              className="er-btn-toggle er-btn-excluir"
+              disabled={selecionados.size === 0}
+              onClick={() => setLoteExcluirAberto(true)}
+              title="Excluir os lançamentos selecionados"
+            >
+              🗑 Excluir ({selecionados.size})
             </button>
             {loteMisto && (
               <span className="er-msg-erro" style={{ marginLeft: 8 }}>
@@ -896,6 +930,41 @@ export default function ClientExtratoRevisaoPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={loteExcluirAberto}
+        title="🗑 Excluir lançamentos selecionados"
+        onClose={() => setLoteExcluirAberto(false)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setLoteExcluirAberto(false)}>Cancelar</button>
+            <button className="btn-danger" onClick={confirmarLoteExcluir} disabled={excluindoLote}>
+              {excluindoLote ? 'Excluindo...' : 'Excluir'}
+            </button>
+          </>
+        }
+      >
+        {(() => {
+          // Itens desta lista são sempre "pendentes de categorização" — nunca uma ponta de
+          // Transferência já confirmada (essa sai da lista no momento em que vira transferência,
+          // antes mesmo de chegar aqui), então não há aviso de contrapartida pra mostrar.
+          const itens = pendentes.filter(p => selecionados.has(p.id))
+          const total = itens.reduce((s, p) => s + (p.tipo === 'Entrada' ? p.valor : -p.valor), 0)
+          return (
+            <>
+              <p style={{ fontSize: 13, color: 'var(--tx3)' }}>
+                Excluir {itens.length} lançamento(s)? Total: {total >= 0 ? '+' : '−'}{fmtBRL(Math.abs(total))}. Essa ação não pode ser desfeita.
+              </p>
+              <ul style={{ fontSize: 12, color: 'var(--tx3)', margin: '8px 0', paddingLeft: 18 }}>
+                {itens.slice(0, 5).map(p => <li key={p.id}>{p.descricao}</li>)}
+              </ul>
+              {itens.length > 5 && (
+                <p style={{ fontSize: 12, color: 'var(--tx3)' }}>+ {itens.length - 5} outros</p>
+              )}
+            </>
+          )
+        })()}
       </Modal>
     </>
   )

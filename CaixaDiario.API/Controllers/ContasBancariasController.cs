@@ -184,6 +184,15 @@ public class ContasBancariasController : ControllerBase
         return Ok(new ApiResponse<ExcluirLancamentoResultDto> { Dados = resultado });
     }
 
+    // Money Vision: "excluir em massa" — um endpoint só, numa transação só, em vez do frontend
+    // fazer N chamadas em sequência pro endpoint acima.
+    [HttpPost("{contaId:guid}/excluir-lote")]
+    public async Task<IActionResult> ExcluirLote(Guid contaId, [FromBody] ExcluirLoteDto dto)
+    {
+        var resultado = await _importacaoService.ExcluirLoteAsync(contaId, ObterUsuarioId(), ObterPerfil(), dto);
+        return Ok(new ApiResponse<ExcluirLoteResultDto> { Dados = resultado });
+    }
+
     // Fase 0.5: "Revisar duplicatas" — só sugere pares, a exclusão usa o endpoint acima.
     [HttpGet("{contaId:guid}/duplicatas")]
     public async Task<IActionResult> ListarDuplicatas(Guid contaId)

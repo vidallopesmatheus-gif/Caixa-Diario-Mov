@@ -44,4 +44,11 @@ public interface IImportacaoService
     /// </summary>
     Task<ExcluirLancamentoResultDto> ExcluirLancamentoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, ExcluirLancamentoDto dto);
+
+    /// <summary>
+    /// Mesma exclusão de ExcluirLancamentoAsync, aplicada a vários lançamentos de uma vez numa
+    /// transação só (tudo ou nada) — se qualquer id não existir nesta conta, nada é excluído.
+    /// </summary>
+    Task<ExcluirLoteResultDto> ExcluirLoteAsync(
+        Guid contaBancariaId, Guid usuarioLogadoId, string perfil, ExcluirLoteDto dto);
 }

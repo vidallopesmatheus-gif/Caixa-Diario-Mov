@@ -192,3 +192,29 @@ export const excluirLancamento = async (
     tituloReaberto: (d.tituloReaberto as string | null) ?? null,
   }
 }
+
+export interface ExcluirLoteResultado {
+  totalExcluidos: number
+  transferenciasExcluidas: number
+  titulosReabertos: string[]
+  contasRecalculadas: string[]
+}
+
+// Money Vision: "excluir em massa" — um endpoint só, numa transação só (tudo ou nada), em vez de N
+// chamadas em sequência pro excluirLancamento acima.
+export const excluirLote = async (
+  contaId: string,
+  itens: Array<{ id: string; data: string }>,
+): Promise<ExcluirLoteResultado> => {
+  const res = await apiFetch<ApiResponse<unknown>>(
+    `/api/contas-bancarias/${contaId}/excluir-lote`,
+    { method: 'POST', body: JSON.stringify({ itens }) },
+  )
+  const d = res.dados as Record<string, unknown>
+  return {
+    totalExcluidos: Number(d.totalExcluidos ?? 0),
+    transferenciasExcluidas: Number(d.transferenciasExcluidas ?? 0),
+    titulosReabertos: (d.titulosReabertos as string[]) ?? [],
+    contasRecalculadas: (d.contasRecalculadas as string[]) ?? [],
+  }
+}
