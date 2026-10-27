@@ -1,4 +1,5 @@
 using CaixaDiario.API.DTOs.Admin;
+using CaixaDiario.API.DTOs.Transferencias;
 using CaixaDiario.API.Enums;
 using CaixaDiario.API.Exceptions;
 using CaixaDiario.API.Responses;
@@ -16,15 +17,21 @@ public class AdminMigracaoController : ControllerBase
     private readonly IMigracaoRecorrenciasService _migracaoRecorrenciasService;
     private readonly IReclassificacaoCategoriasService _reclassificacaoCategoriasService;
     private readonly ILimpezaTransferenciasService _limpezaTransferenciasService;
+    private readonly IRecalculoSaldoService _recalculoSaldoService;
+    private readonly IVerificacaoSinalTransferenciaService _verificacaoSinalTransferenciaService;
 
     public AdminMigracaoController(
         IMigracaoRecorrenciasService migracaoRecorrenciasService,
         IReclassificacaoCategoriasService reclassificacaoCategoriasService,
-        ILimpezaTransferenciasService limpezaTransferenciasService)
+        ILimpezaTransferenciasService limpezaTransferenciasService,
+        IRecalculoSaldoService recalculoSaldoService,
+        IVerificacaoSinalTransferenciaService verificacaoSinalTransferenciaService)
     {
         _migracaoRecorrenciasService = migracaoRecorrenciasService;
         _reclassificacaoCategoriasService = reclassificacaoCategoriasService;
         _limpezaTransferenciasService = limpezaTransferenciasService;
+        _recalculoSaldoService = recalculoSaldoService;
+        _verificacaoSinalTransferenciaService = verificacaoSinalTransferenciaService;
     }
 
     private void VerificarAdmin()
@@ -65,5 +72,27 @@ public class AdminMigracaoController : ControllerBase
         VerificarAdmin();
         var resultado = await _limpezaTransferenciasService.LimparContrapartidasOrfasAsync(confirmar);
         return Ok(new ApiResponse<LimpezaContrapartidasOrfasResultDto> { Dados = resultado });
+    }
+
+    // Money Vision: "saldo das contas não fecha com o extrato" — repara a cadeia de Inicio/
+    // SaldoFinal de TODAS as contas de TODOS os clientes (a corrupção histórica que já existia
+    // antes dos write paths passarem a cascatear certo). Sem "confirmar" (ou confirmar=false): só
+    // relatório, nada é gravado.
+    [HttpPost("saldos-recalcular")]
+    public async Task<IActionResult> RecalcularSaldos([FromQuery] bool confirmar = false)
+    {
+        VerificarAdmin();
+        var resultado = await _recalculoSaldoService.RecalcularTodasAsContasAsync(confirmar);
+        return Ok(new ApiResponse<RecalculoSaldoResultDto> { Dados = resultado });
+    }
+
+    // Money Vision: "Pix recebido entrando como saída" (item 3) — só relatório, nunca corrige
+    // sozinho (ver VerificacaoSinalTransferenciaService).
+    [HttpGet("transferencias-sinal-suspeito")]
+    public async Task<IActionResult> ListarTransferenciasComSinalSuspeito()
+    {
+        VerificarAdmin();
+        var resultado = await _verificacaoSinalTransferenciaService.ListarSinaisSuspeitosAsync();
+        return Ok(new ApiResponse<List<TransferenciaSinalSuspeitoDto>> { Dados = resultado });
     }
 }

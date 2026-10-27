@@ -153,6 +153,7 @@ export const importarExtrato = async (
     faturaId: (d.faturaId as string | null) ?? null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     parcelamentosDetectados: ((d.parcelamentosDetectados as any[]) ?? []).map(mapParcelamentoDetectado),
+    avisosParcelamento: (d.avisosParcelamento as string[]) ?? [],
   }
 }
 

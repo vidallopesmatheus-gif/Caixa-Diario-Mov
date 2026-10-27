@@ -90,6 +90,15 @@ public class ContasBancariasController : ControllerBase
         return Ok(new ApiResponse<ContaBancariaDto> { Dados = conta });
     }
 
+    // Item 4 (Money Vision "saldo não fecha com o extrato") — "Conferir saldo": acerta o saldo da
+    // conta com o banco através de um lançamento visível, nunca uma troca silenciosa do Inicio.
+    [HttpPost("{contaId:guid}/ajustar-saldo")]
+    public async Task<IActionResult> AjustarSaldo(Guid contaId, [FromBody] AjustarSaldoDto dto)
+    {
+        var conta = await _service.AjustarSaldoAsync(contaId, dto, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<ContaBancariaDto> { Dados = conta });
+    }
+
     [HttpPost("{contaId:guid}/vincular-meta/{metaId:guid}")]
     public async Task<IActionResult> VincularMeta(Guid contaId, Guid metaId)
     {

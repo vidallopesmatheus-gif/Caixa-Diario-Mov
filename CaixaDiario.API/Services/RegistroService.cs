@@ -283,6 +283,41 @@ public class RegistroService : IRegistroService
         }
     }
 
+    // Money Vision: "saldo não fecha com o extrato" — RecalcularDiasSeguintesAsync acima propaga um
+    // delta a partir de UM dia que o chamador já sabe estar certo, e para na primeira divergência
+    // zerada assumindo que os dias depois dela também já estão certos. Essa suposição quebra quando
+    // a cadeia já foi corrompida fora de ordem (ex.: um dia no meio ficou com Inicio errado por um
+    // write path que nunca recalculou — havia 8 desses: vínculo de pagamento de fatura, rendimento de
+    // investimento, edição de saldo inicial da conta, etc.) — um recálculo que começa depois do ponto
+    // corrompido nunca o alcança. Esta função é a fonte única de verdade de verdade: percorre a conta
+    // INTEIRA desde o saldo inicial, sem early-exit, reconstruindo Inicio = SaldoFinal do dia anterior
+    // e preservando o "efeito líquido" que cada dia já tinha (SaldoFinal − Inicio, que já embute
+    // entradas, saídas e qualquer ajuste de baixa financeira daquele dia específico — só a ligação
+    // entre os dias é que pode estar errada, nunca a matemática interna de um dia já salvo). Sempre
+    // segura de rodar de novo (idempotente) — por isso é o que tanto os write paths quanto a migração
+    // de reparo em produção devem chamar, em vez de inventar mais uma cadeia de delta.
+    internal static async Task RecalcularContaInteiraAsync(
+        IRegistroRepository registroRepository, Guid contaId, decimal saldoInicialDaConta, List<RegistroDiario>? registrosCliente = null)
+    {
+        var registros = (registrosCliente ?? await registroRepository.ListarPorContaAsync(contaId))
+            .Where(r => r.ContaBancariaId == contaId && !r.Excluido)
+            .OrderBy(r => r.Data)
+            .ToList();
+
+        var saldoCorrente = saldoInicialDaConta;
+        foreach (var registro in registros)
+        {
+            var deltaDoDia = registro.SaldoFinal - registro.Inicio;
+            if (registro.Inicio != saldoCorrente)
+            {
+                registro.Inicio = saldoCorrente;
+                registro.SaldoFinal = saldoCorrente + deltaDoDia;
+                await registroRepository.AtualizarAsync(registro);
+            }
+            saldoCorrente = registro.SaldoFinal;
+        }
+    }
+
     public async Task ExcluirAsync(Guid clienteId, DateOnly data, Guid? contaBancariaId, string motivo, Guid usuarioLogadoId, string perfil)
     {
         if (perfil == "cliente" && usuarioLogadoId != clienteId)

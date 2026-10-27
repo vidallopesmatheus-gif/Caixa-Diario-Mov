@@ -32,6 +32,10 @@ public class ResultadoImportacaoDto
     // Rodada de "parcelamentos": um item por Parcelamento resolvido/criado nesta importação — a
     // tela mostra "Encontrei N parcelamentos: Trocafone 1/10 (faltam 9 · R$ 1.792,44)...".
     public List<ParcelamentoDetectadoResumoDto> ParcelamentosDetectados { get; set; } = new();
+    // Bug real em produção (parcela dá 500): a detecção de parcelamento nunca pode derrubar a
+    // importação — se falhar pra uma linha, a compra entra normal (sem vínculo de parcelamento)
+    // e o motivo aparece aqui, em vez de nunca ter importado nada.
+    public List<string> AvisosParcelamento { get; set; } = new();
 }
 
 public class ParcelamentoDetectadoResumoDto

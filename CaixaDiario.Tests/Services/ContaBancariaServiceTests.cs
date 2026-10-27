@@ -501,6 +501,33 @@ public class ContaBancariaServiceTests
         Assert.Equal(-1200m, atualizada.SaldoAtual);
     }
 
+    // Money Vision: "saldo não fecha com o extrato" — editar o saldo inicial depois que a conta já
+    // tem registros nunca resincronizava a cadeia; o primeiro dia ficava com o Inicio antigo pra
+    // sempre e todo o extrato arrastava a diferença.
+    [Fact]
+    public async Task AtualizarAsync_MudaSaldoInicialComRegistroExistente_RecalculaACadeiaInteira()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Conta", Tipo = "ContaCorrente", SaldoInicial = 100m, Ativa = true };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = new DateOnly(2026, 10, 1),
+            Inicio = 100m, SaldoFinal = 150m, Entradas = new() { new ItemFinanceiro { Descricao = "x", Valor = 50m } },
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _contaRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<ContaBancaria>())).ReturnsAsync((ContaBancaria c) => c);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        var dto = new AtualizarContaBancariaDto { Nome = "Conta", Tipo = "ContaCorrente", SaldoInicial = 300m, Ativa = true };
+
+        await _sut.AtualizarAsync(conta.Id, dto, clienteId, "cliente");
+
+        // Delta local do dia (SaldoFinal − Inicio = +50) preservado, só a âncora mudou: 300 + 50.
+        Assert.Equal(300m, registro.Inicio);
+        Assert.Equal(350m, registro.SaldoFinal);
+    }
+
     [Fact]
     public async Task CriarAsync_ComTipoInvalido_LancaDadosInvalidos()
     {
@@ -766,6 +793,36 @@ public class ContaBancariaServiceTests
         Assert.Equal(1050m, adicionado.SaldoFinal);
     }
 
+    // Money Vision: "saldo não fecha com o extrato" — registrar rendimento nunca cascateava; um dia
+    // futuro já materializado (ex.: recorrência) ficava com Inicio desatualizado pra sempre.
+    [Fact]
+    public async Task RegistrarRendimentoAsync_ComDiaFuturoJaMaterializado_RecalculaOInicioDele()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 1000m);
+        conta.Tipo = "Investimento";
+        var data = new DateOnly(2026, 8, 1);
+        var registroFuturo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data.AddDays(10),
+            Inicio = 1000m, SaldoFinal = 1000m, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync((RegistroDiario?)null);
+        var registrosDaConta = new List<RegistroDiario> { registroFuturo };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(() => registrosDaConta.ToList());
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(registrosDaConta.Add).ReturnsAsync((RegistroDiario r) => r);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new RegistrarRendimentoDto { Data = data, Valor = 50m };
+        await _sut.RegistrarRendimentoAsync(conta.Id, dto, clienteId, "cliente");
+
+        Assert.Equal(1050m, registroFuturo.Inicio);
+        Assert.Equal(1050m, registroFuturo.SaldoFinal);
+    }
+
     [Fact]
     public async Task RegistrarRendimentoAsync_ContaNaoInvestimento_LancaDadosInvalidos()
     {
@@ -778,6 +835,117 @@ public class ContaBancariaServiceTests
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    // ── AjustarSaldoAsync (item 4, Money Vision "saldo não fecha com o extrato") ──────────────────
+
+    [Fact]
+    public async Task AjustarSaldoAsync_SaldoRealMaiorQueOCalculado_CriaEntradaDeAjuste()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 1000m);
+        var hoje = DataLocalHelper.Hoje();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario>());
+
+        RegistroDiario? adicionado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => adicionado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new AjustarSaldoDto { Data = hoje, SaldoReal = 1132.66m };
+        await _sut.AjustarSaldoAsync(conta.Id, dto, clienteId, "cliente");
+
+        Assert.NotNull(adicionado);
+        var entrada = Assert.Single(adicionado!.Entradas);
+        Assert.Equal(132.66m, entrada.Valor);
+        Assert.Equal("Ajuste de saldo", entrada.Categoria);
+        Assert.Equal(LancamentoFiltro.TipoAjusteSaldo, entrada.TipoCusto);
+        Assert.False(LancamentoFiltro.EhOperacional(entrada.TipoCusto)); // nunca conta no DRE
+        Assert.Equal(1132.66m, adicionado.SaldoFinal);
+    }
+
+    [Fact]
+    public async Task AjustarSaldoAsync_SaldoRealMenorQueOCalculado_CriaSaidaDeAjuste()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 1000m);
+        var hoje = DataLocalHelper.Hoje();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario>());
+
+        RegistroDiario? adicionado = null;
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => adicionado = r).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new AjustarSaldoDto { Data = hoje, SaldoReal = 850m };
+        await _sut.AjustarSaldoAsync(conta.Id, dto, clienteId, "cliente");
+
+        Assert.NotNull(adicionado);
+        var saida = Assert.Single(adicionado!.Saidas);
+        Assert.Equal(150m, saida.Valor);
+        Assert.Equal("Ajuste de saldo", saida.Categoria);
+        Assert.Equal(LancamentoFiltro.TipoAjusteSaldo, saida.TipoCusto);
+        Assert.Equal(850m, adicionado.SaldoFinal);
+    }
+
+    [Fact]
+    public async Task AjustarSaldoAsync_SaldoRealIgualAoCalculado_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 1000m);
+        var hoje = DataLocalHelper.Hoje();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, hoje)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario>());
+
+        var dto = new AjustarSaldoDto { Data = hoje, SaldoReal = 1000m };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AjustarSaldoAsync(conta.Id, dto, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    [Fact]
+    public async Task AjustarSaldoAsync_DataFutura_LancaDataFutura()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 1000m);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+
+        var dto = new AjustarSaldoDto { Data = DataLocalHelper.Hoje().AddDays(1), SaldoReal = 1200m };
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.AjustarSaldoAsync(conta.Id, dto, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DATA_FUTURA, ex.Codigo);
+    }
+
+    // Mesma garantia de cascata das outras mutações de saldo deste service.
+    [Fact]
+    public async Task AjustarSaldoAsync_ComDiaFuturoJaMaterializado_RecalculaOInicioDele()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId, saldoInicial: 1000m);
+        var hoje = DataLocalHelper.Hoje();
+        var registroFuturo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = hoje.AddDays(5),
+            Inicio = 1000m, SaldoFinal = 1000m, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, hoje)).ReturnsAsync((RegistroDiario?)null);
+        var registrosDaConta = new List<RegistroDiario> { registroFuturo };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(() => registrosDaConta.ToList());
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(registrosDaConta.Add).ReturnsAsync((RegistroDiario r) => r);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new AjustarSaldoDto { Data = hoje, SaldoReal = 1132.66m };
+        await _sut.AjustarSaldoAsync(conta.Id, dto, clienteId, "cliente");
+
+        Assert.Equal(1132.66m, registroFuturo.Inicio);
+        Assert.Equal(1132.66m, registroFuturo.SaldoFinal);
     }
 
     [Fact]

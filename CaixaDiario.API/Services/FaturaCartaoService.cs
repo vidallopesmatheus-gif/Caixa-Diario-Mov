@@ -30,6 +30,7 @@ public class FaturaCartaoService : IFaturaCartaoService
     private readonly IAuditService _auditService;
     private readonly AppDbContext _context;
     private readonly IFaturaRepository _faturaRepo;
+    private readonly ITransferenciaRepository _transferenciaRepo;
 
     public FaturaCartaoService(
         IContaBancariaRepository contaRepo,
@@ -38,7 +39,8 @@ public class FaturaCartaoService : IFaturaCartaoService
         ICategoriaRepository categoriaRepo,
         IAuditService auditService,
         AppDbContext context,
-        IFaturaRepository faturaRepo)
+        IFaturaRepository faturaRepo,
+        ITransferenciaRepository transferenciaRepo)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
@@ -47,6 +49,7 @@ public class FaturaCartaoService : IFaturaCartaoService
         _auditService = auditService;
         _context = context;
         _faturaRepo = faturaRepo;
+        _transferenciaRepo = transferenciaRepo;
     }
 
     public async Task<List<string>> ListarBancosAsync(Guid contaCartaoId, Guid usuarioLogadoId, string perfil)
@@ -141,6 +144,9 @@ public class FaturaCartaoService : IFaturaCartaoService
         regCartao.SaldoFinal += valorPago;
         regCartao.SalvoEm = DateTime.UtcNow;
         await RegistroDiaHelper.PersistirAsync(_registroRepo, regCartao, novo);
+        // Bug real em produção (saldo não fecha com o extrato): esta entrada no cartão é sempre NOVA
+        // (nunca existia antes), igual à contrapartida de transferência — precisa de cascata.
+        await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contaCartao.Id, contaCartao.SaldoInicial);
 
         var pagamento = new PagamentoFatura
         {
@@ -238,6 +244,8 @@ public class FaturaCartaoService : IFaturaCartaoService
         regCartao.SaldoFinal += valorPago;
         regCartao.SalvoEm = DateTime.UtcNow;
         await RegistroDiaHelper.PersistirAsync(_registroRepo, regCartao, novoCartao);
+        // Ver comentário equivalente em VincularPagamentoAsync — a entrada no cartão é sempre nova.
+        await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contaCartao.Id, contaCartao.SaldoInicial);
 
         var pagamento = new PagamentoFatura
         {
@@ -290,6 +298,10 @@ public class FaturaCartaoService : IFaturaCartaoService
             regCartao.SaldoFinal -= itemCartao.Valor;
             regCartao.SalvoEm = DateTime.UtcNow;
             await _registroRepo.AtualizarAsync(regCartao);
+            // Mesma garantia das outras mutações de saldo deste service.
+            var contaCartaoDesvinculo = await _contaRepo.ObterPorIdAsync(pagamento.ContaCartaoId);
+            if (contaCartaoDesvinculo != null)
+                await RegistroService.RecalcularContaInteiraAsync(_registroRepo, pagamento.ContaCartaoId, contaCartaoDesvinculo.SaldoInicial);
         }
 
         await _pagamentoRepo.RemoverAsync(pagamento);
@@ -364,6 +376,52 @@ public class FaturaCartaoService : IFaturaCartaoService
         await _auditService.LogAsync(conta.ClienteId, usuarioLogadoId, "ItemFinanceiroSaida", "LancarParcelado",
             parcelamentoId.ToString(), null,
             JsonSerializer.Serialize(new { dto.Descricao, dto.ValorTotal, dto.QuantidadeParcelas, dto.Data, dto.Categoria }));
+    }
+
+    // Money Vision: "faturas de cartão — pagamento não abate" (item 5). O usuário já tinha pago a
+    // fatura transferindo dinheiro pra conta do cartão (o saldo real já refletia isso), mas nunca
+    // clicou "vincular pagamento" — a fatura específica continuava com valorPago=0, mesmo a dívida
+    // real já tendo baixado. Procura automaticamente, entre fechamento e vencimento+10 dias, UMA
+    // transferência pro cartão cujo valor bate com o saldo devedor restante, e vincula sem criar
+    // nenhum lançamento novo (a transferência já existe e já afetou o saldo — só passa a contar
+    // pro total desta fatura). Nunca decide sozinho se houver mais de uma candidata.
+    public async Task<bool> AutoVincularPagamentoPorTransferenciaAsync(Guid contaCartaoId, Guid faturaId)
+    {
+        var contaCartao = await ObterCartaoOuFalharAsync(contaCartaoId);
+        var fatura = (await _faturaRepo.ListarPorContaAsync(contaCartaoId)).FirstOrDefault(f => f.Id == faturaId);
+        if (fatura == null) return false;
+
+        var faturasCalculadas = await ListarFaturasInternoAsync(contaCartao);
+        var estaFatura = faturasCalculadas.FirstOrDefault(f => f.Id == faturaId);
+        if (estaFatura == null || estaFatura.SaldoDevedor <= ToleranciaQuitacao) return false;
+
+        var fechamento = fatura.DataFechamento ?? fatura.DataVencimento.AddMonths(-1);
+        var janelaFim = fatura.DataVencimento.AddDays(10);
+
+        var transferencias = (await _transferenciaRepo.ListarPorClienteAsync(contaCartao.ClienteId))
+            .Where(t => t.ContaDestinoId == contaCartaoId && t.Data >= fechamento && t.Data <= janelaFim
+                && Math.Abs(t.Valor - estaFatura.SaldoDevedor) <= ToleranciaQuitacao)
+            .ToList();
+        if (transferencias.Count != 1) return false; // nenhuma ou ambígua — não decide sozinho
+
+        var transferencia = transferencias[0];
+        var registro = await _registroRepo.ObterPorContaEDataAsync(contaCartaoId, transferencia.Data);
+        var item = registro?.Entradas.FirstOrDefault(e => e.TransferenciaId == transferencia.Id && !e.PagamentoFaturaId.HasValue);
+        if (registro == null || item == null) return false;
+
+        var pagamentoId = Guid.NewGuid();
+        item.PagamentoFaturaId = pagamentoId;
+        registro.Entradas = new List<ItemFinanceiro>(registro.Entradas);
+        registro.SalvoEm = DateTime.UtcNow;
+        await _registroRepo.AtualizarAsync(registro);
+
+        await _pagamentoRepo.AdicionarAsync(new PagamentoFatura
+        {
+            Id = pagamentoId, ClienteId = contaCartao.ClienteId, ContaCartaoId = contaCartaoId,
+            ContaOrigemId = transferencia.ContaOrigemId, Competencia = fatura.Competencia, FaturaId = fatura.Id,
+            ValorPago = item.Valor, Data = registro.Data, CriadoEm = DateTime.UtcNow,
+        });
+        return true;
     }
 
     private async Task<List<FaturaCartaoDto>> ListarFaturasInternoAsync(ContaBancaria contaCartao)

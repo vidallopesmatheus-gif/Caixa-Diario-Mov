@@ -226,6 +226,11 @@ public class TransferenciaService : ITransferenciaService
                 ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
             if (item.TransferenciaId.HasValue)
                 throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Este lançamento já foi classificado como transferência.");
+            // Money Vision: "Pix recebido entrando como saída" — nunca propaga um valor corrompido
+            // pra uma contrapartida nova. Saidas/Entradas sempre guardam magnitude positiva; um
+            // valor <= 0 aqui só pode ser dado já corrompido antes desta conversão.
+            if (item.Valor <= 0)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Este lançamento tem um valor inválido e não pode ser convertido em transferência.", "lancamentoId");
             valor = item.Valor;
             descricaoOriginal = item.Descricao;
             item.TipoCusto = LancamentoFiltro.TipoTransferencia;
@@ -271,6 +276,10 @@ public class TransferenciaService : ITransferenciaService
                 regDestino.SaldoFinal += valor;
                 regDestino.SalvoEm = DateTime.UtcNow;
                 await RegistroDiaHelper.PersistirAsync(_registroRepo, regDestino, novo);
+                // A contrapartida provisória pode ter entrado no meio da cadeia de dias já existente
+                // na conta destino (ex.: dias futuros materializados antes) — sem isso, o Inicio deles
+                // ficava desatualizado (bug real em produção: saldo do card não fechava com o extrato).
+                await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contrapartida.Id, contrapartida.SaldoInicial);
             }
 
             contaOrigemId = conta.Id;
@@ -282,6 +291,9 @@ public class TransferenciaService : ITransferenciaService
                 ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
             if (item.TransferenciaId.HasValue)
                 throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Este lançamento já foi classificado como transferência.");
+            // Ver comentário equivalente no ramo de Saída acima.
+            if (item.Valor <= 0)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Este lançamento tem um valor inválido e não pode ser convertido em transferência.", "lancamentoId");
             valor = item.Valor;
             descricaoOriginal = item.Descricao;
             item.TipoCusto = LancamentoFiltro.TipoTransferencia;
@@ -324,6 +336,8 @@ public class TransferenciaService : ITransferenciaService
                 regOrigem.SaldoFinal -= valor;
                 regOrigem.SalvoEm = DateTime.UtcNow;
                 await RegistroDiaHelper.PersistirAsync(_registroRepo, regOrigem, novo);
+                // Ver comentário equivalente no ramo de Saída acima.
+                await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contrapartida.Id, contrapartida.SaldoInicial);
             }
 
             contaOrigemId = contrapartida.Id;
