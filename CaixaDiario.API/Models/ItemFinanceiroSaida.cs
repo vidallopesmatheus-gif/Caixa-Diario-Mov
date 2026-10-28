@@ -49,4 +49,9 @@ public class ItemFinanceiroSaida
     // competência inferida da data (ver Models/Fatura.cs). Só preenchido em compras de conta
     // CartaoCredito; nunca em "Pagamento de fatura" (essas usam PagamentoFaturaId, não FaturaId).
     public Guid? FaturaId { get; set; }
+    // Money Vision: "data da parcela vs. competência" — quando esta Saida é uma parcela (n > 1)
+    // detectada na importação, a Data do RegistroDiario que ela mora é a do fechamento/vencimento
+    // da fatura (a cobrança desta fatura), nunca a data original da compra (que pode ser meses
+    // antes). Preenchido só nesse caso, pra exibir "compra em DD/MM/AAAA" sem perder a data real.
+    public DateOnly? DataCompraOriginal { get; set; }
 }

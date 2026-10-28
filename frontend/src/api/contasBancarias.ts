@@ -55,6 +55,7 @@ function mapLancamento(raw: any): LancamentoExtrato {
     transferenciaId: raw.transferenciaId ?? undefined,
     regraCategorizacaoId: raw.regraCategorizacaoId ?? undefined,
     tipoCusto: raw.tipoCusto ?? undefined,
+    dataCompraOriginal: raw.dataCompraOriginal ?? undefined,
   }
 }
 

@@ -27,6 +27,13 @@ public class PagamentoFaturaRepository : IPagamentoFaturaRepository
         return pagamento;
     }
 
+    public async Task<PagamentoFatura> AtualizarAsync(PagamentoFatura pagamento)
+    {
+        _context.PagamentosFatura.Update(pagamento);
+        await _context.SaveChangesAsync();
+        return pagamento;
+    }
+
     public async Task RemoverAsync(PagamentoFatura pagamento)
     {
         _context.PagamentosFatura.Remove(pagamento);

@@ -162,6 +162,9 @@ export interface LancamentoExtrato {
   // Marcador de ItemFinanceiro/ItemFinanceiroSaida (ver LancamentoFiltro no backend) — "AjusteSaldo"
   // é o único valor usado hoje no front (chip cinza/itálico "Ajuste de saldo", nunca editável).
   tipoCusto?: string
+  // Money Vision: "data da parcela vs. competência" — preenchido só quando esta linha é uma
+  // parcela (numero > 1) cuja data foi reancorada pro fechamento/vencimento da fatura.
+  dataCompraOriginal?: string
 }
 
 export interface PendenciasConta {

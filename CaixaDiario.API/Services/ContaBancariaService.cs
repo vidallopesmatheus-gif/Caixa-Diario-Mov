@@ -248,6 +248,7 @@ public class ContaBancariaService : IContaBancariaService
                     TransferenciaId = saida.TransferenciaId,
                     RegraCategorizacaoId = saida.RegraCategorizacaoId,
                     TipoCusto = saida.TipoCusto,
+                    DataCompraOriginal = saida.DataCompraOriginal?.ToString("yyyy-MM-dd"),
                 }));
             }
 

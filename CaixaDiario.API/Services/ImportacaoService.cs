@@ -100,7 +100,10 @@ public class ImportacaoService : IImportacaoService
 
     // Representação unificada de uma linha do arquivo, independente do formato de origem.
     // Indice = posição no arquivo, na mesma ordem em que o parser encontrou.
-    private record TransacaoParseada(int Indice, DateOnly Data, decimal Valor, string Descricao, string Tipo, string? FitId);
+    // DataOriginal: só preenchida quando Data foi trocada pela data de fechamento/vencimento da
+    // fatura (ver ReancorarParcelasNaFatura) — preserva a data real da compra pra exibição.
+    private record TransacaoParseada(
+        int Indice, DateOnly Data, decimal Valor, string Descricao, string Tipo, string? FitId, DateOnly? DataOriginal = null);
 
     // ── Preview (não persiste nada) — resumo agregado, sem listar linha por linha ────────────
     public async Task<PreviewImportacaoDto> PreviewAsync(
@@ -290,6 +293,20 @@ public class ImportacaoService : IImportacaoService
         return resultado;
     }
 
+    // Money Vision: "data da parcela vs. competência" — uma parcela com numero > 1 é sempre
+    // cobrança DESTA fatura, nunca uma transação nova na data embutida na descrição (que é a da
+    // COMPRA original, podendo ser meses antes). A parcela 1 fica como está: é a compra em si,
+    // acontecendo de verdade no ciclo desta fatura. DataOriginal só é gravada quando a data muda
+    // de verdade — reimportar um arquivo cuja data já bate com dataEfetivaFatura não marca nada.
+    private static List<TransacaoParseada> ReancorarParcelasNaFatura(List<TransacaoParseada> parseadas, DateOnly dataEfetivaFatura) =>
+        parseadas.Select(t =>
+        {
+            if (t.Tipo != "Saida") return t;
+            var parcela = ParcelaDescricaoParser.TentarExtrair(t.Descricao);
+            if (parcela == null || parcela.Numero <= 1 || t.Data == dataEfetivaFatura) return t;
+            return t with { Data = dataEfetivaFatura, DataOriginal = t.Data };
+        }).ToList();
+
     // Move/atualiza o item manual em vez de criar um novo: mantém Categoria/TipoCusto/vínculos/
     // Valor do manual, grava FitId/Descricao do banco. Quando a data muda, move o item entre os
     // dois RegistroDiario — registrosTocados acumula os dias cujo total de entradas/saídas mudou de
@@ -352,6 +369,23 @@ public class ImportacaoService : IImportacaoService
         var parseadas = ParsearArquivoValidando(arquivo);
         if (conta.Tipo == "CartaoCredito") (parseadas, _) = NormalizarSinalParaCartao(parseadas, inverterSinaisManualmente);
 
+        if (conta.Tipo == "CartaoCredito")
+        {
+            if (string.IsNullOrWhiteSpace(banco))
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe o cartão/banco desta fatura.", "banco");
+            if (!dataVencimentoFatura.HasValue)
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe o vencimento desta fatura.", "dataVencimentoFatura");
+
+            // Money Vision: "data da parcela vs. competência" — a planilha traz a data da COMPRA
+            // original (pode ser meses antes), mas parcela com numero > 1 é, por definição, uma
+            // cobrança DESTA fatura. Reancora pra data de fechamento/vencimento ANTES do filtro de
+            // dataInicio/dataFim (senão uma parcela antiga seria excluída do lote antes de chegar a
+            // ser reancorada) e antes de qualquer dedup (senão uma reimportação nunca reconheceria
+            // "já importada", comparando a data original do arquivo contra a reancorada já salva).
+            var dataEfetivaFatura = dataFechamentoFatura ?? dataVencimentoFatura.Value;
+            parseadas = ReancorarParcelasNaFatura(parseadas, dataEfetivaFatura);
+        }
+
         if (dataInicio.HasValue) parseadas = parseadas.Where(t => t.Data >= dataInicio.Value).ToList();
         if (dataFim.HasValue) parseadas = parseadas.Where(t => t.Data <= dataFim.Value).ToList();
 
@@ -366,20 +400,15 @@ public class ImportacaoService : IImportacaoService
         Fatura? fatura = null;
         if (conta.Tipo == "CartaoCredito")
         {
-            if (string.IsNullOrWhiteSpace(banco))
-                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe o cartão/banco desta fatura.", "banco");
-            if (!dataVencimentoFatura.HasValue)
-                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe o vencimento desta fatura.", "dataVencimentoFatura");
-
             var competencia = string.IsNullOrWhiteSpace(competenciaFatura)
-                ? $"{dataVencimentoFatura.Value.Year:D4}-{dataVencimentoFatura.Value.Month:D2}"
+                ? $"{dataVencimentoFatura!.Value.Year:D4}-{dataVencimentoFatura.Value.Month:D2}"
                 : competenciaFatura!.Trim();
 
             // Mesmo banco + competência nesta conta: reaproveita a fatura já existente em vez de
             // criar outra — senão cada reimportação (ex.: completar depois de um erro) duplicava a
             // fatura e os itens antigos ficavam "órfãos" numa fatura diferente da nova.
             fatura = (await _faturaRepo.ListarPorContaAsync(conta.Id))
-                .FirstOrDefault(f => string.Equals(f.Banco, banco.Trim(), StringComparison.OrdinalIgnoreCase) && f.Competencia == competencia);
+                .FirstOrDefault(f => string.Equals(f.Banco, banco!.Trim(), StringComparison.OrdinalIgnoreCase) && f.Competencia == competencia);
             if (fatura == null)
             {
                 fatura = await _faturaRepo.AdicionarAsync(new Fatura
@@ -387,10 +416,10 @@ public class ImportacaoService : IImportacaoService
                     Id = Guid.NewGuid(),
                     ClienteId = conta.ClienteId,
                     ContaBancariaId = conta.Id,
-                    Banco = banco.Trim(),
+                    Banco = banco!.Trim(),
                     Competencia = competencia,
                     DataFechamento = dataFechamentoFatura,
-                    DataVencimento = dataVencimentoFatura.Value,
+                    DataVencimento = dataVencimentoFatura!.Value,
                     CriadoEm = DateTime.UtcNow,
                 });
             }
@@ -714,6 +743,7 @@ public class ImportacaoService : IImportacaoService
                         ParcelamentoId = parcelamentoId,
                         NumeroParcela = parcelaDetectada?.Numero,
                         TotalParcelas = parcelaDetectada?.Total,
+                        DataCompraOriginal = t.DataOriginal,
                     });
                     registro.SaldoFinal -= t.Valor;
                 }

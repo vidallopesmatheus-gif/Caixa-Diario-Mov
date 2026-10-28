@@ -19,13 +19,20 @@ public static partial class ParcelaDescricaoParser
     [GeneratedRegex(@"^(?<comerciante>.+?)\s+PARC\.?\s*(?<numero>\d{1,3})\s*/\s*(?<total>\d{1,3})\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex PadraoParc();
 
+    // Money Vision (reteste 28/10): algumas bandeiras colocam a marca "PARC N/M" ANTES do nome do
+    // comerciante ("PARC 03/05 LOJA X"), não depois — padrão separado do PadraoParc acima, que só
+    // casa quando "PARC N/M" está no FIM da descrição.
+    [GeneratedRegex(@"^PARC\.?\s*(?<numero>\d{1,3})\s*/\s*(?<total>\d{1,3})\s+(?<comerciante>.+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex PadraoParcPrefixo();
+
     [GeneratedRegex(@"^(?<comerciante>.+?)\s*\(\s*(?<numero>\d{1,3})\s+de\s+(?<total>\d{1,3})\s*\)\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex PadraoDe();
 
     [GeneratedRegex(@"^(?<comerciante>.+?)\s+(?<numero>\d{1,3})\s*/\s*(?<total>\d{1,3})\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex PadraoBarraSolta();
 
-    private static readonly Regex[] Padroes = { PadraoParcela(), PadraoParc(), PadraoDe(), PadraoBarraSolta() };
+    private static readonly Regex[] Padroes =
+        { PadraoParcela(), PadraoParc(), PadraoParcPrefixo(), PadraoDe(), PadraoBarraSolta() };
 
     public record Resultado(string Comerciante, int Numero, int Total);
 

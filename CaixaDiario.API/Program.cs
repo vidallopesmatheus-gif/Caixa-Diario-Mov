@@ -111,6 +111,8 @@ builder.Services.AddScoped<IReclassificacaoCategoriasService, ReclassificacaoCat
 builder.Services.AddScoped<ILimpezaTransferenciasService, LimpezaTransferenciasService>();
 builder.Services.AddScoped<IRecalculoSaldoService, RecalculoSaldoService>();
 builder.Services.AddScoped<IVerificacaoSinalTransferenciaService, VerificacaoSinalTransferenciaService>();
+builder.Services.AddScoped<ICorrigirDataParcelasService, CorrigirDataParcelasService>();
+builder.Services.AddScoped<ICorrigirFaturasService, CorrigirFaturasService>();
 builder.Services.AddScoped<IContaProvisionadaService, ContaProvisionadaService>();
 builder.Services.AddScoped<IOcorrenciaRecorrenteDispensadaRepository, OcorrenciaRecorrenteDispensadaRepository>();
 builder.Services.AddScoped<IDuplicataDispensadaRepository, DuplicataDispensadaRepository>();

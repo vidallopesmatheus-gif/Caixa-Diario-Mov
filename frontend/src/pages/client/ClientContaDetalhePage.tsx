@@ -1402,6 +1402,11 @@ export default function ClientContaDetalhePage() {
                         <span className="cd-extrato-desc" title={l.descricao}>
                           <span className="cd-extrato-desc-titulo">{titulo}</span>
                           {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
+                          {/* Money Vision: "data da parcela vs. competência" — a Data da linha é a
+                              da cobrança desta fatura; a compra em si pode ter acontecido antes. */}
+                          {l.dataCompraOriginal && (
+                            <span className="cd-extrato-desc-subtitulo">compra em {fmtDate(l.dataCompraOriginal)}</span>
+                          )}
                         </span>
                         {renderChip(l, chave)}
                         <span className={`cd-col-valor ${l.valor >= 0 ? 'val-green' : 'val-red'}`}>
@@ -1438,6 +1443,9 @@ export default function ClientContaDetalhePage() {
                           <span className="cd-extrato-card-desc">
                             <span className="cd-extrato-desc-titulo">{titulo}</span>
                             {subtitulo && <span className="cd-extrato-desc-subtitulo">{subtitulo}</span>}
+                            {l.dataCompraOriginal && (
+                              <span className="cd-extrato-desc-subtitulo">compra em {fmtDate(l.dataCompraOriginal)}</span>
+                            )}
                             <span className={`cd-chip cd-chip-${tipo}`}>
                               {rotuloChip(l, tipo)}
                             </span>
