@@ -67,6 +67,27 @@ test('card de conta de Investimento mostra aporte/resgate do mês, não entradas
   expect(within(item).getByText('-R$ 120,00')).toBeInTheDocument()
 })
 
+// Money Vision: "card mostra R$ 0,00, mas as faturas dizem outra coisa" (item 4) — o card de
+// cartão tem que usar faturasEmAberto (soma das Faturas reais não pagas), não saldoDevedor (ledger
+// inteiro, pode zerar com um pagamento nunca vinculado a nenhuma fatura), e mostrar compras/
+// pagamentos do mês em vez de entradasMes/saidasMes (que excluem ambos por serem "não operacionais").
+test('card de cartão de crédito mostra faturasEmAberto e compras/pagamentos do mês', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([
+    conta({
+      id: 'cartao', nome: 'Cartões', tipo: 'CartaoCredito', saldoAtual: 349.17,
+      saldoDevedor: 0, faturasEmAberto: 2141.52, comprasMes: 1800, pagamentosMes: 2490.69,
+    }),
+  ])
+
+  render(<MemoryRouter><ClientBancoPage /></MemoryRouter>)
+
+  const linha = await screen.findByText('Cartões')
+  const item = linha.closest('.cb-conta-item') as HTMLElement
+  expect(within(item).getByText('R$ 2.141,52')).toBeInTheDocument() // faturasEmAberto, não os 0 de saldoDevedor
+  expect(within(item).getByText('-R$ 1.800,00')).toBeInTheDocument()
+  expect(within(item).getByText('+R$ 2.490,69')).toBeInTheDocument()
+})
+
 test('sem conta de investimento, o card "Investido / Reserva" não aparece', async () => {
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([
     conta({ id: 'corrente', nome: 'Nubank', tipo: 'ContaCorrente', saldoAtual: 1000 }),

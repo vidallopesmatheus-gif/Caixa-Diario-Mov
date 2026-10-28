@@ -1,6 +1,6 @@
 .financiamentos-page { display: flex; flex-direction: column; gap: 16px; }
 
-.financiamentos-header { display: flex; justify-content: flex-end; }
+.financiamentos-header { display: flex; justify-content: flex-end; gap: 8px; }
 
 .financiamentos-vazio { color: var(--tx3); text-align: center; padding: 40px 0; }
 

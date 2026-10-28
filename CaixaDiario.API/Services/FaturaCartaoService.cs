@@ -31,6 +31,7 @@ public class FaturaCartaoService : IFaturaCartaoService
     private readonly AppDbContext _context;
     private readonly IFaturaRepository _faturaRepo;
     private readonly ITransferenciaRepository _transferenciaRepo;
+    private readonly IParcelamentoDeteccaoService _parcelamentoDeteccaoService;
 
     public FaturaCartaoService(
         IContaBancariaRepository contaRepo,
@@ -40,7 +41,8 @@ public class FaturaCartaoService : IFaturaCartaoService
         IAuditService auditService,
         AppDbContext context,
         IFaturaRepository faturaRepo,
-        ITransferenciaRepository transferenciaRepo)
+        ITransferenciaRepository transferenciaRepo,
+        IParcelamentoDeteccaoService parcelamentoDeteccaoService)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
@@ -50,6 +52,7 @@ public class FaturaCartaoService : IFaturaCartaoService
         _context = context;
         _faturaRepo = faturaRepo;
         _transferenciaRepo = transferenciaRepo;
+        _parcelamentoDeteccaoService = parcelamentoDeteccaoService;
     }
 
     public async Task<List<string>> ListarBancosAsync(Guid contaCartaoId, Guid usuarioLogadoId, string perfil)
@@ -422,6 +425,90 @@ public class FaturaCartaoService : IFaturaCartaoService
             ValorPago = item.Valor, Data = registro.Data, CriadoEm = DateTime.UtcNow,
         });
         return true;
+    }
+
+    // Money Vision: "parcelamentos que já existem não aparecem" (item 5) — "Procurar parcelamentos".
+    // Compras importadas ANTES da detecção de parcelamento existir nunca ganharam ParcelamentoId
+    // (ver ParcelaDescricaoParser) — varre essas compras, resolve/cria o Parcelamento de cada uma
+    // (ProcessarParcelaDetectadaAsync, o MESMO caminho usado numa importação nova, que também gera
+    // as parcelas futuras como previstas em Contas a Pagar) e grava o vínculo retroativamente.
+    // Nunca derruba a varredura inteira por uma linha só — isola e segue (mesma garantia do import).
+    public async Task<DeteccaoRetroativaParcelamentoResultDto> DetectarParcelamentosRetroativamenteAsync(
+        Guid contaCartaoId, Guid usuarioLogadoId, string perfil)
+    {
+        var contaCartao = await ObterCartaoOuFalharAsync(contaCartaoId);
+        VerificarAcesso(contaCartao.ClienteId, usuarioLogadoId, perfil);
+
+        var registros = (await _registroRepo.ListarPorContaAsync(contaCartaoId)).Where(r => !r.Excluido).OrderBy(r => r.Data).ToList();
+        var faturasCache = new Dictionary<Guid, Fatura>();
+        var resumoPorParcelamento = new Dictionary<Guid, ParcelamentoEncontradoRetroativamenteDto>();
+
+        foreach (var registro in registros)
+        {
+            var alterou = false;
+            foreach (var item in registro.Saidas.Where(s => !s.ParcelamentoId.HasValue))
+            {
+                var parcelaDetectada = ParcelaDescricaoParser.TentarExtrair(item.Descricao);
+                if (parcelaDetectada == null) continue;
+
+                var dataVencimentoFatura = registro.Data;
+                if (item.FaturaId.HasValue)
+                {
+                    if (!faturasCache.TryGetValue(item.FaturaId.Value, out var fatura))
+                    {
+                        fatura = await _faturaRepo.ObterPorIdAsync(item.FaturaId.Value);
+                        if (fatura != null) faturasCache[item.FaturaId.Value] = fatura;
+                    }
+                    if (fatura != null) dataVencimentoFatura = fatura.DataVencimento;
+                }
+
+                Parcelamento parcelamento;
+                try
+                {
+                    parcelamento = await _parcelamentoDeteccaoService.ProcessarParcelaDetectadaAsync(
+                        contaCartao, dataVencimentoFatura, parcelaDetectada.Comerciante, item.Categoria,
+                        parcelaDetectada.Numero, parcelaDetectada.Total, item.Valor);
+                }
+                catch (Exception)
+                {
+                    continue; // isola — uma linha com dado estranho nunca derruba a varredura inteira.
+                }
+
+                item.ParcelamentoId = parcelamento.Id;
+                item.NumeroParcela = parcelaDetectada.Numero;
+                item.TotalParcelas = parcelaDetectada.Total;
+                alterou = true;
+
+                var restantes = parcelaDetectada.Total - parcelaDetectada.Numero;
+                resumoPorParcelamento[parcelamento.Id] = new ParcelamentoEncontradoRetroativamenteDto
+                {
+                    ParcelamentoId = parcelamento.Id,
+                    Comerciante = parcelaDetectada.Comerciante,
+                    TotalParcelas = parcelaDetectada.Total,
+                    MaiorParcelaJaReal = parcelaDetectada.Numero,
+                    ParcelasRestantes = restantes,
+                    ValorRestante = restantes * item.Valor,
+                    DataFinal = dataVencimentoFatura.AddMonths(restantes),
+                    Status = parcelamento.Status,
+                };
+            }
+
+            if (alterou)
+            {
+                registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas);
+                registro.SalvoEm = DateTime.UtcNow;
+                await _registroRepo.AtualizarAsync(registro);
+            }
+        }
+
+        var parcelamentos = resumoPorParcelamento.Values.OrderBy(p => p.DataFinal).ToList();
+        return new DeteccaoRetroativaParcelamentoResultDto
+        {
+            ParcelamentosEncontrados = parcelamentos.Count,
+            ValorRestanteTotal = parcelamentos.Sum(p => p.ValorRestante),
+            DataFinal = parcelamentos.Count > 0 ? parcelamentos.Max(p => p.DataFinal) : null,
+            Parcelamentos = parcelamentos,
+        };
     }
 
     private async Task<List<FaturaCartaoDto>> ListarFaturasInternoAsync(ContaBancaria contaCartao)

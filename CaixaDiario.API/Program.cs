@@ -38,7 +38,25 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     };
 });
 // Banco de dados
+// Money Vision: "500 intermitente ao abrir o Dashboard" — rajadas de requisições paralelas (o
+// Dashboard sozinho dispara ~4) esgotavam o pooler do Supabase (host "pooler.supabase.com:5432" é
+// o modo "Session" do PgBouncer, com um limite de conexões bem mais baixo que o pool padrão do
+// Npgsql no lado do cliente, que é 100). Sem um teto explícito, o Npgsql tentava abrir mais
+// conexões do que o pooler aceitava e a abertura falhava com 500 em vez de só esperar a vez.
+// Limita o pool do lado do cliente a um valor conservador — só se a própria connection string não
+// já disser um valor. NUNCA habilitar EnableRetryOnFailure aqui: a estratégia de retry do EF não é
+// compatível com transação aberta manualmente (Database.BeginTransactionAsync), que é o padrão
+// usado em TransferenciaService/ImportacaoService/FaturaCartaoService/LimpezaTransferenciasService
+// — ligar isso derrubaria toda transação manual do app com "does not support user-initiated
+// transactions" em produção.
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (!string.IsNullOrWhiteSpace(connectionString))
+{
+    var csBuilder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+    if (csBuilder.MaxPoolSize == 100) csBuilder.MaxPoolSize = 15;
+    if (csBuilder.Timeout == 15) csBuilder.Timeout = 30;
+    connectionString = csBuilder.ConnectionString;
+}
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
 

@@ -72,10 +72,14 @@ public class OrcamentoDinamicoService : IOrcamentoDinamicoService
 
         var saldoLivre = receitaEsperada - compromissosFixos - aporteNecessario;
 
-        // Gasto variável atual (saídas do mês corrente, exceto transferências/rendimento)
+        // Money Vision: "números que se contradizem" (item 1) — isto tinha que ser só o gasto
+        // VARIÁVEL (o nome do campo já diz), mas somava TODO gasto operacional, inclusive fixo —
+        // que já está contado em compromissosFixos acima. Contava o mesmo custo fixo duas vezes
+        // (uma aqui, outra em compromissosFixos) e fazia "gasto variável atual" bater com o gasto
+        // TOTAL do mês em vez do variável (ver IndicadoresDecisaoDto.CustoVariavel, a mesma fonte).
         var gastoVariavelAtual = registrosValidos
             .Where(r => r.Data.Year == anoAtual && r.Data.Month == mesAtual)
-            .SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).Sum(s => s.Valor);
+            .SelectMany(r => r.Saidas).Where(s => s.TipoCusto == "CustoVariavel").Sum(s => s.Valor);
 
         var ultrapassado = saldoLivre > 0 && gastoVariavelAtual > saldoLivre;
         var percentualUtilizado = saldoLivre > 0

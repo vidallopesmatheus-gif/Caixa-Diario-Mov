@@ -19,6 +19,7 @@ public class FaturaCartaoServiceTests
     private readonly Mock<IAuditService> _auditMock = new();
     private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
     private readonly Mock<ITransferenciaRepository> _transferenciaRepoMock = new();
+    private readonly Mock<IParcelamentoDeteccaoService> _parcelamentoDeteccaoServiceMock = new();
     private readonly FaturaCartaoService _sut;
 
     // InMemory não é relacional — o serviço detecta isso (Database.IsRelational()) e não abre
@@ -32,7 +33,8 @@ public class FaturaCartaoServiceTests
         _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>());
         _sut = new FaturaCartaoService(
             _contaRepoMock.Object, _registroRepoMock.Object, _pagamentoRepoMock.Object, _categoriaRepoMock.Object,
-            _auditMock.Object, CriarContexto(), _faturaRepoMock.Object, _transferenciaRepoMock.Object);
+            _auditMock.Object, CriarContexto(), _faturaRepoMock.Object, _transferenciaRepoMock.Object,
+            _parcelamentoDeteccaoServiceMock.Object);
     }
 
     private static ContaBancaria CriarConta(
@@ -271,6 +273,123 @@ public class FaturaCartaoServiceTests
 
         Assert.False(vinculou);
         _pagamentoRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<PagamentoFatura>()), Times.Never);
+    }
+
+    // ── DetectarParcelamentosRetroativamenteAsync (item 5, "parcelamentos que já existem não aparecem") ──
+
+    [Fact]
+    public async Task DetectarParcelamentosRetroativamenteAsync_CompraJaImportadaSemVinculo_LigaAoParcelamentoERetornaResumo()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Nubank Cartão", "CartaoCredito");
+        var itemId = Guid.NewGuid();
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 9, 26),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = itemId, Descricao = "Trocafone - Parcela 1/10", Valor = 199.16m, Categoria = "Equipamentos" } },
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var parcelamentoId = Guid.NewGuid();
+        _parcelamentoDeteccaoServiceMock.Setup(s => s.ProcessarParcelaDetectadaAsync(
+            contaCartao, registro.Data, "Trocafone", "Equipamentos", 1, 10, 199.16m))
+            .ReturnsAsync(new Parcelamento { Id = parcelamentoId, Status = "Ativo" });
+
+        var resultado = await _sut.DetectarParcelamentosRetroativamenteAsync(contaCartao.Id, clienteId, "cliente");
+
+        Assert.Equal(1, resultado.ParcelamentosEncontrados);
+        var resumo = Assert.Single(resultado.Parcelamentos);
+        Assert.Equal(parcelamentoId, resumo.ParcelamentoId);
+        Assert.Equal("Trocafone", resumo.Comerciante);
+        Assert.Equal(9, resumo.ParcelasRestantes);
+        Assert.Equal(1792.44m, resumo.ValorRestante); // 9 * 199.16
+
+        var itemAtualizado = Assert.Single(registro.Saidas);
+        Assert.Equal(parcelamentoId, itemAtualizado.ParcelamentoId);
+        Assert.Equal(1, itemAtualizado.NumeroParcela);
+        Assert.Equal(10, itemAtualizado.TotalParcelas);
+    }
+
+    [Fact]
+    public async Task DetectarParcelamentosRetroativamenteAsync_CompraJaVinculada_NuncaReprocessa()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Nubank Cartão", "CartaoCredito");
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 9, 26),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Trocafone - Parcela 2/10", Valor = 199.16m, ParcelamentoId = Guid.NewGuid(), NumeroParcela = 2, TotalParcelas = 10 } },
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var resultado = await _sut.DetectarParcelamentosRetroativamenteAsync(contaCartao.Id, clienteId, "cliente");
+
+        Assert.Equal(0, resultado.ParcelamentosEncontrados);
+        _parcelamentoDeteccaoServiceMock.Verify(s => s.ProcessarParcelaDetectadaAsync(
+            It.IsAny<ContaBancaria>(), It.IsAny<DateOnly>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<decimal>()), Times.Never);
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DetectarParcelamentosRetroativamenteAsync_DescricaoSemPadraoDeParcela_NuncaConta()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Nubank Cartão", "CartaoCredito");
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 9, 26),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Supermercado", Valor = 150m } },
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var resultado = await _sut.DetectarParcelamentosRetroativamenteAsync(contaCartao.Id, clienteId, "cliente");
+
+        Assert.Equal(0, resultado.ParcelamentosEncontrados);
+    }
+
+    // Uma falha ao processar uma linha (ex.: dado inconsistente) nunca derruba a varredura inteira
+    // — isola e segue, igual a importação faz com parcela (ver ImportacaoService).
+    [Fact]
+    public async Task DetectarParcelamentosRetroativamenteAsync_FalhaNumaLinha_IsolaESeguePraProximaCompra()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Nubank Cartão", "CartaoCredito");
+        var registroComErro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 4, 1),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "MercadoLivre - Parcela 7/7", Valor = 100m } },
+        };
+        var registroOk = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 9, 26),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Trocafone - Parcela 1/10", Valor = 199.16m } },
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<RegistroDiario> { registroComErro, registroOk });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        _parcelamentoDeteccaoServiceMock.Setup(s => s.ProcessarParcelaDetectadaAsync(
+            contaCartao, registroComErro.Data, "MercadoLivre", It.IsAny<string?>(), 7, 7, 100m))
+            .ThrowsAsync(new InvalidOperationException("erro simulado"));
+        var parcelamentoId = Guid.NewGuid();
+        _parcelamentoDeteccaoServiceMock.Setup(s => s.ProcessarParcelaDetectadaAsync(
+            contaCartao, registroOk.Data, "Trocafone", It.IsAny<string?>(), 1, 10, 199.16m))
+            .ReturnsAsync(new Parcelamento { Id = parcelamentoId, Status = "Ativo" });
+
+        var resultado = await _sut.DetectarParcelamentosRetroativamenteAsync(contaCartao.Id, clienteId, "cliente");
+
+        Assert.Equal(1, resultado.ParcelamentosEncontrados);
+        Assert.Equal(parcelamentoId, Assert.Single(resultado.Parcelamentos).ParcelamentoId);
+        Assert.Null(registroComErro.Saidas[0].ParcelamentoId); // a linha com erro nunca foi marcada
     }
 
     [Fact]

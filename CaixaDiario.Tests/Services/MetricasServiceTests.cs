@@ -89,6 +89,31 @@ public class MetricasServiceTests
         Assert.Equal("amarelo", resultado.PrimeCost.Semaforo);
     }
 
+    // Money Vision: "números que se contradizem" (item 1) — antes, o Dashboard excluía a
+    // categoria "Manutenção" do custo fixo (uma regra só dela, nunca aplicada no DRE/Indicadores) e
+    // usava receita BRUTA sem deduções. Com a fonte única (CalcularDre), o Ponto de Equilíbrio do
+    // Dashboard tem que bater exatamente com o que CalcularDre/CalcularPontoEquilibrio dariam pro
+    // mesmo período, "Manutenção" incluída.
+    [Fact]
+    public void CalcularPeriodo_ComCategoriaManutencaoEDeducao_PontoDeEquilibrioBateComODre()
+    {
+        var reg = CriarRegistro(new DateOnly(2026, 6, 1),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new()
+            {
+                Item("Imposto", 50m, "Impostos", "CustoFixo"),
+                Item("Manutenção predial", 100m, "Manutenção", "CustoFixo"),
+                Item("Insumos", 200m, "Insumos/Mercadoria", "CustoVariavel"),
+            });
+
+        var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
+        var dre = _sut.CalcularDre(new() { reg });
+        var esperado = _sut.CalcularPontoEquilibrio(dre.ReceitaBruta, dre.MargemContribuicao, dre.DespesasFixas.Total, DataLocalHelper.Hoje());
+
+        Assert.NotNull(resultado.PontoDeEquilibrio);
+        Assert.Equal(esperado.ValorMensal, resultado.PontoDeEquilibrio!.Valor);
+    }
+
     [Fact]
     public void CalcularPeriodo_SemCategoria_PontoDeEquilibrioNull()
     {
@@ -790,8 +815,12 @@ public class MetricasServiceTests
         Assert.Equal("vermelho", resultado.PontoDeEquilibrio!.Semaforo);
     }
 
+    // Money Vision: "números que se contradizem" (item 1) — Ponto de Equilíbrio do Dashboard agora
+    // vem do mesmo CalcularDre/CalcularPontoEquilibrio da tela de DRE/Indicadores. Sem margem de
+    // contribuição pra cobrir despesas fixas, o valor fica indisponível (null) — nunca um "0,
+    // verde" artificial, que dava a entender (errado) que a empresa já bateu o ponto de equilíbrio.
     [Fact]
-    public void CalcularPeriodo_MargemContribuicaoZeroOuNegativa_PontoDeEquilibrioZeroESemaforoVerde()
+    public void CalcularPeriodo_MargemContribuicaoZeroOuNegativa_PontoDeEquilibrioIndisponivel()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 1000m, "Vendas", "Receita") },
@@ -801,8 +830,7 @@ public class MetricasServiceTests
                 Item("Custo Variavel", 1000m, "Insumos/Mercadoria", "CustoVariavel"),
             });
         var resultado = _sut.CalcularPeriodo(new() { reg }, new() { reg }, 0m);
-        Assert.Equal(0m, resultado.PontoDeEquilibrio!.Valor);
-        Assert.Equal("verde", resultado.PontoDeEquilibrio.Semaforo);
+        Assert.Null(resultado.PontoDeEquilibrio);
     }
 
     // ---- Semáforos: Valuation ----
@@ -1055,6 +1083,42 @@ public class MetricasServiceTests
         // resultado continua batendo com a soma das linhas (critério de aceite do item 4).
         Assert.Equal(dre.TotalDespesas, dre.Deducoes.Total + dre.CustosVariaveis.Total + dre.DespesasFixas.Total);
         Assert.Equal(dre.Resultado, dre.ResultadoLiquido);
+    }
+
+    // Money Vision: "os subtotais não fecham com as linhas mostradas" (item 2) — todo subtotal do
+    // DRE tem que ser exatamente a soma das linhas imediatamente acima dele na tela (Receitas
+    // Operacionais → Deduções → Custos Operacionais → Margem de Contribuição → Despesas
+    // Operacionais → Resultado Operacional → Atividades de Investimento/Financiamento →
+    // Retiradas dos Sócios → Resultado Líquido). Cobre vários meses sintéticos diferentes —
+    // inclusive os valores exatos do relato ("15.895,54 receita, 9.021,02 custos operacionais")
+    // pra provar que o "furo" era a linha de Deduções não contada na conta manual, não um bug.
+    [Theory]
+    [InlineData(15895.54, 2255.94, 9021.02, 4474.08, 0, 0, 0)] // cenário exato do relato
+    [InlineData(1000, 0, 0, 0, 0, 0, 0)] // sem nenhuma dedução/custo/despesa
+    [InlineData(5000, 100, 2000, 800, 300, -150, 200)] // com atividades de investimento/financiamento e retiradas
+    [InlineData(800, 50, 900, 0, 0, 0, 0)] // margem de contribuição negativa
+    public void CalcularDre_SubtotaisSempreFecham_ComVariosMesesSinteticos(
+        decimal receita, decimal deducao, decimal custoVariavel, decimal despesaFixa,
+        decimal atividadeInvestimento, decimal atividadeFinanciamento, decimal retiradaSocios)
+    {
+        var entradas = new List<ItemFinanceiro> { Item("Receita", receita, "Vendas", "Receita") };
+        if (atividadeInvestimento > 0) entradas.Add(Item("Captação", atividadeInvestimento, "Aporte", "Investimento"));
+        var saidas = new List<ItemFinanceiro>();
+        if (deducao > 0) saidas.Add(Item("Imposto", deducao, "Impostos", "CustoFixo"));
+        if (custoVariavel > 0) saidas.Add(Item("Insumos", custoVariavel, "Insumos/Mercadoria", "CustoVariavel"));
+        if (despesaFixa > 0) saidas.Add(Item("Aluguel", despesaFixa, "Aluguel", "CustoFixo"));
+        if (atividadeInvestimento < 0) saidas.Add(Item("Aquisição", -atividadeInvestimento, "Equipamento", "Investimento"));
+        if (atividadeFinanciamento > 0) entradas.Add(Item("Empréstimo", atividadeFinanciamento, "Empréstimo", "Financiamento"));
+        if (atividadeFinanciamento < 0) saidas.Add(Item("Amortização", -atividadeFinanciamento, "Amortização", "Financiamento"));
+        if (retiradaSocios > 0) saidas.Add(Item("Pró-labore", retiradaSocios, "Retirada", "RetiradaSocios"));
+
+        var reg = CriarRegistro(new DateOnly(2026, 10, 1), entradas, saidas);
+        var dre = _sut.CalcularDre(new() { reg });
+
+        Assert.Equal(dre.MargemContribuicao, dre.ReceitaBruta - dre.Deducoes.Total - dre.CustosVariaveis.Total);
+        Assert.Equal(dre.ResultadoOperacional, dre.MargemContribuicao - dre.DespesasFixas.Total);
+        Assert.Equal(dre.ResultadoLiquido,
+            dre.ResultadoOperacional + dre.AtividadesInvestimento.Total + dre.AtividadesFinanciamento.Total - dre.RetiradasSocios.Total);
     }
 
     // Item 3 (preservado na rodada de ajustes): "Não Classificados" precisa ser o valor LÍQUIDO
@@ -1497,7 +1561,32 @@ public class MetricasServiceTests
         Assert.Equal(2000m, resultado.Gastou); // idem "gastou"
         Assert.Equal(1300m, resultado.Guardou); // só a perna que caiu na conta de investimento
         Assert.Equal(6700m, resultado.Ficou); // 10000 - 2000 - 1300
-        Assert.Equal(13.0m, resultado.TaxaPoupancaPercentual); // 1300 / 10000
+        // Money Vision: taxa de poupança agora é sobre o resultado (entrou-gastou), nunca sobre o
+        // aporte líquido em investimento (Guardou) — ver CalcularParaOndeFoiMeuDinheiro_ResgateNuncaDeixaATaxaNegativaComLucro.
+        Assert.Equal(80.0m, resultado.TaxaPoupancaPercentual); // (10000-2000) / 10000
+    }
+
+    // Money Vision: "taxa de poupança negativa com lucro positivo" (item 3) — um resgate grande
+    // da reserva (maior até que o lucro do mês) nunca pode deixar a taxa de poupança negativa,
+    // porque ela não depende mais de Guardou.
+    [Fact]
+    public void CalcularParaOndeFoiMeuDinheiro_ResgateNuncaDeixaATaxaNegativaComLucro()
+    {
+        var contaInvestimentoId = Guid.NewGuid();
+        var regCorrente = CriarRegistro(new DateOnly(2026, 10, 5),
+            new() { Item("Venda", 15895.54m, "Vendas", "Receita") },
+            new() { Item("Despesas", 13495.10m, "Geral", "CustoVariavel") },
+            contaBancariaId: Guid.NewGuid());
+        var regResgate = CriarRegistro(new DateOnly(2026, 10, 5),
+            new(),
+            new() { Item("Resgate", 1325.82m, "Transferência", "Transferencia") },
+            contaBancariaId: contaInvestimentoId);
+
+        var resultado = _sut.CalcularParaOndeFoiMeuDinheiro(
+            new() { regCorrente, regResgate }, new HashSet<Guid> { contaInvestimentoId });
+
+        Assert.Equal(-1325.82m, resultado.Guardou); // resgate aparece aqui, não na taxa
+        Assert.Equal(15.1m, resultado.TaxaPoupancaPercentual); // (15895.54-13495.10)/15895.54, nunca negativa
     }
 
     [Fact]

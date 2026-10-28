@@ -136,6 +136,12 @@ export interface ContaBancaria {
   diaVencimento?: number | null
   saldoDevedor?: number
   limiteDisponivel?: number | null
+  // Money Vision: "card mostra R$ 0,00, mas as faturas dizem outra coisa" (item 4) — soma do
+  // saldoDevedor de cada Fatura real não paga (mesma fonte do botão "Pagar" da tela de Faturas),
+  // sempre preferir isto a saldoDevedor (que é só o ledger inteiro da conta) para exibição.
+  faturasEmAberto?: number
+  comprasMes?: number
+  pagamentosMes?: number
 }
 
 export interface LancamentoExtrato {

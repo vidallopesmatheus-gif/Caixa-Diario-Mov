@@ -41,6 +41,16 @@ public class ContaBancariaDto
     public int? DiaVencimento { get; set; }
     public decimal? SaldoDevedor { get; set; }
     public decimal? LimiteDisponivel { get; set; }
+    // Money Vision: "card mostra R$ 0,00, mas a API e as faturas dizem outra coisa" (item 4) — a
+    // soma do saldoDevedor de cada Fatura real não paga, a mesma fonte do botão "Pagar" na tela de
+    // Faturas. Diferente de SaldoDevedor (ledger inteiro da conta): aqui é só o que ainda falta
+    // pagar nas faturas já emitidas, nunca negativo por um pagamento que ultrapassou o devido.
+    public decimal? FaturasEmAberto { get; set; }
+    // "Este mês" do cartão: compras (saídas, exceto pagamento de fatura) e pagamentos (entradas
+    // criadas por vincular/pagar fatura) — EntradasMes/SaidasMes genéricos excluem ambos por serem
+    // "não operacionais" pro DRE, e sempre mostravam R$ 0,00 no card do cartão.
+    public decimal? ComprasMes { get; set; }
+    public decimal? PagamentosMes { get; set; }
 }
 
 public class MetaVinculadaDto

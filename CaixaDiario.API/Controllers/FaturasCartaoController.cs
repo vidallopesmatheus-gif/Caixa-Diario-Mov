@@ -66,4 +66,12 @@ public class FaturasCartaoController : ControllerBase
         await _service.LancarComprasParceladaAsync(contaCartaoId, ObterUsuarioId(), ObterPerfil(), dto);
         return Ok(new ApiResponse<object> { Dados = null });
     }
+
+    // Item 5 (Money Vision "parcelamentos que já existem não aparecem"): "Procurar parcelamentos".
+    [HttpPost("{contaCartaoId:guid}/procurar-parcelamentos")]
+    public async Task<IActionResult> ProcurarParcelamentos(Guid contaCartaoId)
+    {
+        var resultado = await _service.DetectarParcelamentosRetroativamenteAsync(contaCartaoId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<DeteccaoRetroativaParcelamentoResultDto> { Dados = resultado });
+    }
 }

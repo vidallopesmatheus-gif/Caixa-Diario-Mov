@@ -20,6 +20,10 @@ export default function OrcamentoDinamicoCard({ clienteId }: Props) {
 
   const status = dados.ultrapassado ? 'alerta' : 'ok'
   const pct = Math.min(100, Math.max(0, dados.saldoLivre > 0 ? dados.percentualUtilizado : 100))
+  // Money Vision: "números que se contradizem" (item 1) — "disponível" tem que ser o que AINDA
+  // sobra (saldo livre − o que já foi gasto), nunca o teto do orçamento sozinho (saldoLivre), que
+  // dava a impressão de ter dinheiro disponível mesmo já tendo passado do limite.
+  const disponivel = dados.saldoLivre - dados.gastoVariavelAtual
 
   return (
     <div className="orcamento-card">
@@ -29,12 +33,14 @@ export default function OrcamentoDinamicoCard({ clienteId }: Props) {
       </div>
 
       <p className={`orcamento-saldo-livre ${status}`}>
-        {dados.saldoLivre > 0 ? fmtBRL(dados.saldoLivre) : '–'}
+        {dados.saldoLivre > 0 ? fmtBRL(Math.abs(disponivel)) : '–'}
       </p>
       <p className="orcamento-sublabel">
-        {dados.saldoLivre > 0
-          ? 'disponível para gastos variáveis este mês'
-          : 'sem margem — receita não cobre compromissos e aportes'}
+        {dados.saldoLivre <= 0
+          ? 'sem margem — receita não cobre compromissos e aportes'
+          : disponivel >= 0
+            ? 'disponível para gastos variáveis este mês'
+            : 'você passou do limite de gastos variáveis este mês'}
       </p>
 
       <div className="orcamento-barra-wrap">

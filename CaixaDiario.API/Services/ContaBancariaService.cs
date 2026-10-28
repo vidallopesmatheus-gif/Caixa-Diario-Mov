@@ -17,11 +17,13 @@ public class ContaBancariaService : IContaBancariaService
     private readonly ITransferenciaRepository _transferenciaRepo;
     private readonly ITransacaoImportadaRepository _transacaoImportadaRepo;
     private readonly IContaRecorrenteRepository _contaRecorrenteRepo;
+    private readonly IFaturaRepository _faturaRepo;
+    private readonly IPagamentoFaturaRepository _pagamentoFaturaRepo;
 
     public ContaBancariaService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, IMetaRepository metaRepo,
         ITransferenciaRepository transferenciaRepo, ITransacaoImportadaRepository transacaoImportadaRepo,
-        IContaRecorrenteRepository contaRecorrenteRepo)
+        IContaRecorrenteRepository contaRecorrenteRepo, IFaturaRepository faturaRepo, IPagamentoFaturaRepository pagamentoFaturaRepo)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
@@ -29,6 +31,8 @@ public class ContaBancariaService : IContaBancariaService
         _transferenciaRepo = transferenciaRepo;
         _transacaoImportadaRepo = transacaoImportadaRepo;
         _contaRecorrenteRepo = contaRecorrenteRepo;
+        _faturaRepo = faturaRepo;
+        _pagamentoFaturaRepo = pagamentoFaturaRepo;
     }
 
     public async Task<List<ContaBancariaDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -37,7 +41,8 @@ public class ContaBancariaService : IContaBancariaService
         var contas = await _contaRepo.ListarPorClienteAsync(clienteId);
         var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
         var metas = await _metaRepo.ListarPorClienteAsync(clienteId);
-        return contas.Select(c => MapToDto(c, registros, metas)).ToList();
+        var faturasEmAbertoPorConta = await ObterFaturasEmAbertoPorContaAsync(contas, registros);
+        return contas.Select(c => MapToDto(c, registros, metas, faturasEmAbertoPorConta.GetValueOrDefault(c.Id))).ToList();
     }
 
     public async Task<ContaBancariaDto> ObterPorIdAsync(Guid id, Guid usuarioLogadoId, string perfil)
@@ -47,7 +52,26 @@ public class ContaBancariaService : IContaBancariaService
         VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
         var registros = await _registroRepo.ListarPorContaAsync(id);
         var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
-        return MapToDto(conta, registros, metas);
+        var faturasEmAbertoPorConta = await ObterFaturasEmAbertoPorContaAsync(new List<ContaBancaria> { conta }, registros);
+        return MapToDto(conta, registros, metas, faturasEmAbertoPorConta.GetValueOrDefault(conta.Id));
+    }
+
+    // Money Vision: "card mostra R$ 0,00, mas a API e as faturas dizem outra coisa" (item 4) —
+    // mesma fonte do botão "Pagar" na tela de Faturas (FaturaCartaoService.CalcularFaturas),
+    // nunca o SaldoDevedor calculado a partir do ledger inteiro da conta (que pode estar zerado
+    // mesmo com faturas reais não pagas, se um pagamento não foi vinculado a nenhuma fatura).
+    private async Task<Dictionary<Guid, decimal>> ObterFaturasEmAbertoPorContaAsync(List<ContaBancaria> contas, List<RegistroDiario> registros)
+    {
+        var resultado = new Dictionary<Guid, decimal>();
+        foreach (var conta in contas.Where(c => c.Tipo == "CartaoCredito"))
+        {
+            var registrosDaConta = registros.Where(r => r.ContaBancariaId == conta.Id && !r.Excluido).ToList();
+            var pagamentos = await _pagamentoFaturaRepo.ListarPorContaCartaoAsync(conta.Id);
+            var faturas = await _faturaRepo.ListarPorContaAsync(conta.Id);
+            var calculadas = FaturaCartaoService.CalcularFaturas(conta, registrosDaConta, pagamentos, faturas, DataLocalHelper.Hoje());
+            resultado[conta.Id] = calculadas.Where(f => f.Status != "Paga").Sum(f => f.SaldoDevedor);
+        }
+        return resultado;
     }
 
     public async Task<ContaBancariaDto> CriarAsync(CriarContaBancariaDto dto, Guid usuarioLogadoId, string perfil)
@@ -468,7 +492,8 @@ public class ContaBancariaService : IContaBancariaService
         return $"{MesesAbreviados[dataAlvo.Month - 1]}/{dataAlvo.Year}";
     }
 
-    private static ContaBancariaDto MapToDto(ContaBancaria c, IEnumerable<RegistroDiario> registros, IEnumerable<MetaAnual> metasDoCliente)
+    private static ContaBancariaDto MapToDto(
+        ContaBancaria c, IEnumerable<RegistroDiario> registros, IEnumerable<MetaAnual> metasDoCliente, decimal? faturasEmAberto = null)
     {
         var regsOrdenados = registros
             .Where(r => r.ContaBancariaId == c.Id && !r.Excluido)
@@ -584,6 +609,16 @@ public class ContaBancariaService : IContaBancariaService
             // (crédito a favor do cliente, ex. fatura paga a mais), a dívida é zero.
             dto.SaldoDevedor = Math.Max(0m, -saldoAtual);
             dto.LimiteDisponivel = c.Limite.HasValue ? c.Limite.Value - dto.SaldoDevedor.Value : null;
+            // Fallback pro ledger quando o chamador não calculou a soma por fatura (ver
+            // ObterFaturasEmAbertoPorContaAsync) — nunca pior que o comportamento de antes.
+            dto.FaturasEmAberto = faturasEmAberto ?? dto.SaldoDevedor;
+
+            // "Este mês" do cartão: compra é sempre saída que não é pagamento de fatura; pagamento
+            // é a entrada sintética criada ao vincular/pagar a fatura (ver FaturaCartaoService).
+            dto.ComprasMes = regsDoMes.SelectMany(r => r.Saidas)
+                .Where(s => s.TipoCusto != LancamentoFiltro.TipoPagamentoFatura).Sum(s => s.Valor);
+            dto.PagamentosMes = regsDoMes.SelectMany(r => r.Entradas)
+                .Where(e => e.TipoCusto == LancamentoFiltro.TipoPagamentoFatura).Sum(e => e.Valor);
         }
 
         return dto;

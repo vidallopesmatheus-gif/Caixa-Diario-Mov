@@ -148,6 +148,14 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
                       {' · '}
                       <span className="val-red">-{fmtBRL(c.resgateMesAtual ?? 0)}</span>
                     </>
+                  ) : c.tipo === 'CartaoCredito' ? (
+                    // Item 4 (Money Vision): entradasMes/saidasMes excluem compra/pagamento de
+                    // fatura por serem "não operacionais" pro DRE — sempre mostravam R$ 0,00 aqui.
+                    <>
+                      Compras: <span className="val-red">-{fmtBRL(c.comprasMes ?? 0)}</span>
+                      {' · '}
+                      Pago: <span className="val-green">+{fmtBRL(c.pagamentosMes ?? 0)}</span>
+                    </>
                   ) : (
                     <>
                       Este mês: <span className="val-green">+{fmtBRL(c.entradasMes)}</span>
@@ -161,7 +169,7 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
                 </div>
               </div>
               {c.tipo === 'CartaoCredito'
-                ? <div className="cb-conta-saldo val-red">{fmtBRL(c.saldoDevedor ?? 0)}</div>
+                ? <div className="cb-conta-saldo val-red">{fmtBRL(c.faturasEmAberto ?? c.saldoDevedor ?? 0)}</div>
                 : <div className={`cb-conta-saldo ${c.saldoAtual < 0 ? 'val-red' : 'val-green'}`}>{fmtBRL(c.saldoAtual)}</div>}
             </div>
           </div>

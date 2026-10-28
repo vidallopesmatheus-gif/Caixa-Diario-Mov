@@ -16,6 +16,8 @@ public class ContaBancariaServiceTests
     private readonly Mock<ITransferenciaRepository> _transferenciaRepoMock = new();
     private readonly Mock<ITransacaoImportadaRepository> _transacaoImportadaRepoMock = new();
     private readonly Mock<IContaRecorrenteRepository> _contaRecorrenteRepoMock = new();
+    private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
+    private readonly Mock<IPagamentoFaturaRepository> _pagamentoFaturaRepoMock = new();
     private readonly ContaBancariaService _sut;
 
     public ContaBancariaServiceTests()
@@ -27,9 +29,14 @@ public class ContaBancariaServiceTests
         _transferenciaRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Transferencia>());
         _transacaoImportadaRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<TransacaoImportada>());
         _contaRecorrenteRepoMock.Setup(r => r.ContarPorContaBancariaAsync(It.IsAny<Guid>())).ReturnsAsync(0);
+        // Fallback padrão pro item 4 (Money Vision "faturas em aberto") — a maioria dos testes não
+        // é de cartão de crédito, só não pode quebrar com NullReferenceException.
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Fatura>());
+        _pagamentoFaturaRepoMock.Setup(r => r.ListarPorContaCartaoAsync(It.IsAny<Guid>())).ReturnsAsync(new List<PagamentoFatura>());
         _sut = new ContaBancariaService(
             _contaRepoMock.Object, _registroRepoMock.Object, _metaRepoMock.Object,
-            _transferenciaRepoMock.Object, _transacaoImportadaRepoMock.Object, _contaRecorrenteRepoMock.Object);
+            _transferenciaRepoMock.Object, _transacaoImportadaRepoMock.Object, _contaRecorrenteRepoMock.Object,
+            _faturaRepoMock.Object, _pagamentoFaturaRepoMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid id, Guid clienteId, decimal saldoInicial = 1000m) => new()
@@ -386,6 +393,51 @@ public class ContaBancariaServiceTests
 
         var dto = Assert.Single(contas);
         Assert.Equal(800m, dto.SaldoAtual);
+    }
+
+    // Money Vision: "card mostra R$ 0,00, mas a API e as faturas dizem outra coisa" (item 4) — o
+    // ledger pode fechar em saldo positivo (pagamentos cobrindo as compras e mais um pouco) mesmo
+    // com uma Fatura real ainda sem ValorPago nenhum (pagamento feito mas nunca vinculado a ela) —
+    // FaturasEmAberto tem que refletir a fatura de verdade, nunca o SaldoDevedor do ledger inteiro.
+    [Fact]
+    public async Task ListarPorClienteAsync_CartaoComFaturaNaoPagaEPagamentoNaoVinculado_FaturasEmAbertoUsaAFaturaReal()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = new ContaBancaria
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Cartões", Tipo = "CartaoCredito",
+            SaldoInicial = 0m, Ativa = true, DataCriacao = DateTime.UtcNow,
+        };
+        var faturaId = Guid.NewGuid();
+        var fatura = new Fatura
+        {
+            Id = faturaId, ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Nubank",
+            Competencia = "2026-10", DataVencimento = new DateOnly(2026, 10, 20), CriadoEm = DateTime.UtcNow,
+        };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 10, 5),
+            Entradas = new()
+            {
+                // Pagamento que caiu no ledger (saldo positivo) mas nunca foi vinculado a nenhuma
+                // fatura (PagamentoFaturaId null) — não conta no SaldoDevedor da Fatura real.
+                new ItemFinanceiro { Descricao = "Pix para Nubank", Valor = 2500m },
+            },
+            Saidas = new() { new ItemFinanceiroSaida { Descricao = "Compra", Valor = 2000m, FaturaId = faturaId } },
+            ContasReceber = new(), ContasPagar = new(), SaldoFinal = 500m,
+        };
+
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { contaCartao });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<Fatura> { fatura });
+        _pagamentoFaturaRepoMock.Setup(r => r.ListarPorContaCartaoAsync(contaCartao.Id)).ReturnsAsync(new List<PagamentoFatura>());
+
+        var contas = await _sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
+
+        var dto = Assert.Single(contas);
+        Assert.Equal(500m, dto.SaldoAtual); // ledger: positivo (crédito a favor)
+        Assert.Equal(0m, dto.SaldoDevedor); // SaldoDevedor do ledger: zero (Math.Max(0, -500))
+        Assert.Equal(2000m, dto.FaturasEmAberto); // a Fatura real ainda deve os 2000 da compra
     }
 
     [Fact]
