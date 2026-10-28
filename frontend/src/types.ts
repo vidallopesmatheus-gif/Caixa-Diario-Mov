@@ -407,6 +407,9 @@ export interface ResultadoImportacao {
   faturaId: string | null
   // Rodada "parcelamentos": um item por Parcelamento resolvido/criado nesta importação.
   parcelamentosDetectados: ParcelamentoDetectadoResumo[]
+  // A detecção de parcelamento nunca derruba a importação — se falhar numa linha, a compra entra
+  // normal (sem vínculo) e o motivo aparece aqui, em vez de nunca ter importado nada.
+  avisosParcelamento: string[]
 }
 
 export interface ParcelamentoDetectadoResumo {

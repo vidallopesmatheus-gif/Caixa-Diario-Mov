@@ -8,6 +8,7 @@ using CaixaDiario.API.Repositories.Interfaces;
 using CaixaDiario.API.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace CaixaDiario.Tests.Services;
@@ -29,6 +30,7 @@ public class ImportacaoServiceTests
     private readonly Mock<IConciliacaoService> _conciliacaoServiceMock = new();
     private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
     private readonly Mock<IParcelamentoDeteccaoService> _parcelamentoDeteccaoServiceMock = new();
+    private readonly Mock<IFaturaCartaoService> _faturaCartaoServiceMock = new();
     private readonly ImportacaoService _sut;
 
     public ImportacaoServiceTests()
@@ -53,6 +55,10 @@ public class ImportacaoServiceTests
             It.IsAny<Guid>(), It.IsAny<DateOnly>(), It.IsAny<DateOnly>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>()))
             .ReturnsAsync(new List<CaixaDiario.API.DTOs.Conciliacao.SugestaoVinculoDto>());
         _faturaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Fatura>())).ReturnsAsync((Fatura f) => f);
+        // Fallback padrão pro reaproveitamento de fatura por banco+competência — sem isso, todo
+        // teste de cartão quebraria com NullReferenceException (ImportarArquivoAsync agora sempre
+        // consulta as faturas existentes da conta antes de decidir se cria uma nova).
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Fatura>());
         // Fallback padrão pra detecção de parcelamento — a maioria dos testes não liga pra qual
         // Parcelamento foi resolvido, só não pode quebrar com NullReferenceException.
         _parcelamentoDeteccaoServiceMock.Setup(s => s.ProcessarParcelaDetectadaAsync(
@@ -62,9 +68,13 @@ public class ImportacaoServiceTests
                 Id = Guid.NewGuid(), ClienteId = conta.ClienteId, ContaCartaoId = conta.Id, DescricaoBase = comerciante,
                 Categoria = categoria, ValorParcela = valor, TotalParcelas = total, Status = "Ativo", CriadoEm = DateTime.UtcNow,
             });
+        // Fallback padrão pro auto-vínculo de pagamento de fatura (item 5) — a maioria dos testes
+        // não liga pro resultado, só não pode quebrar com NullReferenceException.
+        _faturaCartaoServiceMock.Setup(s => s.AutoVincularPagamentoPorTransferenciaAsync(It.IsAny<Guid>(), It.IsAny<Guid>()))
+            .ReturnsAsync(false);
         _sut = new ImportacaoService(_contaRepoMock.Object, _importRepoMock.Object, _registroRepoMock.Object, _categoriaRepoMock.Object,
             _regraRepoMock.Object, _transferenciaServiceMock.Object, _conciliacaoServiceMock.Object, _faturaRepoMock.Object,
-            _parcelamentoDeteccaoServiceMock.Object, CriarContexto());
+            _parcelamentoDeteccaoServiceMock.Object, CriarContexto(), NullLogger<ImportacaoService>.Instance, _faturaCartaoServiceMock.Object);
     }
 
     private static ContaBancaria CriarConta(Guid contaId, Guid clienteId, decimal saldoInicial = 0m, string tipo = "ContaCorrente") => new()
@@ -968,7 +978,7 @@ public class ImportacaoServiceTests
         var contaId = Guid.NewGuid();
         var clienteId = Guid.NewGuid();
         var data = new DateOnly(2026, 7, 26);
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 500m));
         _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
 
         var registroExistente = new RegistroDiario

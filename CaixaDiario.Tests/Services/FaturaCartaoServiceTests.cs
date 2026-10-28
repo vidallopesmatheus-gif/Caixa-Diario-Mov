@@ -18,6 +18,7 @@ public class FaturaCartaoServiceTests
     private readonly Mock<ICategoriaRepository> _categoriaRepoMock = new();
     private readonly Mock<IAuditService> _auditMock = new();
     private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
+    private readonly Mock<ITransferenciaRepository> _transferenciaRepoMock = new();
     private readonly FaturaCartaoService _sut;
 
     // InMemory não é relacional — o serviço detecta isso (Database.IsRelational()) e não abre
@@ -31,7 +32,7 @@ public class FaturaCartaoServiceTests
         _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>());
         _sut = new FaturaCartaoService(
             _contaRepoMock.Object, _registroRepoMock.Object, _pagamentoRepoMock.Object, _categoriaRepoMock.Object,
-            _auditMock.Object, CriarContexto(), _faturaRepoMock.Object);
+            _auditMock.Object, CriarContexto(), _faturaRepoMock.Object, _transferenciaRepoMock.Object);
     }
 
     private static ContaBancaria CriarConta(
@@ -100,6 +101,176 @@ public class FaturaCartaoServiceTests
 
         Assert.Equal(500m, resultado.ValorPago);
         Assert.Equal("2026-09", resultado.Competencia);
+    }
+
+    // Money Vision: "saldo não fecha com o extrato" — a entrada sintética criada no cartão nunca
+    // cascateava; um dia futuro já materializado (ex.: compra parcelada lançada antecipadamente)
+    // ficava com Inicio desatualizado pra sempre.
+    [Fact]
+    public async Task VincularPagamentoAsync_CartaoTemDiaFuturoJaMaterializado_RecalculaOInicioDele()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = CriarConta(clienteId, "Nubank Conta", "ContaCorrente", saldoInicial: 2000m);
+        var contaCartao = CriarConta(clienteId, "Nubank Cartão", "CartaoCredito");
+        var data = new DateOnly(2026, 9, 5);
+        var lancamentoId = Guid.NewGuid();
+
+        var registroOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 2500m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 2000m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = lancamentoId, Descricao = "Pagamento fatura Nubank", Valor = 500m, Categoria = "", PendenteCategorizacao = true } },
+        };
+        var registroFuturoCartao = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = data.AddMonths(1),
+            Inicio = -300m, SaldoFinal = -300m, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCorrente.Id)).ReturnsAsync(contaCorrente);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCorrente.Id, data)).ReturnsAsync(registroOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCartao.Id, data)).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        var registrosDoCartao = new List<RegistroDiario> { registroFuturoCartao };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(() => registrosDoCartao.ToList());
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(registrosDoCartao.Add).ReturnsAsync((RegistroDiario r) => r);
+        _pagamentoRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<PagamentoFatura>())).ReturnsAsync((PagamentoFatura p) => p);
+
+        var dto = new VincularPagamentoFaturaDto
+        {
+            ContaOrigemId = contaCorrente.Id, LancamentoId = lancamentoId, Data = data,
+            ContaCartaoId = contaCartao.Id, Competencia = "2026-09",
+        };
+
+        await _sut.VincularPagamentoAsync(dto, clienteId, "cliente");
+
+        // 0 (SaldoInicial do cartão) + 500 (pagamento) = 500; o dia futuro herda isso e mantém seu
+        // próprio delta local (-300 - (-300) = 0 nesse caso, então só a âncora muda).
+        Assert.Equal(500m, registroFuturoCartao.Inicio);
+        Assert.Equal(500m, registroFuturoCartao.SaldoFinal);
+    }
+
+    // ── AutoVincularPagamentoPorTransferenciaAsync (item 5, Money Vision "pagamento não abate") ──
+
+    [Fact]
+    public async Task AutoVincularPagamentoPorTransferenciaAsync_TransferenciaExistenteNaJanela_Vincula()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaOrigem = CriarConta(clienteId, "Conta Corrente", "ContaCorrente", saldoInicial: 2000m);
+        var contaCartao = CriarConta(clienteId, "Nubank Cartão", "CartaoCredito");
+        var faturaId = Guid.NewGuid();
+        var fatura = new Fatura
+        {
+            Id = faturaId, ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Nubank",
+            Competencia = "2026-09", DataFechamento = new DateOnly(2026, 9, 1), DataVencimento = new DateOnly(2026, 9, 10),
+            CriadoEm = DateTime.UtcNow,
+        };
+        var compraId = Guid.NewGuid();
+        var registroCartaoCompra = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 8, 20),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = -500m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = compraId, Descricao = "Compra", Valor = 500m, FaturaId = faturaId } },
+        };
+        var transferenciaId = Guid.NewGuid();
+        var dataPagamento = new DateOnly(2026, 9, 5);
+        var transferencia = new Transferencia
+        {
+            Id = transferenciaId, ClienteId = clienteId, ContaOrigemId = contaOrigem.Id, ContaDestinoId = contaCartao.Id,
+            Data = dataPagamento, Valor = 500m, CriadoEm = DateTime.UtcNow,
+        };
+        var entradaId = Guid.NewGuid();
+        var registroCartaoPagamento = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = dataPagamento,
+            Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 0m,
+            Entradas = new() { new ItemFinanceiro { Id = entradaId, Descricao = "Pix para Nubank", Valor = 500m, TransferenciaId = transferenciaId } },
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<Fatura> { fatura });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<RegistroDiario> { registroCartaoCompra, registroCartaoPagamento });
+        _pagamentoRepoMock.Setup(r => r.ListarPorContaCartaoAsync(contaCartao.Id)).ReturnsAsync(new List<PagamentoFatura>());
+        _transferenciaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<Transferencia> { transferencia });
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCartao.Id, dataPagamento)).ReturnsAsync(registroCartaoPagamento);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        PagamentoFatura? pagamentoCriado = null;
+        _pagamentoRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<PagamentoFatura>()))
+            .Callback<PagamentoFatura>(p => pagamentoCriado = p).ReturnsAsync((PagamentoFatura p) => p);
+
+        var vinculou = await _sut.AutoVincularPagamentoPorTransferenciaAsync(contaCartao.Id, faturaId);
+
+        Assert.True(vinculou);
+        Assert.NotNull(pagamentoCriado);
+        Assert.Equal(faturaId, pagamentoCriado!.FaturaId);
+        Assert.Equal(500m, pagamentoCriado.ValorPago);
+        Assert.Equal(contaOrigem.Id, pagamentoCriado.ContaOrigemId);
+        var entrada = Assert.Single(registroCartaoPagamento.Entradas);
+        Assert.Equal(pagamentoCriado.Id, entrada.PagamentoFaturaId);
+        // A entrada já existia (a transferência já afetou o saldo) — nunca mexe no SaldoFinal.
+        Assert.Equal(0m, registroCartaoPagamento.SaldoFinal);
+    }
+
+    [Fact]
+    public async Task AutoVincularPagamentoPorTransferenciaAsync_FaturaJaQuitada_NaoFazNada()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Nubank Cartão", "CartaoCredito");
+        var faturaId = Guid.NewGuid();
+        var fatura = new Fatura
+        {
+            Id = faturaId, ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Nubank",
+            Competencia = "2026-09", DataVencimento = new DateOnly(2026, 9, 10), CriadoEm = DateTime.UtcNow,
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<Fatura> { fatura });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<RegistroDiario>());
+        _pagamentoRepoMock.Setup(r => r.ListarPorContaCartaoAsync(contaCartao.Id)).ReturnsAsync(new List<PagamentoFatura>());
+
+        var vinculou = await _sut.AutoVincularPagamentoPorTransferenciaAsync(contaCartao.Id, faturaId);
+
+        Assert.False(vinculou);
+        _pagamentoRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<PagamentoFatura>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AutoVincularPagamentoPorTransferenciaAsync_DuasTransferenciasCandidatas_NaoDecideSozinho()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Nubank Cartão", "CartaoCredito");
+        var faturaId = Guid.NewGuid();
+        var fatura = new Fatura
+        {
+            Id = faturaId, ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Nubank",
+            Competencia = "2026-09", DataFechamento = new DateOnly(2026, 9, 1), DataVencimento = new DateOnly(2026, 9, 10),
+            CriadoEm = DateTime.UtcNow,
+        };
+        var registroCompra = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Data = new DateOnly(2026, 8, 20),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = -500m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Compra", Valor = 500m, FaturaId = faturaId } },
+        };
+        var contaOrigemA = Guid.NewGuid();
+        var contaOrigemB = Guid.NewGuid();
+        var duasCandidatas = new List<Transferencia>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaOrigemId = contaOrigemA, ContaDestinoId = contaCartao.Id, Data = new DateOnly(2026, 9, 5), Valor = 500m, CriadoEm = DateTime.UtcNow },
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaOrigemId = contaOrigemB, ContaDestinoId = contaCartao.Id, Data = new DateOnly(2026, 9, 6), Valor = 500m, CriadoEm = DateTime.UtcNow },
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<Fatura> { fatura });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartao.Id)).ReturnsAsync(new List<RegistroDiario> { registroCompra });
+        _pagamentoRepoMock.Setup(r => r.ListarPorContaCartaoAsync(contaCartao.Id)).ReturnsAsync(new List<PagamentoFatura>());
+        _transferenciaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(duasCandidatas);
+
+        var vinculou = await _sut.AutoVincularPagamentoPorTransferenciaAsync(contaCartao.Id, faturaId);
+
+        Assert.False(vinculou);
+        _pagamentoRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<PagamentoFatura>()), Times.Never);
     }
 
     [Fact]

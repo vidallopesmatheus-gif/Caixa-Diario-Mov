@@ -8,6 +8,7 @@ using CaixaDiario.API.Repositories.Interfaces;
 using CaixaDiario.API.Services.Parsers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace CaixaDiario.API.Services;
 
@@ -22,7 +23,9 @@ public class ImportacaoService : IImportacaoService
     private readonly IConciliacaoService _conciliacaoService;
     private readonly IFaturaRepository _faturaRepo;
     private readonly IParcelamentoDeteccaoService _parcelamentoDeteccaoService;
+    private readonly IFaturaCartaoService _faturaCartaoService;
     private readonly AppDbContext _context;
+    private readonly ILogger<ImportacaoService> _logger;
 
     public ImportacaoService(
         IContaBancariaRepository contaRepo,
@@ -34,7 +37,9 @@ public class ImportacaoService : IImportacaoService
         IConciliacaoService conciliacaoService,
         IFaturaRepository faturaRepo,
         IParcelamentoDeteccaoService parcelamentoDeteccaoService,
-        AppDbContext context)
+        AppDbContext context,
+        ILogger<ImportacaoService> logger,
+        IFaturaCartaoService faturaCartaoService)
     {
         _contaRepo = contaRepo;
         _importRepo = importRepo;
@@ -46,6 +51,8 @@ public class ImportacaoService : IImportacaoService
         _faturaRepo = faturaRepo;
         _parcelamentoDeteccaoService = parcelamentoDeteccaoService;
         _context = context;
+        _logger = logger;
+        _faturaCartaoService = faturaCartaoService;
     }
 
     // Compra no cartão é sempre SAÍDA (dívida), estorno/crédito é sempre ENTRADA — mas bancos
@@ -285,9 +292,11 @@ public class ImportacaoService : IImportacaoService
 
     // Move/atualiza o item manual em vez de criar um novo: mantém Categoria/TipoCusto/vínculos/
     // Valor do manual, grava FitId/Descricao do banco. Quando a data muda, move o item entre os
-    // dois RegistroDiario (saldo é só recalculado no fim, de uma vez, por RecalcularSaldosDesde).
+    // dois RegistroDiario — registrosTocados acumula os dias cujo total de entradas/saídas mudou de
+    // verdade (precisam ter o próprio SaldoFinal recalculado); a cadeia de Inicio dos dias seguintes
+    // é responsabilidade do RecalcularContaInteiraAsync chamado no fim do método, não daqui.
     private static void AplicarMergeComManual(
-        RegistroDiario registroDestino, TransacaoParseada t, ItemSemFitId candidato, ref DateOnly? menorDataAfetadaPorMerge)
+        RegistroDiario registroDestino, TransacaoParseada t, ItemSemFitId candidato, HashSet<RegistroDiario> registrosTocados)
     {
         var moveu = candidato.Registro.Data != t.Data;
 
@@ -327,9 +336,8 @@ public class ImportacaoService : IImportacaoService
 
         if (moveu)
         {
-            var menor = candidato.Registro.Data < t.Data ? candidato.Registro.Data : t.Data;
-            if (!menorDataAfetadaPorMerge.HasValue || menor < menorDataAfetadaPorMerge.Value)
-                menorDataAfetadaPorMerge = menor;
+            registrosTocados.Add(candidato.Registro);
+            registrosTocados.Add(registroDestino);
         }
     }
 
@@ -347,6 +355,12 @@ public class ImportacaoService : IImportacaoService
         if (dataInicio.HasValue) parseadas = parseadas.Where(t => t.Data >= dataInicio.Value).ToList();
         if (dataFim.HasValue) parseadas = parseadas.Where(t => t.Data <= dataFim.Value).ToList();
 
+        // Lote inteiro numa transação só: antes, uma falha no meio da importação (ex.: o próprio
+        // bug do parcelamento) deixava a fatura e alguns lançamentos gravados pela metade — uma
+        // reimportação "Já importada" fantasma que nem aparecia nem podia ser completada de novo.
+        await using var transacao = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync() : null;
+
         // Cartão: cada importação é UMA fatura — todas as compras do arquivo (nunca particionadas
         // por mês-calendário) se ligam a ela via ItemFinanceiroSaida.FaturaId (ver Models/Fatura.cs).
         Fatura? fatura = null;
@@ -361,22 +375,35 @@ public class ImportacaoService : IImportacaoService
                 ? $"{dataVencimentoFatura.Value.Year:D4}-{dataVencimentoFatura.Value.Month:D2}"
                 : competenciaFatura!.Trim();
 
-            fatura = await _faturaRepo.AdicionarAsync(new Fatura
+            // Mesmo banco + competência nesta conta: reaproveita a fatura já existente em vez de
+            // criar outra — senão cada reimportação (ex.: completar depois de um erro) duplicava a
+            // fatura e os itens antigos ficavam "órfãos" numa fatura diferente da nova.
+            fatura = (await _faturaRepo.ListarPorContaAsync(conta.Id))
+                .FirstOrDefault(f => string.Equals(f.Banco, banco.Trim(), StringComparison.OrdinalIgnoreCase) && f.Competencia == competencia);
+            if (fatura == null)
             {
-                Id = Guid.NewGuid(),
-                ClienteId = conta.ClienteId,
-                ContaBancariaId = conta.Id,
-                Banco = banco.Trim(),
-                Competencia = competencia,
-                DataFechamento = dataFechamentoFatura,
-                DataVencimento = dataVencimentoFatura.Value,
-                CriadoEm = DateTime.UtcNow,
-            });
+                fatura = await _faturaRepo.AdicionarAsync(new Fatura
+                {
+                    Id = Guid.NewGuid(),
+                    ClienteId = conta.ClienteId,
+                    ContaBancariaId = conta.Id,
+                    Banco = banco.Trim(),
+                    Competencia = competencia,
+                    DataFechamento = dataFechamentoFatura,
+                    DataVencimento = dataVencimentoFatura.Value,
+                    CriadoEm = DateTime.UtcNow,
+                });
+            }
         }
 
         var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
+        // Snapshot do "ajuste" (baixa financeira) de cada dia já existente, ANTES de qualquer merge
+        // mudar suas entradas/saídas — preserva esse componente quando um merge que move item entre
+        // dias força recalcular o SaldoFinal local (ver uso mais abaixo, junto de registrosTocadosPorMerge).
+        var ajustePorRegistroId = registros.ToDictionary(
+            r => r.Id, r => r.SaldoFinal - RegistroService.CalcularSaldoFinal(r.Inicio, r.Entradas, r.Saidas, 0m));
         var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
         var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
@@ -393,7 +420,7 @@ public class ImportacaoService : IImportacaoService
             aImportar.Where(t => !conciliaveis.Contains(t.Indice)).ToList(), registros, chavesImportadasAntes, consumidoPelaHeuristica);
         var resolucoesPorIndice = (resolucoesDuplicatas ?? new List<ResolucaoDuplicataDto>())
             .ToDictionary(r => r.TransacaoIndice, r => r.Acao);
-        DateOnly? menorDataAfetadaPorMerge = null;
+        var registrosTocadosPorMerge = new HashSet<RegistroDiario>();
         var totalMescladasComManual = 0;
         var totalDuplicatasEntreArquivosSinalizadas = 0;
         var totalDuplicatasEntreArquivosIgnoradas = 0;
@@ -414,6 +441,7 @@ public class ImportacaoService : IImportacaoService
         var conciliadasTransferencia = 0;
         var ambiguasTransferencia = 0;
         var parcelamentosDetectados = new List<ParcelamentoDetectadoResumoDto>();
+        var avisosParcelamento = new List<string>();
 
         // Provisórias já existentes nesta conta (contrapartida de Transferência criada antes do
         // extrato real chegar — ver TransferenciaService.ConverterLancamentoAsync). Cada uma só pode
@@ -508,7 +536,7 @@ public class ImportacaoService : IImportacaoService
                     {
                         // Duplicata de lançamento MANUAL — padrão é mesclar: mantém Categoria/
                         // TipoCusto/vínculos/Valor do manual, só grava FitId/Descrição/Data do banco.
-                        AplicarMergeComManual(registro, t, duplicata.Candidato, ref menorDataAfetadaPorMerge);
+                        AplicarMergeComManual(registro, t, duplicata.Candidato, registrosTocadosPorMerge);
                         totalMescladasComManual++;
                         auditoria.Add(new TransacaoImportada
                         {
@@ -629,22 +657,45 @@ public class ImportacaoService : IImportacaoService
                     Guid? parcelamentoId = null;
                     if (parcelaDetectada != null)
                     {
-                        var parcelamento = await _parcelamentoDeteccaoService.ProcessarParcelaDetectadaAsync(
-                            conta, dataVencimentoFatura!.Value, parcelaDetectada.Comerciante, categoriaFinal,
-                            parcelaDetectada.Numero, parcelaDetectada.Total, t.Valor);
-                        parcelamentoId = parcelamento.Id;
-
-                        var restantes = parcelaDetectada.Total - parcelaDetectada.Numero;
-                        parcelamentosDetectados.Add(new ParcelamentoDetectadoResumoDto
+                        // Bug real em produção: uma falha aqui (ex.: tabela de parcelamento ausente)
+                        // derrubava a importação inteira com 500 e não gravava nada. Agora isola numa
+                        // savepoint — se falhar, desfaz só o que esta linha tentou gravar de
+                        // parcelamento e a compra segue o fluxo normal (sem vínculo), com um aviso.
+                        string? savepoint = null;
+                        if (transacao != null)
                         {
-                            ParcelamentoId = parcelamento.Id,
-                            Comerciante = parcelaDetectada.Comerciante,
-                            NumeroParcela = parcelaDetectada.Numero,
-                            TotalParcelas = parcelaDetectada.Total,
-                            ParcelasRestantes = restantes,
-                            ValorRestante = restantes * t.Valor,
-                            Status = parcelamento.Status,
-                        });
+                            savepoint = $"sp_parcela_{Guid.NewGuid():N}";
+                            await transacao.CreateSavepointAsync(savepoint);
+                        }
+                        try
+                        {
+                            var parcelamento = await _parcelamentoDeteccaoService.ProcessarParcelaDetectadaAsync(
+                                conta, dataVencimentoFatura!.Value, parcelaDetectada.Comerciante, categoriaFinal,
+                                parcelaDetectada.Numero, parcelaDetectada.Total, t.Valor);
+                            parcelamentoId = parcelamento.Id;
+
+                            var restantes = parcelaDetectada.Total - parcelaDetectada.Numero;
+                            parcelamentosDetectados.Add(new ParcelamentoDetectadoResumoDto
+                            {
+                                ParcelamentoId = parcelamento.Id,
+                                Comerciante = parcelaDetectada.Comerciante,
+                                NumeroParcela = parcelaDetectada.Numero,
+                                TotalParcelas = parcelaDetectada.Total,
+                                ParcelasRestantes = restantes,
+                                ValorRestante = restantes * t.Valor,
+                                Status = parcelamento.Status,
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex,
+                                "Falha ao processar parcelamento da linha '{Descricao}' ({Data}) na conta {ContaId}",
+                                t.Descricao, t.Data, contaBancariaId);
+                            if (savepoint != null) await transacao!.RollbackToSavepointAsync(savepoint);
+                            parcelamentoId = null;
+                            avisosParcelamento.Add(
+                                $"Não consegui ler o parcelamento de \"{t.Descricao}\" ({t.Data:dd/MM/yyyy}) — a compra foi importada normalmente, sem o vínculo de parcelamento.");
+                        }
                     }
 
                     registro.Saidas.Add(new ItemFinanceiroSaida
@@ -696,26 +747,25 @@ public class ImportacaoService : IImportacaoService
         foreach (var r in registrosTocadosPorConciliacao)
             await _registroRepo.AtualizarAsync(r);
 
-        // Mesclas que MOVERAM um item manual pra outro dia: o dia de origem só foi tocado aqui, não
-        // pelo loop principal — recalcula saldo de toda a conta a partir do dia mais antigo afetado
-        // (origem ou destino) de uma vez, em vez de tentar propagar delta a delta (poderiam ter
-        // ocorrido duas mesclas tocando dias diferentes na mesma janela).
-        if (menorDataAfetadaPorMerge.HasValue)
+        // Mesclas que MOVERAM um item manual pra outro dia mudaram de verdade o total de entradas/
+        // saídas da origem e do destino — cada um precisa ter o próprio SaldoFinal recalculado (com
+        // o Inicio que já tinha e o ajuste que já existia antes do merge, nunca 0 — bug real que
+        // descartava silenciosamente qualquer baixa financeira que aquele dia já carregava).
+        foreach (var r in registrosTocadosPorMerge)
         {
-            var saldoCorrente = registros
-                .Where(r => r.Data < menorDataAfetadaPorMerge.Value)
-                .OrderByDescending(r => r.Data)
-                .Select(r => r.SaldoFinal)
-                .FirstOrDefault(conta.SaldoInicial);
-
-            foreach (var r in registros.Where(r => r.Data >= menorDataAfetadaPorMerge.Value).OrderBy(r => r.Data))
-            {
-                r.Inicio = saldoCorrente;
-                r.SaldoFinal = RegistroService.CalcularSaldoFinal(r.Inicio, r.Entradas, r.Saidas, 0m);
-                saldoCorrente = r.SaldoFinal;
-                await _registroRepo.AtualizarAsync(r);
-            }
+            var ajuste = ajustePorRegistroId.GetValueOrDefault(r.Id, 0m);
+            r.SaldoFinal = RegistroService.CalcularSaldoFinal(r.Inicio, r.Entradas, r.Saidas, ajuste);
+            await _registroRepo.AtualizarAsync(r);
         }
+
+        // Fonte única de verdade (Money Vision: "saldo não fecha com o extrato") — qualquer mutação
+        // acima pode ter deixado a cadeia de Inicio/SaldoFinal da conta desalinhada (inclusive dias
+        // futuros já materializados fora do intervalo importado, que o loop principal nunca toca).
+        // Sempre reconcilia a conta INTEIRA antes de confirmar a importação, não só quando um merge
+        // aconteceu. Passa a lista "registros" já em memória (inclui os dias novos criados neste
+        // loop) em vez de reconsultar o repositório — os dias novos já estão nela desde que foram
+        // criados, sem precisar de outra ida ao banco.
+        await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contaBancariaId, conta.SaldoInicial, registros);
 
         await _importRepo.AdicionarLoteAsync(auditoria);
 
@@ -759,6 +809,24 @@ public class ImportacaoService : IImportacaoService
             // Nunca falha a importação (já persistida) por causa da sugestão — só não resume.
         }
 
+        // Item 5 (Money Vision "pagamento não abate"): se o usuário já pagou esta fatura
+        // transferindo pro cartão mas nunca clicou "vincular pagamento", acha e vincula agora que o
+        // total final da fatura é conhecido — sem isso "Fatura(s) em aberto" (saldo real, sempre
+        // correto) e o valorPago desta fatura específica (0) mostravam números contraditórios.
+        if (fatura != null)
+        {
+            try
+            {
+                await _faturaCartaoService.AutoVincularPagamentoPorTransferenciaAsync(contaBancariaId, fatura.Id);
+            }
+            catch (ApiException)
+            {
+                // Nunca falha a importação (já persistida) por causa do auto-vínculo — só não vincula.
+            }
+        }
+
+        if (transacao != null) await transacao.CommitAsync();
+
         return new ResultadoImportacaoDto
         {
             TotalImportadas = aImportar.Count - conciliadasTransferencia - totalMescladasComManual - totalDuplicatasEntreArquivosIgnoradas,
@@ -774,6 +842,7 @@ public class ImportacaoService : IImportacaoService
             TotalSugestoesVinculo = totalSugestoesVinculo,
             FaturaId = fatura?.Id,
             ParcelamentosDetectados = parcelamentosDetectados,
+            AvisosParcelamento = avisosParcelamento,
         };
     }
 

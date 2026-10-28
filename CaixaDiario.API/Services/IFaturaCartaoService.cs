@@ -12,6 +12,10 @@ public interface IFaturaCartaoService
     Task<PagamentoFaturaDto> VincularPagamentoAsync(VincularPagamentoFaturaDto dto, Guid usuarioLogadoId, string perfil);
     Task<PagamentoFaturaDto> PagarFaturaAsync(Guid contaCartaoId, PagarFaturaDto dto, Guid usuarioLogadoId, string perfil);
     Task DesvincularPagamentoAsync(Guid id, Guid usuarioLogadoId, string perfil);
+    // Item 5 (Money Vision "pagamento não abate"): acha e vincula automaticamente uma transferência
+    // já existente pro cartão que paga esta fatura (chamado depois de toda importação de fatura
+    // real). Retorna true se vinculou. Nunca cria lançamento novo, nunca decide se for ambíguo.
+    Task<bool> AutoVincularPagamentoPorTransferenciaAsync(Guid contaCartaoId, Guid faturaId);
     // origemMetaId: só preenchido internamente por MetaService.ConquistarAsync (forma Cartão) —
     // nunca vem de fora pelo DTO público (mesmo motivo de ContaProvisionadaService.CriarAsync).
     Task LancarComprasParceladaAsync(

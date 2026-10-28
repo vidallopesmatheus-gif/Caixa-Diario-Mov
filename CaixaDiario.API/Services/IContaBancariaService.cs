@@ -12,6 +12,9 @@ public interface IContaBancariaService
     Task<List<LancamentoExtratoDto>> ObterExtratoAsync(Guid contaId, Guid usuarioLogadoId, string perfil, DateOnly? de, DateOnly? ate);
     Task<PendenciasContaDto> ObterPendenciasAsync(Guid contaId, Guid usuarioLogadoId, string perfil);
     Task<ContaBancariaDto> RegistrarRendimentoAsync(Guid contaId, RegistrarRendimentoDto dto, Guid usuarioLogadoId, string perfil);
+    // Item 4 (Money Vision "saldo não fecha com o extrato"): acerta o saldo da conta com o banco
+    // através de UM lançamento visível, nunca trocando o Inicio em silêncio.
+    Task<ContaBancariaDto> AjustarSaldoAsync(Guid contaId, AjustarSaldoDto dto, Guid usuarioLogadoId, string perfil);
     Task<ContaBancariaDto> VincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil);
     Task<ContaBancariaDto> DesvincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil);
 

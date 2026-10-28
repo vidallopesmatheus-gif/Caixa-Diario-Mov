@@ -82,6 +82,7 @@ public class ContaBancariaService : IContaBancariaService
         if (!TiposValidos.Contains(dto.Tipo))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, $"Tipo inválido. Use: {string.Join(", ", TiposValidos)}");
 
+        var saldoInicialMudou = conta.SaldoInicial != dto.SaldoInicial;
         conta.Nome = dto.Nome.Trim();
         conta.Tipo = dto.Tipo;
         conta.SaldoInicial = dto.SaldoInicial;
@@ -91,6 +92,11 @@ public class ContaBancariaService : IContaBancariaService
         conta.DiaVencimento = dto.Tipo == "CartaoCredito" ? dto.DiaVencimento : null;
 
         var atualizada = await _contaRepo.AtualizarAsync(conta);
+        // Bug real em produção (saldo não fecha com o extrato): editar o saldo inicial depois que a
+        // conta já tem registros nunca resincronizava a cadeia — o primeiro dia continuava com o
+        // Inicio antigo pra sempre, e todo o resto do extrato arrastava a diferença.
+        if (saldoInicialMudou)
+            await RegistroService.RecalcularContaInteiraAsync(_registroRepo, id, atualizada.SaldoInicial);
         var registros = await _registroRepo.ListarPorContaAsync(id);
         var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
         return MapToDto(atualizada, registros, metas);
@@ -305,6 +311,51 @@ public class ContaBancariaService : IContaBancariaService
         }
         registro.SalvoEm = DateTime.UtcNow;
         await RegistroDiaHelper.PersistirAsync(_registroRepo, registro, novo);
+        // Bug real em produção (saldo não fecha com o extrato): rendimento nunca cascateava — um
+        // dia futuro já materializado (ex.: recorrência) ficava com Inicio desatualizado.
+        await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contaId, conta.SaldoInicial);
+
+        var registrosAtualizados = await _registroRepo.ListarPorContaAsync(contaId);
+        var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
+        return MapToDto(conta, registrosAtualizados, metas);
+    }
+
+    // Item 4 (Money Vision "saldo não fecha com o extrato"): "quero acertar o saldo com o banco"
+    // nunca é uma troca silenciosa do Inicio — vira UM lançamento visível (categoria "Ajuste de
+    // saldo", LancamentoFiltro.TipoAjusteSaldo — já excluído do DRE/médias, mas sempre visível no
+    // extrato/Caixa), na data que o usuário escolher.
+    public async Task<ContaBancariaDto> AjustarSaldoAsync(Guid contaId, AjustarSaldoDto dto, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+        if (dto.Data > DataLocalHelper.Hoje())
+            throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
+
+        var (registro, novo) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, conta, dto.Data);
+        var diferenca = dto.SaldoReal - registro.SaldoFinal;
+        if (diferenca == 0m)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "O saldo informado já bate com o saldo calculado nesta data.", "saldoReal");
+
+        var descricao = string.IsNullOrWhiteSpace(dto.Descricao) ? "Ajuste de saldo" : dto.Descricao;
+        if (diferenca > 0)
+        {
+            registro.Entradas.Add(new ItemFinanceiro
+            {
+                Descricao = descricao, Valor = diferenca, Categoria = "Ajuste de saldo", TipoCusto = LancamentoFiltro.TipoAjusteSaldo,
+            });
+        }
+        else
+        {
+            registro.Saidas.Add(new ItemFinanceiroSaida
+            {
+                Descricao = descricao, Valor = -diferenca, Categoria = "Ajuste de saldo", TipoCusto = LancamentoFiltro.TipoAjusteSaldo,
+            });
+        }
+        registro.SaldoFinal += diferenca;
+        registro.SalvoEm = DateTime.UtcNow;
+        await RegistroDiaHelper.PersistirAsync(_registroRepo, registro, novo);
+        await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contaId, conta.SaldoInicial);
 
         var registrosAtualizados = await _registroRepo.ListarPorContaAsync(contaId);
         var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);

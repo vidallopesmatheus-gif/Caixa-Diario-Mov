@@ -6,6 +6,7 @@ import {
   obterExtratoConta,
   obterPendenciasConta,
   registrarRendimento,
+  ajustarSaldo,
   vincularMeta,
   desvincularMeta,
   listarDuplicatas,
@@ -129,6 +130,15 @@ export default function ClientContaDetalhePage() {
   const [rendDescricao, setRendDescricao] = useState('')
   const [salvandoRendimento, setSalvandoRendimento] = useState(false)
   const [historicoSaldo, setHistoricoSaldo] = useState<SaldoMensal[]>([])
+
+  // ── "Conferir saldo" (Money Vision, item 4): acerta o saldo com o banco através de UM
+  // lançamento visível (categoria "Ajuste de saldo"), nunca uma troca silenciosa do saldo inicial
+  // do dia — disponível pra qualquer conta (Investimento já tem seu próprio fluxo acima). ──
+  const [modalConferirSaldo, setModalConferirSaldo] = useState(false)
+  const [conferirData, setConferirData] = useState(todayISO())
+  const [conferirSaldoDisplay, setConferirSaldoDisplay] = useState('')
+  const [conferirSaldoReal, setConferirSaldoReal] = useState(0)
+  const [salvandoConferirSaldo, setSalvandoConferirSaldo] = useState(false)
 
   // ── Reclassificar lançamento como Transferência (fato permutativo) ──────────
   const [contasBancarias, setContasBancarias] = useState<ContaBancaria[]>([])
@@ -655,6 +665,26 @@ export default function ClientContaDetalhePage() {
     }
   }
 
+  function abrirModalConferirSaldo() {
+    setConferirData(todayISO()); setConferirSaldoDisplay(''); setConferirSaldoReal(0)
+    setModalConferirSaldo(true)
+  }
+
+  async function handleConferirSaldo() {
+    if (!contaId) return
+    setSalvandoConferirSaldo(true)
+    try {
+      await ajustarSaldo(contaId, { data: conferirData, saldoReal: conferirSaldoReal })
+      setModalConferirSaldo(false)
+      carregarConta()
+      carregarExtrato()
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao conferir saldo.')
+    } finally {
+      setSalvandoConferirSaldo(false)
+    }
+  }
+
   function abrirModalVincular() {
     setMetaSelecionadaId(''); setNovoAnoMeta(new Date().getFullYear()); setNovoValorSonho('')
     if (clienteId) listarMetas(clienteId).then(setMetasDisponiveis).catch(() => {})
@@ -1053,6 +1083,11 @@ export default function ClientContaDetalhePage() {
             📈 Atualizar saldo
           </button>
         )}
+        {conta.tipo !== 'Investimento' && (
+          <button className="cd-btn-importar" onClick={abrirModalConferirSaldo}>
+            ⚖️ Conferir saldo
+          </button>
+        )}
         {conta.tipo === 'CartaoCredito' && (
           <button className="cd-btn-importar" onClick={() => navigate(`/banco/${contaId}/faturas`)}>
             💳 Ver faturas
@@ -1109,6 +1144,14 @@ export default function ClientContaDetalhePage() {
             </span>
           ))}
           . ✓ parcelas futuras criadas em Contas a Pagar.
+        </div>
+      )}
+
+      {resultadoImportacao && resultadoImportacao.avisosParcelamento.length > 0 && (
+        <div className="cd-msg" style={{ marginTop: -8, marginBottom: 16, fontSize: 13, color: 'var(--warning)' }}>
+          ⚠ {resultadoImportacao.avisosParcelamento.map((aviso, i) => (
+            <span key={i}>{i > 0 && ' '}{aviso}</span>
+          ))}
         </div>
       )}
 
@@ -1544,6 +1587,58 @@ export default function ClientContaDetalhePage() {
         <div className="inp-group">
           <label>Descrição (opcional)</label>
           <input value={rendDescricao} onChange={e => setRendDescricao(e.target.value)} placeholder="Ex: Rendimento do mês" />
+        </div>
+      </Modal>
+
+      <Modal
+        open={modalConferirSaldo}
+        title="⚖️ Conferir saldo"
+        onClose={() => setModalConferirSaldo(false)}
+        footer={
+          <>
+            <button className="btn-cancel" onClick={() => setModalConferirSaldo(false)}>Cancelar</button>
+            <button
+              className="btn-confirm"
+              onClick={handleConferirSaldo}
+              disabled={salvandoConferirSaldo || !conferirSaldoDisplay || conferirSaldoReal === conta.saldoAtual}
+            >
+              {salvandoConferirSaldo ? 'Salvando...' : 'Confirmar'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
+          Seu saldo no app é {fmtBRL(conta.saldoAtual)}. Qual o saldo no app do banco nesta data?
+        </p>
+        <div className="inp-group">
+          <label>Saldo no banco</label>
+          <div className="val-input-wrap">
+            <span className="val-prefix">R$</span>
+            <input
+              type="text" inputMode="decimal" placeholder="0,00"
+              value={conferirSaldoDisplay}
+              onChange={e => {
+                const raw = e.target.value.replace(/[^\d,]/g, '')
+                setConferirSaldoDisplay(raw)
+                setConferirSaldoReal(parseFloat(raw.replace(',', '.')) || 0)
+              }}
+            />
+          </div>
+          {conferirSaldoDisplay && (
+            (() => {
+              const diferenca = conferirSaldoReal - conta.saldoAtual
+              if (diferenca === 0) return <p style={{ fontSize: 12, marginTop: 6, color: 'var(--tx3)' }}>Sem diferença — nada a ajustar.</p>
+              return (
+                <p style={{ fontSize: 12, marginTop: 6, color: diferenca >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                  Cria um ajuste de {diferenca >= 0 ? '+' : '−'}{fmtBRL(Math.abs(diferenca))} em "Ajuste de saldo" — nunca entra no DRE.
+                </p>
+              )
+            })()
+          )}
+        </div>
+        <div className="inp-group">
+          <label>Data</label>
+          <input type="date" value={conferirData} max={todayISO()} onChange={e => setConferirData(e.target.value)} />
         </div>
       </Modal>
 

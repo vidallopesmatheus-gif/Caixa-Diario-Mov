@@ -20,6 +20,9 @@ public class ContaBancariaRepository : IContaBancariaRepository
     public async Task<ContaBancaria?> ObterPorIdAsync(Guid id) =>
         await _context.ContasBancarias.FindAsync(id);
 
+    public async Task<List<ContaBancaria>> ListarTodasAsync() =>
+        await _context.ContasBancarias.ToListAsync();
+
     public async Task<ContaBancaria> AdicionarAsync(ContaBancaria conta)
     {
         _context.ContasBancarias.Add(conta);

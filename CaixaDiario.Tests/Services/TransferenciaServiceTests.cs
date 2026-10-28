@@ -356,6 +356,59 @@ public class TransferenciaServiceTests
         Assert.Equal(500m, resultado.Valor);
     }
 
+    // Money Vision: "saldo não fecha com o extrato" — a contrapartida provisória criada aqui é uma
+    // entrada NOVA na conta destino; se essa conta já tinha um dia futuro materializado (ex.:
+    // recorrência), o Inicio dele ficava desatualizado pra sempre sem essa cascata.
+    [Fact]
+    public async Task ConverterLancamentoAsync_ContaDestinoTemDiaFuturoJaMaterializado_RecalculaOInicioDele()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCorrente = CriarConta(clienteId, "Conta Corrente", tipo: "ContaCorrente", saldoInicial: 1000m);
+        var contaInvestimento = CriarConta(clienteId, "CDI Nubank", tipo: "Investimento", saldoInicial: 0m);
+        var data = new DateOnly(2026, 8, 20);
+        var lancamentoId = Guid.NewGuid();
+
+        var registroOrigem = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCorrente.Id, Data = data, Inicio = 1500m,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1000m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = lancamentoId, Descricao = "Aplicação RDB", Valor = 500m, Categoria = "", PendenteCategorizacao = true } },
+        };
+        // Dia futuro na conta destino, materializado antes com Inicio/SaldoFinal = 0 (sem a
+        // contrapartida que está sendo criada agora) — precisa herdar o novo saldo em cascata.
+        var registroFuturoDestino = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaInvestimento.Id, Data = data.AddDays(5), Inicio = 0m, SaldoFinal = 0m,
+            Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCorrente.Id)).ReturnsAsync(contaCorrente);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaInvestimento.Id)).ReturnsAsync(contaInvestimento);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaCorrente.Id, data)).ReturnsAsync(registroOrigem);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(contaInvestimento.Id, data)).ReturnsAsync((RegistroDiario?)null);
+        // Lista "viva": precisa refletir o registro novo da contrapartida assim que ele for
+        // adicionado, senão RecalcularContaInteiraAsync (que reconsulta o repositório) nunca o vê.
+        var registrosContaInvestimento = new List<RegistroDiario> { registroFuturoDestino };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaInvestimento.Id)).ReturnsAsync(() => registrosContaInvestimento.ToList());
+
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(r => { if (r.ContaBancariaId == contaInvestimento.Id) registrosContaInvestimento.Add(r); })
+            .ReturnsAsync((RegistroDiario r) => r);
+        _transferenciaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Transferencia>())).ReturnsAsync((Transferencia t) => t);
+
+        var dto = new ConverterLancamentoEmTransferenciaDto
+        {
+            ContaId = contaCorrente.Id, LancamentoId = lancamentoId, Data = data, Tipo = "Saida",
+            ContaContrapartidaId = contaInvestimento.Id,
+        };
+
+        await _sut.ConverterLancamentoAsync(dto, clienteId, "cliente");
+
+        Assert.Equal(500m, registroFuturoDestino.Inicio);
+        Assert.Equal(500m, registroFuturoDestino.SaldoFinal);
+    }
+
     [Fact]
     public async Task ConverterLancamentoAsync_EntradaExistente_RelabelaOrigemECriaSaidaNaContrapartida()
     {
@@ -485,6 +538,40 @@ public class TransferenciaServiceTests
 
         Assert.Equal(400, ex.StatusCode);
         Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+    }
+
+    // Money Vision: "Pix recebido entrando como saída" — nunca propaga um valor já corrompido
+    // (<=0) pra uma contrapartida nova.
+    [Fact]
+    public async Task ConverterLancamentoAsync_LancamentoComValorInvalido_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(clienteId, "Conta Corrente");
+        var contrapartida = CriarConta(clienteId, "CDI Nubank", tipo: "Investimento");
+        var data = new DateOnly(2026, 8, 20);
+        var lancamentoId = Guid.NewGuid();
+
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = 1000m, Inicio = 1000m,
+            Saidas = new() { new ItemFinanceiroSaida { Id = lancamentoId, Descricao = "x", Valor = 0m } },
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contrapartida.Id)).ReturnsAsync(contrapartida);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(registro);
+
+        var dto = new ConverterLancamentoEmTransferenciaDto
+        {
+            ContaId = conta.Id, LancamentoId = lancamentoId, Data = data, Tipo = "Saida",
+            ContaContrapartidaId = contrapartida.Id,
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ConverterLancamentoAsync(dto, clienteId, "cliente"));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(CodigoRetorno.DADOS_INVALIDOS, ex.Codigo);
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
     }
 
     [Fact]

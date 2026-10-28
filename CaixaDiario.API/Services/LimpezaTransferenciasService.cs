@@ -58,8 +58,14 @@ public class LimpezaTransferenciasService : ILimpezaTransferenciasService
 
             if (confirmar)
             {
+                // Diferente do merge de importação (onde um "ajuste" pré-existente é uma baixa
+                // financeira legítima que tem que ser preservada): aqui o SaldoFinal armazenado pode
+                // SER a própria corrupção que esta limpeza existe pra eliminar (ex.: o "R$400 a mais"
+                // do relato). Por isso recomputa do zero (ajuste=0) em vez de preservar a diferença
+                // que já havia — confiar de novo nela reintroduziria o mesmo bug que está sendo corrigido.
                 registro.Saidas = registro.Saidas.Where(s => !EhOrfa(s)).ToList();
                 registro.Entradas = registro.Entradas.Where(e => !EhOrfa(e)).ToList();
+                registro.SaldoFinal = RegistroService.CalcularSaldoFinal(registro.Inicio, registro.Entradas, registro.Saidas, 0m);
                 registro.SalvoEm = DateTime.UtcNow;
                 await _registroRepo.AtualizarAsync(registro);
                 contasAfetadas.Add(contaId);
@@ -72,22 +78,15 @@ public class LimpezaTransferenciasService : ILimpezaTransferenciasService
         // Remover um item solto no meio do histórico não dá pra corrigir só com uma cascata de
         // delta a partir de um ponto — pode haver mais de uma data afetada, não necessariamente
         // contígua, na mesma conta (era exatamente esse o segundo sintoma do bug: saldo arrastando
-        // uma divergência antiga, tipo o par "Guardado/Resgatado do RDB"). Mais seguro reconstruir a
-        // cadeia inteira da conta do zero: Inicio do primeiro dia fica como está (é a âncora — ou
-        // vem do saldo inicial da conta, ou já estava correto antes da varredura), cada dia seguinte
-        // recebe Inicio = SaldoFinal do dia anterior, e SaldoFinal = Inicio + Σentradas − Σsaídas.
+        // uma divergência antiga, tipo o par "Guardado/Resgatado do RDB"). RecalcularContaInteiraAsync
+        // (fonte única de verdade, Money Vision "saldo não fecha com o extrato") reconstrói a cadeia
+        // de Inicio de toda a conta a partir do saldo inicial, preservando o SaldoFinal local que
+        // cada dia já tem (já corrigido acima, incluindo o ajuste).
         foreach (var contaId in contasAfetadas)
         {
-            var registrosDaConta = (await _registroRepo.ListarPorContaAsync(contaId)).OrderBy(r => r.Data).ToList();
-            decimal? saldoCorrente = null;
-            foreach (var r in registrosDaConta)
-            {
-                if (saldoCorrente.HasValue) r.Inicio = saldoCorrente.Value;
-                r.SaldoFinal = r.Inicio + r.Entradas.Sum(e => e.Valor) - r.Saidas.Sum(s => s.Valor);
-                r.SalvoEm = DateTime.UtcNow;
-                await _registroRepo.AtualizarAsync(r);
-                saldoCorrente = r.SaldoFinal;
-            }
+            var conta = await _contaRepo.ObterPorIdAsync(contaId);
+            if (conta == null) continue;
+            await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contaId, conta.SaldoInicial);
             resultado.ContasRecalculadas++;
         }
 

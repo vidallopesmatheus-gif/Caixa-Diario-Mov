@@ -190,6 +190,19 @@ export const registrarRendimento = async (
   return mapConta(res.dados)
 }
 
+// Money Vision: "Conferir saldo" (item 4) — acerta o saldo com o banco através de UM lançamento
+// visível (categoria "Ajuste de saldo"), nunca uma troca silenciosa do saldo inicial do dia.
+export const ajustarSaldo = async (
+  contaId: string,
+  dto: { data: string; saldoReal: number; descricao?: string },
+): Promise<ContaBancaria> => {
+  const res = await apiFetch<ApiResponse<unknown>>(`/api/contas-bancarias/${contaId}/ajustar-saldo`, {
+    method: 'POST',
+    body: JSON.stringify(dto),
+  })
+  return mapConta(res.dados)
+}
+
 export const vincularMeta = async (contaId: string, metaId: string): Promise<ContaBancaria> => {
   const res = await apiFetch<ApiResponse<unknown>>(`/api/contas-bancarias/${contaId}/vincular-meta/${metaId}`, {
     method: 'POST',
