@@ -15,7 +15,9 @@ public class OrcamentoDinamicoServiceTests
         ContaBancariaId = Guid.NewGuid(),
         Data = data,
         Entradas = entradas > 0 ? new List<ItemFinanceiro> { new() { Descricao = "Receita", Valor = entradas } } : new(),
-        Saidas = saidas > 0 ? new List<ItemFinanceiroSaida> { new() { Descricao = "Despesa", Valor = saidas, Categoria = "Geral" } } : new(),
+        // TipoCusto = "CustoVariavel": gastoVariavelAtual agora filtra só por isso (antes somava
+        // todo gasto operacional, inclusive fixo — contando compromissosFixos duas vezes).
+        Saidas = saidas > 0 ? new List<ItemFinanceiroSaida> { new() { Descricao = "Despesa", Valor = saidas, Categoria = "Geral", TipoCusto = "CustoVariavel" } } : new(),
         ContasReceber = new(),
         ContasPagar = new(),
         CriadoEm = DateTime.UtcNow,
@@ -95,6 +97,33 @@ public class OrcamentoDinamicoServiceTests
         Assert.Equal(1500m, resultado.GastoVariavelAtual);
         Assert.True(resultado.Ultrapassado);
         Assert.Equal(150.0m, resultado.PercentualUtilizado);
+    }
+
+    // Money Vision: "números que se contradizem" (item 1) — gastoVariavelAtual tinha que ser só o
+    // gasto VARIÁVEL do mês, nunca o gasto fixo também (que já é contado em compromissosFixos).
+    [Fact]
+    public void Calcular_ComGastoFixoEVariavelNoMes_GastoVariavelAtualContaSoOVariavel()
+    {
+        var registros = new List<RegistroDiario>
+        {
+            CriarRegistro(Hoje.AddMonths(-1), entradas: 1000m),
+        };
+        var registroDoMes = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ContaBancariaId = Guid.NewGuid(), Data = Hoje,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new()
+            {
+                new ItemFinanceiroSaida { Descricao = "Aluguel", Valor = 2000m, Categoria = "Aluguel", TipoCusto = "CustoFixo" },
+                new ItemFinanceiroSaida { Descricao = "Mercado", Valor = 300m, Categoria = "Mercado", TipoCusto = "CustoVariavel" },
+            },
+            CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
+        };
+        registros.Add(registroDoMes);
+
+        var resultado = _sut.Calcular(registros, new List<ContaRecorrente>(), new List<MetaAnual>());
+
+        Assert.Equal(300m, resultado.GastoVariavelAtual);
     }
 
     [Fact]

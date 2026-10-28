@@ -22,32 +22,41 @@ public class SaudeFinanceiraServiceTests
         SalvoEm = DateTime.UtcNow,
     };
 
-    // Item 5 (Money Vision): mesma fórmula de "Para onde foi meu dinheiro" — guardado (aporte
-    // líquido em Transferencia numa conta de Investimento) ÷ receita, não (receita−despesas) ÷
-    // receita (duas fórmulas diferentes pro mesmo nome confundiam o cliente).
-    private static RegistroDiario CriarAporteInvestimento(Guid contaInvestimentoId, DateOnly data, decimal valor) => new()
-    {
-        Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ContaBancariaId = contaInvestimentoId, Data = data,
-        Entradas = new List<ItemFinanceiro> { new() { Descricao = "Aporte", Valor = valor, Categoria = "Transferência", TipoCusto = "Transferencia" } },
-        Saidas = new(), ContasReceber = new(), ContasPagar = new(),
-        CriadoEm = DateTime.UtcNow, SalvoEm = DateTime.UtcNow,
-    };
-
+    // Money Vision: "taxa de poupança negativa com lucro positivo" (item 3) — taxa de poupança
+    // agora é (receita − gastos) ÷ receita, igual "Para onde foi meu dinheiro". Um resgate da
+    // reserva de investimento NUNCA entra nesta conta (é "Guardou", um indicador separado) — por
+    // isso estes testes não precisam mais de uma conta de investimento, só de receita/gasto reais.
     [Fact]
-    public void Calcular_ComAporteEmContaDeInvestimento_CalculaTaxaPoupancaVerde()
+    public void Calcular_ComReceitaEGastoNoMes_CalculaTaxaPoupancaVerde()
+    {
+        var registros = new List<RegistroDiario> { CriarRegistro(Hoje, entradas: 1000m, saidas: 700m) };
+
+        var resultado = _sut.Calcular(registros, new List<MetaAnual>(), new HashSet<Guid>());
+
+        Assert.True(resultado.TaxaPoupanca.Disponivel);
+        Assert.Equal(30m, resultado.TaxaPoupanca.Valor); // (1000-700)/1000
+        Assert.Equal("verde", resultado.TaxaPoupanca.Semaforo);
+    }
+
+    // Um resgate da reserva pra cobrir despesa (saída de Transferencia numa conta de Investimento)
+    // nunca torna a taxa de poupança negativa, mesmo com lucro operacional real no mês.
+    [Fact]
+    public void Calcular_ComResgateDeInvestimentoNoMes_TaxaPoupancaContinuaPositiva()
     {
         var contaInvestimentoId = Guid.NewGuid();
-        var registros = new List<RegistroDiario>
+        var resgate = new RegistroDiario
         {
-            CriarRegistro(Hoje, entradas: 1000m),
-            CriarAporteInvestimento(contaInvestimentoId, Hoje, 300m),
+            Id = Guid.NewGuid(), ClienteId = Guid.NewGuid(), ContaBancariaId = contaInvestimentoId, Data = Hoje,
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new List<ItemFinanceiroSaida> { new() { Descricao = "Resgate", Valor = 1325.82m, Categoria = "Transferência", TipoCusto = "Transferencia" } },
         };
+        var registros = new List<RegistroDiario> { CriarRegistro(Hoje, entradas: 15895.54m, saidas: 13495.10m), resgate };
 
         var resultado = _sut.Calcular(registros, new List<MetaAnual>(), new HashSet<Guid> { contaInvestimentoId });
 
         Assert.True(resultado.TaxaPoupanca.Disponivel);
-        Assert.Equal(30m, resultado.TaxaPoupanca.Valor);
-        Assert.Equal("verde", resultado.TaxaPoupanca.Semaforo);
+        Assert.Equal(15.1m, resultado.TaxaPoupanca.Valor); // (15895.54-13495.10)/15895.54, nunca -8.3%
+        Assert.Equal("amarelo", resultado.TaxaPoupanca.Semaforo); // 15.1% está entre 5% e 20%
     }
 
     [Fact]
@@ -71,18 +80,13 @@ public class SaudeFinanceiraServiceTests
     }
 
     [Theory]
-    [InlineData(1000, 150, "amarelo")]
-    [InlineData(1000, 20, "vermelho")]
-    public void Calcular_TaxaPoupanca_ClassificaSemaforoPorFaixa(decimal receita, decimal aporte, string semaforoEsperado)
+    [InlineData(1000, 850, "amarelo")] // sobra 15%
+    [InlineData(1000, 980, "vermelho")] // sobra 2%
+    public void Calcular_TaxaPoupanca_ClassificaSemaforoPorFaixa(decimal receita, decimal gastos, string semaforoEsperado)
     {
-        var contaInvestimentoId = Guid.NewGuid();
-        var registros = new List<RegistroDiario>
-        {
-            CriarRegistro(Hoje, entradas: receita),
-            CriarAporteInvestimento(contaInvestimentoId, Hoje, aporte),
-        };
+        var registros = new List<RegistroDiario> { CriarRegistro(Hoje, entradas: receita, saidas: gastos) };
 
-        var resultado = _sut.Calcular(registros, new List<MetaAnual>(), new HashSet<Guid> { contaInvestimentoId });
+        var resultado = _sut.Calcular(registros, new List<MetaAnual>(), new HashSet<Guid>());
 
         Assert.Equal(semaforoEsperado, resultado.TaxaPoupanca.Semaforo);
     }
@@ -242,21 +246,18 @@ public class SaudeFinanceiraServiceTests
     }
 
     [Fact]
-    public void Calcular_IgnoraTransferenciaERendimentoDeContaQueNaoEInvestimentoNaTaxaDePoupanca()
+    public void Calcular_IgnoraTransferenciaERendimento_NaTaxaDePoupanca()
     {
-        var contaInvestimentoId = Guid.NewGuid();
         var registro = CriarRegistro(Hoje, entradas: 1000m, saidas: 700m);
-        // Ruído numa conta comum (não investimento) — nunca deveria inflar a receita nem contar
-        // como "guardado", mesmo sendo Transferencia/Rendimento.
+        // Transferência/Rendimento nunca contam como receita/gasto real (LancamentoFiltro.
+        // EhOperacional) — nem um resgate "disfarçado" de entrada nem um aporte "disfarçado" de
+        // saída podem inflar ou reduzir a taxa de poupança.
         registro.Entradas.Add(new ItemFinanceiro { Descricao = "Resgate em outra conta", Valor = 5000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
         registro.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aporte em outra conta", Valor = 2000m, Categoria = "Transferência", TipoCusto = "Transferencia" });
         registro.Entradas.Add(new ItemFinanceiro { Descricao = "Rendimento", Valor = 50m, Categoria = "Rendimento", TipoCusto = "Rendimento" });
-        var aporte = CriarAporteInvestimento(contaInvestimentoId, Hoje, 300m);
 
-        var resultado = _sut.Calcular(
-            new List<RegistroDiario> { registro, aporte }, new List<MetaAnual>(), new HashSet<Guid> { contaInvestimentoId });
+        var resultado = _sut.Calcular(new List<RegistroDiario> { registro }, new List<MetaAnual>(), new HashSet<Guid>());
 
-        // Receita continua só os 1000 operacionais; guardado é só o aporte na conta de investimento.
-        Assert.Equal(30m, resultado.TaxaPoupanca.Valor);
+        Assert.Equal(30m, resultado.TaxaPoupanca.Valor); // (1000-700)/1000, ignorando o ruído
     }
 }

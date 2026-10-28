@@ -24,7 +24,14 @@ export async function apiFetch<T>(
   // próprio corpo da resposta), nunca "sessão expirada". Tratar os dois igual apagava o token
   // certo e mostrava "Sessão expirada" bem na tela de login, escondendo a mensagem real da API.
   const isAuthRoute = path.startsWith('/api/auth/')
-  const res = await fetch(`${BASE}${path}`, {
+  const metodo = (options.method ?? 'GET').toUpperCase()
+  // Money Vision: "500 intermitente ao abrir o Dashboard" — rajadas de GET em paralelo podiam
+  // esgotar o pool de conexões por um instante; uma leitura (GET, sempre segura de repetir) que
+  // falha com 500/503 tenta de novo 1x depois de uma pausa curta antes de mostrar erro, em vez de
+  // derrubar a tela na primeira falha transitória.
+  const podeTentarDeNovo = metodo === 'GET'
+
+  const executar = async (): Promise<Response> => fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
@@ -32,6 +39,13 @@ export async function apiFetch<T>(
       ...(token && !isAuthRoute ? { Authorization: `Bearer ${token}` } : {}),
     },
   })
+
+  let res = await executar()
+  if (podeTentarDeNovo && (res.status === 500 || res.status === 503)) {
+    await new Promise(resolve => setTimeout(resolve, 400))
+    res = await executar()
+  }
+
   if (res.status === 401 && !isAuthRoute) {
     localStorage.removeItem('token')
     localStorage.removeItem('user')

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
@@ -72,6 +72,35 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
     () => calcularJanelaPeriodo(periodoOpcao, { de: personalizadoDe, ate: personalizadoAte }),
     [periodoOpcao, personalizadoDe, personalizadoAte]
   )
+
+  // Money Vision: "números que se contradizem" (item 1) — igual ClientDrePage.tsx: se o mês
+  // atual (padrão da tela) ainda não tem nenhum lançamento (comum logo no início do mês), mostrar
+  // "Sem receita no período" ou "—" não ajuda ninguém — pula pro último mês que de fato tem
+  // movimento, mesma origem de dados (useRegistros) e mesmo critério da tela de DRE. Roda só uma
+  // vez, e só se o usuário ainda não tiver trocado o período enquanto os registros carregavam.
+  const ajusteInicialRef = useRef(false)
+  useEffect(() => {
+    if (ajusteInicialRef.current) return
+    if (registros.length === 0) return
+    if (periodoOpcao !== 'mes') return
+    ajusteInicialRef.current = true
+
+    const hojeDate = new Date()
+    const anoHoje = hojeDate.getFullYear()
+    const mesHoje = hojeDate.getMonth() + 1
+    const temAtividadeNoMesAtual = registros.some(r => {
+      const [a, m] = r.data.split('-').map(Number)
+      return a === anoHoje && m === mesHoje
+    })
+    if (temAtividadeNoMesAtual) return
+
+    const maisRecente = registros.reduce((max, r) => (r.data > max ? r.data : max), registros[0].data)
+    const [anoRecente, mesRecente] = maisRecente.slice(0, 7).split('-').map(Number)
+    const ultimoDia = new Date(anoRecente, mesRecente, 0).toISOString().slice(0, 10)
+    setPeriodoOpcao('personalizado')
+    setPersonalizadoDe(`${maisRecente.slice(0, 7)}-01`)
+    setPersonalizadoAte(ultimoDia)
+  }, [registros, periodoOpcao])
 
   useEffect(() => {
     if (!clienteId) return

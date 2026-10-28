@@ -16,6 +16,11 @@ public interface IFaturaCartaoService
     // já existente pro cartão que paga esta fatura (chamado depois de toda importação de fatura
     // real). Retorna true se vinculou. Nunca cria lançamento novo, nunca decide se for ambíguo.
     Task<bool> AutoVincularPagamentoPorTransferenciaAsync(Guid contaCartaoId, Guid faturaId);
+    // Item 5 (Money Vision "parcelamentos que já existem não aparecem"): "Procurar parcelamentos"
+    // — varre compras já importadas antes da detecção existir e liga cada uma a um Parcelamento,
+    // gerando as parcelas futuras como previstas (mesmo efeito de uma importação nova).
+    Task<DeteccaoRetroativaParcelamentoResultDto> DetectarParcelamentosRetroativamenteAsync(
+        Guid contaCartaoId, Guid usuarioLogadoId, string perfil);
     // origemMetaId: só preenchido internamente por MetaService.ConquistarAsync (forma Cartão) —
     // nunca vem de fora pelo DTO público (mesmo motivo de ContaProvisionadaService.CriarAsync).
     Task LancarComprasParceladaAsync(

@@ -43,10 +43,17 @@ public class MetricasService : IMetricasService
                 };
             }
 
-            if (custosFixos > 0 || custosVariaveis > 0)
+            // Money Vision: "números que se contradizem" (item 1) — o Dashboard calculava Ponto de
+            // Equilíbrio com sua própria fórmula (receita bruta sem deduções, custos fixos
+            // excluindo "Manutenção", custos variáveis só por TipoCusto) e dava um número diferente
+            // do DRE/Indicadores pro mesmo período. Fonte única: o mesmo DRE que a tela de DRE usa.
+            var dreParaPontoEquilibrio = CalcularDre(registrosDoPeriodo, categorias);
+            var peDetalhado = CalcularPontoEquilibrio(
+                dreParaPontoEquilibrio.ReceitaBruta, dreParaPontoEquilibrio.MargemContribuicao,
+                dreParaPontoEquilibrio.DespesasFixas.Total, DataLocalHelper.Hoje());
+            if (peDetalhado.Disponivel && peDetalhado.ValorMensal.HasValue)
             {
-                var mc = (receita - custosVariaveis) / receita;
-                var pe = mc > 0 ? custosFixos / mc : 0;
+                var pe = peDetalhado.ValorMensal.Value;
                 dto.PontoDeEquilibrio = new PontoDeEquilibrioDto
                 {
                     Valor = pe,
@@ -899,7 +906,12 @@ public class MetricasService : IMetricasService
             Gastou = gastou,
             Guardou = guardou,
             Ficou = ficou,
-            TaxaPoupancaPercentual = entrou > 0 ? Math.Round(guardou / entrou * 100, 1) : null,
+            // Money Vision: "taxa de poupança negativa com lucro positivo" (item 3) — taxa de
+            // poupança é sobre o RESULTADO operacional (entrou − gastou), nunca sobre "guardou"
+            // (aplicação líquida em investimento). Um resgate da reserva pra cobrir uma despesa não
+            // é "gasto a mais" nem "poupança negativa" — é só a conta de onde o dinheiro saiu, e já
+            // aparece sozinho em Guardou (negativo quando há resgate líquido no mês).
+            TaxaPoupancaPercentual = entrou > 0 ? Math.Round((entrou - gastou) / entrou * 100, 1) : null,
             TopCategoriasGasto = topCategorias,
         };
     }

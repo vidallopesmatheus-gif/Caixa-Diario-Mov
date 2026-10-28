@@ -1,5 +1,6 @@
 import { apiFetch } from './client'
 import type { ApiResponse } from '../types'
+import { cachedFetch } from '../utils/requestCache'
 
 export interface OrcamentoDinamico {
   receitaEsperada: number
@@ -12,6 +13,8 @@ export interface OrcamentoDinamico {
 }
 
 export async function obterOrcamentoDinamico(clienteId: string): Promise<OrcamentoDinamico> {
-  const res = await apiFetch<ApiResponse<OrcamentoDinamico>>(`/api/orcamento-dinamico/${clienteId}`)
-  return res.dados!
+  return cachedFetch(`orcamento-dinamico:${clienteId}`, async () => {
+    const res = await apiFetch<ApiResponse<OrcamentoDinamico>>(`/api/orcamento-dinamico/${clienteId}`)
+    return res.dados!
+  })
 }

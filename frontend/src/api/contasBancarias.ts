@@ -36,6 +36,9 @@ function mapConta(raw: any): ContaBancaria {
     diaVencimento: raw.diaVencimento ?? undefined,
     saldoDevedor: raw.saldoDevedor ?? undefined,
     limiteDisponivel: raw.limiteDisponivel ?? undefined,
+    faturasEmAberto: raw.faturasEmAberto ?? undefined,
+    comprasMes: raw.comprasMes ?? undefined,
+    pagamentosMes: raw.pagamentosMes ?? undefined,
   }
 }
 

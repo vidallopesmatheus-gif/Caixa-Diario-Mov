@@ -43,7 +43,11 @@ export default function ParaOndeFoiMeuDinheiroCard({ dados }: Props) {
       {taxaPoupancaPercentual != null && (
         <div className="pofmd-taxa">
           Taxa de poupança: <strong style={{ color: corTaxa }}>{fmtPct(taxaPoupancaPercentual)}</strong>
-          {taxaPoupancaPercentual < 0 && <span style={{ color: 'var(--danger)' }}> — você usou a reserva</span>}
+          {/* Money Vision: "taxa de poupança negativa com lucro positivo" — a taxa agora é sobre o
+              resultado (entrou-gastou), não sobre resgate de reserva; negativa aqui significa
+              prejuízo real no mês, nunca "usou a reserva" (isso já aparece em `frase` acima,
+              independente da taxa, sempre que guardou < 0). */}
+          {taxaPoupancaPercentual < 0 && <span style={{ color: 'var(--danger)' }}> — você gastou mais do que ganhou</span>}
         </div>
       )}
     </div>

@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
-import { fmtBRL, fmtDate, fmtPct, todayISO } from '../../utils/format'
+import { fmtBRL, fmtDate, fmtPct, monthLabel, todayISO } from '../../utils/format'
 import {
   listarFinanciamentos, criarFinanciamento, listarParcelasFinanciamento, baixarParcelaFinanciamento,
   adiantarFinanciamento, excluirFinanciamento, type AdiantamentoResultado,
 } from '../../api/financiamentos'
 import { listarContasBancarias } from '../../api/contasBancarias'
+import { procurarParcelamentos } from '../../api/faturasCartao'
 import Modal from '../../components/shared/Modal'
 import type { Financiamento, ParcelaFinanciamento, ContaBancaria } from '../../types'
 import './ClientFinanciamentosPage.css'
@@ -59,6 +60,7 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
   const [prefill, setPrefill] = useState<PrefillFinanciamento | null>(null)
   const [adiantarAlvo, setAdiantarAlvo] = useState<Financiamento | null>(null)
   const [excluirAlvo, setExcluirAlvo] = useState<Financiamento | null>(null)
+  const [procurandoParcelamentos, setProcurandoParcelamentos] = useState(false)
 
   // Fase 5G: "🏆 Conquistei" com forma "Financiado" manda o usuário pra aqui já com o cadastro
   // aberto e pré-preenchido (sonho = descrição, valorSonho = valor do bem) — limpa o state da
@@ -106,6 +108,35 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
     }
   }
 
+  // Money Vision: "parcelamentos que já existem não aparecem" (item 5) — varre todas as contas de
+  // cartão do cliente e liga retroativamente compras já importadas antes da detecção existir.
+  const handleProcurarParcelamentos = async () => {
+    const cartoes = contas.filter(c => c.tipo === 'CartaoCredito')
+    if (cartoes.length === 0) {
+      setMsg('Nenhuma conta de cartão de crédito cadastrada.')
+      return
+    }
+    setProcurandoParcelamentos(true)
+    setMsg('')
+    try {
+      const resultados = await Promise.all(cartoes.map(c => procurarParcelamentos(c.id)))
+      const totalEncontrados = resultados.reduce((s, r) => s + r.parcelamentosEncontrados, 0)
+      if (totalEncontrados === 0) {
+        setMsg('Nenhum parcelamento novo encontrado.')
+        return
+      }
+      const valorTotal = resultados.reduce((s, r) => s + r.valorRestanteTotal, 0)
+      const dataFinal = resultados.map(r => r.dataFinal).filter((d): d is string => !!d).sort().at(-1)
+      const ateLabel = dataFinal ? ` até ${monthLabel(dataFinal.slice(0, 7)).toLowerCase()}` : ''
+      setMsg(`Encontrei ${totalEncontrados} parcelamento(s) — ${fmtBRL(valorTotal)} a pagar${ateLabel}.`)
+      await carregar()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Erro ao procurar parcelamentos.')
+    } finally {
+      setProcurandoParcelamentos(false)
+    }
+  }
+
   const handleExcluir = async (f: Financiamento, removerAdiantamentos: boolean) => {
     setMsg('')
     try {
@@ -124,6 +155,9 @@ export default function ClientFinanciamentosPage({ clienteIdOverride }: Props) {
       {msg && <div className="financiamentos-msg">{msg}</div>}
 
       <div className="financiamentos-header">
+        <button className="btn-fin-secundario" onClick={handleProcurarParcelamentos} disabled={procurandoParcelamentos}>
+          {procurandoParcelamentos ? 'Procurando...' : '🔍 Procurar parcelamentos'}
+        </button>
         <button className="btn-primary" onClick={() => setNovoOpen(true)}>+ Novo financiamento</button>
       </div>
 

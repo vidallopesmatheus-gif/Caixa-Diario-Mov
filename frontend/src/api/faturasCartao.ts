@@ -155,3 +155,40 @@ export const lancarCompraParcelada = async (contaCartaoId: string, dto: {
     }),
   })
 }
+
+// Money Vision: "parcelamentos que já existem não aparecem" (item 5) — "Procurar parcelamentos".
+export interface ParcelamentoEncontradoRetroativamente {
+  parcelamentoId: string
+  comerciante: string
+  totalParcelas: number
+  maiorParcelaJaReal: number
+  parcelasRestantes: number
+  valorRestante: number
+  dataFinal: string | null
+  status: string
+}
+
+export interface DeteccaoRetroativaParcelamentoResultado {
+  parcelamentosEncontrados: number
+  valorRestanteTotal: number
+  dataFinal: string | null
+  parcelamentos: ParcelamentoEncontradoRetroativamente[]
+}
+
+export const procurarParcelamentos = async (contaCartaoId: string): Promise<DeteccaoRetroativaParcelamentoResultado> => {
+  const res = await apiFetch<ApiResponse<unknown>>(`/api/faturas-cartao/${contaCartaoId}/procurar-parcelamentos`, {
+    method: 'POST',
+  })
+  const d = res.dados as Record<string, unknown>
+  return {
+    parcelamentosEncontrados: Number(d.parcelamentosEncontrados ?? 0),
+    valorRestanteTotal: Number(d.valorRestanteTotal ?? 0),
+    dataFinal: (d.dataFinal as string | null) ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parcelamentos: ((d.parcelamentos as any[]) ?? []).map(p => ({
+      parcelamentoId: p.parcelamentoId, comerciante: p.comerciante ?? '', totalParcelas: p.totalParcelas ?? 0,
+      maiorParcelaJaReal: p.maiorParcelaJaReal ?? 0, parcelasRestantes: p.parcelasRestantes ?? 0,
+      valorRestante: p.valorRestante ?? 0, dataFinal: p.dataFinal ?? null, status: p.status ?? '',
+    })),
+  }
+}
