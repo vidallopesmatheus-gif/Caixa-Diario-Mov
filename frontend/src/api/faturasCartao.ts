@@ -134,8 +134,8 @@ export const pagarFatura = async (contaCartaoId: string, dto: {
 }
 
 /**
- * Item 9: lança uma compra parcelada direto no cartão — cria uma saída por parcela, uma em cada
- * competência futura (um mês depois da anterior), nunca um único lançamento "informativo".
+ * Item 9: lança uma compra parcelada direto no cartão — só a 1ª parcela (e as já vencidas) vira
+ * lançamento, na fatura do banco; as futuras ficam previstas em Contas a Pagar até a fatura chegar.
  */
 export const lancarCompraParcelada = async (contaCartaoId: string, dto: {
   descricao: string
@@ -143,6 +143,7 @@ export const lancarCompraParcelada = async (contaCartaoId: string, dto: {
   categoria: string
   quantidadeParcelas: number
   data: string
+  banco?: string
 }): Promise<void> => {
   await apiFetch<ApiResponse<null>>(`/api/faturas-cartao/${contaCartaoId}/lancar-parcelado`, {
     method: 'POST',
@@ -152,6 +153,7 @@ export const lancarCompraParcelada = async (contaCartaoId: string, dto: {
       Categoria: dto.categoria,
       QuantidadeParcelas: dto.quantidadeParcelas,
       Data: dto.data,
+      Banco: dto.banco || undefined,
     }),
   })
 }

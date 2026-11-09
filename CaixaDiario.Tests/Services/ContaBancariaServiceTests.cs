@@ -912,7 +912,8 @@ public class ContaBancariaServiceTests
         var entrada = Assert.Single(adicionado!.Entradas);
         Assert.Equal(132.66m, entrada.Valor);
         Assert.Equal("Ajuste de saldo", entrada.Categoria);
-        Assert.Equal(LancamentoFiltro.TipoAjusteSaldo, entrada.TipoCusto);
+        Assert.Equal(LancamentoFiltro.TipoAjusteConciliacao, entrada.TipoCusto);
+        Assert.Equal("Ajuste de conciliação em " + hoje.ToString("dd/MM") + " — banco R$ 1.132,66, app R$ 1.000,00", entrada.Descricao);
         Assert.False(LancamentoFiltro.EhOperacional(entrada.TipoCusto)); // nunca conta no DRE
         Assert.Equal(1132.66m, adicionado.SaldoFinal);
     }
@@ -938,7 +939,7 @@ public class ContaBancariaServiceTests
         var saida = Assert.Single(adicionado!.Saidas);
         Assert.Equal(150m, saida.Valor);
         Assert.Equal("Ajuste de saldo", saida.Categoria);
-        Assert.Equal(LancamentoFiltro.TipoAjusteSaldo, saida.TipoCusto);
+        Assert.Equal(LancamentoFiltro.TipoAjusteConciliacao, saida.TipoCusto);
         Assert.Equal(850m, adicionado.SaldoFinal);
     }
 

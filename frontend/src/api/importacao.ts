@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import { mapLinhaDiagnostico, mapPonto } from './conciliacaoSaldo'
 import type {
   ApiResponse, ResumoImportacao, ResultadoImportacao, PendenteCategorizacao, DuplicataManual, DuplicataEntreArquivos,
   ParcelamentoDetectadoResumo,
@@ -59,6 +60,16 @@ function mapResumo(raw: any): ResumoImportacao {
     dataFimArquivo: raw.dataFimArquivo ?? '',
     duplicatasManuais: (raw.duplicatasManuais ?? []).map(mapDuplicataManual),
     duplicatasEntreArquivos: (raw.duplicatasEntreArquivos ?? []).map(mapDuplicataEntreArquivos),
+    cobertura: raw.cobertura ? {
+      arquivoDe: String(raw.cobertura.arquivoDe).slice(0, 10), arquivoAte: String(raw.cobertura.arquivoAte).slice(0, 10),
+      jaHaviaDe: raw.cobertura.jaHaviaDe ?? undefined, jaHaviaAte: raw.cobertura.jaHaviaAte ?? undefined,
+      novosDiasDe: raw.cobertura.novosDiasDe ?? undefined, novosDiasAte: raw.cobertura.novosDiasAte ?? undefined,
+      quantidadeDiasNovos: raw.cobertura.quantidadeDiasNovos ?? 0,
+    } : undefined,
+    ausentesNoArquivo: (raw.ausentesNoArquivo ?? []).map(mapLinhaDiagnostico),
+    saldoBancoArquivo: raw.saldoBancoArquivo
+      ? { data: String(raw.saldoBancoArquivo.data).slice(0, 10), saldo: raw.saldoBancoArquivo.saldo ?? 0 }
+      : undefined,
   }
 }
 
@@ -115,6 +126,10 @@ export const importarExtrato = async (
     // Mesmo valor usado no preview precisa ser reenviado aqui, senão a decisão de inverter ou não
     // o sinal é recalculada do zero (ver ImportacaoService.NormalizarSinalParaCartao).
     inverterSinaisManualmente?: boolean
+    // Money Vision (conciliação): lançamentos que sumiram do extrato novo e o usuário mandou excluir,
+    // e o saldo do banco digitado quando o arquivo não traz um.
+    excluirAusentes?: { id: string; data: string }[]
+    saldoBancoInformado?: number; dataSaldoBanco?: string
   },
 ): Promise<ResultadoImportacao> => {
   const form = new FormData()
@@ -132,6 +147,10 @@ export const importarExtrato = async (
   if (opcoes?.inverterSinaisManualmente !== undefined) {
     form.append('inverterSinaisManualmente', String(opcoes.inverterSinaisManualmente))
   }
+  if (opcoes?.excluirAusentes?.length) form.append('excluirAusentesJson', JSON.stringify(opcoes.excluirAusentes))
+  // Sempre com ponto decimal — o backend lê invariante, nunca pela cultura do servidor.
+  if (opcoes?.saldoBancoInformado !== undefined) form.append('saldoBancoInformado', opcoes.saldoBancoInformado.toFixed(2))
+  if (opcoes?.dataSaldoBanco) form.append('dataSaldoBanco', opcoes.dataSaldoBanco)
 
   const res = await apiFetch<ApiResponse<unknown>>(
     `/api/contas-bancarias/${contaId}/importar-extrato`,
@@ -154,6 +173,8 @@ export const importarExtrato = async (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     parcelamentosDetectados: ((d.parcelamentosDetectados as any[]) ?? []).map(mapParcelamentoDetectado),
     avisosParcelamento: (d.avisosParcelamento as string[]) ?? [],
+    conciliacao: d.conciliacao ? mapPonto(d.conciliacao) : undefined,
+    totalAusentesExcluidos: Number(d.totalAusentesExcluidos ?? 0),
   }
 }
 

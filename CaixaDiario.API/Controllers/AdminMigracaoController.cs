@@ -19,19 +19,25 @@ public class AdminMigracaoController : ControllerBase
     private readonly ILimpezaTransferenciasService _limpezaTransferenciasService;
     private readonly IRecalculoSaldoService _recalculoSaldoService;
     private readonly IVerificacaoSinalTransferenciaService _verificacaoSinalTransferenciaService;
+    private readonly ICorrigirDataParcelasService _corrigirDataParcelasService;
+    private readonly ICorrigirFaturasService _corrigirFaturasService;
 
     public AdminMigracaoController(
         IMigracaoRecorrenciasService migracaoRecorrenciasService,
         IReclassificacaoCategoriasService reclassificacaoCategoriasService,
         ILimpezaTransferenciasService limpezaTransferenciasService,
         IRecalculoSaldoService recalculoSaldoService,
-        IVerificacaoSinalTransferenciaService verificacaoSinalTransferenciaService)
+        IVerificacaoSinalTransferenciaService verificacaoSinalTransferenciaService,
+        ICorrigirDataParcelasService corrigirDataParcelasService,
+        ICorrigirFaturasService corrigirFaturasService)
     {
         _migracaoRecorrenciasService = migracaoRecorrenciasService;
         _reclassificacaoCategoriasService = reclassificacaoCategoriasService;
         _limpezaTransferenciasService = limpezaTransferenciasService;
         _recalculoSaldoService = recalculoSaldoService;
         _verificacaoSinalTransferenciaService = verificacaoSinalTransferenciaService;
+        _corrigirDataParcelasService = corrigirDataParcelasService;
+        _corrigirFaturasService = corrigirFaturasService;
     }
 
     private void VerificarAdmin()
@@ -86,6 +92,16 @@ public class AdminMigracaoController : ControllerBase
         return Ok(new ApiResponse<RecalculoSaldoResultDto> { Dados = resultado });
     }
 
+    // Money Vision ("ajuste mexeu no DRE"): converte os ajustes de saldo antigos pro tipo de sistema
+    // AjusteConciliacao (fora do DRE e dos indicadores). Sem "confirmar": só relatório.
+    [HttpPost("ajustes-conciliacao-migrar")]
+    public async Task<IActionResult> MigrarAjustesConciliacao([FromQuery] bool confirmar = false)
+    {
+        VerificarAdmin();
+        var resultado = await _recalculoSaldoService.MigrarAjustesConciliacaoAsync(confirmar);
+        return Ok(new ApiResponse<MigracaoAjustesConciliacaoResultDto> { Dados = resultado });
+    }
+
     // Money Vision: "Pix recebido entrando como saída" (item 3) — só relatório, nunca corrige
     // sozinho (ver VerificacaoSinalTransferenciaService).
     [HttpGet("transferencias-sinal-suspeito")]
@@ -94,5 +110,24 @@ public class AdminMigracaoController : ControllerBase
         VerificarAdmin();
         var resultado = await _verificacaoSinalTransferenciaService.ListarSinaisSuspeitosAsync();
         return Ok(new ApiResponse<List<TransferenciaSinalSuspeitoDto>> { Dados = resultado });
+    }
+
+    // Money Vision: "data da parcela vs. competência" (item 2) — repara parcelas importadas antes
+    // da reancoragem existir. Sem "confirmar" (ou confirmar=false): só relatório, nada é gravado.
+    [HttpPost("parcelas-corrigir-data")]
+    public async Task<IActionResult> CorrigirDataParcelas([FromQuery] bool confirmar = false)
+    {
+        VerificarAdmin();
+        var resultado = await _corrigirDataParcelasService.CorrigirAsync(confirmar);
+        return Ok(new ApiResponse<CorrigirDataParcelasResultDto> { Dados = resultado });
+    }
+
+    // Money Vision: "fatura do C6 dividida em duas + pagamentos não vinculados" (item 3).
+    [HttpPost("faturas-corrigir")]
+    public async Task<IActionResult> CorrigirFaturas([FromQuery] bool confirmar = false)
+    {
+        VerificarAdmin();
+        var resultado = await _corrigirFaturasService.CorrigirAsync(confirmar);
+        return Ok(new ApiResponse<CorrigirFaturasResultDto> { Dados = resultado });
     }
 }

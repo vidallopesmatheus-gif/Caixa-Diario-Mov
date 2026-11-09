@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { obterDre } from '../../api/metricas'
 import { listarContasBancarias } from '../../api/contasBancarias'
@@ -717,14 +717,30 @@ export default function ClientDrePage() {
             if (linha.tipo === 'subtotal') {
               const { total, percentual } = valorEPercentualSubtotal(periodosComDre[0].dre, linha.key)
               const corPositivoNegativo = total >= 0 ? 'var(--success)' : 'var(--danger)'
+              const dreAtual = periodosComDre[0].dre
               return (
-                <div key={linha.key} className={`dre-linha dre-linha-subtotal${linha.final ? ' dre-linha-final' : ''}`}>
-                  <span className="dre-linha-label">{linha.label}</span>
-                  <span className="dre-linha-valor-wrap">
-                    <span className="dre-linha-valor" style={linha.final ? { color: corPositivoNegativo } : undefined}>{fmtBRL(total)}</span>
-                    <span className="dre-linha-pct">{fmtPctOuTraco(percentual)}</span>
-                  </span>
-                </div>
+                <Fragment key={linha.key}>
+                  <div className={`dre-linha dre-linha-subtotal${linha.final ? ' dre-linha-final' : ''}`}>
+                    <span className="dre-linha-label">{linha.label}</span>
+                    <span className="dre-linha-valor-wrap">
+                      <span className="dre-linha-valor" style={linha.final ? { color: corPositivoNegativo } : undefined}>{fmtBRL(total)}</span>
+                      <span className="dre-linha-pct">{fmtPctOuTraco(percentual)}</span>
+                    </span>
+                  </div>
+                  {/* Money Vision ("ajuste mexeu no DRE"): visível, mas DEPOIS do Resultado
+                      Líquido e fora dele — não distorce margem, ponto de equilíbrio nem indicadores. */}
+                  {linha.key === 'resultadoLiquido' && (dreAtual.quantidadeAjustesConciliacao ?? 0) > 0 && (
+                    <div className="dre-linha dre-linha-ajuste-conciliacao">
+                      <span className="dre-linha-label">
+                        (±) Ajustes de conciliação de saldo
+                        <span className="dre-linha-pct" style={{ marginLeft: 6 }}>⚖️ não afeta o resultado</span>
+                      </span>
+                      <span className="dre-linha-valor-wrap">
+                        <span className="dre-linha-valor">{fmtBRL(dreAtual.ajustesConciliacao ?? 0)}</span>
+                      </span>
+                    </div>
+                  )}
+                </Fragment>
               )
             }
 

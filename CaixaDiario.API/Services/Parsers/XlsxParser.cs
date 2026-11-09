@@ -72,7 +72,7 @@ public static class XlsxParser
             }
 
             if (valor <= 0) continue;
-            result.Add(new TransacaoCsv(data.Value, valor, desc, tipo));
+            result.Add(new TransacaoCsv(data.Value, valor, desc, tipo, mapa.Saldo >= 0 ? LerDecimal(celulas, mapa.Saldo) : null));
         }
 
         return result;

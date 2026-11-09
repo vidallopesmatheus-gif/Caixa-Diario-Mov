@@ -20,6 +20,8 @@ public class FaturaCartaoServiceTests
     private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
     private readonly Mock<ITransferenciaRepository> _transferenciaRepoMock = new();
     private readonly Mock<IParcelamentoDeteccaoService> _parcelamentoDeteccaoServiceMock = new();
+    private readonly Mock<IParcelamentoRepository> _parcelamentoRepoMock = new();
+    private static readonly DateOnly Hoje = new(2026, 11, 8);
     private readonly FaturaCartaoService _sut;
 
     // InMemory não é relacional — o serviço detecta isso (Database.IsRelational()) e não abre
@@ -34,7 +36,7 @@ public class FaturaCartaoServiceTests
         _sut = new FaturaCartaoService(
             _contaRepoMock.Object, _registroRepoMock.Object, _pagamentoRepoMock.Object, _categoriaRepoMock.Object,
             _auditMock.Object, CriarContexto(), _faturaRepoMock.Object, _transferenciaRepoMock.Object,
-            _parcelamentoDeteccaoServiceMock.Object);
+            _parcelamentoDeteccaoServiceMock.Object, _parcelamentoRepoMock.Object, new RelogioFixo(Hoje));
     }
 
     private static ContaBancaria CriarConta(
@@ -953,72 +955,158 @@ public class FaturaCartaoServiceTests
         return persistidos;
     }
 
+    private List<Fatura> ConfigurarFaturasFake(Guid contaCartaoId, params Fatura[] existentes)
+    {
+        var faturas = existentes.ToList();
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartaoId)).ReturnsAsync(() => faturas.ToList());
+        _faturaRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Fatura>()))
+            .Callback<Fatura>(faturas.Add).ReturnsAsync((Fatura f) => f);
+        return faturas;
+    }
+
+    private List<Parcelamento> ConfigurarParcelamentosFake()
+    {
+        var parcelamentos = new List<Parcelamento>();
+        _parcelamentoRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Parcelamento>()))
+            .Callback<Parcelamento>(parcelamentos.Add).ReturnsAsync((Parcelamento p) => p);
+        _parcelamentoRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<Parcelamento>())).ReturnsAsync((Parcelamento p) => p);
+        return parcelamentos;
+    }
+
+    // Critério de aceite (Money Vision, "Conquistei → Cartão parcelado"): 10× no Nubank com a 1ª
+    // vencendo em out/2026 (hoje = 08/11/2026) → 1 lançamento realizado na fatura Nubank 2026-10 e
+    // 9 contas a pagar previstas de nov/2026 a jul/2027, fora do saldo.
     [Fact]
-    public async Task LancarComprasParceladaAsync_CriaUmaSaidaPorParcelaEmMesesConsecutivosEEncadeiaOSaldo()
+    public async Task LancarComprasParceladaAsync_CompraNova_SoAParcela1ViraLancamentoEAsFuturasFicamPrevistas()
     {
         var clienteId = Guid.NewGuid();
-        var contaCartao = CriarConta(clienteId, "Cartão", "CartaoCredito");
-        var dataCompra = new DateOnly(2026, 1, 10);
+        var metaId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
-        _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(clienteId))
-            .ReturnsAsync(new List<Categoria> { new() { Nome = "Equipamentos", Tipo = "DespesaNaoOperacional" } });
         var persistidos = ConfigurarRegistrosFake(contaCartao.Id);
+        var faturas = ConfigurarFaturasFake(contaCartao.Id);
+        var parcelamentos = ConfigurarParcelamentosFake();
 
         var dto = new LancarCompraParceladaDto
         {
-            Descricao = "Notebook", ValorTotal = 300m, Categoria = "Equipamentos", QuantidadeParcelas = 3, Data = dataCompra,
+            Descricao = "Macbook", Categoria = "Equipamentos", QuantidadeParcelas = 10, Banco = "Nubank",
+            ValorParcela = 199.16m, Data = new DateOnly(2026, 10, 15), DataPrimeiraParcela = new DateOnly(2026, 10, 20),
         };
 
-        await _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto);
+        await _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto, metaId);
 
-        Assert.Equal(3, persistidos.Count);
-        var p1 = persistidos.Single(r => r.Data == dataCompra);
-        var p2 = persistidos.Single(r => r.Data == dataCompra.AddMonths(1));
-        var p3 = persistidos.Single(r => r.Data == dataCompra.AddMonths(2));
+        var saida = Assert.Single(persistidos.SelectMany(r => r.Saidas));
+        var fatura = Assert.Single(faturas);
+        Assert.Equal(("Nubank", "2026-10"), (fatura.Banco, fatura.Competencia));
+        Assert.Equal(fatura.Id, saida.FaturaId);
+        Assert.Equal(new DateOnly(2026, 10, 15), persistidos.Single(r => r.Saidas.Count > 0).Data);
+        Assert.Equal(("Macbook - Parcela 1/10", 199.16m, metaId), (saida.Descricao, saida.Valor, saida.OrigemMetaId));
 
-        var s1 = Assert.Single(p1.Saidas);
-        Assert.Equal("Notebook (1/3)", s1.Descricao);
-        Assert.Equal(100m, s1.Valor);
-        Assert.Equal("DespesaNaoOperacional", s1.TipoCusto);
-        Assert.Equal(1, s1.NumeroParcela);
-        Assert.Equal(3, s1.TotalParcelas);
-        Assert.NotNull(s1.ParcelamentoId);
+        var previstas = persistidos.SelectMany(r => r.ContasPagar).OrderBy(c => c.NumeroParcela).ToList();
+        Assert.Equal(Enumerable.Range(2, 9), previstas.Select(c => c.NumeroParcela!.Value));
+        Assert.Equal(new DateOnly(2026, 11, 20), previstas.First().DataVencimento);
+        Assert.Equal(new DateOnly(2027, 7, 20), previstas.Last().DataVencimento);
+        Assert.All(previstas, c => Assert.Equal((saida.ParcelamentoId, metaId, false), (c.ParcelamentoId, c.OrigemMetaId, c.Pago)));
 
-        var s2 = Assert.Single(p2.Saidas);
-        var s3 = Assert.Single(p3.Saidas);
-        Assert.Equal("Notebook (2/3)", s2.Descricao);
-        Assert.Equal("Notebook (3/3)", s3.Descricao);
-        Assert.Equal(s1.ParcelamentoId, s2.ParcelamentoId);
-        Assert.Equal(s1.ParcelamentoId, s3.ParcelamentoId);
-
-        // Cada parcela parte do saldo onde a anterior deixou — nunca reseta nem acumula errado.
-        Assert.Equal(0m, p1.Inicio);
-        Assert.Equal(-100m, p1.SaldoFinal);
-        Assert.Equal(-100m, p2.Inicio);
-        Assert.Equal(-200m, p2.SaldoFinal);
-        Assert.Equal(-200m, p3.Inicio);
-        Assert.Equal(-300m, p3.SaldoFinal);
+        var parcelamento = Assert.Single(parcelamentos);
+        Assert.Equal((parcelamento.Id, 1991.60m, metaId, "Ativo"), (saida.ParcelamentoId!.Value, parcelamento.ValorTotal, parcelamento.MetaId, parcelamento.Status));
+        Assert.Equal(-199.16m, persistidos.Single(r => r.Saidas.Count > 0).SaldoFinal);
     }
 
     [Fact]
-    public async Task LancarComprasParceladaAsync_ValorNaoDivisivel_UltimaParcelaAbsorveOArredondamento()
+    public async Task LancarComprasParceladaAsync_ParcelasJaVencidas_ViramLancamentoNaDataDaCobranca()
     {
         var clienteId = Guid.NewGuid();
-        var contaCartao = CriarConta(clienteId, "Cartão", "CartaoCredito");
-        var dataCompra = new DateOnly(2026, 1, 10);
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
         _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
         var persistidos = ConfigurarRegistrosFake(contaCartao.Id);
+        var faturas = ConfigurarFaturasFake(contaCartao.Id);
+        ConfigurarParcelamentosFake();
 
         var dto = new LancarCompraParceladaDto
         {
-            Descricao = "Compra", ValorTotal = 100m, Categoria = "Software", QuantidadeParcelas = 3, Data = dataCompra,
+            Descricao = "Sofá", Categoria = "Móveis", QuantidadeParcelas = 4, Banco = "C6", ValorTotal = 400m,
+            Data = new DateOnly(2026, 8, 10), DataPrimeiraParcela = new DateOnly(2026, 8, 20),
         };
 
         await _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto);
 
-        var valores = persistidos.OrderBy(r => r.Data).Select(r => r.Saidas.Single().Valor).ToList();
+        var datasRealizadas = persistidos.Where(r => r.Saidas.Count > 0).Select(r => r.Data).OrderBy(d => d).ToList();
+        Assert.Equal(new[] { new DateOnly(2026, 8, 10), new DateOnly(2026, 9, 20), new DateOnly(2026, 10, 20) }, datasRealizadas);
+        Assert.Equal(new[] { "2026-08", "2026-09", "2026-10" }, faturas.Select(f => f.Competencia).OrderBy(c => c));
+        Assert.Equal(4, Assert.Single(persistidos.SelectMany(r => r.ContasPagar)).NumeroParcela);
+    }
+
+    [Fact]
+    public async Task LancarComprasParceladaAsync_FaturaDoBancoJaExiste_ReaproveitaEmVezDeCriarOutra()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        var persistidos = ConfigurarRegistrosFake(contaCartao.Id);
+        var existente = new Fatura
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartao.Id, Banco = "Nubank",
+            Competencia = "2026-11", DataVencimento = new DateOnly(2026, 11, 20),
+        };
+        ConfigurarFaturasFake(contaCartao.Id, existente);
+        ConfigurarParcelamentosFake();
+
+        var dto = new LancarCompraParceladaDto
+        {
+            Descricao = "Fone", Categoria = "Equipamentos", QuantidadeParcelas = 3, Banco = "nubank", ValorTotal = 300m,
+            Data = new DateOnly(2026, 11, 5), DataPrimeiraParcela = new DateOnly(2026, 11, 20),
+        };
+
+        await _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto);
+
+        Assert.Equal(existente.Id, Assert.Single(persistidos.SelectMany(r => r.Saidas)).FaturaId);
+        _faturaRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<Fatura>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LancarComprasParceladaAsync_SemValorDaParcela_DivideOTotalComAjusteNaUltima()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        var persistidos = ConfigurarRegistrosFake(contaCartao.Id);
+        ConfigurarFaturasFake(contaCartao.Id);
+        ConfigurarParcelamentosFake();
+
+        var dto = new LancarCompraParceladaDto
+        {
+            Descricao = "Compra", Categoria = "Software", QuantidadeParcelas = 3, Banco = "Nubank", ValorTotal = 100m,
+            Data = new DateOnly(2026, 11, 5), DataPrimeiraParcela = new DateOnly(2026, 11, 20),
+        };
+
+        await _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto);
+
+        var valores = persistidos.SelectMany(r => r.Saidas).Select(s => (s.NumeroParcela!.Value, s.Valor))
+            .Concat(persistidos.SelectMany(r => r.ContasPagar).Select(c => (c.NumeroParcela!.Value, c.Valor)))
+            .OrderBy(v => v.Item1).Select(v => v.Valor).ToList();
         Assert.Equal(new[] { 33.33m, 33.33m, 33.34m }, valores);
-        Assert.Equal(100m, valores.Sum());
+    }
+
+    [Fact]
+    public async Task LancarComprasParceladaAsync_SemBancoComVariosBancosNoCartao_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartao = CriarConta(clienteId, "Cartões", "CartaoCredito");
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaCartao.Id)).ReturnsAsync(contaCartao);
+        ConfigurarFaturasFake(contaCartao.Id,
+            new Fatura { Id = Guid.NewGuid(), Banco = "Nubank", Competencia = "2026-10" },
+            new Fatura { Id = Guid.NewGuid(), Banco = "C6", Competencia = "2026-10" });
+
+        var dto = new LancarCompraParceladaDto
+        {
+            Descricao = "Compra", Categoria = "Software", QuantidadeParcelas = 3, ValorTotal = 300m, Data = new DateOnly(2026, 11, 5),
+        };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(
+            () => _sut.LancarComprasParceladaAsync(contaCartao.Id, clienteId, "cliente", dto));
+
+        Assert.Equal(("banco", CodigoRetorno.DADOS_INVALIDOS), (ex.Campo, ex.Codigo));
     }
 
     [Fact]

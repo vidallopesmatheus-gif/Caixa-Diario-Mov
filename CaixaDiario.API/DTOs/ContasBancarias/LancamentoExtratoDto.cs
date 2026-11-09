@@ -20,4 +20,8 @@ public class LancamentoExtratoDto
     // Marcador de ItemFinanceiro/ItemFinanceiroSaida (ver LancamentoFiltro) — "AjusteSaldo" é o
     // único valor que o front usa hoje (rótulo cinza "Ajuste de saldo", nunca editável/transferível).
     public string? TipoCusto { get; set; }
+    // Money Vision: "data da parcela vs. competência" — preenchido só quando esta linha é uma
+    // parcela (numero > 1) cuja Data foi reancorada pro fechamento/vencimento da fatura; o front
+    // mostra "compra em DD/MM/AAAA" com a data real da compra, sem perder a data da cobrança.
+    public string? DataCompraOriginal { get; set; } // "yyyy-MM-dd"
 }

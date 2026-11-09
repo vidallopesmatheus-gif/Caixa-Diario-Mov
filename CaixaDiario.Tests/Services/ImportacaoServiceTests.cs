@@ -433,6 +433,59 @@ public class ImportacaoServiceTests
         Assert.Null(naoParcelada.TotalParcelas);
     }
 
+    // Money Vision: "data da parcela vs. competência" (reteste 28/10) — parcela com numero > 1 é
+    // cobrança DESTA fatura, nunca uma transação na data embutida na descrição (a da compra
+    // original, meses antes). A data do lançamento vira a de fechamento/vencimento da fatura, e a
+    // original fica só em DataCompraOriginal, pra exibição.
+    [Fact]
+    public async Task ImportarArquivoAsync_ParcelaComNumeroMaiorQueUm_ReancoraParaFechamentoDaFaturaEPreservaDataOriginal()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        var registrosCriados = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(registrosCriados.Add).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n01/04/2026;MercadoLivre - parcela 7/7;100,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "C6", dataVencimentoFatura: new DateOnly(2026, 10, 20), dataFechamentoFatura: new DateOnly(2026, 10, 13));
+
+        var registro = Assert.Single(registrosCriados);
+        Assert.Equal(new DateOnly(2026, 10, 13), registro.Data); // fechamento, nunca 01/04
+        var item = Assert.Single(registro.Saidas);
+        Assert.Equal(new DateOnly(2026, 4, 1), item.DataCompraOriginal);
+    }
+
+    // numero == 1: a parcela 1 É a compra acontecendo de verdade neste ciclo — nunca reancorada.
+    [Fact]
+    public async Task ImportarArquivoAsync_PrimeiraParcela_NuncaReancoraNemPreencheDataCompraOriginal()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, tipo: "CartaoCredito"));
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        var registrosCriados = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(registrosCriados.Add).ReturnsAsync((RegistroDiario r) => r);
+
+        var csv = "Data;Descricao;Valor\n26/07/2026;Trocafone - Parcela 1/10;100,00\n";
+        var arquivo = CriarArquivoTexto("fatura.csv", csv);
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null,
+            banco: "Nubank", dataVencimentoFatura: new DateOnly(2026, 8, 10));
+
+        var registro = Assert.Single(registrosCriados);
+        Assert.Equal(new DateOnly(2026, 7, 26), registro.Data);
+        var item = Assert.Single(registro.Saidas);
+        Assert.Null(item.DataCompraOriginal);
+    }
+
     // Rodada de ajustes "parcelamentos": a compra parcelada detectada aciona a resolução/criação do
     // Parcelamento (ver ParcelamentoDeteccaoService) e grava o Id dele na parcela real importada.
     [Fact]
@@ -1422,11 +1475,11 @@ public class ImportacaoServiceTests
         var clienteId = Guid.NewGuid();
         var data = new DateOnly(2026, 7, 20);
         var itemId = Guid.NewGuid();
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 1000m));
 
         var registro = new RegistroDiario
         {
-            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 1000m,
             Entradas = new(),
             Saidas = new() { new() { Id = itemId, Descricao = "Posto", Valor = 150m, Categoria = "Manutenção" } },
             ContasReceber = new(), ContasPagar = new(),
@@ -1456,11 +1509,11 @@ public class ImportacaoServiceTests
         var clienteId = Guid.NewGuid();
         var data = new DateOnly(2026, 7, 20);
         var itemId = Guid.NewGuid();
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 1000m));
 
         var registro = new RegistroDiario
         {
-            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 1000m,
             Entradas = new() { new() { Id = itemId, Descricao = "Venda balcão", Valor = 300m } },
             Saidas = new(),
             ContasReceber = new(), ContasPagar = new(),

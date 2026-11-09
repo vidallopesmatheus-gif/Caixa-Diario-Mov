@@ -9,8 +9,14 @@
  * função (Dashboard, Histórico, Admin Overview); e PagamentoFatura nem existia aqui, fazendo
  * fatura de cartão duplicar gastos nos rankings de "Maiores Favorecidos" do DRE.
  */
-const TIPOS_NAO_OPERACIONAIS = new Set(['Transferencia', 'Rendimento', 'Investimento', 'Financiamento', 'PagamentoFatura', 'AjusteSaldo'])
+// AjusteConciliacao: ajuste de conciliação de saldo (tipo de sistema); AjusteSaldo é o valor legado.
+const TIPOS_NAO_OPERACIONAIS = new Set(['Transferencia', 'Rendimento', 'Investimento', 'Financiamento', 'PagamentoFatura', 'AjusteSaldo', 'AjusteConciliacao'])
 
 export function ehOperacional(item: { tipoCusto?: string }): boolean {
   return !item.tipoCusto || !TIPOS_NAO_OPERACIONAIS.has(item.tipoCusto)
+}
+
+/** Ajuste de conciliação de saldo — nunca receita/despesa, nunca reclassificável (só desfazer). */
+export function ehAjusteConciliacao(tipoCusto?: string): boolean {
+  return tipoCusto === 'AjusteConciliacao' || tipoCusto === 'AjusteSaldo'
 }

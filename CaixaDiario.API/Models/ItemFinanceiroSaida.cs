@@ -41,6 +41,9 @@ public class ItemFinanceiroSaida
     // Fase 5: preenchido quando esta saída foi criada por "🏆 Conquistei" (à vista ou cartão) —
     // "Desfazer conquista" usa isso pra achar e remover, nunca uma lista de Ids guardada na Meta.
     public Guid? OrigemMetaId { get; set; }
+    // "Conquistei → Já lancei essa compra": lançamento que JÁ existia (importado/manual) e só foi
+    // vinculado à meta — diferente de OrigemMetaId, "Desfazer conquista" só limpa isto, nunca apaga.
+    public Guid? MetaVinculadaId { get; set; }
     // Fase 6: preenchido quando esta saída foi criada pela baixa de uma parcela de financiamento
     // (juros, amortização ou encargos) — estorno usa isso pra achar e remover os até 3 lançamentos
     // de uma mesma parcela, sem precisar vasculhar pelos Ids individuais guardados em ContaProvisionada.
@@ -49,4 +52,9 @@ public class ItemFinanceiroSaida
     // competência inferida da data (ver Models/Fatura.cs). Só preenchido em compras de conta
     // CartaoCredito; nunca em "Pagamento de fatura" (essas usam PagamentoFaturaId, não FaturaId).
     public Guid? FaturaId { get; set; }
+    // Money Vision: "data da parcela vs. competência" — quando esta Saida é uma parcela (n > 1)
+    // detectada na importação, a Data do RegistroDiario que ela mora é a do fechamento/vencimento
+    // da fatura (a cobrança desta fatura), nunca a data original da compra (que pode ser meses
+    // antes). Preenchido só nesse caso, pra exibir "compra em DD/MM/AAAA" sem perder a data real.
+    public DateOnly? DataCompraOriginal { get; set; }
 }

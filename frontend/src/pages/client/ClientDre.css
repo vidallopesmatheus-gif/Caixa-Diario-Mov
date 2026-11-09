@@ -596,3 +596,10 @@
     display: none;
   }
 }
+
+/* Money Vision: (±) ajustes de conciliação de saldo — depois do Resultado Líquido, discreto. */
+.dre-linha-ajuste-conciliacao {
+  opacity: .8;
+  font-style: italic;
+  border-top: 1px dashed var(--bd);
+}

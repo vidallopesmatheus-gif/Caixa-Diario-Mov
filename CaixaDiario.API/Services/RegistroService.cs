@@ -135,6 +135,18 @@ public class RegistroService : IRegistroService
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
 
         var registrosCliente = (await _registroRepository.ListarPorClienteAsync(dto.ClienteId)) ?? new List<RegistroDiario>();
+        // Money Vision ("toda vez preciso lançar ajuste"): nunca o Inicio que o navegador mandou (o
+        // Caixa calcula o dele a partir do que tinha carregado, que podia estar desatualizado) —
+        // é sempre o saldo final do dia anterior desta conta. Só registro legado sem conta
+        // vinculada (fora de qualquer cadeia) continua usando o informado.
+        var foraDaCadeia = existente != null && !existente.ContaBancariaId.HasValue;
+        var inicio = foraDaCadeia
+            ? dto.Inicio
+            : registrosCliente
+                .Where(r => r.ContaBancariaId == contaId && !r.Excluido && r.Data < dto.Data)
+                .OrderByDescending(r => r.Data)
+                .FirstOrDefault()?.SaldoFinal
+              ?? contas.FirstOrDefault(c => c.Id == contaId)?.SaldoInicial ?? dto.Inicio;
         var dadosAntes = existente != null ? JsonSerializer.Serialize(MapToDto(existente)) : null;
         var referenciasReceber = registrosCliente
             .Where(r => r.Id != existente?.Id && r.Data != dto.Data)
@@ -153,7 +165,7 @@ public class RegistroService : IRegistroService
             var contasReceberAntes = existente.ContasReceber;
             var contasPagarAntes = existente.ContasPagar;
 
-            existente.Inicio = dto.Inicio;
+            existente.Inicio = inicio;
             existente.Entradas = DeduplicarPorId(dto.Entradas.Select(MapItemDto).ToList(), e => e.Id);
             existente.Saidas = DeduplicarPorId(dto.Saidas.Select(MapSaidaDto).ToList(), s => s.Id);
             existente.ContasReceber = AplicarBaixaAutomatica(MesclarContas(contasReceberAntes, contasReceberEntrada), dto.Data);
@@ -161,9 +173,12 @@ public class RegistroService : IRegistroService
             DesmarcarDuplicatas(existente.ContasReceber, referenciasReceber);
             DesmarcarDuplicatas(existente.ContasPagar, referenciasPagar);
 
-            var ajuste = AplicarBaixaFinanceira(contasReceberAntes, existente.ContasReceber, dto.Data, isReceber: true)
+            // Só pelos efeitos colaterais (DataBaixa/ValorRealizado de cada título) — o saldo do dia
+            // sai de SaldoEncadeamento, que conta TODAS as baixas sem lançamento do dia, não só as
+            // que mudaram neste save (o delta sozinho perdia as baixas já feitas antes).
+            _ = AplicarBaixaFinanceira(contasReceberAntes, existente.ContasReceber, dto.Data, isReceber: true)
                        + AplicarBaixaFinanceira(contasPagarAntes, existente.ContasPagar, dto.Data, isReceber: false);
-            existente.SaldoFinal = CalcularSaldoFinal(dto.Inicio, existente.Entradas, existente.Saidas, ajuste);
+            existente.SaldoFinal = inicio + SaldoEncadeamento.EfeitoDoDia(existente);
             existente.SalvoEm = DateTime.UtcNow;
             existente.AtualizadoEm = DateTime.UtcNow;
             existente.UsuarioAtualizacao = nomeUsuarioLogado;
@@ -193,7 +208,7 @@ public class RegistroService : IRegistroService
         DesmarcarDuplicatas(contasReceberNovo, referenciasReceber);
         DesmarcarDuplicatas(contasPagarNovo, referenciasPagar);
 
-        var ajusteNovo = AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasReceberNovo, dto.Data, isReceber: true)
+        _ = AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasReceberNovo, dto.Data, isReceber: true)
                        + AplicarBaixaFinanceira(new List<ContaProvisionada>(), contasPagarNovo, dto.Data, isReceber: false);
 
         var entradasNovo = DeduplicarPorId(dto.Entradas.Select(MapItemDto).ToList(), e => e.Id);
@@ -205,16 +220,17 @@ public class RegistroService : IRegistroService
             ClienteId = dto.ClienteId,
             ContaBancariaId = contaId,
             Data = dto.Data,
-            Inicio = dto.Inicio,
+            Inicio = inicio,
             Entradas = entradasNovo,
             Saidas = saidasNovo,
             ContasReceber = contasReceberNovo,
             ContasPagar = contasPagarNovo,
-            SaldoFinal = CalcularSaldoFinal(dto.Inicio, entradasNovo, saidasNovo, ajusteNovo),
+            SaldoFinal = inicio,
             CriadoEm = DateTime.UtcNow,
             SalvoEm = DateTime.UtcNow,
             UsuarioAtualizacao = nomeUsuarioLogado
         };
+        novo.SaldoFinal = inicio + SaldoEncadeamento.EfeitoDoDia(novo);
 
         var criado = await _registroRepository.AdicionarAsync(novo);
         var criadoDto = MapToDto(criado);
@@ -258,64 +274,38 @@ public class RegistroService : IRegistroService
         return Math.Round(calculado, 2, MidpointRounding.AwayFromZero) + ajuste;
     }
 
-    // Quando o SaldoFinal de um dia muda, todo dia seguinte da MESMA conta que já existia (ex.:
-    // ocorrências de recorrência materializadas com antecedência) ficou com um Inicio desatualizado.
-    // Propaga a diferença em cadeia — soma o mesmo delta no Inicio e no SaldoFinal de cada um, na
-    // ordem, preservando as entradas/saídas/baixas de cada dia (que não mudaram). Para na primeira
-    // divergência zerada: se aquele dia já está consistente, os de depois também estarão.
+    // Quando um dia muda, todo dia seguinte da MESMA conta (inclusive futuros já materializados, ex.:
+    // recorrências) precisa partir do novo saldo. Recalcula o próprio dia (se ele está na lista) e
+    // TODOS os seguintes pela função única (SaldoEncadeamento) — sem early-exit: parar no primeiro
+    // dia "já consistente" assumia que os de depois também estavam, e uma cadeia corrompida no meio
+    // nunca era alcançada. O saldo final do dia anterior a `data` é a âncora (já certo, porque toda
+    // escrita anterior também recalculou dali em diante); sem o dia na lista (ex.: acabou de ser
+    // excluído, ou é novo e ainda não estava no snapshot), a âncora é o saldoFinalDoDia informado.
     // internal static (recebe o repositório por parâmetro): também usado por ContaProvisionadaService.
     internal static async Task RecalcularDiasSeguintesAsync(
         IRegistroRepository registroRepository, Guid contaId, DateOnly data, decimal saldoFinalDoDia, List<RegistroDiario> registrosCliente)
     {
-        var saldoCorrente = saldoFinalDoDia;
-        var seguintes = registrosCliente
-            .Where(r => r.ContaBancariaId == contaId && r.Data > data)
-            .OrderBy(r => r.Data);
-
-        foreach (var proximo in seguintes)
-        {
-            var delta = saldoCorrente - proximo.Inicio;
-            if (delta == 0m) break;
-            proximo.Inicio += delta;
-            proximo.SaldoFinal += delta;
-            saldoCorrente = proximo.SaldoFinal;
-            await registroRepository.AtualizarAsync(proximo);
-        }
+        var daConta = registrosCliente.Where(r => r.ContaBancariaId == contaId && !r.Excluido).OrderBy(r => r.Data).ToList();
+        var doDia = daConta.FirstOrDefault(r => r.Data == data);
+        var anterior = daConta.LastOrDefault(r => r.Data < data);
+        var alterados = doDia != null
+            ? SaldoEncadeamento.Encadear(anterior?.SaldoFinal ?? doDia.Inicio, daConta.Where(r => r.Data >= data))
+            : SaldoEncadeamento.Encadear(saldoFinalDoDia, daConta.Where(r => r.Data > data));
+        foreach (var registro in alterados) await registroRepository.AtualizarAsync(registro);
     }
 
-    // Money Vision: "saldo não fecha com o extrato" — RecalcularDiasSeguintesAsync acima propaga um
-    // delta a partir de UM dia que o chamador já sabe estar certo, e para na primeira divergência
-    // zerada assumindo que os dias depois dela também já estão certos. Essa suposição quebra quando
-    // a cadeia já foi corrompida fora de ordem (ex.: um dia no meio ficou com Inicio errado por um
-    // write path que nunca recalculou — havia 8 desses: vínculo de pagamento de fatura, rendimento de
-    // investimento, edição de saldo inicial da conta, etc.) — um recálculo que começa depois do ponto
-    // corrompido nunca o alcança. Esta função é a fonte única de verdade de verdade: percorre a conta
-    // INTEIRA desde o saldo inicial, sem early-exit, reconstruindo Inicio = SaldoFinal do dia anterior
-    // e preservando o "efeito líquido" que cada dia já tinha (SaldoFinal − Inicio, que já embute
-    // entradas, saídas e qualquer ajuste de baixa financeira daquele dia específico — só a ligação
-    // entre os dias é que pode estar errada, nunca a matemática interna de um dia já salvo). Sempre
-    // segura de rodar de novo (idempotente) — por isso é o que tanto os write paths quanto a migração
-    // de reparo em produção devem chamar, em vez de inventar mais uma cadeia de delta.
+    // Money Vision: "saldo não fecha com o extrato" — reencadeia a conta INTEIRA desde o saldo
+    // inicial pela função única (SaldoEncadeamento): Inicio = saldo final do dia anterior e SaldoFinal
+    // = Inicio + efeito real do dia (entradas, saídas e baixas sem lançamento), nunca o "SaldoFinal −
+    // Inicio" que estava gravado — esse delta guardado era justamente o que um write path errado
+    // corrompia. Idempotente: é o que os write paths e a migração de reparo em produção chamam.
     internal static async Task RecalcularContaInteiraAsync(
         IRegistroRepository registroRepository, Guid contaId, decimal saldoInicialDaConta, List<RegistroDiario>? registrosCliente = null)
     {
         var registros = (registrosCliente ?? await registroRepository.ListarPorContaAsync(contaId))
-            .Where(r => r.ContaBancariaId == contaId && !r.Excluido)
-            .OrderBy(r => r.Data)
-            .ToList();
-
-        var saldoCorrente = saldoInicialDaConta;
-        foreach (var registro in registros)
-        {
-            var deltaDoDia = registro.SaldoFinal - registro.Inicio;
-            if (registro.Inicio != saldoCorrente)
-            {
-                registro.Inicio = saldoCorrente;
-                registro.SaldoFinal = saldoCorrente + deltaDoDia;
-                await registroRepository.AtualizarAsync(registro);
-            }
-            saldoCorrente = registro.SaldoFinal;
-        }
+            .Where(r => r.ContaBancariaId == contaId && !r.Excluido);
+        foreach (var registro in SaldoEncadeamento.Encadear(saldoInicialDaConta, registros))
+            await registroRepository.AtualizarAsync(registro);
     }
 
     public async Task ExcluirAsync(Guid clienteId, DateOnly data, Guid? contaBancariaId, string motivo, Guid usuarioLogadoId, string perfil)
@@ -400,6 +390,7 @@ public class RegistroService : IRegistroService
         {
             var item = registro.Entradas.FirstOrDefault(e => e.Id == dto.LancamentoId)
                 ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+            GarantirQueNaoEAjuste(item.TipoCusto);
             categoriaAnterior = item.Categoria;
             descricaoAlvo = item.Descricao;
             item.Categoria = dto.CategoriaNova;
@@ -412,6 +403,7 @@ public class RegistroService : IRegistroService
         {
             var item = registro.Saidas.FirstOrDefault(s => s.Id == dto.LancamentoId)
                 ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+            GarantirQueNaoEAjuste(item.TipoCusto);
             categoriaAnterior = item.Categoria;
             descricaoAlvo = item.Descricao;
             item.Categoria = dto.CategoriaNova;
@@ -593,10 +585,25 @@ public class RegistroService : IRegistroService
         return resultado;
     }
 
+    // Money Vision ("ajuste mexeu no DRE"): o ajuste de conciliação nunca vira receita/despesa — nem
+    // se o Caixa reenviar o item sem o TipoCusto, nem se alguém lançar à mão com a categoria dele.
+    private static string? TipoCustoPreservandoAjuste(string? tipoCusto, string? categoria) =>
+        LancamentoFiltro.EhAjusteConciliacao(tipoCusto)
+        || string.Equals(categoria?.Trim(), LancamentoFiltro.CategoriaAjusteSaldo, StringComparison.OrdinalIgnoreCase)
+            ? LancamentoFiltro.TipoAjusteConciliacao
+            : tipoCusto;
+
+    private static void GarantirQueNaoEAjuste(string? tipoCusto)
+    {
+        if (LancamentoFiltro.EhAjusteConciliacao(tipoCusto))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                "Ajuste de conciliação não é reclassificável — se ele não faz mais sentido, desfaça o ajuste.");
+    }
+
     private static ItemFinanceiro MapItemDto(ItemFinanceiroDto d) =>
         new()
         {
-            Id = d.Id, Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, TipoCusto = d.TipoCusto,
+            Id = d.Id, Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, TipoCusto = TipoCustoPreservandoAjuste(d.TipoCusto, d.Categoria),
             TransferenciaId = d.TransferenciaId, FitId = d.FitId, PendenteCategorizacao = d.PendenteCategorizacao,
         };
 
@@ -604,7 +611,7 @@ public class RegistroService : IRegistroService
         new()
         {
             Id = d.Id, Descricao = d.Descricao, Valor = d.Valor, Categoria = d.Categoria, Subcategoria = d.Subcategoria,
-            TipoCusto = d.TipoCusto, TransferenciaId = d.TransferenciaId, FitId = d.FitId, PendenteCategorizacao = d.PendenteCategorizacao,
+            TipoCusto = TipoCustoPreservandoAjuste(d.TipoCusto, d.Categoria), TransferenciaId = d.TransferenciaId, FitId = d.FitId, PendenteCategorizacao = d.PendenteCategorizacao,
             ParcelamentoId = d.ParcelamentoId, NumeroParcela = d.NumeroParcela, TotalParcelas = d.TotalParcelas,
         };
 

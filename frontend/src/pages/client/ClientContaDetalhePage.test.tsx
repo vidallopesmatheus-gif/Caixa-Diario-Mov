@@ -99,7 +99,7 @@ test('agrupa lançamentos por dia com entradas, saídas e saldo do dia no cabeç
   const grupo = cabecalho.closest('.cd-extrato-dia-cabecalho') as HTMLElement
   expect(within(grupo).getByText(/Entradas \+R\$ 300,00/)).toBeInTheDocument()
   expect(within(grupo).getByText(/Saídas −R\$ 200,00/)).toBeInTheDocument()
-  expect(within(grupo).getByText(/Saldo do dia R\$ 432,66/)).toBeInTheDocument()
+  expect(within(grupo).getByText(/Saldo final do dia R\$\s432,66/)).toBeInTheDocument()
 })
 
 test('descrição bruta de débito aparece limpa e capitalizada no título da linha', async () => {
@@ -269,7 +269,7 @@ test('lançamento com tipoCusto AjusteSaldo mostra o chip cinza "Ajuste de saldo
   ])
   renderPagina()
 
-  const chip = await screen.findByRole('button', { name: 'Ajuste de saldo' })
+  const chip = await screen.findByRole('button', { name: '⚖️ Ajuste de saldo' })
   expect(chip.className).toContain('cd-chip-ajuste')
   expect(chip).toBeDisabled()
 })
@@ -297,7 +297,7 @@ test('ajuste de saldo não entra no subtotal de Entradas/Saídas do dia, mas o s
   const cabecalho = (await screen.findByText('08/10/2026')).closest('.cd-extrato-dia-cabecalho') as HTMLElement
   expect(within(cabecalho).getByText(/Entradas \+R\$ 300,00/)).toBeInTheDocument()
   expect(within(cabecalho).queryByText(/Saídas/)).not.toBeInTheDocument()
-  expect(within(cabecalho).getByText(/Saldo do dia R\$ 132,66/)).toBeInTheDocument()
+  expect(within(cabecalho).getByText(/Saldo final do dia R\$\s132,66/)).toBeInTheDocument()
 })
 
 // ── Bloco 4: chip de transferência mostra a outra conta ─────────────────────────────────────────

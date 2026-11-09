@@ -28,7 +28,8 @@ public interface IImportacaoService
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
         DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null,
         string? banco = null, DateOnly? dataVencimentoFatura = null, DateOnly? dataFechamentoFatura = null,
-        string? competenciaFatura = null, bool? inverterSinaisManualmente = null);
+        string? competenciaFatura = null, bool? inverterSinaisManualmente = null,
+        OpcoesConciliacaoImportacaoDto? opcoesConciliacao = null);
 
     Task<List<PendenteCategorizacaoDto>> ListarPendentesCategorizacaoAsync(
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil);

@@ -25,6 +25,35 @@ public class MetricasServiceTests
     private static Categoria Cat(string nome, string tipo, string? grupo = null, int ordem = 0, string bloco = "") =>
         new() { Id = Guid.NewGuid(), Nome = nome, Tipo = tipo, GrupoId = Guid.NewGuid(), Grupo = new Grupo { Nome = grupo ?? "Outros", Bloco = bloco }, Ordem = ordem, Ativa = true };
 
+    // Money Vision ("ajuste mexeu no DRE"): o ajuste de conciliação aparece só no bloco próprio
+    // depois do Resultado Líquido — mesmo um antigo cujo TipoCusto foi sobrescrito por "Receita".
+    [Fact]
+    public void CalcularDre_ComAjustesDeConciliacao_NaoMudaReceitaNemResultado()
+    {
+        var semAjuste = CriarRegistro(new DateOnly(2026, 10, 5),
+            new() { Item("Venda", 1000m, "Vendas", "Receita") },
+            new() { Item("Aluguel", 300m, "Aluguel", "CustoFixo") });
+        var comAjuste = CriarRegistro(new DateOnly(2026, 10, 5),
+            new()
+            {
+                Item("Venda", 1000m, "Vendas", "Receita"),
+                Item("Ajuste de conciliação em 07/11", 50m, "Ajuste de saldo", LancamentoFiltro.TipoAjusteConciliacao),
+                Item("Ajuste de saldo", 20m, "Receitas diversas", "Receita"),
+            },
+            new()
+            {
+                Item("Aluguel", 300m, "Aluguel", "CustoFixo"),
+                Item("Ajuste de conciliação em 08/11", 684.06m, "Ajuste de saldo", LancamentoFiltro.TipoAjusteConciliacao),
+            });
+
+        var esperado = _sut.CalcularDre(new() { semAjuste });
+        var dre = _sut.CalcularDre(new() { comAjuste });
+
+        Assert.Equal((esperado.ReceitaBruta, esperado.ResultadoOperacional, esperado.ResultadoLiquido, esperado.MargemContribuicao),
+            (dre.ReceitaBruta, dre.ResultadoOperacional, dre.ResultadoLiquido, dre.MargemContribuicao));
+        Assert.Equal((-614.06m, 3), (dre.AjustesConciliacao, dre.QuantidadeAjustesConciliacao));
+    }
+
     [Fact]
     public void CalcularPeriodo_SemCategorias_EbitdaNull()
     {

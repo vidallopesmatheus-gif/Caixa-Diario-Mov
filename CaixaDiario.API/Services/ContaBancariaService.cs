@@ -19,11 +19,13 @@ public class ContaBancariaService : IContaBancariaService
     private readonly IContaRecorrenteRepository _contaRecorrenteRepo;
     private readonly IFaturaRepository _faturaRepo;
     private readonly IPagamentoFaturaRepository _pagamentoFaturaRepo;
+    private readonly IConciliacaoSaldoService? _conciliacaoSaldo;
 
     public ContaBancariaService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, IMetaRepository metaRepo,
         ITransferenciaRepository transferenciaRepo, ITransacaoImportadaRepository transacaoImportadaRepo,
-        IContaRecorrenteRepository contaRecorrenteRepo, IFaturaRepository faturaRepo, IPagamentoFaturaRepository pagamentoFaturaRepo)
+        IContaRecorrenteRepository contaRecorrenteRepo, IFaturaRepository faturaRepo, IPagamentoFaturaRepository pagamentoFaturaRepo,
+        IConciliacaoSaldoService? conciliacaoSaldo = null)
     {
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
@@ -33,6 +35,7 @@ public class ContaBancariaService : IContaBancariaService
         _contaRecorrenteRepo = contaRecorrenteRepo;
         _faturaRepo = faturaRepo;
         _pagamentoFaturaRepo = pagamentoFaturaRepo;
+        _conciliacaoSaldo = conciliacaoSaldo;
     }
 
     public async Task<List<ContaBancariaDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -42,7 +45,13 @@ public class ContaBancariaService : IContaBancariaService
         var registros = await _registroRepo.ListarPorClienteAsync(clienteId);
         var metas = await _metaRepo.ListarPorClienteAsync(clienteId);
         var faturasEmAbertoPorConta = await ObterFaturasEmAbertoPorContaAsync(contas, registros);
-        return contas.Select(c => MapToDto(c, registros, metas, faturasEmAbertoPorConta.GetValueOrDefault(c.Id))).ToList();
+        var conciliacaoPorConta = await ObterConciliacaoPorContaAsync(contas, registros);
+        return contas.Select(c =>
+        {
+            var dto = MapToDto(c, registros, metas, faturasEmAbertoPorConta.GetValueOrDefault(c.Id));
+            dto.Conciliacao = conciliacaoPorConta.GetValueOrDefault(c.Id);
+            return dto;
+        }).ToList();
     }
 
     public async Task<ContaBancariaDto> ObterPorIdAsync(Guid id, Guid usuarioLogadoId, string perfil)
@@ -53,8 +62,14 @@ public class ContaBancariaService : IContaBancariaService
         var registros = await _registroRepo.ListarPorContaAsync(id);
         var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
         var faturasEmAbertoPorConta = await ObterFaturasEmAbertoPorContaAsync(new List<ContaBancaria> { conta }, registros);
-        return MapToDto(conta, registros, metas, faturasEmAbertoPorConta.GetValueOrDefault(conta.Id));
+        var dto = MapToDto(conta, registros, metas, faturasEmAbertoPorConta.GetValueOrDefault(conta.Id));
+        dto.Conciliacao = (await ObterConciliacaoPorContaAsync(new List<ContaBancaria> { conta }, registros)).GetValueOrDefault(conta.Id);
+        return dto;
     }
+
+    private async Task<Dictionary<Guid, DTOs.ConciliacaoSaldo.StatusConciliacaoDto>> ObterConciliacaoPorContaAsync(
+        List<ContaBancaria> contas, List<RegistroDiario> registros) =>
+        _conciliacaoSaldo == null ? new() : await _conciliacaoSaldo.ObterStatusPorContaAsync(contas, registros);
 
     // Money Vision: "card mostra R$ 0,00, mas a API e as faturas dizem outra coisa" (item 4) —
     // mesma fonte do botão "Pagar" na tela de Faturas (FaturaCartaoService.CalcularFaturas),
@@ -190,7 +205,7 @@ public class ContaBancariaService : IContaBancariaService
 
         foreach (var r in registros)
         {
-            // Sincroniza com o início do dia armazenado, evitando deriva por edições manuais de saldo.
+            // Inicio da cadeia gravada — escrita só por SaldoEncadeamento, a mesma fonte do card.
             saldo = r.Inicio;
 
             foreach (var entrada in r.Entradas)
@@ -219,7 +234,7 @@ public class ContaBancariaService : IContaBancariaService
             // existente — Fase 0.5) significa que esse dinheiro JÁ está contado via o próprio
             // Entrada/Saída, nos loops abaixo — somar aqui também duplicava a linha e o saldo
             // acumulado do dia. Só sintetiza essa linha pra baixas antigas sem lançamento real.
-            foreach (var recebido in r.ContasReceber.Where(cp => cp.Pago && !cp.LancamentoVinculadoId.HasValue))
+            foreach (var recebido in r.ContasReceber.Where(SaldoEncadeamento.EhBaixaSemLancamento))
             {
                 var valorEfetivo = recebido.ValorRealizado ?? recebido.Valor;
                 saldo += valorEfetivo;
@@ -248,10 +263,11 @@ public class ContaBancariaService : IContaBancariaService
                     TransferenciaId = saida.TransferenciaId,
                     RegraCategorizacaoId = saida.RegraCategorizacaoId,
                     TipoCusto = saida.TipoCusto,
+                    DataCompraOriginal = saida.DataCompraOriginal?.ToString("yyyy-MM-dd"),
                 }));
             }
 
-            foreach (var pago in r.ContasPagar.Where(cp => cp.Pago && !cp.LancamentoVinculadoId.HasValue))
+            foreach (var pago in r.ContasPagar.Where(SaldoEncadeamento.EhBaixaSemLancamento))
             {
                 var valorEfetivo = pago.ValorRealizado ?? pago.Valor;
                 saldo -= valorEfetivo;
@@ -344,10 +360,11 @@ public class ContaBancariaService : IContaBancariaService
         return MapToDto(conta, registrosAtualizados, metas);
     }
 
-    // Item 4 (Money Vision "saldo não fecha com o extrato"): "quero acertar o saldo com o banco"
-    // nunca é uma troca silenciosa do Inicio — vira UM lançamento visível (categoria "Ajuste de
-    // saldo", LancamentoFiltro.TipoAjusteSaldo — já excluído do DRE/médias, mas sempre visível no
-    // extrato/Caixa), na data que o usuário escolher.
+    // Item 4 (Money Vision "saldo não fecha com o extrato") + "ajuste fora do resultado": acertar o
+    // saldo com o banco nunca é uma troca silenciosa do Inicio — vira UM lançamento visível do tipo
+    // de sistema AjusteConciliacao (fora do DRE, dos indicadores e das médias), na data escolhida,
+    // com o "banco R$ X, app R$ Y" na descrição e um ponto de conciliação já batendo. Desfazer =
+    // excluir o lançamento (tem Id próprio).
     public async Task<ContaBancariaDto> AjustarSaldoAsync(Guid contaId, AjustarSaldoDto dto, Guid usuarioLogadoId, string perfil)
     {
         var conta = await _contaRepo.ObterPorIdAsync(contaId)
@@ -357,33 +374,45 @@ public class ContaBancariaService : IContaBancariaService
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
 
         var (registro, novo) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, conta, dto.Data);
-        var diferenca = dto.SaldoReal - registro.SaldoFinal;
+        var saldoApp = registro.SaldoFinal;
+        var diferenca = dto.SaldoReal - saldoApp;
         if (diferenca == 0m)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "O saldo informado já bate com o saldo calculado nesta data.", "saldoReal");
 
-        var descricao = string.IsNullOrWhiteSpace(dto.Descricao) ? "Ajuste de saldo" : dto.Descricao;
+        var ptBr = System.Globalization.CultureInfo.GetCultureInfo("pt-BR");
+        var descricao = string.IsNullOrWhiteSpace(dto.Descricao)
+            ? $"Ajuste de conciliação em {dto.Data:dd/MM} — banco {dto.SaldoReal.ToString("C", ptBr)}, app {saldoApp.ToString("C", ptBr)}"
+            : dto.Descricao;
         if (diferenca > 0)
         {
-            registro.Entradas.Add(new ItemFinanceiro
+            registro.Entradas = new List<ItemFinanceiro>(registro.Entradas)
             {
-                Descricao = descricao, Valor = diferenca, Categoria = "Ajuste de saldo", TipoCusto = LancamentoFiltro.TipoAjusteSaldo,
-            });
+                new()
+                {
+                    Id = Guid.NewGuid(), Descricao = descricao, Valor = diferenca,
+                    Categoria = LancamentoFiltro.CategoriaAjusteSaldo, TipoCusto = LancamentoFiltro.TipoAjusteConciliacao,
+                },
+            };
         }
         else
         {
-            registro.Saidas.Add(new ItemFinanceiroSaida
+            registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas)
             {
-                Descricao = descricao, Valor = -diferenca, Categoria = "Ajuste de saldo", TipoCusto = LancamentoFiltro.TipoAjusteSaldo,
-            });
+                new()
+                {
+                    Id = Guid.NewGuid(), Descricao = descricao, Valor = -diferenca,
+                    Categoria = LancamentoFiltro.CategoriaAjusteSaldo, TipoCusto = LancamentoFiltro.TipoAjusteConciliacao,
+                },
+            };
         }
-        registro.SaldoFinal += diferenca;
+        registro.SaldoFinal = registro.Inicio + SaldoEncadeamento.EfeitoDoDia(registro);
         registro.SalvoEm = DateTime.UtcNow;
         await RegistroDiaHelper.PersistirAsync(_registroRepo, registro, novo);
         await RegistroService.RecalcularContaInteiraAsync(_registroRepo, contaId, conta.SaldoInicial);
+        if (_conciliacaoSaldo != null)
+            await _conciliacaoSaldo.RegistrarPontoAsync(conta, dto.Data, dto.SaldoReal, "Ajuste");
 
-        var registrosAtualizados = await _registroRepo.ListarPorContaAsync(contaId);
-        var metas = await _metaRepo.ListarPorClienteAsync(conta.ClienteId);
-        return MapToDto(conta, registrosAtualizados, metas);
+        return await ObterPorIdAsync(contaId, usuarioLogadoId, perfil);
     }
 
     public async Task<ContaBancariaDto> VincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil)
@@ -470,12 +499,9 @@ public class ContaBancariaService : IContaBancariaService
             throw new ApiException(403, CodigoRetorno.ACESSO_NEGADO, "Acesso negado.");
     }
 
-    /// <summary>Saldo atual = SaldoFinal do registro mais recente da conta, ou SaldoInicial se não houver nenhum.</summary>
+    /// <summary>Saldo atual pela função única (SaldoEncadeamento) — o mesmo número do card e do extrato.</summary>
     public static decimal ObterSaldoAtual(ContaBancaria conta, IEnumerable<RegistroDiario> registros) =>
-        registros
-            .Where(r => r.ContaBancariaId == conta.Id && !r.Excluido)
-            .OrderByDescending(r => r.Data)
-            .FirstOrDefault()?.SaldoFinal ?? conta.SaldoInicial;
+        SaldoEncadeamento.SaldoAtual(conta, registros);
 
     private static readonly string[] MesesAbreviados =
         { "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez" };
@@ -500,7 +526,7 @@ public class ContaBancariaService : IContaBancariaService
             .OrderByDescending(r => r.Data)
             .ToList();
 
-        var saldoAtual = regsOrdenados.FirstOrDefault()?.SaldoFinal ?? c.SaldoInicial;
+        var saldoAtual = SaldoEncadeamento.SaldoAtual(c, regsOrdenados);
 
         var hoje = DataLocalHelper.Hoje();
         var regsDoMes = regsOrdenados.Where(r => r.Data.Year == hoje.Year && r.Data.Month == hoje.Month);

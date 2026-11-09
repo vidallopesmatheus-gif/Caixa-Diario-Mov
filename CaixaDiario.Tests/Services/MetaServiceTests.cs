@@ -22,15 +22,25 @@ public class MetaServiceTests
     private readonly Mock<IFaturaCartaoService> _faturaCartaoServiceMock = new();
     private readonly Mock<ITransferenciaService> _transferenciaServiceMock = new();
     private readonly Mock<IFinanciamentoRepository> _financiamentoRepoMock = new();
+    private readonly Mock<IParcelamentoRepository> _parcelamentoRepoMock = new();
+    private readonly Mock<IParcelamentoDeteccaoService> _parcelamentoDeteccaoServiceMock = new();
+    private readonly Mock<IFaturaRepository> _faturaRepoMock = new();
+    private static readonly DateOnly Hoje = new(2026, 11, 8);
     private readonly MetaService _sut;
 
     public MetaServiceTests()
     {
         _categoriaRepoMock.Setup(r => r.ListarTodasPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(new List<Categoria>());
+        // Vínculos do andamento (CarregarVinculosAsync) — vazios por padrão, cada teste sobrescreve.
+        _parcelamentoRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(() => new List<Parcelamento>());
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(() => new List<RegistroDiario>());
+        _contaBancariaRepoMock.Setup(r => r.ListarPorClienteAsync(It.IsAny<Guid>())).ReturnsAsync(() => new List<ContaBancaria>());
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(() => new List<Fatura>());
         _sut = new MetaService(
             _repoMock.Object, _metaProgressoMock.Object, _contaBancariaRepoMock.Object,
             _registroRepoMock.Object, _categoriaRepoMock.Object, _contaProvisionadaServiceMock.Object,
-            _faturaCartaoServiceMock.Object, _transferenciaServiceMock.Object, _financiamentoRepoMock.Object);
+            _faturaCartaoServiceMock.Object, _transferenciaServiceMock.Object, _financiamentoRepoMock.Object,
+            _parcelamentoRepoMock.Object, _parcelamentoDeteccaoServiceMock.Object, _faturaRepoMock.Object, new RelogioFixo(Hoje));
     }
 
     [Fact]
@@ -269,7 +279,8 @@ public class MetaServiceTests
         var sut = new MetaService(
             repoMock.Object, _metaProgressoMock.Object, _contaBancariaRepoMock.Object,
             _registroRepoMock.Object, _categoriaRepoMock.Object, _contaProvisionadaServiceMock.Object,
-            _faturaCartaoServiceMock.Object, _transferenciaServiceMock.Object, _financiamentoRepoMock.Object);
+            _faturaCartaoServiceMock.Object, _transferenciaServiceMock.Object, _financiamentoRepoMock.Object,
+            _parcelamentoRepoMock.Object, _parcelamentoDeteccaoServiceMock.Object, _faturaRepoMock.Object);
 
         var ex = await Assert.ThrowsAsync<ApiException>(() => sut.ExcluirMetaAsync(meta.Id, Guid.NewGuid(), "cliente"));
 
@@ -545,12 +556,13 @@ public class MetaServiceTests
 
         var resultado = await _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto);
 
-        // Item 3 (Money Vision): a 1ª parcela usa a data do próximo vencimento do cartão
-        // (DataPrimeiraParcela), não a data da compra — nunca mais as duas coincidindo por acaso.
+        // Item 3 (Money Vision): a 1ª parcela vence no próximo vencimento do cartão
+        // (DataPrimeiraParcela); a compra em si continua na data da compra.
         _faturaCartaoServiceMock.Verify(s => s.LancarComprasParceladaAsync(
             contaCartaoId, clienteId, "cliente",
             It.Is<LancarCompraParceladaDto>(d => d.ValorTotal == 4000m && d.QuantidadeParcelas == 10
-                && d.Descricao == "🏆 Notebook" && d.Categoria == "Equipamentos" && d.Data == dataPrimeiraParcela),
+                && d.Descricao == "🏆 Notebook" && d.Categoria == "Equipamentos" && d.Data == data
+                && d.DataPrimeiraParcela == dataPrimeiraParcela),
             meta.Id), Times.Once);
         Assert.Equal("Conquistada", resultado.Status);
     }
@@ -879,5 +891,395 @@ public class MetaServiceTests
 
         Assert.Equal(403, ex.StatusCode);
         Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
+    }
+
+    // ── "Conquistei → Já lancei essa compra" (Money Vision: compra duplicada) ────────────────────
+
+    private static Parcelamento CriarParcelamentoTrocafone(Guid clienteId, Guid contaCartaoId, decimal valorParcela) => new()
+    {
+        Id = Guid.NewGuid(), ClienteId = clienteId, ContaCartaoId = contaCartaoId, DescricaoBase = "Trocafone",
+        ValorParcela = valorParcela, TotalParcelas = 10, DataPrimeira = new DateOnly(2026, 10, 20),
+        ValorTotal = valorParcela * 10, Status = "Ativo",
+    };
+
+    // Parcela 1 real (na fatura do banco) + parcelas 2..10 previstas em Contas a Pagar.
+    private static List<RegistroDiario> CriarParcelasTrocafone(Guid clienteId, Guid contaCartaoId, Parcelamento p, Guid faturaId)
+    {
+        var real = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartaoId, Data = new DateOnly(2026, 10, 5),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new() { Id = Guid.NewGuid(), Descricao = "Trocafone - Parcela 1/10", Valor = p.ValorParcela, ParcelamentoId = p.Id, NumeroParcela = 1, TotalParcelas = 10, FaturaId = faturaId } },
+        };
+        var previstas = Enumerable.Range(2, 9).Select(n => new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartaoId, Data = p.DataPrimeira.AddMonths(n - 1),
+            Entradas = new(), Saidas = new(), ContasReceber = new(),
+            ContasPagar = new() { new() { Id = Guid.NewGuid(), Descricao = $"Trocafone - Parcela {n}/10", Valor = p.ValorParcela, ParcelamentoId = p.Id, NumeroParcela = n } },
+        });
+        return previstas.Prepend(real).ToList();
+    }
+
+    [Fact]
+    public async Task Conquistar_JaLancadoComDoisParcelamentos_VinculaSemCriarLancamentoEMostraAndamento()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartaoId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        var nubank = CriarParcelamentoTrocafone(clienteId, contaCartaoId, 199.16m);
+        var c6 = CriarParcelamentoTrocafone(clienteId, contaCartaoId, 210.00m);
+        var faturaNubank = new Fatura { Id = Guid.NewGuid(), Banco = "Nubank", Competencia = "2026-10" };
+        var faturaC6 = new Fatura { Id = Guid.NewGuid(), Banco = "C6", Competencia = "2026-10" };
+        var registros = CriarParcelasTrocafone(clienteId, contaCartaoId, nubank, faturaNubank.Id)
+            .Concat(CriarParcelasTrocafone(clienteId, contaCartaoId, c6, faturaC6.Id)).ToList();
+
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
+        _parcelamentoRepoMock.Setup(r => r.ObterPorIdAsync(nubank.Id)).ReturnsAsync(nubank);
+        _parcelamentoRepoMock.Setup(r => r.ObterPorIdAsync(c6.Id)).ReturnsAsync(c6);
+        _parcelamentoRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<Parcelamento>())).ReturnsAsync((Parcelamento p) => p);
+        _parcelamentoRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<Parcelamento> { nubank, c6 });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(registros);
+        _contaBancariaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria>
+        {
+            new() { Id = contaCartaoId, ClienteId = clienteId, Tipo = "CartaoCredito", Ativa = true },
+        });
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(contaCartaoId)).ReturnsAsync(new List<Fatura> { faturaNubank, faturaC6 });
+
+        var dto = new ConquistarMetaDto
+        {
+            Modo = "JaLancado", FormaPagamento = "Cartao", Data = new DateOnly(2026, 10, 29), ParcelamentoIds = { nubank.Id, c6.Id },
+        };
+
+        var resultado = await _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto);
+
+        _faturaCartaoServiceMock.Verify(s => s.LancarComprasParceladaAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<LancarCompraParceladaDto>(), It.IsAny<Guid?>()), Times.Never);
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+        Assert.Equal((meta.Id, meta.Id), (nubank.MetaId, c6.MetaId));
+        Assert.Equal(("Conquistada", 4091.60m, contaCartaoId), (resultado.Status, resultado.ValorPago, resultado.ContaPagamentoId));
+
+        var andamento = resultado.Andamento!;
+        Assert.Equal((409.16m, 4091.60m), (andamento.ValorPago, andamento.ValorTotal));
+        Assert.Equal(new DateOnly(2027, 7, 20), andamento.DataTermino);
+        Assert.Equal(409.16m, andamento.ValorMensal);
+        Assert.Equal(new[] { "Nubank", "C6" }, andamento.Parcelamentos.Select(p => p.Banco));
+        Assert.All(andamento.Parcelamentos, p => Assert.Equal((1, 10), (p.ParcelasPagas, p.TotalParcelas)));
+    }
+
+    [Fact]
+    public async Task Conquistar_JaLancadoComLancamentoSoltoParcela1De10_CriaOParcelamentoAPartirDele()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        var cartao = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "CartaoCredito", Ativa = true };
+        var fatura = new Fatura { Id = Guid.NewGuid(), Banco = "C6", Competencia = "2026-10", DataVencimento = new DateOnly(2026, 10, 20) };
+        var saida = new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "TROCAFONE", Valor = 210m, Categoria = "Equipamentos", FaturaId = fatura.Id };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = cartao.Id, Data = new DateOnly(2026, 10, 5),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), Saidas = new() { saida },
+        };
+        var criado = CriarParcelamentoTrocafone(clienteId, cartao.Id, 210m);
+
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
+        _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(cartao.Id)).ReturnsAsync(cartao);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(cartao.Id, registro.Data)).ReturnsAsync(registro);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _faturaRepoMock.Setup(r => r.ObterPorIdAsync(fatura.Id)).ReturnsAsync(fatura);
+        _parcelamentoDeteccaoServiceMock.Setup(s => s.ProcessarParcelaDetectadaAsync(
+                cartao, fatura.DataVencimento, "TROCAFONE", "Equipamentos", 1, 10, 210m))
+            .ReturnsAsync(criado);
+        _parcelamentoRepoMock.Setup(r => r.ObterPorIdAsync(criado.Id)).ReturnsAsync(criado);
+        _parcelamentoRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<Parcelamento>())).ReturnsAsync((Parcelamento p) => p);
+
+        var dto = new ConquistarMetaDto
+        {
+            Modo = "JaLancado", FormaPagamento = "Cartao", Data = new DateOnly(2026, 10, 29),
+            Lancamentos = { new() { LancamentoId = saida.Id, ContaBancariaId = cartao.Id, Data = registro.Data, NumeroParcela = 1, TotalParcelas = 10 } },
+        };
+
+        var resultado = await _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto);
+
+        Assert.Equal((criado.Id, 1, 10), (saida.ParcelamentoId!.Value, saida.NumeroParcela!.Value, saida.TotalParcelas!.Value));
+        Assert.Equal(meta.Id, criado.MetaId);
+        Assert.Null(saida.MetaVinculadaId); // o vínculo é o parcelamento inteiro, não só esta parcela
+        Assert.Equal(2100m, resultado.ValorPago);
+    }
+
+    [Fact]
+    public async Task Conquistar_JaLancadoComLancamentoAVista_MarcaComoVinculadoSemApagarNemCriar()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        var conta = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "ContaCorrente", Ativa = true };
+        var saida = new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Pix Loja", Valor = 3800m, Categoria = "Equipamentos" };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = new DateOnly(2026, 10, 5),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), Saidas = new() { saida }, SaldoFinal = 1000m,
+        };
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
+        _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, registro.Data)).ReturnsAsync(registro);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var dto = new ConquistarMetaDto
+        {
+            Modo = "JaLancado", FormaPagamento = "AVista", Data = new DateOnly(2026, 10, 5),
+            Lancamentos = { new() { LancamentoId = saida.Id, ContaBancariaId = conta.Id, Data = registro.Data } },
+        };
+
+        var resultado = await _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto);
+
+        Assert.Equal(meta.Id, Assert.Single(registro.Saidas).MetaVinculadaId);
+        Assert.Equal(1000m, registro.SaldoFinal);
+        Assert.Equal(3800m, resultado.ValorPago);
+    }
+
+    [Fact]
+    public async Task Conquistar_JaLancadoSemNenhumItem_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+
+        var dto = new ConquistarMetaDto { Modo = "JaLancado", FormaPagamento = "Cartao", Data = new DateOnly(2026, 10, 29) };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto));
+
+        Assert.Equal((400, CodigoRetorno.DADOS_INVALIDOS), (ex.StatusCode, ex.Codigo));
+    }
+
+    [Fact]
+    public async Task Conquistar_ParcelamentoDeOutraMeta_LancaDadosInvalidos()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        var deOutra = CriarParcelamentoTrocafone(clienteId, Guid.NewGuid(), 199.16m);
+        deOutra.MetaId = Guid.NewGuid();
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _parcelamentoRepoMock.Setup(r => r.ObterPorIdAsync(deOutra.Id)).ReturnsAsync(deOutra);
+
+        var dto = new ConquistarMetaDto { Modo = "JaLancado", FormaPagamento = "Cartao", Data = new DateOnly(2026, 10, 29), ParcelamentoIds = { deOutra.Id } };
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto));
+
+        Assert.Equal("parcelamentoIds", ex.Campo);
+        _parcelamentoRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<Parcelamento>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Conquistar_CartaoComValorDaParcela_GravaOTotalReal()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        var cartao = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Tipo = "CartaoCredito", Ativa = true };
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
+        _contaBancariaRepoMock.Setup(r => r.ObterPorIdAsync(cartao.Id)).ReturnsAsync(cartao);
+
+        var dto = new ConquistarMetaDto
+        {
+            FormaPagamento = "Cartao", Data = new DateOnly(2026, 10, 15), Parcelas = 10, ValorParcela = 199.16m, Banco = "Nubank",
+            DataPrimeiraParcela = new DateOnly(2026, 10, 20), ContaPagamentoId = cartao.Id, Categoria = "Equipamentos",
+        };
+
+        var resultado = await _sut.ConquistarAsync(meta.Id, clienteId, "cliente", dto);
+
+        _faturaCartaoServiceMock.Verify(s => s.LancarComprasParceladaAsync(cartao.Id, clienteId, "cliente",
+            It.Is<LancarCompraParceladaDto>(d => d.Banco == "Nubank" && d.ValorParcela == 199.16m), meta.Id), Times.Once);
+        Assert.Equal(1991.60m, resultado.ValorPago);
+    }
+
+    // ── Desfazer: apaga tudo que o "Conquistei" criou, só solta o que já existia ────────────────
+
+    [Fact]
+    public async Task DesfazerConquista_CartaoLancadoPeloApp_RemoveParcelaPrevistasParcelamentoEFaturaVazia()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartaoId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        meta.Status = "Conquistada";
+        meta.FormaPagamento = "Cartao";
+        var parcelamento = CriarParcelamentoTrocafone(clienteId, contaCartaoId, 400m);
+        parcelamento.MetaId = meta.Id;
+        var fatura = new Fatura { Id = Guid.NewGuid(), Banco = "Nubank", Competencia = "2026-10" };
+        var registros = CriarParcelasTrocafone(clienteId, contaCartaoId, parcelamento, fatura.Id);
+        foreach (var s in registros.SelectMany(r => r.Saidas)) s.OrigemMetaId = meta.Id;
+        foreach (var c in registros.SelectMany(r => r.ContasPagar)) c.OrigemMetaId = meta.Id;
+        registros[0].SaldoFinal = -400m;
+
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
+        _contaBancariaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria>
+        {
+            new() { Id = contaCartaoId, ClienteId = clienteId, Tipo = "CartaoCredito", Ativa = true },
+        });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(registros);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaCartaoId)).ReturnsAsync(registros);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _parcelamentoRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<Parcelamento> { parcelamento });
+        _faturaRepoMock.Setup(r => r.ObterPorIdAsync(fatura.Id)).ReturnsAsync(fatura);
+        // Antes de remover: a fatura tem a parcela 1; depois, nenhuma compra (some da listagem).
+        _faturaCartaoServiceMock.SetupSequence(s => s.ListarFaturasAsync(contaCartaoId, clienteId, "cliente"))
+            .ReturnsAsync(new List<CaixaDiario.API.DTOs.FaturasCartao.FaturaCartaoDto> { new() { Id = fatura.Id, Competencia = "2026-10", Status = "Aberta" } })
+            .ReturnsAsync(new List<CaixaDiario.API.DTOs.FaturasCartao.FaturaCartaoDto>());
+
+        var resultado = await _sut.DesfazerConquistaAsync(meta.Id, clienteId, "cliente");
+
+        Assert.Empty(registros.SelectMany(r => r.Saidas));
+        Assert.Empty(registros.SelectMany(r => r.ContasPagar));
+        Assert.Equal(0m, registros[0].SaldoFinal);
+        _parcelamentoRepoMock.Verify(r => r.RemoverAsync(parcelamento), Times.Once);
+        _faturaRepoMock.Verify(r => r.RemoverAsync(fatura), Times.Once);
+        Assert.Empty(resultado.Mantidos);
+        Assert.Equal("EmAndamento", meta.Status);
+    }
+
+    [Fact]
+    public async Task DesfazerConquista_JaLancado_SoDesvinculaSemApagarNada()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartaoId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        meta.Status = "Conquistada";
+        meta.FormaPagamento = "Cartao";
+        var parcelamento = CriarParcelamentoTrocafone(clienteId, contaCartaoId, 199.16m);
+        parcelamento.MetaId = meta.Id;
+        var registros = CriarParcelasTrocafone(clienteId, contaCartaoId, parcelamento, Guid.NewGuid());
+        var avulsa = new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Capa", Valor = 50m, MetaVinculadaId = meta.Id };
+        registros[0].Saidas.Add(avulsa);
+
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(registros);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _parcelamentoRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<Parcelamento> { parcelamento });
+        _parcelamentoRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<Parcelamento>())).ReturnsAsync((Parcelamento p) => p);
+
+        var resultado = await _sut.DesfazerConquistaAsync(meta.Id, clienteId, "cliente");
+
+        Assert.Equal(2, registros[0].Saidas.Count);
+        Assert.Null(avulsa.MetaVinculadaId);
+        Assert.Equal(9, registros.SelectMany(r => r.ContasPagar).Count());
+        Assert.Null(parcelamento.MetaId);
+        _parcelamentoRepoMock.Verify(r => r.RemoverAsync(It.IsAny<Parcelamento>()), Times.Never);
+        Assert.Empty(resultado.Removidos);
+    }
+
+    [Fact]
+    public async Task DesfazerConquista_ParcelaDoAppJaMescladaComAFaturaReal_MantemOLancamento()
+    {
+        var clienteId = Guid.NewGuid();
+        var contaCartaoId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        meta.Status = "Conquistada";
+        meta.FormaPagamento = "Cartao";
+        var mesclada = new ItemFinanceiroSaida
+        {
+            Id = Guid.NewGuid(), Descricao = "Trocafone - Parcela 1/10", Valor = 199.16m, OrigemMetaId = meta.Id, FitId = "nubank-123",
+        };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaCartaoId, Data = new DateOnly(2026, 10, 5),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), Saidas = new() { mesclada }, SaldoFinal = -199.16m,
+        };
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _repoMock.Setup(r => r.SalvarAsync(It.IsAny<MetaAnual>())).ReturnsAsync((MetaAnual m) => m);
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var resultado = await _sut.DesfazerConquistaAsync(meta.Id, clienteId, "cliente");
+
+        Assert.Equal((-199.16m, (Guid?)null), (registro.SaldoFinal, Assert.Single(registro.Saidas).OrigemMetaId));
+        Assert.Single(resultado.Mantidos);
+    }
+
+    // ── ListarCandidatosVinculoAsync ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ListarCandidatosVinculo_SoOfereceCompraDosUltimos90DiasQueNaoEhDeOutraMeta()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        var cartao = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Cartões", Tipo = "CartaoCredito", Ativa = true };
+        var fatura = new Fatura { Id = Guid.NewGuid(), Banco = "Nubank", Competencia = "2026-10" };
+        var livre = CriarParcelamentoTrocafone(clienteId, cartao.Id, 199.16m);
+        var deOutraMeta = CriarParcelamentoTrocafone(clienteId, cartao.Id, 210m);
+        deOutraMeta.MetaId = Guid.NewGuid();
+
+        ItemFinanceiroSaida Saida(string descricao) => new() { Id = Guid.NewGuid(), Descricao = descricao, Valor = 10m };
+        var trocafone = new ItemFinanceiroSaida
+        {
+            Id = Guid.NewGuid(), Descricao = "Trocafone - Parcela 1/10", Valor = 199.16m, FaturaId = fatura.Id,
+            ParcelamentoId = livre.Id, NumeroParcela = 1, TotalParcelas = 10,
+        };
+        var recente = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = cartao.Id, Data = Hoje.AddDays(-30),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new()
+            {
+                trocafone,
+                new() { Id = Guid.NewGuid(), Descricao = "Pagamento fatura", Valor = 500m, TipoCusto = LancamentoFiltro.TipoPagamentoFatura },
+                new() { Id = Guid.NewGuid(), Descricao = "🏆 Outra meta", Valor = 100m, OrigemMetaId = Guid.NewGuid() },
+                new() { Id = Guid.NewGuid(), Descricao = "Vinculado a outra", Valor = 100m, MetaVinculadaId = Guid.NewGuid() },
+            },
+        };
+        var antigo = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = cartao.Id, Data = Hoje.AddDays(-91),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(), Saidas = new() { Saida("Antiga") },
+        };
+
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+        _contaBancariaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { cartao });
+        _faturaRepoMock.Setup(r => r.ListarPorContaAsync(cartao.Id)).ReturnsAsync(new List<Fatura> { fatura });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { recente, antigo });
+        _parcelamentoRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<Parcelamento> { livre, deOutraMeta });
+
+        var resultado = await _sut.ListarCandidatosVinculoAsync(meta.Id, clienteId, "cliente");
+
+        var lancamento = Assert.Single(resultado.Lancamentos);
+        Assert.Equal((trocafone.Id, "Nubank", true, "Cartões"), (lancamento.Id, lancamento.Banco, lancamento.ContaEhCartao, lancamento.ContaNome));
+        var parcelamento = Assert.Single(resultado.Parcelamentos);
+        Assert.Equal((livre.Id, "Nubank", 10), (parcelamento.Id, parcelamento.Banco, parcelamento.ParcelasPagas));
+    }
+
+    [Fact]
+    public async Task ListarCandidatosVinculo_ClienteAcessandoMetaDeOutro_LancaAcessoNegado()
+    {
+        var meta = CriarMetaEmAndamento(Guid.NewGuid());
+        _repoMock.Setup(r => r.ObterPorIdAsync(meta.Id)).ReturnsAsync(meta);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ListarCandidatosVinculoAsync(meta.Id, Guid.NewGuid(), "cliente"));
+
+        Assert.Equal(403, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ListarMetas_MetaConquistadaAVista_AndamentoMostraOValorPago()
+    {
+        var clienteId = Guid.NewGuid();
+        var meta = CriarMetaEmAndamento(clienteId);
+        meta.Status = "Conquistada";
+        meta.FormaPagamento = "AVista";
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = Guid.NewGuid(), Data = new DateOnly(2026, 10, 5),
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new() { Id = Guid.NewGuid(), Descricao = "🏆 Macbook", Valor = 3900m, OrigemMetaId = meta.Id } },
+        };
+        _repoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<MetaAnual> { meta });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        var andamento = Assert.Single(await _sut.ListarMetasAsync(clienteId, clienteId, "cliente")).Andamento!;
+
+        Assert.Equal((3900m, 3900m, 0), (andamento.ValorPago, andamento.ValorTotal, andamento.Parcelamentos.Count));
+        Assert.Null(andamento.DataTermino);
     }
 }

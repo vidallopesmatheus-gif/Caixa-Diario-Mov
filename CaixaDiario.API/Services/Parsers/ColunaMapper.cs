@@ -2,7 +2,8 @@ using System.Globalization;
 
 namespace CaixaDiario.API.Services.Parsers;
 
-public record ColMap(int Data, int Descricao, int Valor, int Credito, int Debito);
+// Saldo: coluna opcional "Saldo" (saldo da conta depois da linha) — usada pra conciliar com o app.
+public record ColMap(int Data, int Descricao, int Valor, int Credito, int Debito, int Saldo = -1);
 
 /// <summary>
 /// Heurística de identificação de colunas (data/descrição/valor ou crédito+débito) e parsing de
@@ -23,11 +24,12 @@ public static class ColunaMapper
 
     public static ColMap MapearColunas(string[] cols)
     {
-        int data = -1, desc = -1, valor = -1, cred = -1, deb = -1;
+        int data = -1, desc = -1, valor = -1, cred = -1, deb = -1, saldo = -1;
         for (int i = 0; i < cols.Length; i++)
         {
             var c = cols[i].ToLowerInvariant().Trim('"', ' ');
             if (data < 0 && (c.Contains("data") || c.Contains("date") || c == "dt")) data = i;
+            else if (saldo < 0 && c.Contains("saldo")) saldo = i;
             else if (desc < 0 && (c.Contains("hist") || c.Contains("descr") || c.Contains("title")
                 || c.Contains("memo") || c.Contains("lancamento"))) desc = i;
             else if (valor < 0 && (c == "valor" || c == "value" || c == "amount" || c.Contains("vlr"))) valor = i;
@@ -39,10 +41,10 @@ public static class ColunaMapper
         if (desc < 0)
         {
             for (int i = 0; i < cols.Length; i++)
-                if (i != data && i != valor && i != cred && i != deb) { desc = i; break; }
+                if (i != data && i != valor && i != cred && i != deb && i != saldo) { desc = i; break; }
         }
 
-        return new ColMap(data, desc, valor, cred, deb);
+        return new ColMap(data, desc, valor, cred, deb, saldo);
     }
 
     public static DateOnly? ParseData(string s)

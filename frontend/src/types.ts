@@ -142,6 +142,8 @@ export interface ContaBancaria {
   faturasEmAberto?: number
   comprasMes?: number
   pagamentosMes?: number
+  // Money Vision: "Extrato até 07/11 · Banco em 07/11 R$ X ✅".
+  conciliacao?: StatusConciliacao
 }
 
 export interface LancamentoExtrato {
@@ -162,6 +164,9 @@ export interface LancamentoExtrato {
   // Marcador de ItemFinanceiro/ItemFinanceiroSaida (ver LancamentoFiltro no backend) — "AjusteSaldo"
   // é o único valor usado hoje no front (chip cinza/itálico "Ajuste de saldo", nunca editável).
   tipoCusto?: string
+  // Money Vision: "data da parcela vs. competência" — preenchido só quando esta linha é uma
+  // parcela (numero > 1) cuja data foi reancorada pro fechamento/vencimento da fatura.
+  dataCompraOriginal?: string
 }
 
 export interface PendenciasConta {
@@ -331,6 +336,32 @@ export interface MetaAnual {
   // Item 5 (Money Vision): "Ativo" | "Quitado" do contrato vinculado — "Ativo" mostra "Quitar
   // <bem>" em vez de só "Conquistada".
   financiamentoStatus?: 'Ativo' | 'Quitado'
+  // "Conquistei → Já lancei essa compra": parcelamentos/lançamentos vinculados à meta.
+  parcelamentoIds?: string[]
+  lancamentoIds?: string[]
+  andamento?: AndamentoConquista
+}
+
+/** "Pago R$ 409,16 de R$ 4.091,60" — só em metas conquistadas com algo vinculado/lançado. */
+export interface AndamentoConquista {
+  valorPago: number
+  valorTotal: number
+  parcelamentos: ParcelamentoDaMeta[]
+  /** "YYYY-MM-DD" da última parcela do parcelamento que termina por último. */
+  dataTermino?: string
+  /** Soma das parcelas mensais — o que sobra por mês depois de dataTermino. */
+  valorMensal: number
+}
+
+export interface ParcelamentoDaMeta {
+  id: string
+  descricao: string
+  banco?: string
+  parcelasPagas: number
+  totalParcelas: number
+  valorParcela: number
+  valorTotal: number
+  dataUltimaParcela: string
 }
 
 export interface LoginResponse {
@@ -395,6 +426,12 @@ export interface ResumoImportacao {
   dataFimArquivo: string
   duplicatasManuais: DuplicataManual[]
   duplicatasEntreArquivos: DuplicataEntreArquivos[]
+  // Money Vision (período sobreposto): "Arquivo: 01/10 a 07/11 · já havia no app: 01/10 a 15/10 · novos dias: 16/10 a 07/11".
+  cobertura?: CoberturaImportacao
+  // Importados antes, dentro do período do arquivo, que não aparecem no extrato novo (manter/excluir).
+  ausentesNoArquivo?: LinhaDiagnostico[]
+  // Saldo que o próprio arquivo informa (OFX LEDGERBAL ou coluna "Saldo"). Sem ele, a prévia pergunta.
+  saldoBancoArquivo?: { data: string; saldo: number }
 }
 
 export interface ResultadoImportacao {
@@ -416,6 +453,9 @@ export interface ResultadoImportacao {
   // A detecção de parcelamento nunca derruba a importação — se falhar numa linha, a compra entra
   // normal (sem vínculo) e o motivo aparece aqui, em vez de nunca ter importado nada.
   avisosParcelamento: string[]
+  // Saldo do app × saldo do banco depois de importar — diferente: abre o diagnóstico, nunca ajusta sozinho.
+  conciliacao?: PontoConciliacao
+  totalAusentesExcluidos?: number
 }
 
 export interface ParcelamentoDetectadoResumo {
@@ -501,4 +541,67 @@ export interface ChatResponse {
   }
   codigoRetorno: string
   mensagem: string
+}
+
+// ── Money Vision: conciliação de saldo com o banco ─────────────────────────────────────────────
+export interface PontoConciliacao {
+  data: string
+  saldoBanco: number
+  saldoApp: number
+  /** Banco − app. */
+  diferenca: number
+  conciliado: boolean
+  origem: string
+}
+
+export interface StatusConciliacao {
+  /** Último dia coberto por extrato importado. */
+  extratoAte?: string
+  diasSemExtrato?: number
+  saldoApp: number
+  ultimoPonto?: PontoConciliacao
+  /** Primeiro ponto divergente depois do último conciliado. */
+  divergenteDesde?: string
+}
+
+export interface CoberturaExtrato {
+  diasComExtrato: string[]
+  pontos: PontoConciliacao[]
+  saldosPorDia: { data: string; saldoFinal: number }[]
+  status: StatusConciliacao
+}
+
+export interface CoberturaImportacao {
+  arquivoDe: string
+  arquivoAte: string
+  jaHaviaDe?: string
+  jaHaviaAte?: string
+  novosDiasDe?: string
+  novosDiasAte?: string
+  quantidadeDiasNovos: number
+}
+
+export interface LinhaDiagnostico {
+  id: string
+  data: string
+  descricao: string
+  /** Com sinal: entrada +, saída −. */
+  valor: number
+  categoria?: string
+  /** Quanto o saldo do app muda se esta linha for corrigida. */
+  efeitoSeCorrigir: number
+}
+
+export interface DiagnosticoDiferenca {
+  data: string
+  saldoBanco: number
+  saldoApp: number
+  diferenca: number
+  analisadoDesde: string
+  lacunas: { de: string; ate: string }[]
+  duplicatas: { itens: LinhaDiagnostico[]; somaExcedente: number }[]
+  sinalSuspeito: LinhaDiagnostico[]
+  transferenciasSemPar: LinhaDiagnostico[]
+  manuais: LinhaDiagnostico[]
+  combinacao?: { resumo: string; itens: LinhaDiagnostico[] }
 }

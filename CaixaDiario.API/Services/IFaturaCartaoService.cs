@@ -23,6 +23,7 @@ public interface IFaturaCartaoService
         Guid contaCartaoId, Guid usuarioLogadoId, string perfil);
     // origemMetaId: só preenchido internamente por MetaService.ConquistarAsync (forma Cartão) —
     // nunca vem de fora pelo DTO público (mesmo motivo de ContaProvisionadaService.CriarAsync).
-    Task LancarComprasParceladaAsync(
+    // Retorna o Id do Parcelamento criado.
+    Task<Guid> LancarComprasParceladaAsync(
         Guid contaCartaoId, Guid usuarioLogadoId, string perfil, LancarCompraParceladaDto dto, Guid? origemMetaId = null);
 }

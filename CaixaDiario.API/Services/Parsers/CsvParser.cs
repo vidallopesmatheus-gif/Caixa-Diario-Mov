@@ -2,7 +2,8 @@ using System.Text;
 
 namespace CaixaDiario.API.Services.Parsers;
 
-public record TransacaoCsv(DateOnly Data, decimal Valor, string Descricao, string Tipo);
+// Saldo: só quando o arquivo tem a coluna "Saldo" (saldo da conta depois desta linha).
+public record TransacaoCsv(DateOnly Data, decimal Valor, string Descricao, string Tipo, decimal? Saldo = null);
 
 public static class CsvParser
 {
@@ -84,7 +85,8 @@ public static class CsvParser
             }
 
             if (valor <= 0) continue;
-            result.Add(new TransacaoCsv(data.Value, valor, desc.Trim('"', ' '), tipo));
+            decimal? saldoLinha = mapa.Saldo >= 0 && ColunaMapper.ParseDecimalBr(ColunaMapper.CampoSafe(campos, mapa.Saldo), out var s) ? s : null;
+            result.Add(new TransacaoCsv(data.Value, valor, desc.Trim('"', ' '), tipo, saldoLinha));
         }
 
         return result;

@@ -65,4 +65,28 @@ public class ParcelaDescricaoParserTests
     {
         Assert.Null(ParcelaDescricaoParser.TentarExtrair(descricao));
     }
+
+    // Money Vision: "a detecção de parcelamento não reconhece nada" (reteste 28/10) — strings
+    // exatas da fatura C6 real do cliente teste, pra nunca mais regredir sem um teste pegando.
+    [Theory]
+    [InlineData("MercadoLivre - parcela 7/7", "MercadoLivre", 7, 7)]
+    [InlineData("MP *NoizeProtect - parcela 7/10", "MP *NoizeProtect", 7, 10)]
+    [InlineData("Airbnb (HMZ4JA8CJH) - parcela 6/6", "Airbnb (HMZ4JA8CJH)", 6, 6)]
+    [InlineData("Mercado *Livra Boa Noite - parcela 5/12", "Mercado *Livra Boa Noite", 5, 12)]
+    [InlineData("Amazon Retail BR - parcela 4/4", "Amazon Retail BR", 4, 4)]
+    [InlineData("Trocafone - parcela 1/10", "Trocafone", 1, 10)]
+    [InlineData("Hbl*Hblthomytalks - Parcela 11/12", "Hbl*Hblthomytalks", 11, 12)]
+    [InlineData("Loja Y (2 de 6)", "Loja Y", 2, 6)]
+    // "PARC N/M" ANTES do comerciante — padrão diferente de "Magazine Luiza PARC 02/08" (depois).
+    [InlineData("PARC 03/05 LOJA X", "LOJA X", 3, 5)]
+    public void TentarExtrair_StringsExatasDoRelatoDeProducao_ExtraiComercianteNumeroETotal(
+        string descricao, string comercianteEsperado, int numeroEsperado, int totalEsperado)
+    {
+        var resultado = ParcelaDescricaoParser.TentarExtrair(descricao);
+
+        Assert.NotNull(resultado);
+        Assert.Equal(comercianteEsperado, resultado!.Comerciante);
+        Assert.Equal(numeroEsperado, resultado.Numero);
+        Assert.Equal(totalEsperado, resultado.Total);
+    }
 }

@@ -866,6 +866,98 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("parcelamentos", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.PeriodoExtrato", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateOnly>("Ate")
+                        .HasColumnType("date")
+                        .HasColumnName("ate");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<Guid>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
+
+                    b.Property<DateOnly>("De")
+                        .HasColumnType("date")
+                        .HasColumnName("de");
+
+                    b.Property<DateTime>("ImportadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("importado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContaBancariaId");
+
+                    b.ToTable("periodos_extrato", (string)null);
+                });
+
+            modelBuilder.Entity("CaixaDiario.API.Models.PontoConciliacao", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("AtualizadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("atualizado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<Guid>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateOnly>("Data")
+                        .HasColumnType("date")
+                        .HasColumnName("data");
+
+                    b.Property<string>("Origem")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Informado")
+                        .HasColumnName("origem");
+
+                    b.Property<decimal>("SaldoApp")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("saldo_app");
+
+                    b.Property<decimal>("SaldoBanco")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("saldo_banco");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClienteId");
+
+                    b.HasIndex("ContaBancariaId", "Data")
+                        .IsUnique();
+
+                    b.ToTable("pontos_conciliacao", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.RegistroDiario", b =>
                 {
                     b.Property<Guid>("Id")

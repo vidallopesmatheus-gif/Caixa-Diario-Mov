@@ -202,4 +202,78 @@ public class ParcelamentoDeteccaoServiceTests
         Assert.NotNull(atualizado);
         Assert.Equal("Quitado", atualizado!.Status);
     }
+
+    // ── Parcelamento lançado pelo app ("🏆 Macbook" via Conquistei) ────────────────────────────
+
+    private static Parcelamento CriarParcelamentoDoApp(ContaBancaria cartao) => new()
+    {
+        Id = Guid.NewGuid(), ClienteId = cartao.ClienteId, ContaCartaoId = cartao.Id, DescricaoBase = "🏆 Macbook",
+        ValorParcela = 200m, TotalParcelas = 10, DataPrimeira = new DateOnly(2026, 10, 20),
+        ValorTotal = 2000m, Status = "Ativo", CriadoEm = DateTime.UtcNow,
+    };
+
+    private static RegistroDiario CriarRegistro(ContaBancaria cartao, DateOnly data, decimal saldoFinal = 0m) => new()
+    {
+        Id = Guid.NewGuid(), ClienteId = cartao.ClienteId, ContaBancariaId = cartao.Id, Data = data,
+        Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(), SaldoFinal = saldoFinal,
+    };
+
+    [Fact]
+    public async Task ProcessarParcelaDetectadaAsync_DescricaoDoBancoDiferenteComPrevistaReservada_SubstituiAPrevistaDoApp()
+    {
+        var cartao = CriarCartao(Guid.NewGuid());
+        var doApp = CriarParcelamentoDoApp(cartao);
+        var registroNov = CriarRegistro(cartao, new DateOnly(2026, 11, 20));
+        registroNov.ContasPagar.Add(new ContaProvisionada
+        {
+            Id = Guid.NewGuid(), Descricao = "🏆 Macbook - Parcela 2/10", Valor = 200m, ParcelamentoId = doApp.Id, NumeroParcela = 2,
+        });
+        _parcelamentoRepoMock.Setup(r => r.ListarAtivosPorContaAsync(cartao.Id)).ReturnsAsync(new List<Parcelamento> { doApp });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(cartao.Id)).ReturnsAsync(new List<RegistroDiario> { registroNov });
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(cartao.Id, It.IsAny<DateOnly>())).ReturnsAsync((RegistroDiario?)null);
+
+        // R$ 203,50 está a 1,75% de R$ 200 — fora da tolerância normal, dentro da do app.
+        var resultado = await _sut.ProcessarParcelaDetectadaAsync(cartao, new DateOnly(2026, 11, 20), "Trocafone", null, 2, 10, 203.50m);
+
+        Assert.Equal(doApp.Id, resultado.Id);
+        Assert.Empty(registroNov.ContasPagar);
+        _parcelamentoRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<Parcelamento>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessarParcelaDetectadaAsync_ParcelaManualDoAppChegaNaFatura_RemoveAManualEDevolveOSaldo()
+    {
+        var cartao = CriarCartao(Guid.NewGuid());
+        var doApp = CriarParcelamentoDoApp(cartao);
+        var registroOut = CriarRegistro(cartao, new DateOnly(2026, 10, 15), saldoFinal: -200m);
+        registroOut.Saidas.Add(new ItemFinanceiroSaida
+        {
+            Id = Guid.NewGuid(), Descricao = "🏆 Macbook - Parcela 1/10", Valor = 200m, ParcelamentoId = doApp.Id, NumeroParcela = 1, TotalParcelas = 10,
+        });
+        _parcelamentoRepoMock.Setup(r => r.ListarAtivosPorContaAsync(cartao.Id)).ReturnsAsync(new List<Parcelamento> { doApp });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(cartao.Id)).ReturnsAsync(new List<RegistroDiario> { registroOut });
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(cartao.Id, It.IsAny<DateOnly>())).ReturnsAsync((RegistroDiario?)null);
+
+        var resultado = await _sut.ProcessarParcelaDetectadaAsync(cartao, new DateOnly(2026, 10, 20), "Trocafone", null, 1, 10, 200m);
+
+        Assert.Equal(doApp.Id, resultado.Id);
+        Assert.Empty(registroOut.Saidas);
+        Assert.Equal(0m, registroOut.SaldoFinal);
+    }
+
+    [Fact]
+    public async Task ProcessarParcelaDetectadaAsync_DescricaoDiferenteSemLugarReservado_CriaParcelamentoNovo()
+    {
+        var cartao = CriarCartao(Guid.NewGuid());
+        var doApp = CriarParcelamentoDoApp(cartao);
+        _parcelamentoRepoMock.Setup(r => r.ListarAtivosPorContaAsync(cartao.Id)).ReturnsAsync(new List<Parcelamento> { doApp });
+        _parcelamentoRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<Parcelamento>())).ReturnsAsync((Parcelamento p) => p);
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(cartao.Id)).ReturnsAsync(new List<RegistroDiario>());
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(cartao.Id, It.IsAny<DateOnly>())).ReturnsAsync((RegistroDiario?)null);
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var resultado = await _sut.ProcessarParcelaDetectadaAsync(cartao, new DateOnly(2026, 11, 20), "Trocafone", null, 2, 10, 200m);
+
+        Assert.NotEqual(doApp.Id, resultado.Id);
+    }
 }

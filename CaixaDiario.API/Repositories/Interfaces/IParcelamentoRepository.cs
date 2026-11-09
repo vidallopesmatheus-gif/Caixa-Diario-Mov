@@ -9,4 +9,6 @@ public interface IParcelamentoRepository
     Task<List<Parcelamento>> ListarAtivosPorContaAsync(Guid contaCartaoId);
     Task<Parcelamento> AdicionarAsync(Parcelamento parcelamento);
     Task<Parcelamento> AtualizarAsync(Parcelamento parcelamento);
+    // "Desfazer conquista": parcelamento criado pelo "Conquistei" que ficou sem nenhuma parcela.
+    Task RemoverAsync(Parcelamento parcelamento);
 }

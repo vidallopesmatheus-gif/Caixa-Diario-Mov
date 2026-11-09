@@ -3,14 +3,15 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
 import StatCard from '../../components/shared/StatCard'
 import DayNav from '../../components/shared/DayNav'
-import { fmtBRL, todayISO, addDays } from '../../utils/format'
+import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
+import { obterCoberturaExtrato } from '../../api/conciliacaoSaldo'
 import { listarCategorias } from '../../api/categorias'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
 import { excluirLancamento } from '../../api/importacao'
 import { lancarCompraParcelada } from '../../api/faturasCartao'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
-import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, ContaBancaria, CategoriaAdmin } from '../../types'
+import type { ItemFinanceiro, ItemFinanceiroSaida, Categorias, ContaBancaria, CategoriaAdmin, CoberturaExtrato } from '../../types'
 import './ClientCaixa.css'
 
 interface Props { clienteIdOverride?: string }
@@ -30,7 +31,7 @@ const GUID_VAZIO = '00000000-0000-0000-0000-000000000000'
 type LinhaEntrada = ItemFinanceiro & { contaId: string; transferenciaContaId?: string }
 // Item 9: parcelas só é relevante quando a linha aponta pra uma conta CartaoCredito — default 1
 // (sem parcelamento, comportamento de sempre).
-type LinhaSaida = ItemFinanceiroSaida & { contaId: string; transferenciaContaId?: string; parcelas?: number }
+type LinhaSaida = ItemFinanceiroSaida & { contaId: string; transferenciaContaId?: string; parcelas?: number; banco?: string }
 
 const CATEGORIA_TRANSFERENCIA = 'Transferência'
 
@@ -89,6 +90,14 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [contas, setContas] = useState<ContaBancaria[]>([])
   const [contaId, setContaId] = useState<string>('')
+  // Money Vision: de onde vem o "Saldo início" — saldo final de qual dia, e se esse dia tem extrato.
+  const [coberturaConta, setCoberturaConta] = useState<CoberturaExtrato | null>(null)
+  useEffect(() => {
+    if (!contaId) return
+    let ignore = false
+    obterCoberturaExtrato(contaId).then(c => { if (!ignore) setCoberturaConta(c) }).catch(() => {})
+    return () => { ignore = true }
+  }, [contaId])
   const entradaDescRefs = useRef<(HTMLInputElement | null)[]>([])
   const saidaDescRefs = useRef<(HTMLInputElement | null)[]>([])
 
@@ -253,7 +262,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       try {
         await lancarCompraParcelada(contaDaLinha.id, {
           descricao: item.descricao, valorTotal: item.valor, categoria: item.categoria,
-          quantidadeParcelas: parcelas, data,
+          quantidadeParcelas: parcelas, data, banco: item.banco,
         })
         setSaidas(prev => {
           const next = prev.filter((_, j) => j !== idx)
@@ -522,6 +531,10 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
     setSaidas(prev => prev.map((x, j) => j === i ? { ...x, parcelas: n } : x))
   }
 
+  function updateSaidaBanco(i: number, banco: string) {
+    setSaidas(prev => prev.map((x, j) => j === i ? { ...x, banco } : x))
+  }
+
   function abrirEscolhaDeContrapartida(tipo: 'entrada' | 'saida', idx: number) {
     setCatOpen({ tipo, idx })
     setEscolhendoContrapartida(true)
@@ -613,6 +626,17 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         <div className="inp-group">
           <label>Saldo início (preenchido automaticamente)</label>
           <input type="text" value={fmtNum(inicio)} readOnly style={{ color: 'var(--tx4)', cursor: 'not-allowed' }} />
+          {coberturaConta && (() => {
+            const anterior = coberturaConta.saldosPorDia.filter(s => s.data < data).at(-1)
+            const ontem = addDays(data, -1)
+            const semExtratoOntem = coberturaConta.diasComExtrato.length > 0 && !coberturaConta.diasComExtrato.includes(ontem)
+            return (
+              <span style={{ fontSize: 11, color: semExtratoOntem ? 'var(--warning)' : 'var(--tx3)' }}>
+                {anterior ? `= saldo final de ${fmtDate(anterior.data)}` : '= saldo inicial da conta'}
+                {semExtratoOntem && ` · ⚠ sem extrato em ${fmtDate(ontem)}`}
+              </span>
+            )
+          })()}
         </div>
 
         <div className="inp-group">
@@ -836,6 +860,14 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
                   <span style={{ fontSize: 11, color: 'var(--tx3)' }}>
                     {(s.parcelas ?? 1)}x de {fmtBRL(s.valor / (s.parcelas ?? 1))}
                   </span>
+                )}
+                {/* A 1ª parcela entra na fatura desse banco; as outras ficam previstas em Contas a Pagar. */}
+                {(s.parcelas ?? 1) > 1 && (
+                  <input
+                    type="text" placeholder="Banco (Nubank, C6…)" aria-label="Banco do cartão"
+                    value={s.banco ?? ''} onChange={ev => updateSaidaBanco(i, ev.target.value)}
+                    style={{ width: 140, fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg-input)', color: 'var(--tx1)' }}
+                  />
                 )}
               </div>
             )}

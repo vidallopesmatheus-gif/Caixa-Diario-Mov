@@ -65,7 +65,7 @@ public class LimpezaTransferenciasService : ILimpezaTransferenciasService
                 // que já havia — confiar de novo nela reintroduziria o mesmo bug que está sendo corrigido.
                 registro.Saidas = registro.Saidas.Where(s => !EhOrfa(s)).ToList();
                 registro.Entradas = registro.Entradas.Where(e => !EhOrfa(e)).ToList();
-                registro.SaldoFinal = RegistroService.CalcularSaldoFinal(registro.Inicio, registro.Entradas, registro.Saidas, 0m);
+                registro.SaldoFinal = registro.Inicio + SaldoEncadeamento.EfeitoDoDia(registro);
                 registro.SalvoEm = DateTime.UtcNow;
                 await _registroRepo.AtualizarAsync(registro);
                 contasAfetadas.Add(contaId);

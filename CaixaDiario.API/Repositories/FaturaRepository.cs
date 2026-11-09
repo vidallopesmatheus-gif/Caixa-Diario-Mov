@@ -41,4 +41,10 @@ public class FaturaRepository : IFaturaRepository
         await _context.SaveChangesAsync();
         return fatura;
     }
+
+    public async Task RemoverAsync(Fatura fatura)
+    {
+        _context.Faturas.Remove(fatura);
+        await _context.SaveChangesAsync();
+    }
 }

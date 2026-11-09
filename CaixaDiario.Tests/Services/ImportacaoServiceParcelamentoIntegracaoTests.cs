@@ -89,11 +89,15 @@ public class ImportacaoServiceParcelamentoIntegracaoTests
             },
         });
 
+        // "01/04/2026" é a data da COMPRA original (planilha real do C6) — não dá mais pra
+        // isolar essa linha filtrando por dataInicio/dataFim nessa data: a parcela (numero=7 > 1)
+        // é reancorada pro fechamento da fatura ANTES do filtro (ver ReancorarParcelasNaFatura),
+        // então importa o arquivo inteiro, igual uma importação real.
         var csv = "Data;Descricao;Valor\n01/04/2026;MercadoLivre - parcela 7/7;100,00\n";
         var arquivo = CriarArquivoTexto("fatura.csv", csv);
 
         var resultado = await sut.ImportarArquivoAsync(
-            contaId, clienteId, "cliente", arquivo, new DateOnly(2026, 4, 1), new DateOnly(2026, 4, 1),
+            contaId, clienteId, "cliente", arquivo, null, null,
             banco: "C6", dataVencimentoFatura: new DateOnly(2026, 10, 20), dataFechamentoFatura: new DateOnly(2026, 10, 13),
             competenciaFatura: "2026-10");
 
@@ -101,6 +105,14 @@ public class ImportacaoServiceParcelamentoIntegracaoTests
         Assert.Empty(resultado.AvisosParcelamento);
         var parcelamento = Assert.Single(resultado.ParcelamentosDetectados);
         Assert.Equal("Quitado", parcelamento.Status);
+
+        // A compra entrou na data de fechamento da fatura (13/10/2026), não em 01/04 — a data
+        // original fica preservada só pra exibição.
+        var registros = await registroRepo.ListarPorContaAsync(contaId);
+        var itemParcela = registros.SelectMany(r => r.Saidas).Single(s => s.Descricao.Contains("MercadoLivre"));
+        var registroDaParcela = registros.Single(r => r.Saidas.Contains(itemParcela));
+        Assert.Equal(new DateOnly(2026, 10, 13), registroDaParcela.Data);
+        Assert.Equal(new DateOnly(2026, 4, 1), itemParcela.DataCompraOriginal);
     }
 
     [Fact]

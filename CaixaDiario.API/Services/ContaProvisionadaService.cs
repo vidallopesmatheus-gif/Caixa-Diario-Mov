@@ -176,7 +176,7 @@ public class ContaProvisionadaService : IContaProvisionadaService
                 new() { Id = novoLancamentoId, Descricao = item.Descricao, Valor = valorEfetivo, Categoria = item.Categoria ?? "Administrativas", TipoCusto = "CustoFixo" },
             };
         }
-        regDestino.SaldoFinal = RegistroService.CalcularSaldoFinal(regDestino.Inicio, regDestino.Entradas, regDestino.Saidas, 0m);
+        regDestino.SaldoFinal = regDestino.Inicio + SaldoEncadeamento.EfeitoDoDia(regDestino);
         regDestino.SalvoEm = DateTime.UtcNow;
 
         item.LancamentoVinculadoId = novoLancamentoId;
@@ -205,7 +205,7 @@ public class ContaProvisionadaService : IContaProvisionadaService
                     if (ehReceber) regLancamento.Entradas = regLancamento.Entradas.Where(e => e.Id != lancamentoId).ToList();
                     else regLancamento.Saidas = regLancamento.Saidas.Where(s => s.Id != lancamentoId).ToList();
 
-                    regLancamento.SaldoFinal = RegistroService.CalcularSaldoFinal(regLancamento.Inicio, regLancamento.Entradas, regLancamento.Saidas, 0m);
+                    regLancamento.SaldoFinal = regLancamento.Inicio + SaldoEncadeamento.EfeitoDoDia(regLancamento);
                     regLancamento.SalvoEm = DateTime.UtcNow;
                     await _registroRepo.AtualizarAsync(regLancamento);
 

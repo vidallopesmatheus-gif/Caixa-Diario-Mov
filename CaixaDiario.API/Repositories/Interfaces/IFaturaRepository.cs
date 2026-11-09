@@ -10,4 +10,7 @@ public interface IFaturaRepository
     Task<List<string>> ListarBancosDistintosPorClienteAsync(Guid clienteId);
     Task<Fatura> AdicionarAsync(Fatura fatura);
     Task<Fatura> AtualizarAsync(Fatura fatura);
+    // Money Vision: "fatura do C6 dividida em duas" (item 3) — migração de reparo remove a fatura
+    // duplicada depois de repontar suas compras/pagamentos pra fatura mantida.
+    Task RemoverAsync(Fatura fatura);
 }

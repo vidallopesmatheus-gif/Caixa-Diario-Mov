@@ -35,4 +35,10 @@ public class ParcelamentoRepository : IParcelamentoRepository
         await _context.SaveChangesAsync();
         return parcelamento;
     }
+
+    public async Task RemoverAsync(Parcelamento parcelamento)
+    {
+        _context.Parcelamentos.Remove(parcelamento);
+        await _context.SaveChangesAsync();
+    }
 }

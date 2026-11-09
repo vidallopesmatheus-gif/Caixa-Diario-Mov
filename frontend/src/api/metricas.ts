@@ -135,6 +135,9 @@ export interface Dre {
   retiradasSocios: DreLinhaVertical
   resultadoLiquido: number
   resultadoLiquidoPercentual: number | null
+  // Money Vision: (±) ajustes de conciliação de saldo — bloco depois do Resultado Líquido, fora dele.
+  ajustesConciliacao?: number
+  quantidadeAjustesConciliacao?: number
 
   /** Demonstrativo hierárquico de 3 níveis (Bloco → Grupo → Categoria) — fonte da tela de DRE nova. */
   blocos: DreBloco[]
