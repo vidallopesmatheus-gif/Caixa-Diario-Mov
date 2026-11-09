@@ -10,4 +10,6 @@ public interface IMetaService
     Task ExcluirMetaAsync(Guid id, Guid usuarioLogadoId, string perfil);
     Task<MetaAnualDto> ConquistarAsync(Guid metaId, Guid usuarioLogadoId, string perfil, ConquistarMetaDto dto);
     Task<DesfazerConquistaResultDto> DesfazerConquistaAsync(Guid metaId, Guid usuarioLogadoId, string perfil);
+    // "Conquistei → Já lancei essa compra": parcelamentos e lançamentos recentes que podem ser vinculados.
+    Task<CandidatosVinculoMetaDto> ListarCandidatosVinculoAsync(Guid metaId, Guid usuarioLogadoId, string perfil);
 }

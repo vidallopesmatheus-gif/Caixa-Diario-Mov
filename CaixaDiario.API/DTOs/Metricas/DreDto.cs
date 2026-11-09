@@ -75,6 +75,10 @@ public class DreDto
     public DreLinhaVerticalDto RetiradasSocios { get; set; } = new();
     public decimal ResultadoLiquido { get; set; }
     public decimal? ResultadoLiquidoPercentual { get; set; }
+    // Money Vision ("ajuste mexeu no DRE"): (±) ajustes de conciliação de saldo — bloco próprio
+    // DEPOIS do Resultado Líquido, só pra ficar visível; nunca soma em nenhuma linha de resultado.
+    public decimal AjustesConciliacao { get; set; }
+    public int QuantidadeAjustesConciliacao { get; set; }
 
     /// <summary>Demonstrativo hierárquico de 3 níveis (Bloco → Grupo → Categoria) para a tela de DRE.</summary>
     public List<DreBlocoDto> Blocos { get; set; } = new();
@@ -92,5 +96,9 @@ public class ResultadoLiquidoMensalDto
     public string Mes { get; set; } = string.Empty;
     public decimal ResultadoLiquido { get; set; }
     public decimal? ResultadoLiquidoPercentual { get; set; }
+    // Money Vision ("ajuste mexeu no DRE"): (±) ajustes de conciliação de saldo — bloco próprio
+    // DEPOIS do Resultado Líquido, só pra ficar visível; nunca soma em nenhuma linha de resultado.
+    public decimal AjustesConciliacao { get; set; }
+    public int QuantidadeAjustesConciliacao { get; set; }
     public bool TemDados { get; set; }
 }

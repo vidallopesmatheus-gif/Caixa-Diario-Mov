@@ -24,6 +24,8 @@ public class ImportacaoService : IImportacaoService
     private readonly IFaturaRepository _faturaRepo;
     private readonly IParcelamentoDeteccaoService _parcelamentoDeteccaoService;
     private readonly IFaturaCartaoService _faturaCartaoService;
+    private readonly IConciliacaoSaldoService? _conciliacaoSaldoService;
+    private readonly IPeriodoExtratoRepository? _periodoExtratoRepo;
     private readonly AppDbContext _context;
     private readonly ILogger<ImportacaoService> _logger;
 
@@ -39,7 +41,9 @@ public class ImportacaoService : IImportacaoService
         IParcelamentoDeteccaoService parcelamentoDeteccaoService,
         AppDbContext context,
         ILogger<ImportacaoService> logger,
-        IFaturaCartaoService faturaCartaoService)
+        IFaturaCartaoService faturaCartaoService,
+        IConciliacaoSaldoService? conciliacaoSaldoService = null,
+        IPeriodoExtratoRepository? periodoExtratoRepo = null)
     {
         _contaRepo = contaRepo;
         _importRepo = importRepo;
@@ -53,6 +57,8 @@ public class ImportacaoService : IImportacaoService
         _context = context;
         _logger = logger;
         _faturaCartaoService = faturaCartaoService;
+        _conciliacaoSaldoService = conciliacaoSaldoService;
+        _periodoExtratoRepo = periodoExtratoRepo;
     }
 
     // Compra no cartão é sempre SAÍDA (dívida), estorno/crédito é sempre ENTRADA — mas bancos
@@ -111,7 +117,7 @@ public class ImportacaoService : IImportacaoService
         DateOnly? dataInicio, DateOnly? dataFim, bool? inverterSinaisManualmente = null)
     {
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
-        var todasParseadas = ParsearArquivoValidando(arquivo);
+        var todasParseadas = ParsearArquivoValidando(arquivo, out var saldosBanco);
         var sinalInvertido = false;
         if (conta.Tipo == "CartaoCredito")
             (todasParseadas, sinalInvertido) = NormalizarSinalParaCartao(todasParseadas, inverterSinaisManualmente);
@@ -129,7 +135,9 @@ public class ImportacaoService : IImportacaoService
         var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
         var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
-        var jaImportadas = IdentificarJaImportadas(parseadas, registrosAtivos);
+        var (jaImportadas, casados) = CasarComRazao(parseadas, registrosAtivos);
+        var periodos = _periodoExtratoRepo != null ? await _periodoExtratoRepo.ListarPorContaAsync(contaBancariaId) : new List<PeriodoExtrato>();
+        var diasComExtratoAntes = ConciliacaoSaldoCalculo.DiasComExtrato(periodos, historico, registrosAtivos);
         var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
         var conciliaveis = IdentificarConciliaveis(novas, registrosAtivos);
         var consumidoPelaHeuristica = ContarConsumidoPelaHeuristica(parseadas, jaImportadas);
@@ -152,6 +160,9 @@ public class ImportacaoService : IImportacaoService
             DataFimArquivo = dataFimArquivo.ToString("yyyy-MM-dd"),
             DuplicatasManuais = MapearDuplicatasManuais(novas, candidatosDuplicata),
             DuplicatasEntreArquivos = MapearDuplicatasEntreArquivos(novas, candidatosDuplicata),
+            Cobertura = CalcularCobertura(parseadas.Count > 0 ? parseadas : todasParseadas, diasComExtratoAntes),
+            AusentesNoArquivo = AusentesNoArquivo(conta, parseadas, registrosAtivos, casados, chavesImportadasAntes),
+            SaldoBancoArquivo = saldosBanco.LastOrDefault(),
         };
     }
 
@@ -363,10 +374,12 @@ public class ImportacaoService : IImportacaoService
         Guid contaBancariaId, Guid usuarioLogadoId, string perfil, IFormFile arquivo,
         DateOnly? dataInicio, DateOnly? dataFim, List<ResolucaoDuplicataDto>? resolucoesDuplicatas = null,
         string? banco = null, DateOnly? dataVencimentoFatura = null, DateOnly? dataFechamentoFatura = null,
-        string? competenciaFatura = null, bool? inverterSinaisManualmente = null)
+        string? competenciaFatura = null, bool? inverterSinaisManualmente = null,
+        OpcoesConciliacaoImportacaoDto? opcoesConciliacao = null)
     {
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
-        var parseadas = ParsearArquivoValidando(arquivo);
+        var parseadas = ParsearArquivoValidando(arquivo, out var saldosBanco);
+        opcoesConciliacao ??= new OpcoesConciliacaoImportacaoDto();
         if (conta.Tipo == "CartaoCredito") (parseadas, _) = NormalizarSinalParaCartao(parseadas, inverterSinaisManualmente);
 
         if (conta.Tipo == "CartaoCredito")
@@ -428,18 +441,16 @@ public class ImportacaoService : IImportacaoService
         var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId))
             .Where(r => !r.Excluido)
             .ToList();
-        // Snapshot do "ajuste" (baixa financeira) de cada dia já existente, ANTES de qualquer merge
-        // mudar suas entradas/saídas — preserva esse componente quando um merge que move item entre
-        // dias força recalcular o SaldoFinal local (ver uso mais abaixo, junto de registrosTocadosPorMerge).
-        var ajustePorRegistroId = registros.ToDictionary(
-            r => r.Id, r => r.SaldoFinal - RegistroService.CalcularSaldoFinal(r.Inicio, r.Entradas, r.Saidas, 0m));
         var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
         var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
         var jaImportadas = IdentificarJaImportadas(parseadas, registros);
         var aImportar = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
 
-        if (aImportar.Count == 0)
+        // Money Vision ("período sobreposto"): reimportar um extrato que já está todo no app ainda
+        // serve pra conciliar o saldo e pra excluir o que sumiu dele — só não há o que lançar.
+        var temConciliacao = saldosBanco.Count > 0 || opcoesConciliacao.SaldoBancoInformado.HasValue || opcoesConciliacao.ExcluirAusentes.Count > 0;
+        if (aImportar.Count == 0 && (conta.Tipo == "CartaoCredito" || !temConciliacao))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
                 "Nenhuma transação nova para importar no intervalo selecionado — todas já foram importadas antes.");
 
@@ -777,16 +788,9 @@ public class ImportacaoService : IImportacaoService
         foreach (var r in registrosTocadosPorConciliacao)
             await _registroRepo.AtualizarAsync(r);
 
-        // Mesclas que MOVERAM um item manual pra outro dia mudaram de verdade o total de entradas/
-        // saídas da origem e do destino — cada um precisa ter o próprio SaldoFinal recalculado (com
-        // o Inicio que já tinha e o ajuste que já existia antes do merge, nunca 0 — bug real que
-        // descartava silenciosamente qualquer baixa financeira que aquele dia já carregava).
-        foreach (var r in registrosTocadosPorMerge)
-        {
-            var ajuste = ajustePorRegistroId.GetValueOrDefault(r.Id, 0m);
-            r.SaldoFinal = RegistroService.CalcularSaldoFinal(r.Inicio, r.Entradas, r.Saidas, ajuste);
-            await _registroRepo.AtualizarAsync(r);
-        }
+        // Mesclas que MOVERAM um item manual pra outro dia (registrosTocadosPorMerge) mudaram o efeito
+        // da origem e do destino — o reencadeamento abaixo recalcula cada dia pela função única
+        // (SaldoEncadeamento, que já conta as baixas sem lançamento), sem precisar de conta à parte.
 
         // Fonte única de verdade (Money Vision: "saldo não fecha com o extrato") — qualquer mutação
         // acima pode ter deixado a cadeia de Inicio/SaldoFinal da conta desalinhada (inclusive dias
@@ -829,10 +833,9 @@ public class ImportacaoService : IImportacaoService
         var totalSugestoesVinculo = 0;
         try
         {
-            var dataMin = aImportar.Min(t => t.Data);
-            var dataMax = aImportar.Max(t => t.Data);
-            totalSugestoesVinculo = (await _conciliacaoService.ListarSugestoesAsync(
-                conta.ClienteId, dataMin, dataMax, usuarioLogadoId, perfil, contaBancariaId)).Count;
+            if (aImportar.Count > 0)
+                totalSugestoesVinculo = (await _conciliacaoService.ListarSugestoesAsync(
+                    conta.ClienteId, aImportar.Min(t => t.Data), aImportar.Max(t => t.Data), usuarioLogadoId, perfil, contaBancariaId)).Count;
         }
         catch (ApiException)
         {
@@ -857,8 +860,13 @@ public class ImportacaoService : IImportacaoService
 
         if (transacao != null) await transacao.CommitAsync();
 
+        var (conciliacao, totalAusentesExcluidos) = await ConcluirConciliacaoAsync(
+            conta, parseadas, saldosBanco, opcoesConciliacao, dataFim, usuarioLogadoId, perfil);
+
         return new ResultadoImportacaoDto
         {
+            Conciliacao = conciliacao,
+            TotalAusentesExcluidos = totalAusentesExcluidos,
             TotalImportadas = aImportar.Count - conciliadasTransferencia - totalMescladasComManual - totalDuplicatasEntreArquivosIgnoradas,
             TotalPendentesCategorizacao = pendentes,
             TotalCategorizadasPorRegra = categorizadasPorRegra,
@@ -874,6 +882,62 @@ public class ImportacaoService : IImportacaoService
             ParcelamentosDetectados = parcelamentosDetectados,
             AvisosParcelamento = avisosParcelamento,
         };
+    }
+
+    // Money Vision (conciliação automática), depois do lote já gravado — cada passo isolado, nunca
+    // desfaz a importação: (1) registra o período que o extrato cobre; (2) exclui os lançamentos que
+    // o usuário escolheu na prévia (sumiram do extrato novo); (3) compara o saldo do app no fim do
+    // dia do saldo do banco (arquivo ou digitado) e grava o ponto de conciliação — se não bater, NÃO
+    // cria ajuste: a tela abre o diagnóstico da diferença.
+    private async Task<(DTOs.ConciliacaoSaldo.PontoConciliacaoDto? Conciliacao, int AusentesExcluidos)> ConcluirConciliacaoAsync(
+        ContaBancaria conta, List<TransacaoParseada> parseadas, List<SaldoBancoArquivoDto> saldosBanco,
+        OpcoesConciliacaoImportacaoDto opcoes, DateOnly? dataFim, Guid usuarioLogadoId, string perfil)
+    {
+        if (_periodoExtratoRepo != null && parseadas.Count > 0 && conta.Tipo != "CartaoCredito")
+        {
+            // O saldo do OFX costuma ser de depois da última transação (ex.: DTASOF 07/11, última
+            // compra 05/11) — o extrato cobre até lá também, sem lançamento nesses dias.
+            var ate = new[] { parseadas.Max(t => t.Data) }.Concat(saldosBanco.Select(s => s.Data)).Max();
+            if (dataFim.HasValue && ate > dataFim.Value) ate = dataFim.Value;
+            await _periodoExtratoRepo.AdicionarAsync(new PeriodoExtrato
+            {
+                ClienteId = conta.ClienteId, ContaBancariaId = conta.Id, De = parseadas.Min(t => t.Data), Ate = ate, ImportadoEm = DateTime.UtcNow,
+            });
+        }
+
+        var ausentesExcluidos = 0;
+        if (opcoes.ExcluirAusentes.Count > 0)
+        {
+            try
+            {
+                ausentesExcluidos = (await ExcluirLoteAsync(conta.Id, usuarioLogadoId, perfil, new ExcluirLoteDto { Itens = opcoes.ExcluirAusentes })).TotalExcluidos;
+            }
+            catch (ApiException ex)
+            {
+                // A importação já está gravada — um item que mudou entre a prévia e o "Importar"
+                // não pode derrubar o resultado; o usuário ainda pode excluir pela tela da conta.
+                _logger.LogWarning(ex, "Exclusão dos lançamentos ausentes do extrato falhou na conta {ContaId}", conta.Id);
+            }
+        }
+
+        if (_conciliacaoSaldoService == null || conta.Tipo == "CartaoCredito") return (null, ausentesExcluidos);
+
+        var pontos = saldosBanco.ToList();
+        if (opcoes.SaldoBancoInformado.HasValue)
+            pontos.Add(new SaldoBancoArquivoDto
+            {
+                Data = opcoes.DataSaldoBanco ?? parseadas.Max(t => t.Data), Saldo = opcoes.SaldoBancoInformado.Value,
+            });
+
+        DTOs.ConciliacaoSaldo.PontoConciliacaoDto? ultimo = null;
+        var origem = saldosBanco.Count > 0 && parseadas.Any(t => t.FitId != null) ? "Ofx" : "Planilha";
+        foreach (var p in pontos.OrderBy(p => p.Data))
+        {
+            var ehInformado = opcoes.SaldoBancoInformado.HasValue && p.Saldo == opcoes.SaldoBancoInformado.Value
+                && p.Data == (opcoes.DataSaldoBanco ?? parseadas.Max(t => t.Data));
+            ultimo = await _conciliacaoSaldoService.RegistrarPontoAsync(conta, p.Data, p.Saldo, ehInformado ? "Informado" : origem);
+        }
+        return (ultimo, ausentesExcluidos);
     }
 
     // ── Categorização pendente (lançamentos já reais, só falta a categoria) ──────
@@ -989,7 +1053,7 @@ public class ImportacaoService : IImportacaoService
 
             foreach (var item in grupo)
             {
-                var saida = registro.Saidas.FirstOrDefault(s => s.Id == item.Id);
+                var saida = registro.Saidas.FirstOrDefault(s => s.Id == item.Id && !LancamentoFiltro.EhAjusteConciliacao(s.TipoCusto));
                 if (saida != null)
                 {
                     saida.Categoria = item.Categoria;
@@ -1000,7 +1064,7 @@ public class ImportacaoService : IImportacaoService
                     continue;
                 }
 
-                var entrada = registro.Entradas.FirstOrDefault(e => e.Id == item.Id);
+                var entrada = registro.Entradas.FirstOrDefault(e => e.Id == item.Id && !LancamentoFiltro.EhAjusteConciliacao(e.TipoCusto));
                 if (entrada == null) continue;
                 entrada.Categoria = item.Categoria;
                 if (categoriasPorNome.TryGetValue(item.Categoria, out var tipoCustoEntrada))
@@ -1366,7 +1430,12 @@ public class ImportacaoService : IImportacaoService
         return conta;
     }
 
-    private static List<TransacaoParseada> ParsearArquivoValidando(IFormFile arquivo)
+    private static List<TransacaoParseada> ParsearArquivoValidando(IFormFile arquivo) => ParsearArquivoValidando(arquivo, out _);
+
+    // saldosBanco: saldo que o próprio arquivo informa — OFX <LEDGERBAL> (um só), ou a coluna
+    // "Saldo" da planilha (o da última linha de cada dia, respeitando se o arquivo vem do mais
+    // antigo pro mais novo ou ao contrário).
+    private static List<TransacaoParseada> ParsearArquivoValidando(IFormFile arquivo, out List<SaldoBancoArquivoDto> saldosBanco)
     {
         var ext = Path.GetExtension(arquivo.FileName).ToLowerInvariant();
         if (ext is not ".ofx" and not ".csv" and not ".xlsx")
@@ -1374,22 +1443,23 @@ public class ImportacaoService : IImportacaoService
                 "Formato inválido. Envie um arquivo .ofx, .csv ou .xlsx.");
 
         List<TransacaoParseada> parseadas;
+        saldosBanco = new List<SaldoBancoArquivoDto>();
         using (var stream = arquivo.OpenReadStream())
         {
             try
             {
-                parseadas = ext switch
+                if (ext == ".ofx")
                 {
-                    ".ofx" => OfxParser.Parse(stream)
-                        .Select((t, i) => new TransacaoParseada(i, t.Data, t.Valor, t.Descricao, t.Tipo, t.FitId))
-                        .ToList(),
-                    ".xlsx" => XlsxParser.Parse(stream)
-                        .Select((t, i) => new TransacaoParseada(i, t.Data, t.Valor, t.Descricao, t.Tipo, null))
-                        .ToList(),
-                    _ => CsvParser.Parse(stream)
-                        .Select((t, i) => new TransacaoParseada(i, t.Data, t.Valor, t.Descricao, t.Tipo, null))
-                        .ToList(),
-                };
+                    var (transacoes, saldo) = OfxParser.ParseComSaldo(stream);
+                    parseadas = transacoes.Select((t, i) => new TransacaoParseada(i, t.Data, t.Valor, t.Descricao, t.Tipo, t.FitId)).ToList();
+                    if (saldo != null) saldosBanco.Add(new SaldoBancoArquivoDto { Data = saldo.Data, Saldo = saldo.Saldo });
+                }
+                else
+                {
+                    var linhas = ext == ".xlsx" ? XlsxParser.Parse(stream) : CsvParser.Parse(stream);
+                    parseadas = linhas.Select((t, i) => new TransacaoParseada(i, t.Data, t.Valor, t.Descricao, t.Tipo, null)).ToList();
+                    saldosBanco = SaldosDaPlanilha(linhas);
+                }
             }
             catch (InvalidOperationException ex)
             {
@@ -1402,6 +1472,18 @@ public class ImportacaoService : IImportacaoService
                 "Nenhuma transação encontrada no arquivo. Verifique o formato.");
 
         return parseadas;
+    }
+
+    private static List<SaldoBancoArquivoDto> SaldosDaPlanilha(List<TransacaoCsv> linhas)
+    {
+        var comSaldo = linhas.Where(l => l.Saldo.HasValue).ToList();
+        if (comSaldo.Count == 0) return new List<SaldoBancoArquivoDto>();
+        var crescente = comSaldo[0].Data <= comSaldo[^1].Data;
+        return comSaldo
+            .GroupBy(l => l.Data)
+            .Select(g => new SaldoBancoArquivoDto { Data = g.Key, Saldo = (crescente ? g.Last() : g.First()).Saldo!.Value })
+            .OrderBy(s => s.Data)
+            .ToList();
     }
 
     // "Já importada" é decidido SÓ contra o LANÇAMENTO REAL (Entradas/Saidas dos registros não
@@ -1423,38 +1505,103 @@ public class ImportacaoService : IImportacaoService
     // como novas transações. Um `.Any()` simples (o que existia antes) marcaria a segunda
     // ocorrência legítima como duplicata só por ela parecer com a primeira — a diferença de
     // quantidade (multiset) é o que resolve isso sem precisar perguntar nada ao usuário.
-    private static HashSet<int> IdentificarJaImportadas(List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos)
+    private static HashSet<int> IdentificarJaImportadas(List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos) =>
+        CasarComRazao(parseadas, registrosAtivos).JaImportadas;
+
+    // JaImportadas: índices do arquivo que já existem no razão. ItensCasados: Ids dos lançamentos do
+    // razão que alguma linha do arquivo "reivindicou" — o que sobra de importado dentro do período
+    // do arquivo é o que sumiu do extrato novo (ver AusentesNoArquivo).
+    //
+    // Money Vision ("período sobreposto"): linha OFX com FITID que não existe mais no razão ainda
+    // casa por data + valor + descrição contra lançamentos que também vieram de OFX (o banco pode
+    // renumerar o FITID entre um extrato parcial e o do mês inteiro) — nunca contra um manual sem
+    // FITID, que continua indo pro fluxo de "mesclar com manual" (IdentificarCandidatosDuplicata).
+    private static (HashSet<int> JaImportadas, HashSet<Guid> ItensCasados) CasarComRazao(
+        List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos)
     {
         var jaImportadas = new HashSet<int>();
+        var casados = new HashSet<Guid>();
+        var itens = registrosAtivos
+            .SelectMany(r => r.Entradas.Select(e => (r.Data, Tipo: "Entrada", e.Id, e.Valor, e.Descricao, e.FitId))
+                .Concat(r.Saidas.Select(s => (r.Data, Tipo: "Saida", s.Id, s.Valor, s.Descricao, s.FitId))))
+            .ToList();
 
+        var porFitId = itens.Where(i => i.FitId != null).GroupBy(i => (i.Tipo, i.FitId!)).ToDictionary(g => g.Key, g => g.Select(i => i.Id).ToList());
         foreach (var t in parseadas.Where(t => t.FitId != null))
         {
-            var existe = t.Tipo == "Entrada"
-                ? registrosAtivos.Any(r => r.Entradas.Any(e => e.FitId == t.FitId))
-                : registrosAtivos.Any(r => r.Saidas.Any(s => s.FitId == t.FitId));
-            if (existe) jaImportadas.Add(t.Indice);
+            if (!porFitId.TryGetValue((t.Tipo, t.FitId!), out var ids)) continue;
+            jaImportadas.Add(t.Indice);
+            foreach (var id in ids) casados.Add(id);
         }
 
-        var disponivelNoRazao = new Dictionary<(DateOnly Data, string Tipo, decimal Valor, string Descricao), int>();
-        foreach (var r in registrosAtivos)
+        // Por CONTAGEM de ocorrências, não por existência: duas transações legítimas idênticas no
+        // mesmo dia (dois Pix iguais, dois Ubers) só viram duplicata até o limite de quantas já
+        // existem no razão; a partir daí, as extras do arquivo entram como novas.
+        Dictionary<(DateOnly, string, decimal, string), Queue<Guid>> Fila(Func<(DateOnly Data, string Tipo, Guid Id, decimal Valor, string Descricao, string? FitId), bool> filtro) =>
+            itens.Where(i => !casados.Contains(i.Id) && filtro(i))
+                .GroupBy(i => ChaveOcorrencia(i.Data, i.Tipo, i.Valor, i.Descricao))
+                .ToDictionary(g => g.Key, g => new Queue<Guid>(g.Select(i => i.Id)));
+        var todos = Fila(_ => true);
+        var soDeOfx = Fila(i => i.FitId != null);
+
+        foreach (var t in parseadas.Where(t => !jaImportadas.Contains(t.Indice)))
         {
-            foreach (var e in r.Entradas)
-                IncrementarOcorrencia(disponivelNoRazao, r.Data, "Entrada", e.Valor, e.Descricao);
-            foreach (var s in r.Saidas)
-                IncrementarOcorrencia(disponivelNoRazao, r.Data, "Saida", s.Valor, s.Descricao);
+            var fila = t.FitId == null ? todos : soDeOfx;
+            if (!fila.TryGetValue(ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao), out var ids) || ids.Count == 0) continue;
+            var id = ids.Dequeue();
+            jaImportadas.Add(t.Indice);
+            casados.Add(id);
+            // As duas filas apontam pros mesmos lançamentos — tira da outra também.
+            var outra = t.FitId == null ? soDeOfx : todos;
+            if (outra.TryGetValue(ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao), out var idsOutra))
+                outra[ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao)] = new Queue<Guid>(idsOutra.Where(x => x != id));
         }
 
-        foreach (var t in parseadas.Where(t => t.FitId == null))
-        {
-            var chave = ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao);
-            if (disponivelNoRazao.TryGetValue(chave, out var restante) && restante > 0)
+        return (jaImportadas, casados);
+    }
+
+    // Lançamentos que vieram de extrato (FITID, ou linha de planilha registrada na auditoria) dentro
+    // do período do arquivo e que nenhuma linha do arquivo novo reivindicou — podem ter sido
+    // estornados no banco ou estar duplicados no app. Só conta corrente/caixa: fatura de cartão
+    // tem compras de faturas diferentes misturadas no mesmo período de datas.
+    private static List<DTOs.ConciliacaoSaldo.LinhaDiagnosticoDto> AusentesNoArquivo(
+        ContaBancaria conta, List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos,
+        HashSet<Guid> casados, HashSet<(DateOnly, string, decimal, string)> chavesImportadasAntes)
+    {
+        if (conta.Tipo == "CartaoCredito" || parseadas.Count == 0) return new();
+        var de = parseadas.Min(t => t.Data);
+        var ate = parseadas.Max(t => t.Data);
+
+        return registrosAtivos.Where(r => r.Data >= de && r.Data <= ate)
+            .SelectMany(r => r.Entradas.Where(e => !e.Provisoria && !LancamentoFiltro.EhAjusteConciliacao(e.TipoCusto))
+                    .Select(e => (r.Data, Tipo: "Entrada", e.Id, Valor: e.Valor, e.Descricao, e.FitId, e.Categoria))
+                .Concat(r.Saidas.Where(s => !s.Provisoria && !LancamentoFiltro.EhAjusteConciliacao(s.TipoCusto))
+                    .Select(s => (r.Data, Tipo: "Saida", s.Id, Valor: s.Valor, s.Descricao, s.FitId, s.Categoria))))
+            .Where(i => !casados.Contains(i.Id)
+                && (i.FitId != null || chavesImportadasAntes.Contains(ChaveOcorrencia(i.Data, i.Tipo, i.Valor, i.Descricao))))
+            .Select(i => new DTOs.ConciliacaoSaldo.LinhaDiagnosticoDto
             {
-                disponivelNoRazao[chave] = restante - 1;
-                jaImportadas.Add(t.Indice);
-            }
-        }
+                Id = i.Id, Data = i.Data, Descricao = i.Descricao, Categoria = i.Categoria,
+                Valor = i.Tipo == "Saida" ? -i.Valor : i.Valor,
+                EfeitoSeCorrigir = i.Tipo == "Saida" ? i.Valor : -i.Valor,
+            })
+            .OrderBy(l => l.Data)
+            .ToList();
+    }
 
-        return jaImportadas;
+    private static CoberturaImportacaoDto CalcularCobertura(List<TransacaoParseada> parseadas, SortedSet<DateOnly> diasComExtratoAntes)
+    {
+        var de = parseadas.Min(t => t.Data);
+        var ate = parseadas.Max(t => t.Data);
+        var jaHavia = diasComExtratoAntes.GetViewBetween(de, ate);
+        var novos = Enumerable.Range(0, ate.DayNumber - de.DayNumber + 1).Select(de.AddDays).Where(d => !jaHavia.Contains(d)).ToList();
+        return new CoberturaImportacaoDto
+        {
+            ArquivoDe = de, ArquivoAte = ate,
+            JaHaviaDe = jaHavia.Count > 0 ? jaHavia.Min : null, JaHaviaAte = jaHavia.Count > 0 ? jaHavia.Max : null,
+            NovosDiasDe = novos.Count > 0 ? novos[0] : null, NovosDiasAte = novos.Count > 0 ? novos[^1] : null,
+            QuantidadeDiasNovos = novos.Count,
+        };
     }
 
     private static void IncrementarOcorrencia(

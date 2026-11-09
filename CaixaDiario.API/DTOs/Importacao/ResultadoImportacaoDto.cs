@@ -36,6 +36,10 @@ public class ResultadoImportacaoDto
     // importação — se falhar pra uma linha, a compra entra normal (sem vínculo de parcelamento)
     // e o motivo aparece aqui, em vez de nunca ter importado nada.
     public List<string> AvisosParcelamento { get; set; } = new();
+    // Money Vision (conciliação automática): saldo do app no fim do dia do saldo informado pelo banco
+    // × esse saldo. Null quando o arquivo não trouxe saldo e o usuário não informou nenhum.
+    public CaixaDiario.API.DTOs.ConciliacaoSaldo.PontoConciliacaoDto? Conciliacao { get; set; }
+    public int TotalAusentesExcluidos { get; set; }
 }
 
 public class ParcelamentoDetectadoResumoDto

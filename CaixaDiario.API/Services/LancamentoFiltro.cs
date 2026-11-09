@@ -22,9 +22,25 @@ public static class LancamentoFiltro
     // manualmente pra bater o extrato do banco) — nunca é receita/despesa real, nunca entra no
     // DRE nem nas médias, mesmo que tenha sido categorizada (ex.: "Devoluções") antes desta correção.
     public const string TipoAjusteSaldo = "AjusteSaldo";
+    // Money Vision ("ajuste mexeu no DRE"): tipo de sistema do ajuste de conciliação de saldo — é
+    // correção de conciliação, nunca receita/despesa. "AjusteSaldo" é o valor legado, tratado igual
+    // até a migração (RecalculoSaldoService.MigrarAjustesConciliacaoAsync) converter todos.
+    public const string TipoAjusteConciliacao = "AjusteConciliacao";
+    public const string CategoriaAjusteSaldo = "Ajuste de saldo";
+
+    public static bool EhAjusteConciliacao(string? tipoCusto) =>
+        tipoCusto == TipoAjusteConciliacao || tipoCusto == TipoAjusteSaldo;
+
+    // Lançamento que é ajuste pela categoria/descrição, mesmo que algum caminho antigo tenha
+    // sobrescrito o TipoCusto (ex.: recategorização, re-salvar o dia no Caixa).
+    public static bool PareceAjusteConciliacao(string? tipoCusto, string? categoria, string? descricao) =>
+        EhAjusteConciliacao(tipoCusto)
+        || string.Equals(categoria?.Trim(), CategoriaAjusteSaldo, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(descricao?.Trim(), CategoriaAjusteSaldo, StringComparison.OrdinalIgnoreCase)
+        || (descricao?.Trim().StartsWith("Ajuste de conciliação em", StringComparison.OrdinalIgnoreCase) ?? false);
 
     public static bool EhOperacional(string? tipoCusto) =>
         tipoCusto != TipoTransferencia && tipoCusto != TipoRendimento
         && tipoCusto != TipoInvestimento && tipoCusto != TipoFinanciamento
-        && tipoCusto != TipoPagamentoFatura && tipoCusto != TipoAjusteSaldo;
+        && tipoCusto != TipoPagamentoFatura && !EhAjusteConciliacao(tipoCusto);
 }

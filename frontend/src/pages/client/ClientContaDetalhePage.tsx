@@ -6,7 +6,6 @@ import {
   obterExtratoConta,
   obterPendenciasConta,
   registrarRendimento,
-  ajustarSaldo,
   vincularMeta,
   desvincularMeta,
   listarDuplicatas,
@@ -31,12 +30,25 @@ import { limparDescricao } from '../../utils/descricaoExibicao'
 import { mesAtualISO, deslocarMes, labelMes, calcularDiasAtraso, estaNoMes } from '../../utils/contasPagarReceber'
 import Modal from '../../components/shared/Modal'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
-import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao, Categorias, CategoriaAdmin } from '../../types'
+import StatusConciliacaoResumo from '../../components/conciliacao/StatusConciliacaoResumo'
+import CoberturaTimeline from '../../components/conciliacao/CoberturaTimeline'
+import DiagnosticoDiferencaModal from '../../components/conciliacao/DiagnosticoDiferencaModal'
+import { obterCoberturaExtrato, registrarSaldoBanco } from '../../api/conciliacaoSaldo'
+import { ehAjusteConciliacao } from '../../utils/lancamentos'
+import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao, Categorias, CategoriaAdmin, CoberturaExtrato } from '../../types'
 import './ClientContas.css'
 import './ClientContaDetalhe.css'
 import './ClientContasBancarias.css'
 
 type Aba = 'extrato' | 'recebiveis' | 'pagamentos'
+
+// "1.234,56" → 1234.56; vazio/ inválido → undefined (campo opcional).
+function parseBRLSimples(texto: string): number | undefined {
+  const limpo = texto.trim().replace(/\./g, '').replace(',', '.')
+  if (!limpo) return undefined
+  const n = Number(limpo)
+  return Number.isFinite(n) ? n : undefined
+}
 
 const TIPO_LABEL: Record<string, string> = {
   Caixa: '💵 Caixa',
@@ -196,8 +208,17 @@ export default function ClientContaDetalhePage() {
   const [novoValorSonho, setNovoValorSonho] = useState('')
   const [salvandoVinculo, setSalvandoVinculo] = useState(false)
 
+  // ── Money Vision: conciliação com o banco ("até onde está lançado") ──────────
+  const [cobertura, setCobertura] = useState<CoberturaExtrato | null>(null)
+  const [diagnosticoAlvo, setDiagnosticoAlvo] = useState<{ data: string; saldoBanco: number } | null>(null)
+  const [irParaData, setIrParaData] = useState('')
+  // Prévia da importação: ausentes marcados pra excluir (chave = id) e saldo do banco digitado.
+  const [ausentesExcluir, setAusentesExcluir] = useState<Set<string>>(new Set())
+  const [saldoBancoImportDisplay, setSaldoBancoImportDisplay] = useState('')
+
   const carregarConta = useCallback(() => {
     if (!clienteId || !contaId) return
+    obterCoberturaExtrato(contaId).then(setCobertura).catch(() => {})
     setLoadingConta(true)
     listarContasBancarias(clienteId)
       .then(lista => {
@@ -258,6 +279,8 @@ export default function ClientContaDetalhePage() {
     setCompetenciaFatura('')
     setCompetenciaEditadaManualmente(false)
     setInverterSinaisManualmente(undefined)
+    setAusentesExcluir(new Set())
+    setSaldoBancoImportDisplay('')
     try {
       const resumo = await previewExtrato(contaId, arquivo)
       setDataInicioImport(resumo.dataInicioArquivo || todayISO())
@@ -322,6 +345,7 @@ export default function ClientContaDetalhePage() {
       const resolucoes: ResolucaoDuplicata[] = Object.entries(resolucoesDuplicatas).map(([indice, acao]) => ({
         transacaoIndice: Number(indice), acao,
       }))
+      const saldoInformado = parseBRLSimples(saldoBancoImportDisplay)
       const resultado = await importarExtrato(contaId, arquivoImportar, {
         dataInicio: dataInicioImport,
         dataFim: dataFimImport,
@@ -332,9 +356,16 @@ export default function ClientContaDetalhePage() {
           dataVencimentoFatura,
           dataFechamentoFatura: dataFechamentoFatura || undefined,
           competenciaFatura: competenciaFatura || undefined,
-        } : {}),
+        } : {
+          excluirAusentes: (resumoImportacao?.ausentesNoArquivo ?? []).filter(a => ausentesExcluir.has(a.id)).map(a => ({ id: a.id, data: a.data })),
+          saldoBancoInformado: saldoInformado,
+          dataSaldoBanco: saldoInformado !== undefined ? dataFimImport : undefined,
+        }),
       })
       setResultadoImportacao(resultado)
+      // Money Vision: saldo do banco não bateu — mostra as causas antes de qualquer ajuste.
+      if (resultado.conciliacao && !resultado.conciliacao.conciliado)
+        setDiagnosticoAlvo({ data: resultado.conciliacao.data, saldoBanco: resultado.conciliacao.saldoBanco })
       setModalImportar(false)
       setArquivoImportar(null)
       setResumoImportacao(null)
@@ -670,14 +701,17 @@ export default function ClientContaDetalhePage() {
     setModalConferirSaldo(true)
   }
 
+  // Money Vision: conferir nunca ajusta direto — grava o saldo do banco (ponto de conciliação) e,
+  // se não bater, abre o diagnóstico; o ajuste só existe no fim dele, pra diferença que sobrar.
   async function handleConferirSaldo() {
     if (!contaId) return
     setSalvandoConferirSaldo(true)
     try {
-      await ajustarSaldo(contaId, { data: conferirData, saldoReal: conferirSaldoReal })
+      const ponto = await registrarSaldoBanco(contaId, conferirData, conferirSaldoReal)
       setModalConferirSaldo(false)
+      if (ponto.conciliado) setMsg(`✅ Conciliado com o banco em ${fmtDate(ponto.data)}.`)
+      else setDiagnosticoAlvo({ data: ponto.data, saldoBanco: ponto.saldoBanco })
       carregarConta()
-      carregarExtrato()
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Erro ao conferir saldo.')
     } finally {
@@ -752,7 +786,7 @@ export default function ClientContaDetalhePage() {
   function classificarChip(l: LancamentoExtrato): TipoChip {
     // Bloco 3: ajuste de saldo vem antes de tudo — mesmo categorizado (ex.: "Devoluções" por
     // engano antes desta correção), nunca é receita/despesa/transferência de verdade.
-    if (l.tipoCusto === 'AjusteSaldo') return 'ajuste'
+    if (ehAjusteConciliacao(l.tipoCusto)) return 'ajuste'
     if (l.pendenteCategorizacao || !l.categoria) return 'sem-categoria'
     if (l.categoria === 'Transferência') return 'transferencia'
     if (tipoPorCategoria.get(l.categoria) === 'Investimento') return 'investimento'
@@ -772,7 +806,7 @@ export default function ClientContaDetalhePage() {
   }, [transferencias, conta])
 
   function rotuloChip(l: LancamentoExtrato, tipo: TipoChip): string {
-    if (tipo === 'ajuste') return 'Ajuste de saldo'
+    if (tipo === 'ajuste') return '⚖️ Ajuste de saldo'
     if (tipo === 'sem-categoria') return 'Sem categoria'
     if (tipo === 'transferencia') {
       const outraConta = l.transferenciaId ? nomeOutraContaPorTransferenciaId.get(l.transferenciaId) : undefined
@@ -812,6 +846,18 @@ export default function ClientContaDetalhePage() {
     return mapa
   }, [lancamentos])
 
+  // Money Vision: ponto de conciliação (saldo do banco) de cada dia, e o saldo do app no fim de
+  // qualquer dia — o do último dia lançado até ali (mesma cadeia do card), ou o saldo inicial.
+  const pontoPorDia = useMemo(() => new Map((cobertura?.pontos ?? []).map(p => [p.data, p])), [cobertura])
+  function saldoNoFimDe(iso: string): number {
+    const anteriores = (cobertura?.saldosPorDia ?? []).filter(s => s.data <= iso)
+    return anteriores.length > 0 ? anteriores[anteriores.length - 1].saldoFinal : (conta?.saldoInicial ?? 0)
+  }
+
+  // Reimportar um extrato que já está todo no app ainda serve pra conciliar ou excluir o que sumiu.
+  const temConciliacaoNaImportacao = conta?.tipo !== 'CartaoCredito' && (
+    ausentesExcluir.size > 0 || !!resumoImportacao?.saldoBancoArquivo || parseBRLSimples(saldoBancoImportDisplay) !== undefined)
+
   // Agrupamento por dia (item 4, Bloco 1).
   interface GrupoDia { data: string; itens: LancamentoExtrato[]; entradas: number; saidas: number; saldoDoDia: number }
   const gruposPorDia = useMemo<GrupoDia[]>(() => {
@@ -824,7 +870,7 @@ export default function ClientContaDetalhePage() {
     return [...porData.entries()].map(([data, itens]) => {
       // Ajuste de saldo não é uma transação de verdade — não conta no "Entradas +X · Saídas −Y"
       // do dia (item 10, Bloco 3), mas o Saldo do dia continua o real (vem de saldoPorDia).
-      const itensReais = itens.filter(l => l.tipoCusto !== 'AjusteSaldo')
+      const itensReais = itens.filter(l => !ehAjusteConciliacao(l.tipoCusto))
       return {
         data,
         itens,
@@ -928,7 +974,7 @@ export default function ClientContaDetalhePage() {
     const ehTransferencia = l.categoria === 'Transferência'
     // Bloco 3: ajuste de saldo não é uma transação de verdade — não faz sentido trocar categoria
     // nem virar transferência, só excluir (se foi lançado errado).
-    const ehAjuste = l.tipoCusto === 'AjusteSaldo'
+    const ehAjuste = ehAjusteConciliacao(l.tipoCusto)
     return (
       <span className="cd-acoes-linha">
         <button
@@ -1056,6 +1102,16 @@ export default function ClientContaDetalhePage() {
         </div>
       </div>
 
+      {/* Money Vision: "Extrato até 07/11 · Saldo do app R$ X · Banco em 07/11 R$ X ✅" — cartão
+          concilia por fatura, não por saldo do dia. */}
+      {conta.tipo !== 'CartaoCredito' && (cobertura?.status ?? conta.conciliacao) && (
+        <StatusConciliacaoResumo
+          status={(cobertura?.status ?? conta.conciliacao)!}
+          onVerDiagnostico={p => setDiagnosticoAlvo({ data: p.data, saldoBanco: p.saldoBanco })}
+          onImportar={() => fileInputRef.current?.click()}
+        />
+      )}
+
       {conta.pendentesCategorizacao > 0 && (
         <div className="cd-msg cd-msg-aviso" style={{ cursor: 'pointer' }} onClick={() => navigate(`/banco/extrato/${contaId}`)}>
           🏷️ {conta.pendentesCategorizacao} lançamento(s) aguardando categoria — clique para categorizar
@@ -1099,6 +1155,12 @@ export default function ClientContaDetalhePage() {
 
       {resultadoImportacao && (
         <div className="cd-msg cd-msg-sucesso">
+          {resultadoImportacao.conciliacao?.conciliado && (
+            <div><strong>✅ Conciliado com o banco até {fmtDate(resultadoImportacao.conciliacao.data)}</strong></div>
+          )}
+          {(resultadoImportacao.totalAusentesExcluidos ?? 0) > 0 && (
+            <div>{resultadoImportacao.totalAusentesExcluidos} lançamento(s) que não estavam no extrato novo excluído(s).</div>
+          )}
           ✅ {resultadoImportacao.totalImportadas} lançamento(s) importado(s)
           {resultadoImportacao.totalConciliadasTransferencia > 0 && (
             <> — {resultadoImportacao.totalConciliadasTransferencia} conciliado(s) com transferência(s) já classificada(s)</>
@@ -1317,6 +1379,10 @@ export default function ClientContaDetalhePage() {
 
       {aba === 'extrato' && (
         <>
+          {cobertura && conta.tipo !== 'CartaoCredito' && (
+            <CoberturaTimeline cobertura={cobertura} onSelecionarPeriodo={(d, a) => { setDe(d); setAte(a) }} />
+          )}
+
           <div className="cd-filtro-periodo">
             <label>De <input type="date" value={de} onChange={e => setDe(e.target.value)} /></label>
             <label>Até <input type="date" value={ate} onChange={e => setAte(e.target.value)} /></label>
@@ -1324,6 +1390,17 @@ export default function ClientContaDetalhePage() {
               <input type="checkbox" checked={mostrarSaldoPorLinha} onChange={e => setMostrarSaldoPorLinha(e.target.checked)} />
               Mostrar saldo por linha
             </label>
+            {/* Money Vision: "qual o saldo do app em tal dia" — pra comparar com o banco. */}
+            <label>
+              Ir para data{' '}
+              <input type="date" value={irParaData} max={todayISO()} onChange={e => {
+                setIrParaData(e.target.value)
+                if (e.target.value) { setDe(e.target.value); setAte(e.target.value) }
+              }} />
+            </label>
+            {irParaData && (
+              <span className="cd-saldo-na-data">Saldo do app no fim de {fmtDate(irParaData)}: <strong>{fmtBRL(saldoNoFimDe(irParaData))}</strong></span>
+            )}
           </div>
 
           {/* Barra de filtros (item 6, Bloco 2) */}
@@ -1379,7 +1456,14 @@ export default function ClientContaDetalhePage() {
                   <span className="cd-extrato-dia-resumo">
                     {grupo.entradas > 0 && <span className="val-green">Entradas +{fmtBRL(grupo.entradas)}</span>}
                     {grupo.saidas > 0 && <span className="val-red">Saídas −{fmtBRL(grupo.saidas)}</span>}
-                    <span>Saldo do dia {fmtBRL(grupo.saldoDoDia)}</span>
+                    <span>Saldo final do dia {fmtBRL(grupo.saldoDoDia)}</span>
+                    {(() => {
+                      const ponto = pontoPorDia.get(grupo.data)
+                      if (!ponto) return null
+                      return ponto.conciliado
+                        ? <span className="val-green">Banco: {fmtBRL(ponto.saldoBanco)} ✅</span>
+                        : <span className="val-red">Banco: {fmtBRL(ponto.saldoBanco)} ⚠ {fmtBRL(ponto.diferenca)}</span>
+                    })()}
                   </span>
                 </div>
 
@@ -1610,15 +1694,15 @@ export default function ClientContaDetalhePage() {
             <button
               className="btn-confirm"
               onClick={handleConferirSaldo}
-              disabled={salvandoConferirSaldo || !conferirSaldoDisplay || conferirSaldoReal === conta.saldoAtual}
+              disabled={salvandoConferirSaldo || !conferirSaldoDisplay}
             >
-              {salvandoConferirSaldo ? 'Salvando...' : 'Confirmar'}
+              {salvandoConferirSaldo ? 'Conferindo...' : 'Conferir'}
             </button>
           </>
         }
       >
         <p style={{ fontSize: 13, color: 'var(--tx3)', marginBottom: 12 }}>
-          Seu saldo no app é {fmtBRL(conta.saldoAtual)}. Qual o saldo no app do banco nesta data?
+          No fim de {fmtDate(conferirData)} o app tem {fmtBRL(saldoNoFimDe(conferirData))}. Qual o saldo no app do banco nesse dia?
         </p>
         <div className="inp-group">
           <label>Saldo no banco</label>
@@ -1636,11 +1720,11 @@ export default function ClientContaDetalhePage() {
           </div>
           {conferirSaldoDisplay && (
             (() => {
-              const diferenca = conferirSaldoReal - conta.saldoAtual
-              if (diferenca === 0) return <p style={{ fontSize: 12, marginTop: 6, color: 'var(--tx3)' }}>Sem diferença — nada a ajustar.</p>
+              const diferenca = Math.round((conferirSaldoReal - saldoNoFimDe(conferirData)) * 100) / 100
+              if (diferenca === 0) return <p style={{ fontSize: 12, marginTop: 6, color: 'var(--success)' }}>✅ Bate com o app — fica registrado como conciliado.</p>
               return (
-                <p style={{ fontSize: 12, marginTop: 6, color: diferenca >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                  Cria um ajuste de {diferenca >= 0 ? '+' : '−'}{fmtBRL(Math.abs(diferenca))} em "Ajuste de saldo" — nunca entra no DRE.
+                <p style={{ fontSize: 12, marginTop: 6, color: 'var(--danger)' }}>
+                  Diferença de {fmtBRL(Math.abs(diferenca))}. Antes de qualquer ajuste, mostramos as possíveis causas (duplicatas, dias sem extrato…).
                 </p>
               )
             })()
@@ -1651,6 +1735,17 @@ export default function ClientContaDetalhePage() {
           <input type="date" value={conferirData} max={todayISO()} onChange={e => setConferirData(e.target.value)} />
         </div>
       </Modal>
+
+      {diagnosticoAlvo && contaId && (
+        <DiagnosticoDiferencaModal
+          contaId={contaId}
+          data={diagnosticoAlvo.data}
+          saldoBanco={diagnosticoAlvo.saldoBanco}
+          onClose={() => setDiagnosticoAlvo(null)}
+          onAlterado={() => { carregarConta(); carregarExtrato() }}
+          onFiltrarPeriodo={(d, a) => { setAba('extrato'); setDe(d); setAte(a) }}
+        />
+      )}
 
       <Modal
         open={modalDuplicatas}
@@ -1745,11 +1840,14 @@ export default function ClientContaDetalhePage() {
               className="btn-confirm"
               onClick={handleConfirmarImportacao}
               disabled={
-                importando || previewCarregando || !resumoImportacao || resumoImportacao.totalNovas === 0
+                importando || previewCarregando || !resumoImportacao
+                || (resumoImportacao.totalNovas === 0 && !temConciliacaoNaImportacao)
                 || (conta?.tipo === 'CartaoCredito' && (!bancoFatura.trim() || !dataVencimentoFatura))
               }
             >
-              {importando ? 'Importando...' : `Importar ${resumoImportacao?.totalNovas ?? 0} transação(ões)`}
+              {importando ? 'Importando...'
+                : (resumoImportacao?.totalNovas ?? 0) === 0 && temConciliacaoNaImportacao ? 'Conciliar com o banco'
+                : `Importar ${resumoImportacao?.totalNovas ?? 0} transação(ões)`}
             </button>
           </>
         }
@@ -1822,6 +1920,18 @@ export default function ClientContaDetalhePage() {
             {resumoImportacao.totalNovas > 0 && (
               <p style={{ fontSize: 12 }}>Entram como <strong>pendentes de categorização</strong> — categorize depois na tela de categorização.</p>
             )}
+            {/* Money Vision (período sobreposto): o que o arquivo cobre × o que já estava no app. */}
+            {resumoImportacao.cobertura && conta?.tipo !== 'CartaoCredito' && (
+              <p style={{ fontSize: 12 }}>
+                Arquivo: {fmtDate(resumoImportacao.cobertura.arquivoDe)} a {fmtDate(resumoImportacao.cobertura.arquivoAte)}
+                {resumoImportacao.cobertura.jaHaviaDe && resumoImportacao.cobertura.jaHaviaAte && (
+                  <> · já havia no app: {fmtDate(resumoImportacao.cobertura.jaHaviaDe)} a {fmtDate(resumoImportacao.cobertura.jaHaviaAte)}</>
+                )}
+                {resumoImportacao.cobertura.novosDiasDe && resumoImportacao.cobertura.novosDiasAte
+                  ? <> · novos dias: {fmtDate(resumoImportacao.cobertura.novosDiasDe)} a {fmtDate(resumoImportacao.cobertura.novosDiasAte)}</>
+                  : <> · nenhum dia novo</>}
+              </p>
+            )}
             {conta?.tipo === 'CartaoCredito' && (
               <div style={{ marginTop: 8 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
@@ -1870,6 +1980,47 @@ export default function ClientContaDetalhePage() {
               )
             })}
           </div>
+        )}
+
+        {/* Money Vision: importado antes, dentro do período do arquivo, mas sumiu do extrato novo
+            (estornado ou duplicado no app) — padrão é manter; o usuário marca o que excluir. */}
+        {!previewCarregando && resumoImportacao && (resumoImportacao.ausentesNoArquivo ?? []).length > 0 && (
+          <div style={{ margin: '12px 0', border: '1px solid var(--bd)', borderRadius: 8, padding: 10 }}>
+            <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              ⚠️ {resumoImportacao.ausentesNoArquivo!.length} lançamento(s) do app não aparece(m) no extrato novo desse período
+              (podem ter sido estornados ou duplicados) — manter ou excluir?
+            </p>
+            {resumoImportacao.ausentesNoArquivo!.map(a => (
+              <label key={a.id} style={{ display: 'flex', gap: 6, fontSize: 12, marginBottom: 4, cursor: 'pointer' }}>
+                <input type="checkbox" checked={ausentesExcluir.has(a.id)}
+                  onChange={e => setAusentesExcluir(prev => {
+                    const next = new Set(prev)
+                    if (e.target.checked) next.add(a.id); else next.delete(a.id)
+                    return next
+                  })} />
+                <span>Excluir · {fmtDate(a.data)} · {a.descricao} · <strong className={a.valor >= 0 ? 'val-green' : 'val-red'}>{fmtBRL(a.valor)}</strong></span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {/* Money Vision (conciliação automática): sem o saldo no próprio arquivo, pergunta — é o
+            que permite dizer "✅ conciliado" sem nenhum ajuste depois de importar. */}
+        {!previewCarregando && resumoImportacao && conta?.tipo !== 'CartaoCredito' && (
+          resumoImportacao.saldoBancoArquivo ? (
+            <p style={{ fontSize: 12, color: 'var(--tx3)' }}>
+              O arquivo informa o saldo do banco em {fmtDate(resumoImportacao.saldoBancoArquivo.data)}: <strong>{fmtBRL(resumoImportacao.saldoBancoArquivo.saldo)}</strong> — vamos conferir com o app depois de importar.
+            </p>
+          ) : (
+            <div className="inp-group">
+              <label>Saldo no banco em {dataFimImport ? fmtDate(dataFimImport) : 'último dia'} (opcional)</label>
+              <div className="val-input-wrap">
+                <span className="val-prefix">R$</span>
+                <input type="text" inputMode="decimal" placeholder="0,00" value={saldoBancoImportDisplay}
+                  onChange={e => setSaldoBancoImportDisplay(e.target.value.replace(/[^\d,.-]/g, ''))} />
+              </div>
+            </div>
+          )
         )}
 
         {/* Item 3.1: por padrão NÃO importa (desmarcado) — o usuário decide por linha se quer
@@ -2138,7 +2289,7 @@ export default function ClientContaDetalhePage() {
         <div className="cd-sheet-overlay" onClick={() => setAcaoMobileLancamento(null)}>
           <div className="cd-sheet" onClick={e => e.stopPropagation()}>
             <div className="cd-sheet-desc">{limparDescricao(acaoMobileLancamento.descricao).titulo}</div>
-            {acaoMobileLancamento.tipoCusto === 'AjusteSaldo' ? (
+            {ehAjusteConciliacao(acaoMobileLancamento.tipoCusto) ? (
               <div className="cd-sheet-aviso">Ajuste de saldo — não é reclassificável, só pode ser excluído.</div>
             ) : (
               <>

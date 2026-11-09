@@ -30,6 +30,8 @@ public class AppDbContext : DbContext
     public DbSet<SugestaoRecorrenciaIgnorada> SugestoesRecorrenciaIgnoradas { get; set; }
     public DbSet<Financiamento> Financiamentos { get; set; }
     public DbSet<Parcelamento> Parcelamentos { get; set; }
+    public DbSet<PontoConciliacao> PontosConciliacao { get; set; }
+    public DbSet<PeriodoExtrato> PeriodosExtrato { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -228,6 +230,36 @@ public class AppDbContext : DbContext
             entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
             // Uma ocorrência específica (recorrência + vencimento) só pode ser dispensada uma vez.
             entity.HasIndex(e => new { e.RecorrenciaId, e.DataVencimento }).IsUnique();
+        });
+
+        modelBuilder.Entity<PeriodoExtrato>(entity =>
+        {
+            entity.ToTable("periodos_extrato");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+            entity.Property(e => e.De).HasColumnName("de");
+            entity.Property(e => e.Ate).HasColumnName("ate");
+            entity.Property(e => e.ImportadoEm).HasColumnName("importado_em").HasDefaultValueSql("NOW()");
+            entity.HasIndex(e => e.ContaBancariaId);
+        });
+
+        modelBuilder.Entity<PontoConciliacao>(entity =>
+        {
+            entity.ToTable("pontos_conciliacao");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+            entity.Property(e => e.Data).HasColumnName("data");
+            entity.Property(e => e.SaldoBanco).HasColumnName("saldo_banco").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SaldoApp).HasColumnName("saldo_app").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Origem).HasColumnName("origem").IsRequired().HasDefaultValue("Informado");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em").HasDefaultValueSql("NOW()");
+            entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em").HasDefaultValueSql("NOW()");
+            entity.HasIndex(e => new { e.ContaBancariaId, e.Data }).IsUnique();
+            entity.HasIndex(e => e.ClienteId);
         });
 
         modelBuilder.Entity<Parcelamento>(entity =>

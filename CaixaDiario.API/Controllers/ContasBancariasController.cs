@@ -1,3 +1,4 @@
+using CaixaDiario.API.DTOs.ConciliacaoSaldo;
 using CaixaDiario.API.DTOs.ContasBancarias;
 using CaixaDiario.API.DTOs.Importacao;
 using CaixaDiario.API.Enums;
@@ -17,13 +18,16 @@ public class ContasBancariasController : ControllerBase
     private readonly IContaBancariaService _service;
     private readonly IImportacaoService _importacaoService;
     private readonly IDuplicataExtratoService _duplicataExtratoService;
+    private readonly IConciliacaoSaldoService _conciliacaoSaldoService;
 
     public ContasBancariasController(
-        IContaBancariaService service, IImportacaoService importacaoService, IDuplicataExtratoService duplicataExtratoService)
+        IContaBancariaService service, IImportacaoService importacaoService, IDuplicataExtratoService duplicataExtratoService,
+        IConciliacaoSaldoService conciliacaoSaldoService)
     {
         _service = service;
         _importacaoService = importacaoService;
         _duplicataExtratoService = duplicataExtratoService;
+        _conciliacaoSaldoService = conciliacaoSaldoService;
     }
 
     private Guid ObterUsuarioId() => Guid.Parse(User.FindFirst("id")!.Value);
@@ -99,6 +103,32 @@ public class ContasBancariasController : ControllerBase
         return Ok(new ApiResponse<ContaBancariaDto> { Dados = conta });
     }
 
+    // Money Vision ("até onde está lançado"): dias cobertos por extrato, pontos de conciliação com o
+    // banco e saldo de cada dia — linha do tempo no topo do extrato.
+    [HttpGet("{contaId:guid}/cobertura")]
+    public async Task<IActionResult> ObterCobertura(Guid contaId)
+    {
+        var resultado = await _conciliacaoSaldoService.ObterCoberturaAsync(contaId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<CoberturaExtratoDto> { Dados = resultado });
+    }
+
+    // Diagnóstico da diferença app × banco numa data — antes de qualquer ajuste. Sem saldoBanco,
+    // usa o do ponto de conciliação já registrado naquela data.
+    [HttpGet("{contaId:guid}/diagnostico-saldo")]
+    public async Task<IActionResult> DiagnosticarSaldo(Guid contaId, [FromQuery] DateOnly data, [FromQuery] decimal? saldoBanco)
+    {
+        var resultado = await _conciliacaoSaldoService.DiagnosticarAsync(contaId, data, saldoBanco, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<DiagnosticoDiferencaDto> { Dados = resultado });
+    }
+
+    // "Saldo no banco em 07/11" informado à mão — grava o ponto de conciliação (nunca cria ajuste).
+    [HttpPost("{contaId:guid}/saldo-banco")]
+    public async Task<IActionResult> RegistrarSaldoBanco(Guid contaId, [FromBody] RegistrarSaldoBancoDto dto)
+    {
+        var resultado = await _conciliacaoSaldoService.RegistrarSaldoBancoAsync(contaId, dto, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<PontoConciliacaoDto> { Dados = resultado });
+    }
+
     [HttpPost("{contaId:guid}/vincular-meta/{metaId:guid}")]
     public async Task<IActionResult> VincularMeta(Guid contaId, Guid metaId)
     {
@@ -148,7 +178,12 @@ public class ContasBancariasController : ControllerBase
         // Cartão (Bloco 2): obrigatórios só quando a conta é CartaoCredito — ver ImportacaoService.
         [FromForm] string? banco = null, [FromForm] DateOnly? dataVencimentoFatura = null,
         [FromForm] DateOnly? dataFechamentoFatura = null, [FromForm] string? competenciaFatura = null,
-        [FromForm] bool? inverterSinaisManualmente = null)
+        [FromForm] bool? inverterSinaisManualmente = null,
+        // Money Vision (conciliação): JSON [{"id":"...","data":"yyyy-MM-dd"}] dos lançamentos que
+        // sumiram do extrato novo e o usuário mandou excluir; e o saldo do banco digitado na prévia
+        // (texto com ponto decimal — nunca depende da cultura do servidor).
+        [FromForm] string? excluirAusentesJson = null,
+        [FromForm] string? saldoBancoInformado = null, [FromForm] DateOnly? dataSaldoBanco = null)
     {
         List<ResolucaoDuplicataDto>? resolucoes = null;
         if (!string.IsNullOrWhiteSpace(resolucoesDuplicatasJson))
@@ -165,9 +200,30 @@ public class ContasBancariasController : ControllerBase
             }
         }
 
+        var opcoesConciliacao = new OpcoesConciliacaoImportacaoDto { DataSaldoBanco = dataSaldoBanco };
+        if (!string.IsNullOrWhiteSpace(excluirAusentesJson))
+        {
+            try
+            {
+                opcoesConciliacao.ExcluirAusentes = System.Text.Json.JsonSerializer.Deserialize<List<ItemExcluirLoteDto>>(
+                    excluirAusentesJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "excluirAusentesJson inválido.", "excluirAusentesJson");
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(saldoBancoInformado))
+        {
+            if (!decimal.TryParse(saldoBancoInformado, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var saldo))
+                throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Saldo do banco inválido.", "saldoBancoInformado");
+            opcoesConciliacao.SaldoBancoInformado = saldo;
+        }
+
         var resultado = await _importacaoService.ImportarArquivoAsync(
             contaId, ObterUsuarioId(), ObterPerfil(), arquivo, dataInicio, dataFim, resolucoes,
-            banco, dataVencimentoFatura, dataFechamentoFatura, competenciaFatura, inverterSinaisManualmente);
+            banco, dataVencimentoFatura, dataFechamentoFatura, competenciaFatura, inverterSinaisManualmente,
+            opcoesConciliacao);
         return Ok(new ApiResponse<ResultadoImportacaoDto> { Dados = resultado });
     }
 

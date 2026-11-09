@@ -53,6 +53,13 @@ public class MetasController : ControllerBase
         return Ok(new ApiResponse<MetaAnualDto> { Dados = resultado });
     }
 
+    [HttpGet("{id:guid}/candidatos-vinculo")]
+    public async Task<IActionResult> CandidatosVinculo(Guid id)
+    {
+        var resultado = await _metaService.ListarCandidatosVinculoAsync(id, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<CandidatosVinculoMetaDto> { Dados = resultado });
+    }
+
     [HttpPost("{id:guid}/desfazer-conquista")]
     public async Task<IActionResult> DesfazerConquista(Guid id)
     {

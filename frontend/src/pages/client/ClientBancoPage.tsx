@@ -6,6 +6,7 @@ import { listarSugestoesTransferenciaSemPar } from '../../api/transferencias'
 import { obterParaOndeFoiMeuDinheiro } from '../../api/metricas'
 import type { ParaOndeFoiMeuDinheiro } from '../../api/metricas'
 import ParaOndeFoiMeuDinheiroCard from '../../components/shared/ParaOndeFoiMeuDinheiroCard'
+import StatusConciliacaoResumo from '../../components/conciliacao/StatusConciliacaoResumo'
 import { fmtBRL } from '../../utils/format'
 import type { ContaBancaria } from '../../types'
 import './ClientContasBancarias.css'
@@ -167,6 +168,8 @@ export default function ClientBancoPage({ clienteIdOverride }: Props) {
                     <> · <span style={{ color: 'var(--warning)' }}>🏷️ {c.pendentesCategorizacao} pendente(s)</span></>
                   )}
                 </div>
+                {/* Money Vision: "Extrato até 07/11 · Banco em 07/11 R$ X ✅" (cartão concilia por fatura). */}
+                {c.tipo !== 'CartaoCredito' && c.conciliacao && <StatusConciliacaoResumo status={c.conciliacao} compacto />}
               </div>
               {c.tipo === 'CartaoCredito'
                 ? <div className="cb-conta-saldo val-red">{fmtBRL(c.faturasEmAberto ?? c.saldoDevedor ?? 0)}</div>

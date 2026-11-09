@@ -1,5 +1,6 @@
 import { apiFetch } from './client'
 import type { ApiResponse, ContaBancaria, LancamentoExtrato, PendenciasConta } from '../types'
+import { mapStatusConciliacao } from './conciliacaoSaldo'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapConta(raw: any): ContaBancaria {
@@ -39,6 +40,7 @@ function mapConta(raw: any): ContaBancaria {
     faturasEmAberto: raw.faturasEmAberto ?? undefined,
     comprasMes: raw.comprasMes ?? undefined,
     pagamentosMes: raw.pagamentosMes ?? undefined,
+    conciliacao: raw.conciliacao ? mapStatusConciliacao(raw.conciliacao) : undefined,
   }
 }
 

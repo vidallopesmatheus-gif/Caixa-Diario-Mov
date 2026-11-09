@@ -14,6 +14,9 @@ public class ParcelamentoDeteccaoService : IParcelamentoDeteccaoService
     // TransferenciaService/ImportacaoService) — parcelas de uma mesma compra têm valor idêntico na
     // prática, a tolerância é só pra absorver arredondamento de centavo entre meses.
     private const decimal ToleranciaValor = 0.01m;
+    // Parcela lançada pelo app pode ter o valor digitado/dividido pelo usuário (centavos diferentes
+    // do que o banco cobra) — margem maior, compensada por exigir o lugar reservado da parcela.
+    private const decimal ToleranciaValorLancadoPeloApp = 0.02m;
 
     private readonly IParcelamentoRepository _parcelamentoRepo;
     private readonly IRegistroRepository _registroRepo;
@@ -28,11 +31,12 @@ public class ParcelamentoDeteccaoService : IParcelamentoDeteccaoService
         ContaBancaria contaCartao, DateOnly dataVencimentoFatura,
         string comerciante, string? categoria, int numero, int total, decimal valorParcela)
     {
-        var parcelamento = await ResolverOuCriarParcelamentoAsync(contaCartao, dataVencimentoFatura, comerciante, categoria, numero, total, valorParcela);
-
         var registros = await _registroRepo.ListarPorContaAsync(contaCartao.Id);
 
+        var parcelamento = await ResolverOuCriarParcelamentoAsync(registros, contaCartao, dataVencimentoFatura, comerciante, categoria, numero, total, valorParcela);
+
         await RemoverPrevistaSubstituidaAsync(registros, parcelamento.Id, numero);
+        await RemoverParcelaManualSubstituidaAsync(registros, parcelamento.Id, numero);
         await GerarPrevistasQueFaltamAsync(registros, contaCartao, parcelamento, dataVencimentoFatura, comerciante, categoria, numero, total, valorParcela);
 
         // A parcela recém-chegada é a última do parcelamento e não sobrou nenhuma prevista — quita.
@@ -46,8 +50,8 @@ public class ParcelamentoDeteccaoService : IParcelamentoDeteccaoService
     }
 
     private async Task<Parcelamento> ResolverOuCriarParcelamentoAsync(
-        ContaBancaria contaCartao, DateOnly dataVencimentoFatura, string comerciante, string? categoria,
-        int numero, int total, decimal valorParcela)
+        List<RegistroDiario> registros, ContaBancaria contaCartao, DateOnly dataVencimentoFatura, string comerciante,
+        string? categoria, int numero, int total, decimal valorParcela)
     {
         var ativos = await _parcelamentoRepo.ListarAtivosPorContaAsync(contaCartao.Id);
         var existente = ativos.FirstOrDefault(p =>
@@ -55,6 +59,16 @@ public class ParcelamentoDeteccaoService : IParcelamentoDeteccaoService
             && NormalizarComparacao(p.DescricaoBase) == NormalizarComparacao(comerciante)
             && Math.Abs(p.ValorParcela - valorParcela) <= valorParcela * ToleranciaValor);
         if (existente != null) return existente;
+
+        // Parcelamento lançado pelo próprio app (ex.: "🏆 Macbook" via Conquistei) tem descrição
+        // diferente da que o banco usa ("Trocafone - Parcela 2/10") — casa pelo lugar reservado pra
+        // esta parcela (prevista, ou manual ainda sem FitId) com valor ±2%. Só decide sozinho com
+        // um único candidato.
+        var porLugarReservado = ativos.Where(p =>
+            p.TotalParcelas == total
+            && Math.Abs(p.ValorParcela - valorParcela) <= valorParcela * ToleranciaValorLancadoPeloApp
+            && TemLugarReservado(registros, p.Id, numero)).ToList();
+        if (porLugarReservado.Count == 1) return porLugarReservado[0];
 
         var novo = new Parcelamento
         {
@@ -86,6 +100,29 @@ public class ParcelamentoDeteccaoService : IParcelamentoDeteccaoService
             registro.SalvoEm = DateTime.UtcNow;
             await _registroRepo.AtualizarAsync(registro);
             return; // só pode existir uma prevista por (parcelamento, número)
+        }
+    }
+
+    private static bool TemLugarReservado(List<RegistroDiario> registros, Guid parcelamentoId, int numero) =>
+        registros.Any(r =>
+            r.ContasPagar.Any(c => c.ParcelamentoId == parcelamentoId && c.NumeroParcela == numero && !c.Pago)
+            || r.Saidas.Any(s => s.ParcelamentoId == parcelamentoId && s.NumeroParcela == numero && s.FitId == null));
+
+    // Parcela que o app lançou como realizada (ex.: a 1ª de "Lançar agora") e que a fatura real
+    // agora traz de verdade: a real substitui a manual — senão a mesma parcela contaria duas vezes
+    // no saldo e no DRE. Nunca toca em parcela que já veio de um arquivo (tem FitId).
+    private async Task RemoverParcelaManualSubstituidaAsync(List<RegistroDiario> registros, Guid parcelamentoId, int numero)
+    {
+        foreach (var registro in registros)
+        {
+            var manual = registro.Saidas.FirstOrDefault(s => s.ParcelamentoId == parcelamentoId && s.NumeroParcela == numero && s.FitId == null);
+            if (manual == null) continue;
+
+            registro.Saidas = registro.Saidas.Where(s => s.Id != manual.Id).ToList();
+            registro.SaldoFinal += manual.Valor;
+            registro.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(registro);
+            return;
         }
     }
 

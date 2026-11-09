@@ -6,9 +6,14 @@ namespace CaixaDiario.API.Services.Parsers;
 
 public record TransacaoOfx(DateOnly Data, decimal Valor, string Descricao, string Tipo, string? FitId);
 
+// Saldo que o próprio banco informa no arquivo (<LEDGERBAL><BALAMT> em <DTASOF>).
+public record SaldoOfx(DateOnly Data, decimal Saldo);
+
 public static class OfxParser
 {
-    public static List<TransacaoOfx> Parse(Stream stream)
+    public static List<TransacaoOfx> Parse(Stream stream) => ParseComSaldo(stream).Transacoes;
+
+    public static (List<TransacaoOfx> Transacoes, SaldoOfx? Saldo) ParseComSaldo(Stream stream)
     {
         using var ms = new MemoryStream();
         stream.CopyTo(ms);
@@ -20,10 +25,29 @@ public static class OfxParser
         var content = encoding.GetString(bytes).TrimStart('﻿');
 
         // OFX 2.x começa com declaração XML
-        if (content.TrimStart().StartsWith("<?xml", StringComparison.OrdinalIgnoreCase))
-            return ParseXml(content);
+        var transacoes = content.TrimStart().StartsWith("<?xml", StringComparison.OrdinalIgnoreCase)
+            ? ParseXml(content)
+            : ParseSgml(content);
+        return (transacoes, ExtrairSaldo(content));
+    }
 
-        return ParseSgml(content);
+    // Money Vision (conciliação automática): Nubank, C6, Bradesco, Itaú e Inter mandam o saldo da
+    // conta no fim do arquivo. Regex serve pros dois formatos (SGML sem fechamento de tag e XML).
+    private static SaldoOfx? ExtrairSaldo(string content)
+    {
+        var bloco = Regex.Match(content, @"<LEDGERBAL>(.*?)(</LEDGERBAL>|<AVAILBAL>|</STMTRS>|$)",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!bloco.Success) return null;
+
+        var balAmt = ExtrairValor(bloco.Groups[1].Value, "BALAMT");
+        var dtAsOf = ExtrairValor(bloco.Groups[1].Value, "DTASOF");
+        if (balAmt == null || dtAsOf == null) return null;
+
+        var data = ParseOfxDate(dtAsOf);
+        if (data == null || !decimal.TryParse(balAmt.Replace(",", "."), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var saldo))
+            return null;
+        return new SaldoOfx(data.Value, saldo);
     }
 
     // ── OFX 1.x SGML ────────────────────────────────────────────────────────

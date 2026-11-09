@@ -23,6 +23,35 @@ public class CategoriaServiceTests
     private static Grupo Grupo(string nome, string bloco) => new() { Id = Guid.NewGuid(), Nome = nome, Bloco = bloco, Ativo = true };
 
     [Fact]
+    public async Task CriarAsync_NomeAjusteDeSaldo_LancaDadosInvalidosPorSerDoSistema()
+    {
+        var grupo = Grupo("Outras", Blocos.DespesasOperacionais);
+        _grupoRepoMock.Setup(r => r.ObterPorIdAsync(grupo.Id)).ReturnsAsync(grupo);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.CriarAsync(_clienteId, new CriarCategoriaDto { Nome = " ajuste de SALDO ", GrupoId = grupo.Id }, _clienteId, "cliente"));
+
+        Assert.Equal(("nome", 400), (ex.Campo, ex.StatusCode));
+        _repoMock.Verify(r => r.AdicionarAsync(It.IsAny<Categoria>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ListarAgrupadasAsync_CategoriaLegadaAjusteDeSaldo_NaoApareceNoSeletor()
+    {
+        var grupo = Grupo("Outras", Blocos.DespesasOperacionais);
+        _repoMock.Setup(r => r.ListarAtivasPorClienteAsync(_clienteId)).ReturnsAsync(new List<Categoria>
+        {
+            new() { Id = Guid.NewGuid(), Nome = "Ajuste de saldo", Tipo = "CustoFixo", TipoMovimento = "Ambos", Grupo = grupo, GrupoId = grupo.Id, Ativa = true },
+            new() { Id = Guid.NewGuid(), Nome = "Aluguel", Tipo = "CustoFixo", TipoMovimento = "Saida", Grupo = grupo, GrupoId = grupo.Id, Ativa = true },
+        });
+
+        var resultado = await _sut.ListarAgrupadasAsync(_clienteId);
+
+        Assert.DoesNotContain(resultado.Saidas.Concat(resultado.Entradas), c => c.Nome == "Ajuste de saldo");
+        Assert.Contains(resultado.Saidas, c => c.Nome == "Aluguel");
+    }
+
+    [Fact]
     public async Task CriarAsync_DerivaTipoDoBlocoDoGrupo_NaoDoInputDoUsuario()
     {
         var grupo = Grupo("Imobilizado", Blocos.AtividadesDeInvestimento);

@@ -1,0 +1,113 @@
+/* Money Vision — conciliação de saldo com o banco (status, linha do tempo, diagnóstico). */
+.conc-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--tx2);
+  margin: 8px 0;
+}
+
+.conc-status--compacto {
+  font-size: 11px;
+  margin: 6px 0 0;
+  gap: 2px;
+}
+
+.conc-status-linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.conc-ok { color: var(--success, #34c759); }
+.conc-alerta { color: var(--danger, #ff6b6b); }
+.conc-aviso { color: var(--warning, #ff9500); }
+.conc-dica { font-size: 12px; color: var(--tx3); }
+
+.conc-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.conc-link:disabled { opacity: .5; cursor: default; }
+
+.conc-timeline {
+  margin: 8px 0 12px;
+  font-size: 12px;
+  color: var(--tx2);
+}
+
+.conc-timeline summary { cursor: pointer; font-weight: 600; }
+
+.conc-timeline-legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 8px 0;
+  color: var(--tx3);
+}
+
+.conc-timeline-legenda .conc-dia { display: inline-block; vertical-align: middle; }
+
+.conc-timeline-mes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.conc-timeline-rotulo { width: 64px; flex-shrink: 0; color: var(--tx3); }
+
+.conc-timeline-dias {
+  display: grid;
+  grid-template-columns: repeat(31, minmax(0, 1fr));
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.conc-dia {
+  height: 14px;
+  min-width: 6px;
+  border-radius: 3px;
+  border: none;
+  padding: 0;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.conc-dia--coberto { background: var(--accent); color: #fff; }
+.conc-dia--lacuna { background: var(--bd); cursor: pointer; }
+.conc-dia--lacuna:hover { outline: 1px solid var(--tx3); }
+.conc-dia--futuro { background: transparent; }
+
+.conc-diag-destaque {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 10px 0;
+}
+
+.conc-diag-secao { margin: 12px 0; }
+.conc-diag-secao h4 { font-size: 13px; margin: 0 0 6px; }
+.conc-diag-secao ul, .conc-diag-destaque ul { list-style: none; margin: 6px 0; padding: 0; }
+.conc-diag-grupo { border-left: 2px solid var(--bd); padding-left: 8px !important; }
+
+.conc-diag-linha {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 10px;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--bd);
+}

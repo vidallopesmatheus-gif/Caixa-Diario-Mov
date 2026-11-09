@@ -9,6 +9,7 @@ import { calcularJanelaPeriodo } from '../../utils/periodo'
 import type { PeriodoOpcao } from '../../utils/periodo'
 import { obterMeta, salvarMeta, listarMetas, excluirMeta, desfazerConquistaMeta } from '../../api/metas'
 import ConquistarMetaModal from './dashboard/ConquistarMetaModal'
+import AndamentoConquistaResumo from './dashboard/AndamentoConquistaResumo'
 import { calcularRitmoMeta } from '../../utils/metaRitmo'
 import { obterSelicAtual } from '../../api/selic'
 import { listarContasBancarias } from '../../api/contasBancarias'
@@ -1126,7 +1127,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                     </span>
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--tx2)', marginTop: 6 }}>
-                    Planejado: {fmtBRL(m.valorSonho)} · Pago: {fmtBRL(m.valorPago ?? 0)}
+                    Planejado {fmtBRL(m.valorSonho)} · saiu por {fmtBRL(m.valorPago ?? 0)}
                     {' · '}
                     <span style={{ color: diferenca <= 0 ? '#34c759' : '#ff9500' }}>
                       {diferenca <= 0 ? `economia de ${fmtBRL(Math.abs(diferenca))}` : `${fmtBRL(diferenca)} a mais`}
@@ -1134,6 +1135,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
                     {mesesAteConquistar !== null && <> · {mesesAteConquistar} mês(es) até conquistar</>}
                     {m.formaPagamento && <> · {m.formaPagamento}</>}
                   </div>
+                  {m.andamento && <AndamentoConquistaResumo andamento={m.andamento} />}
                   <button
                     type="button"
                     onClick={() => handleDesfazerConquista(m)}

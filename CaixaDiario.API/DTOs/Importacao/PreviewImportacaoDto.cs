@@ -32,4 +32,31 @@ public class PreviewImportacaoDto
     public List<DuplicataManualDto> DuplicatasManuais { get; set; } = new();
     // Só informativo — sempre importa, mesmo sem decisão do usuário (ver ConciliacaoService).
     public List<DuplicataEntreArquivosDto> DuplicatasEntreArquivos { get; set; } = new();
+
+    // Money Vision ("importação com período sobreposto"): "Arquivo: 01/10 a 07/11 · já havia no
+    // app: 01/10 a 15/10 · novos dias: 16/10 a 07/11".
+    public CoberturaImportacaoDto Cobertura { get; set; } = new();
+    // Lançamentos importados antes, dentro do período do arquivo, que NÃO aparecem no extrato novo
+    // (estornados ou duplicados) — o usuário decide manter ou excluir (ImportarArquivoAsync).
+    public List<CaixaDiario.API.DTOs.ConciliacaoSaldo.LinhaDiagnosticoDto> AusentesNoArquivo { get; set; } = new();
+    // Saldo que o próprio arquivo informa (OFX <LEDGERBAL>, ou coluna "Saldo") — sem ele, a tela
+    // pergunta "Saldo no banco em <data> (opcional)".
+    public SaldoBancoArquivoDto? SaldoBancoArquivo { get; set; }
+}
+
+public class CoberturaImportacaoDto
+{
+    public DateOnly ArquivoDe { get; set; }
+    public DateOnly ArquivoAte { get; set; }
+    public DateOnly? JaHaviaDe { get; set; }
+    public DateOnly? JaHaviaAte { get; set; }
+    public DateOnly? NovosDiasDe { get; set; }
+    public DateOnly? NovosDiasAte { get; set; }
+    public int QuantidadeDiasNovos { get; set; }
+}
+
+public class SaldoBancoArquivoDto
+{
+    public DateOnly Data { get; set; }
+    public decimal Saldo { get; set; }
 }

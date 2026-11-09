@@ -27,7 +27,8 @@ public class ProjecaoService : IProjecaoService
             : registros.Where(r => r.ContaBancariaId == contaBancariaId).ToList();
 
         var contasExcluidasDoSaldo = ObterContasExcluidasDoSaldo(consolidado, opcoes);
-        var saldoAtual = CalcularSaldoConsolidado(registros, registrosFiltrados, consolidado, contasExcluidasDoSaldo);
+        // Mesmo número do card (todas as datas, inclusive dias futuros já materializados).
+        var saldoAtual = SaldoAte(registros, opcoes.Contas, consolidado ? null : contaBancariaId, contasExcluidasDoSaldo, DateOnly.MaxValue);
 
         var fatorReceita = opcoes.Cenario == "Conservador" ? FatorReceitaConservador : 1m;
         var fatorDespesa = opcoes.Cenario == "Conservador" ? FatorDespesaConservador : 1m;
@@ -233,16 +234,8 @@ public class ProjecaoService : IProjecaoService
         // Item 5: a exclusão de reserva/cartão vale pro histórico TAMBÉM, não só pra projeção —
         // senão o gráfico "pula" exatamente em "hoje", quando a projeção passa a ignorar um saldo
         // que o histórico vinha contando até ali.
-        decimal SaldoConsolidadoAte(DateOnly ateData)
-        {
-            var relevantes = registrosFiltrados.Where(r => r.Data <= ateData).ToList();
-            if (!consolidado)
-                return relevantes.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0m;
-            return relevantes
-                .Where(r => r.ContaBancariaId.HasValue && !contasExcluidasDoSaldo.Contains(r.ContaBancariaId.Value))
-                .GroupBy(r => r.ContaBancariaId)
-                .Sum(g => g.OrderByDescending(r => r.Data).First().SaldoFinal);
-        }
+        decimal SaldoConsolidadoAte(DateOnly ateData) =>
+            SaldoAte(registros, opcoes.Contas, consolidado ? null : contaBancariaId, contasExcluidasDoSaldo, ateData);
 
         var saldoAtual = SaldoConsolidadoAte(hoje);
         var fatorReceita = opcoes.Cenario == "Conservador" ? FatorReceitaConservador : 1m;
@@ -466,17 +459,30 @@ public class ProjecaoService : IProjecaoService
             .ToHashSet();
     }
 
-    private static decimal CalcularSaldoConsolidado(
-        List<RegistroDiario> registros, List<RegistroDiario> registrosFiltrados, bool consolidado, HashSet<Guid> contasExcluidas)
+    // Saldo pela função única do card/extrato (SaldoEncadeamento), conta a conta. Conta sem
+    // cadastro na lista (dado legado/testes) cai no último SaldoFinal gravado, como antes.
+    private static decimal SaldoAte(
+        List<RegistroDiario> registros, List<ContaBancaria> contas, Guid? contaUnica, HashSet<Guid> contasExcluidas, DateOnly ate)
     {
-        if (!consolidado)
-            return registrosFiltrados.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0m;
+        var porConta = registros.Where(r => r.ContaBancariaId.HasValue && !r.Excluido && r.Data <= ate)
+            .GroupBy(r => r.ContaBancariaId!.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
+        var ids = contaUnica.HasValue
+            ? new List<Guid> { contaUnica.Value }
+            : porConta.Keys.Union(contas.Select(c => c.Id)).Where(id => !contasExcluidas.Contains(id)).ToList();
 
-        return registros
-            .Where(r => r.ContaBancariaId.HasValue && !contasExcluidas.Contains(r.ContaBancariaId.Value))
-            .GroupBy(r => r.ContaBancariaId)
-            .Sum(g => g.OrderByDescending(r => r.Data).First().SaldoFinal);
+        var total = 0m;
+        foreach (var id in ids)
+        {
+            var doDia = porConta.GetValueOrDefault(id) ?? new List<RegistroDiario>();
+            var conta = contas.FirstOrDefault(c => c.Id == id);
+            total += conta != null
+                ? SaldoEncadeamento.SaldoNoFimDe(conta, doDia, ate)
+                : doDia.OrderByDescending(r => r.Data).FirstOrDefault()?.SaldoFinal ?? 0m;
+        }
+        return total;
     }
+
 
     // Item 4: faturas de cartão em aberto ou fechadas (ainda não totalmente pagas) de cada conta
     // CartaoCredito do cliente, indexadas pela data de vencimento — mesmo cálculo de competência/

@@ -224,8 +224,14 @@ public class MetricasService : IMetricasService
     {
         // Transferências entre contas e rendimento de investimento não são receita/despesa —
         // ficam de fora do DRE (continuam visíveis no extrato/Caixa, só não entram no resultado).
-        var saidasOperacionais = registros.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto)).ToList();
-        var entradasOperacionais = registros.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto)).ToList();
+        // Ajuste de conciliação também sai por categoria/descrição: um lançamento antigo pode ter tido
+        // o TipoCusto sobrescrito antes da migração (ver RecalculoSaldoService.MigrarAjustesConciliacaoAsync).
+        var saidasOperacionais = registros.SelectMany(r => r.Saidas)
+            .Where(s => LancamentoFiltro.EhOperacional(s.TipoCusto) && !LancamentoFiltro.PareceAjusteConciliacao(s.TipoCusto, s.Categoria, s.Descricao)).ToList();
+        var entradasOperacionais = registros.SelectMany(r => r.Entradas)
+            .Where(e => LancamentoFiltro.EhOperacional(e.TipoCusto) && !LancamentoFiltro.PareceAjusteConciliacao(e.TipoCusto, e.Categoria, e.Descricao)).ToList();
+        var ajustesEntrada = registros.SelectMany(r => r.Entradas).Where(e => LancamentoFiltro.PareceAjusteConciliacao(e.TipoCusto, e.Categoria, e.Descricao)).ToList();
+        var ajustesSaida = registros.SelectMany(r => r.Saidas).Where(s => LancamentoFiltro.PareceAjusteConciliacao(s.TipoCusto, s.Categoria, s.Descricao)).ToList();
         // Entrada sem categoria (ainda pendente de classificação) não é receita confirmada — fica de
         // fora da Receita Bruta e entra, negativa, dentro de Despesas Operacionais (valor líquido
         // junto com as saídas sem categoria — ver "Não Classificado" abaixo). Sem isso esse dinheiro
@@ -463,6 +469,8 @@ public class MetricasService : IMetricasService
             RetiradasSocios = retiradasSocios,
             ResultadoLiquido = resultadoLiquido,
             ResultadoLiquidoPercentual = Percentual(resultadoLiquido),
+            AjustesConciliacao = ajustesEntrada.Sum(e => e.Valor) - ajustesSaida.Sum(s => s.Valor),
+            QuantidadeAjustesConciliacao = ajustesEntrada.Count + ajustesSaida.Count,
             Blocos = blocos,
         };
     }

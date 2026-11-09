@@ -1475,11 +1475,11 @@ public class ImportacaoServiceTests
         var clienteId = Guid.NewGuid();
         var data = new DateOnly(2026, 7, 20);
         var itemId = Guid.NewGuid();
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 1000m));
 
         var registro = new RegistroDiario
         {
-            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 1000m,
             Entradas = new(),
             Saidas = new() { new() { Id = itemId, Descricao = "Posto", Valor = 150m, Categoria = "Manutenção" } },
             ContasReceber = new(), ContasPagar = new(),
@@ -1509,11 +1509,11 @@ public class ImportacaoServiceTests
         var clienteId = Guid.NewGuid();
         var data = new DateOnly(2026, 7, 20);
         var itemId = Guid.NewGuid();
-        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 1000m));
 
         var registro = new RegistroDiario
         {
-            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 1000m,
             Entradas = new() { new() { Id = itemId, Descricao = "Venda balcão", Valor = 300m } },
             Saidas = new(),
             ContasReceber = new(), ContasPagar = new(),

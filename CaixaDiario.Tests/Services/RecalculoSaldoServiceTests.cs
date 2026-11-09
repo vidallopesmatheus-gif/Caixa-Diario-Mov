@@ -22,10 +22,14 @@ public class RecalculoSaldoServiceTests
         SaldoInicial = saldoInicial, Ativa = true, DataCriacao = DateTime.UtcNow,
     };
 
-    private static RegistroDiario CriarRegistro(Guid contaId, Guid clienteId, DateOnly data, decimal inicio, decimal saldoFinal) => new()
+    // Efeito real do dia (SaldoEncadeamento) vem de uma entrada/saída de mesmo valor — o recálculo
+    // usa os lançamentos do dia, nunca o "SaldoFinal − Inicio" gravado.
+    private static RegistroDiario CriarRegistro(Guid contaId, Guid clienteId, DateOnly data, decimal inicio, decimal saldoFinal, decimal efeito) => new()
     {
         Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data,
-        Inicio = inicio, SaldoFinal = saldoFinal, Entradas = new(), Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        Inicio = inicio, SaldoFinal = saldoFinal, ContasReceber = new(), ContasPagar = new(),
+        Entradas = efeito > 0 ? new() { new() { Descricao = "Entrada", Valor = efeito } } : new(),
+        Saidas = efeito < 0 ? new() { new() { Descricao = "Saída", Valor = -efeito } } : new(),
     };
 
     [Fact]
@@ -34,8 +38,8 @@ public class RecalculoSaldoServiceTests
         var conta = CriarConta(saldoInicial: 1000m);
         // 18/10 fecha em 816,72 mas 19/10 abre arrastando um Inicio velho de 132,66 — exatamente o
         // bug real relatado (Nubank).
-        var dia1 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 18), 1000m, 816.72m);
-        var dia2 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 19), 132.66m, -575.12m);
+        var dia1 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 18), 1000m, 816.72m, -183.28m);
+        var dia2 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 19), 132.66m, -575.12m, -707.78m);
         _contaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaBancaria> { conta });
         _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario> { dia1, dia2 });
 
@@ -47,8 +51,8 @@ public class RecalculoSaldoServiceTests
         Assert.Equal(conta.Id, item.ContaBancariaId);
         Assert.Equal(new DateOnly(2026, 10, 19), item.PrimeiraDataDivergente);
         Assert.Equal(-575.12m, item.SaldoAtualAntes);
-        // -575,12 (dia2 antes da cascata) tinha delta local de -707,78 (−575,12 − 132,66); com o
-        // Inicio corrigido (816,72), o saldo final correto é 816,72 − 707,78 = 108,94.
+        // dia2 tem saída de 707,78; com o Inicio corrigido (816,72, o saldo final de 18/10),
+        // o saldo final correto é 816,72 − 707,78 = 108,94.
         Assert.Equal(108.94m, item.SaldoAtualDepois);
 
         // Nada foi gravado.
@@ -61,8 +65,8 @@ public class RecalculoSaldoServiceTests
     public async Task RecalcularTodasAsContasAsync_ComConfirmar_CorrigeACadeiaDeVerdade()
     {
         var conta = CriarConta(saldoInicial: 1000m);
-        var dia1 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 18), 1000m, 816.72m);
-        var dia2 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 19), 132.66m, -575.12m);
+        var dia1 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 18), 1000m, 816.72m, -183.28m);
+        var dia2 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 19), 132.66m, -575.12m, -707.78m);
         _contaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaBancaria> { conta });
         _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario> { dia1, dia2 });
         _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
@@ -81,7 +85,7 @@ public class RecalculoSaldoServiceTests
     public async Task RecalcularTodasAsContasAsync_ContaSemDivergencia_NaoEntraNoRelatorio()
     {
         var conta = CriarConta(saldoInicial: 500m);
-        var dia1 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 18), 500m, 700m);
+        var dia1 = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 18), 500m, 700m, 200m);
         _contaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaBancaria> { conta });
         _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario> { dia1 });
 
@@ -89,6 +93,41 @@ public class RecalculoSaldoServiceTests
 
         Assert.Equal(0, resultado.ContasComDivergencia);
         Assert.Empty(resultado.Itens);
+    }
+
+    [Fact]
+    public async Task MigrarAjustesConciliacaoAsync_ComConfirmar_ConverteAjustesAntigosEMantemOResto()
+    {
+        var conta = CriarConta(saldoInicial: 0m);
+        var dia = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 18), 0m, 0m, 0m);
+        dia.Entradas.Add(new ItemFinanceiro { Descricao = "Ajuste de saldo", Valor = 684.06m, Categoria = "Receitas diversas", TipoCusto = "Receita" });
+        dia.Saidas.Add(new ItemFinanceiroSaida { Descricao = "saldo", Valor = 10m, Categoria = "Devoluções", TipoCusto = LancamentoFiltro.TipoAjusteSaldo });
+        dia.Saidas.Add(new ItemFinanceiroSaida { Descricao = "Aluguel", Valor = 500m, Categoria = "Aluguel", TipoCusto = "CustoFixo" });
+        _contaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaBancaria> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario> { dia });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        var resultado = await _sut.MigrarAjustesConciliacaoAsync(confirmar: true);
+
+        Assert.Equal(2, resultado.LancamentosConvertidos);
+        Assert.Equal(LancamentoFiltro.TipoAjusteConciliacao, dia.Entradas.Single().TipoCusto);
+        Assert.Equal(LancamentoFiltro.TipoAjusteConciliacao, dia.Saidas.Single(s => s.Descricao == "saldo").TipoCusto);
+        Assert.Equal("CustoFixo", dia.Saidas.Single(s => s.Descricao == "Aluguel").TipoCusto);
+    }
+
+    [Fact]
+    public async Task MigrarAjustesConciliacaoAsync_SemConfirmar_SoRelatorio()
+    {
+        var conta = CriarConta();
+        var dia = CriarRegistro(conta.Id, conta.ClienteId, new DateOnly(2026, 10, 18), 0m, 0m, 0m);
+        dia.Entradas.Add(new ItemFinanceiro { Descricao = "Ajuste de saldo", Valor = 50m, Categoria = "Ajuste de saldo", TipoCusto = "Receita" });
+        _contaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaBancaria> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(new List<RegistroDiario> { dia });
+
+        var resultado = await _sut.MigrarAjustesConciliacaoAsync(confirmar: false);
+
+        Assert.Equal(("Receita", 1), (dia.Entradas[0].TipoCusto, resultado.LancamentosConvertidos));
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
     }
 
     [Fact]

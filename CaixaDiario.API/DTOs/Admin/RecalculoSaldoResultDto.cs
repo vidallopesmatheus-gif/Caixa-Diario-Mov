@@ -22,3 +22,23 @@ public class RecalculoSaldoResultDto
     public int ContasComDivergencia { get; set; }
     public List<DivergenciaSaldoContaDto> Itens { get; set; } = new();
 }
+
+// Money Vision ("ajuste mexeu no DRE"): lançamentos de ajuste de saldo antigos (categoria/descrição
+// "Ajuste de saldo" ou tipo legado "AjusteSaldo") que passam pro tipo de sistema AjusteConciliacao.
+public class MigracaoAjustesConciliacaoResultDto
+{
+    public bool Confirmado { get; set; }
+    public int LancamentosConvertidos { get; set; }
+    public List<AjusteConvertidoDto> Itens { get; set; } = new();
+}
+
+public class AjusteConvertidoDto
+{
+    public Guid ClienteId { get; set; }
+    public Guid ContaBancariaId { get; set; }
+    public DateOnly Data { get; set; }
+    public string Descricao { get; set; } = string.Empty;
+    public decimal Valor { get; set; }
+    public string? TipoCustoAnterior { get; set; }
+    public string? CategoriaAnterior { get; set; }
+}

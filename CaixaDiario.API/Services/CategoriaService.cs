@@ -50,7 +50,10 @@ public class CategoriaService : ICategoriaService
 
     public async Task<CategoriasAgrupadasDto> ListarAgrupadasAsync(Guid clienteId)
     {
-        var ativas = await _repo.ListarAtivasPorClienteAsync(clienteId);
+        // Uma categoria legada chamada "Ajuste de saldo" nunca aparece no seletor comum (é do sistema).
+        var ativas = (await _repo.ListarAtivasPorClienteAsync(clienteId))
+            .Where(c => !string.Equals(c.Nome.Trim(), LancamentoFiltro.CategoriaAjusteSaldo, StringComparison.OrdinalIgnoreCase))
+            .ToList();
         return new CategoriasAgrupadasDto
         {
             Entradas = ativas.Where(EhEntrada).Select(MapToItemDto).ToList(),
@@ -70,6 +73,7 @@ public class CategoriaService : ICategoriaService
         VerificarAcesso(clienteId, usuarioLogadoId, perfil);
         var grupo = await ObterGrupoOuFalharAsync(dto.GrupoId);
         var nome = dto.Nome.Trim();
+        GarantirNomeNaoReservado(nome);
         if (await _repo.ObterPorNomeAsync(clienteId, nome) is not null)
             throw new ApiException(409, CodigoRetorno.CATEGORIA_DUPLICADA, "Já existe uma categoria com esse nome.");
 
@@ -101,6 +105,7 @@ public class CategoriaService : ICategoriaService
         var categoria = await ObterDoClienteOuFalharAsync(clienteId, id);
 
         var nome = dto.Nome.Trim();
+        GarantirNomeNaoReservado(nome);
         var existente = await _repo.ObterPorNomeAsync(clienteId, nome);
         if (existente is not null && existente.Id != id)
             throw new ApiException(409, CodigoRetorno.CATEGORIA_DUPLICADA, "Já existe uma categoria com esse nome.");
@@ -161,6 +166,15 @@ public class CategoriaService : ICategoriaService
 
         origem.Ativa = false;
         await _repo.AtualizarAsync(origem);
+    }
+
+    // "Ajuste de saldo" é categoria do sistema (LancamentoFiltro.TipoAjusteConciliacao) — uma
+    // categoria comum com esse nome faria o ajuste voltar a contar como receita/despesa.
+    private static void GarantirNomeNaoReservado(string nome)
+    {
+        if (string.Equals(nome, LancamentoFiltro.CategoriaAjusteSaldo, StringComparison.OrdinalIgnoreCase))
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS,
+                "\"Ajuste de saldo\" é uma categoria do sistema — escolha outro nome.", "nome");
     }
 
     private static void VerificarAcesso(Guid clienteId, Guid usuarioLogadoId, string perfil)
