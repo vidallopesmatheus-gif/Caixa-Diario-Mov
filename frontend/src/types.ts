@@ -366,6 +366,8 @@ export interface ParcelamentoDaMeta {
 
 export interface LoginResponse {
   token: string
+  /** Quando o access token vence (ISO, UTC) — só em memória, nunca salvo no navegador. */
+  expiraEm?: string
   perfil: 'admin' | 'cliente'
   nomeUsuario: string
   nomeCompleto: string
@@ -594,14 +596,29 @@ export interface LinhaDiagnostico {
 
 export interface DiagnosticoDiferenca {
   data: string
-  saldoBanco: number
+  /** Ausentes quando não há saldo do banco informado nesta data — as causas continuam listadas. */
+  saldoBanco?: number
   saldoApp: number
-  diferenca: number
+  diferenca?: number
   analisadoDesde: string
   lacunas: { de: string; ate: string }[]
   duplicatas: { itens: LinhaDiagnostico[]; somaExcedente: number }[]
   sinalSuspeito: LinhaDiagnostico[]
   transferenciasSemPar: LinhaDiagnostico[]
   manuais: LinhaDiagnostico[]
+  /** Ajustes de saldo no período — escondem dado faltando; efeitoSeCorrigir = desfazer. */
+  ajustes: LinhaDiagnostico[]
   combinacao?: { resumo: string; itens: LinhaDiagnostico[] }
+}
+
+/** Ajuste de saldo da conta na tela "Conferir saldo" — confirmar ou desfazer. */
+export interface AjusteSaldo {
+  id: string
+  data: string
+  descricao: string
+  /** Com sinal: entrada positiva, saída negativa. */
+  valor: number
+  saldoDoDiaSemAjuste: number
+  saldoDoDia: number
+  confirmado: boolean
 }

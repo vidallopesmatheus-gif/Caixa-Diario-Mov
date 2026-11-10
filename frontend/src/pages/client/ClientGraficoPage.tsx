@@ -121,7 +121,7 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
   const pctVariavel = custoTotalClassificavel > 0 ? (indicadores.custoVariavel / custoTotalClassificavel) * 100 : 0
   const pctNaoClass = custoTotalClassificavel > 0 ? (indicadores.custoNaoClassificado / custoTotalClassificavel) * 100 : 0
 
-  const leituraMargem = leituraMargemDre(dre.margem)
+  const leituraMargem = leituraMargemDre(dre.resultadoLiquidoPercentual)
 
   let leitura6Meses: string
   let toneLeitura6Meses: MvTone = 'neutral'
@@ -271,22 +271,23 @@ export default function ClientGraficoPage({ clienteIdOverride }: Props) {
 
         <div className="mv-gauge-wrap">
           <MvGauge
-            value={dre.margem ?? 0}
+            value={dre.resultadoLiquidoPercentual ?? 0}
             min={-20} max={40}
             zonas={[{ ate: 0, cor: 'var(--danger)' }, { ate: 10, cor: 'var(--warning)' }, { ate: 40, cor: 'var(--success)' }]}
-            valorFormatado={fmtPct(dre.margem)}
+            valorFormatado={fmtPct(dre.resultadoLiquidoPercentual)}
             legenda="margem líquida"
           />
         </div>
         <p style={{ textAlign: 'center', fontSize: 14, color: 'var(--tx2)', margin: '0 0 18px' }}>
           De cada <strong style={{ color: 'var(--tx1)' }}>R$ 100</strong> que entram, sobram{' '}
-          <strong style={{ color: (dre.margem ?? 0) >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(dre.margem ?? 0)}</strong>.
+          <strong style={{ color: (dre.resultadoLiquidoPercentual ?? 0) >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(dre.resultadoLiquidoPercentual ?? 0)}</strong>.
         </p>
 
         <MvKpiGrid>
           <MvKpi label="Receita do mês" value={dre.receitaBruta} tone="neutral" />
-          <MvKpi label="Custos e despesas" value={dre.totalDespesas} tone="bad" />
-          <MvKpi label="Resultado" value={dre.resultado} tone={dre.resultado >= 0 ? 'good' : 'bad'} />
+          {/* O mesmo Resultado Líquido do DRE — "custos" é o que fecha a conta Receita − Custos = Resultado. */}
+          <MvKpi label="Custos e despesas" value={dre.receitaBruta - dre.resultadoLiquido} tone="bad" />
+          <MvKpi label="Resultado" value={dre.resultadoLiquido} tone={dre.resultadoLiquido >= 0 ? 'good' : 'bad'} />
         </MvKpiGrid>
         <MvInsight text={leituraMargem} tone="neutral" />
 

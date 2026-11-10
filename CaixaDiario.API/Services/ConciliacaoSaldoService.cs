@@ -15,6 +15,9 @@ public interface IConciliacaoSaldoService
     // Uso interno (importação/ajuste) — sem checagem de acesso, quem chama já checou.
     Task<PontoConciliacaoDto> RegistrarPontoAsync(ContaBancaria conta, DateOnly data, decimal saldoBanco, string origem);
     Task<Dictionary<Guid, StatusConciliacaoDto>> ObterStatusPorContaAsync(List<ContaBancaria> contas, List<RegistroDiario> registros);
+    // "Conferir saldo": ajustes da conta pra confirmar (fica) ou desfazer (exclusão comum do lançamento).
+    Task<List<AjusteSaldoDto>> ListarAjustesAsync(Guid contaId, Guid usuarioLogadoId, string perfil);
+    Task ConfirmarAjusteAsync(Guid contaId, Guid lancamentoId, Guid usuarioLogadoId, string perfil);
 }
 
 // Money Vision ("até onde está lançado" + conciliação sem ajuste toda hora). Toda a matemática
@@ -27,11 +30,16 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
     private readonly IPontoConciliacaoRepository _pontoRepo;
     private readonly IPeriodoExtratoRepository _periodoRepo;
     private readonly TimeProvider _timeProvider;
+    private readonly IDuplicataDispensadaRepository? _dispensadaRepo;
+    private readonly ILogger<ConciliacaoSaldoService>? _logger;
 
     public ConciliacaoSaldoService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, ITransacaoImportadaRepository importRepo,
-        IPontoConciliacaoRepository pontoRepo, IPeriodoExtratoRepository periodoRepo, TimeProvider? timeProvider = null)
+        IPontoConciliacaoRepository pontoRepo, IPeriodoExtratoRepository periodoRepo, TimeProvider? timeProvider = null,
+        IDuplicataDispensadaRepository? dispensadaRepo = null, ILogger<ConciliacaoSaldoService>? logger = null)
     {
+        _dispensadaRepo = dispensadaRepo;
+        _logger = logger;
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _importRepo = importRepo;
@@ -63,8 +71,7 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
     {
         var conta = await ObterContaComAcessoAsync(contaId, usuarioLogadoId, perfil);
         var pontos = await _pontoRepo.ListarPorContaAsync(contaId);
-        var saldo = saldoBanco ?? pontos.FirstOrDefault(p => p.Data == data)?.SaldoBanco
-            ?? throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Informe o saldo do banco nesta data.", "saldoBanco");
+        var saldo = saldoBanco ?? pontos.FirstOrDefault(p => p.Data == data)?.SaldoBanco;
 
         var registrosCliente = await _registroRepo.ListarPorClienteAsync(conta.ClienteId);
         var registrosDaConta = registrosCliente.Where(r => r.ContaBancariaId == contaId && !r.Excluido).ToList();
@@ -75,7 +82,10 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
             .ToHashSet();
         var dias = ConciliacaoSaldoCalculo.DiasComExtrato(await _periodoRepo.ListarPorContaAsync(contaId), importadas, registrosDaConta);
 
-        return ConciliacaoSaldoCalculo.Diagnosticar(conta, registrosCliente, pontos, dias, chaves, data, saldo);
+        var paresMantidos = _dispensadaRepo == null ? new HashSet<(Guid, Guid)>()
+            : (await _dispensadaRepo.ListarPorContaAsync(contaId)).Select(d => (d.LancamentoMenorId, d.LancamentoMaiorId)).ToHashSet();
+
+        return ConciliacaoSaldoCalculo.Diagnosticar(conta, registrosCliente, pontos, dias, chaves, data, saldo, paresMantidos);
     }
 
     public async Task<PontoConciliacaoDto> RegistrarSaldoBancoAsync(Guid contaId, RegistrarSaldoBancoDto dto, Guid usuarioLogadoId, string perfil)
@@ -102,15 +112,73 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
         var resultado = new Dictionary<Guid, StatusConciliacaoDto>();
         if (contas.Count == 0) return resultado;
 
-        var pontosDoCliente = await _pontoRepo.ListarPorClienteAsync(contas[0].ClienteId);
+        // A listagem de contas nunca pode cair por causa da conciliação (deploy de 09/11: tabela
+        // nova sem migration → 500 em tudo). Sem os pontos, cada conta sai só sem esse bloco.
+        List<PontoConciliacao> pontosDoCliente;
+        try
+        {
+            pontosDoCliente = await _pontoRepo.ListarPorClienteAsync(contas[0].ClienteId);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Conciliação indisponível para o cliente {ClienteId} — contas listadas sem status.", contas[0].ClienteId);
+            return resultado;
+        }
+
         foreach (var conta in contas)
         {
-            var daConta = registros.Where(r => r.ContaBancariaId == conta.Id && !r.Excluido).ToList();
-            var dias = await DiasComExtratoAsync(conta.Id, daConta);
-            resultado[conta.Id] = ConciliacaoSaldoCalculo.CalcularStatus(
-                conta, daConta, pontosDoCliente.Where(p => p.ContaBancariaId == conta.Id).ToList(), dias, Hoje());
+            try
+            {
+                var daConta = registros.Where(r => r.ContaBancariaId == conta.Id && !r.Excluido).ToList();
+                var dias = await DiasComExtratoAsync(conta.Id, daConta);
+                resultado[conta.Id] = ConciliacaoSaldoCalculo.CalcularStatus(
+                    conta, daConta, pontosDoCliente.Where(p => p.ContaBancariaId == conta.Id).ToList(), dias, Hoje());
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Falha ao calcular a conciliação da conta {ContaId} — conta listada sem status.", conta.Id);
+            }
         }
         return resultado;
+    }
+
+    public async Task<List<AjusteSaldoDto>> ListarAjustesAsync(Guid contaId, Guid usuarioLogadoId, string perfil)
+    {
+        await ObterContaComAcessoAsync(contaId, usuarioLogadoId, perfil);
+        var registros = (await _registroRepo.ListarPorContaAsync(contaId)).Where(r => !r.Excluido).OrderBy(r => r.Data);
+
+        return registros.SelectMany(r =>
+                r.Entradas.Where(e => LancamentoFiltro.PareceAjusteConciliacao(e.TipoCusto, e.Categoria, e.Descricao))
+                    .Select(e => Ajuste(r, e.Id, e.Descricao, e.Valor, e.AjusteConfirmado))
+                .Concat(r.Saidas.Where(s => LancamentoFiltro.PareceAjusteConciliacao(s.TipoCusto, s.Categoria, s.Descricao))
+                    .Select(s => Ajuste(r, s.Id, s.Descricao, -s.Valor, s.AjusteConfirmado))))
+            .ToList();
+
+        static AjusteSaldoDto Ajuste(RegistroDiario r, Guid id, string descricao, decimal valor, bool confirmado) => new()
+        {
+            Id = id, Data = r.Data, Descricao = descricao, Valor = valor,
+            SaldoDoDia = r.SaldoFinal, SaldoDoDiaSemAjuste = r.SaldoFinal - valor, Confirmado = confirmado,
+        };
+    }
+
+    public async Task ConfirmarAjusteAsync(Guid contaId, Guid lancamentoId, Guid usuarioLogadoId, string perfil)
+    {
+        await ObterContaComAcessoAsync(contaId, usuarioLogadoId, perfil);
+        foreach (var r in (await _registroRepo.ListarPorContaAsync(contaId)).Where(r => !r.Excluido))
+        {
+            var entrada = r.Entradas.FirstOrDefault(e => e.Id == lancamentoId && LancamentoFiltro.PareceAjusteConciliacao(e.TipoCusto, e.Categoria, e.Descricao));
+            var saida = r.Saidas.FirstOrDefault(s => s.Id == lancamentoId && LancamentoFiltro.PareceAjusteConciliacao(s.TipoCusto, s.Categoria, s.Descricao));
+            if (entrada == null && saida == null) continue;
+
+            if (entrada != null) entrada.AjusteConfirmado = true;
+            if (saida != null) saida.AjusteConfirmado = true;
+            r.Entradas = new List<ItemFinanceiro>(r.Entradas); // força o EF a detectar a mudança (jsonb)
+            r.Saidas = new List<ItemFinanceiroSaida>(r.Saidas);
+            r.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(r);
+            return;
+        }
+        throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Ajuste de saldo não encontrado nesta conta.");
     }
 
     private async Task<SortedSet<DateOnly>> DiasComExtratoAsync(Guid contaId, List<RegistroDiario> registrosDaConta) =>

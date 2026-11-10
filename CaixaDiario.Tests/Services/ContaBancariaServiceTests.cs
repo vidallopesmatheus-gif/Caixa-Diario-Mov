@@ -477,6 +477,57 @@ public class ContaBancariaServiceTests
         Assert.Equal(CodigoRetorno.ACESSO_NEGADO, ex.Codigo);
     }
 
+    // Deploy de 09/11 ("Banco: Contas ativas 0"): a listagem tem que sair para conta sem nenhum
+    // lançamento, conta sem ponto de conciliação e cartão — os campos novos ficam nulos.
+    [Fact]
+    public async Task ListarPorClienteAsync_ContaVaziaContaSemPontoECartao_ListaAsTresComCamposNovosNulos()
+    {
+        var clienteId = Guid.NewGuid();
+        var vazia = CriarConta(Guid.NewGuid(), clienteId);
+        var semPonto = CriarConta(Guid.NewGuid(), clienteId);
+        var cartao = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = clienteId, Nome = "Cartão", Tipo = "CartaoCredito", Ativa = true, DiaFechamento = 1, DiaVencimento = 10 };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = semPonto.Id, Data = new DateOnly(2026, 11, 3),
+            Inicio = 1000m, SaldoFinal = 1100m, Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+            Entradas = new() { new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Venda", Valor = 100m } },
+        };
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { vazia, semPonto, cartao });
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        var pontoRepo = new Mock<IPontoConciliacaoRepository>();
+        pontoRepo.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<PontoConciliacao>());
+        var periodoRepo = new Mock<IPeriodoExtratoRepository>();
+        periodoRepo.Setup(r => r.ListarPorContaAsync(It.IsAny<Guid>())).ReturnsAsync(new List<PeriodoExtrato>());
+        var conciliacao = new ConciliacaoSaldoService(_contaRepoMock.Object, _registroRepoMock.Object, _transacaoImportadaRepoMock.Object, pontoRepo.Object, periodoRepo.Object);
+        var sut = CriarSutCom(conciliacao);
+
+        var contas = await sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
+
+        Assert.Equal(3, contas.Count);
+        Assert.All(contas, c => Assert.Null(c.Conciliacao!.UltimoPonto));
+        Assert.All(contas, c => Assert.Null(c.Conciliacao!.ExtratoAte));
+    }
+
+    [Fact]
+    public async Task ListarPorClienteAsync_ConciliacaoQuebra_ListaAsContasSemStatus()
+    {
+        var clienteId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<ContaBancaria> { CriarConta(Guid.NewGuid(), clienteId) });
+        var conciliacao = new Mock<IConciliacaoSaldoService>();
+        conciliacao.Setup(c => c.ObterStatusPorContaAsync(It.IsAny<List<ContaBancaria>>(), It.IsAny<List<RegistroDiario>>()))
+            .ThrowsAsync(new InvalidOperationException("relation \"pontos_conciliacao\" does not exist"));
+        var sut = CriarSutCom(conciliacao.Object);
+
+        var contas = await sut.ListarPorClienteAsync(clienteId, clienteId, "cliente");
+
+        Assert.Null(Assert.Single(contas).Conciliacao);
+    }
+
+    private ContaBancariaService CriarSutCom(IConciliacaoSaldoService conciliacao) => new(
+        _contaRepoMock.Object, _registroRepoMock.Object, _metaRepoMock.Object,
+        _transferenciaRepoMock.Object, _transacaoImportadaRepoMock.Object, _contaRecorrenteRepoMock.Object,
+        _faturaRepoMock.Object, _pagamentoFaturaRepoMock.Object, conciliacao);
+
     [Fact]
     public async Task ObterPorIdAsync_ComContaInexistente_LancaNaoEncontrado()
     {

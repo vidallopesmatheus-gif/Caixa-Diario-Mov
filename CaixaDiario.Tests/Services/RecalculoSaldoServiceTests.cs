@@ -141,4 +141,84 @@ public class RecalculoSaldoServiceTests
 
         Assert.Empty(resultado.Itens);
     }
+
+    // ── ConsolidarAjustesAsync (Money Vision: "ajustes da migração que o usuário não entende") ──
+
+    private static RegistroDiario Dia(ContaBancaria conta, DateOnly data, params (string Descricao, decimal Valor, string? TipoCusto)[] itens) => new()
+    {
+        Id = Guid.NewGuid(), ClienteId = conta.ClienteId, ContaBancariaId = conta.Id, Data = data, ContasReceber = new(), ContasPagar = new(),
+        Entradas = itens.Where(i => i.Valor > 0).Select(i => new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = i.Descricao, Valor = i.Valor, TipoCusto = i.TipoCusto }).ToList(),
+        Saidas = itens.Where(i => i.Valor < 0).Select(i => new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = i.Descricao, Valor = -i.Valor, TipoCusto = i.TipoCusto }).ToList(),
+    };
+
+    private List<RegistroDiario> ConfigurarConta(ContaBancaria conta, params RegistroDiario[] dias)
+    {
+        SaldoEncadeamento.Encadear(conta.SaldoInicial, dias);
+        _contaRepoMock.Setup(r => r.ListarTodasAsync()).ReturnsAsync(new List<ContaBancaria> { conta });
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(conta.Id)).ReturnsAsync(dias.ToList());
+        return dias.ToList();
+    }
+
+    [Fact]
+    public async Task ConsolidarAjustesAsync_ParQueZeraEReabreAConta_ViraUmAjusteLiquidoSemMudarOSaldo()
+    {
+        var conta = CriarConta(saldoInicial: 3895.76m);
+        var dias = ConfigurarConta(conta,
+            Dia(conta, new DateOnly(2026, 9, 30), ("saldo", -3895.76m, "AjusteSaldo")),
+            Dia(conta, new DateOnly(2026, 10, 1), ("saldo", 132.66m, "AjusteSaldo"), ("Venda", 50m, "Receita")));
+
+        var resultado = await _sut.ConsolidarAjustesAsync(confirmar: true);
+
+        var item = Assert.Single(resultado.Itens);
+        Assert.Equal(("Consolidar", -3763.10m), (item.Acao, item.ValorFinal!.Value));
+        var ajuste = Assert.Single(dias[0].Saidas);
+        Assert.Equal(3763.10m, ajuste.Valor);
+        Assert.Equal("Ajuste automático da migração — saldo informado anteriormente em 01/10 era R$ 182,66", ajuste.Descricao);
+        Assert.Equal(LancamentoFiltro.TipoAjusteConciliacao, ajuste.TipoCusto);
+        Assert.DoesNotContain(dias[1].Entradas, e => e.Descricao == "saldo");
+        Assert.Equal((182.66m, 182.66m), (item.SaldoAtualAntes, dias[1].SaldoFinal));
+    }
+
+    [Fact]
+    public async Task ConsolidarAjustesAsync_ParQueSeAnula_RemoveOsDois()
+    {
+        var conta = CriarConta(saldoInicial: 1022.30m);
+        var dias = ConfigurarConta(conta,
+            Dia(conta, new DateOnly(2026, 9, 30), ("saldo", -1022.30m, "AjusteSaldo")),
+            Dia(conta, new DateOnly(2026, 10, 1), ("saldo", 1022.30m, "AjusteSaldo")));
+
+        var resultado = await _sut.ConsolidarAjustesAsync(confirmar: true);
+
+        Assert.Equal("RemoverPar", Assert.Single(resultado.Itens).Acao);
+        Assert.All(dias, d => Assert.Empty(d.Entradas.Concat<object>(d.Saidas)));
+        Assert.Equal(1022.30m, dias[1].SaldoFinal);
+    }
+
+    [Fact]
+    public async Task ConsolidarAjustesAsync_SemConfirmar_SoRelatorioNadaMudaNemEmMemoria()
+    {
+        var conta = CriarConta(saldoInicial: 1022.30m);
+        var dias = ConfigurarConta(conta,
+            Dia(conta, new DateOnly(2026, 9, 30), ("saldo", -1022.30m, "AjusteSaldo")),
+            Dia(conta, new DateOnly(2026, 10, 1), ("saldo", 1022.30m, "AjusteSaldo")));
+
+        var resultado = await _sut.ConsolidarAjustesAsync(confirmar: false);
+
+        Assert.Single(resultado.Itens);
+        Assert.Single(dias[0].Saidas);
+        Assert.Single(dias[1].Entradas);
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ConsolidarAjustesAsync_AjusteSoltoLancadoPeloUsuario_FicaComoEsta()
+    {
+        var conta = CriarConta();
+        ConfigurarConta(conta, Dia(conta, new DateOnly(2026, 11, 7), ("Ajuste de saldo", 11809.52m, LancamentoFiltro.TipoAjusteConciliacao)));
+
+        var resultado = await _sut.ConsolidarAjustesAsync(confirmar: true);
+
+        Assert.Empty(resultado.Itens);
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
 }

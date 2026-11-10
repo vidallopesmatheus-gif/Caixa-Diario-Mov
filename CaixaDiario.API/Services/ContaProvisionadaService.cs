@@ -153,6 +153,7 @@ public class ContaProvisionadaService : IContaProvisionadaService
             // riscado quando o valor de fato pago/recebido era diferente do provisionado.
             if (!dto.ValorRealizado.HasValue)
                 item.ValorRealizado = BuscarValorDoLancamento(registros, dto.LancamentoVinculadoId.Value, ehReceber);
+            if (ehReceber) await HerdarCategoriaDaContaAReceberAsync(registros, dto.LancamentoVinculadoId.Value, item.Categoria);
             return;
         }
 
@@ -220,6 +221,29 @@ public class ContaProvisionadaService : IContaProvisionadaService
         item.ValorRealizado = null;
         item.LancamentoVinculadoId = null;
         item.LancamentoCriadoPelaBaixa = false;
+    }
+
+    // Money Vision ("Flavia +2.000 sem categoria"): o recebimento importado que dá baixa numa conta a
+    // receber assume a categoria dela (ex.: Serviços Prestados) — sem isso ficava "a classificar" no
+    // DRE. Nunca sobrescreve uma categoria que o lançamento já tenha.
+    private async Task HerdarCategoriaDaContaAReceberAsync(List<RegistroDiario> registros, Guid lancamentoId, string? categoria)
+    {
+        if (string.IsNullOrWhiteSpace(categoria)) return;
+        foreach (var r in registros)
+        {
+            var entrada = r.Entradas.FirstOrDefault(e => e.Id == lancamentoId);
+            if (entrada == null) continue;
+            if (!string.IsNullOrWhiteSpace(entrada.Categoria)) return;
+
+            entrada.Categoria = categoria;
+            entrada.TipoCusto = "Receita";
+            entrada.PendenteCategorizacao = false;
+            entrada.CategoriaSugerida = false;
+            r.Entradas = new List<ItemFinanceiro>(r.Entradas); // força o EF a detectar a mudança (jsonb)
+            r.SalvoEm = DateTime.UtcNow;
+            await _registroRepo.AtualizarAsync(r);
+            return;
+        }
     }
 
     private static decimal? BuscarValorDoLancamento(List<RegistroDiario> registros, Guid lancamentoId, bool ehReceber)

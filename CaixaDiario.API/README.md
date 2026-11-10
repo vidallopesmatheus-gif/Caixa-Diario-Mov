@@ -36,7 +36,8 @@ cd CaixaDiario.API
     "SecretKey": "<chave-secreta-minimo-32-caracteres>",
     "Issuer": "CaixaDiario",
     "Audience": "CaixaDiario",
-    "ExpiresInHours": "24"
+    "AccessTokenMinutes": "30",
+    "RefreshTokenDays": "14"
   },
   "Cors": {
     "AllowedOrigins": "http://localhost:5500,http://127.0.0.1:5500"
@@ -50,6 +51,8 @@ Salvar como `appsettings.Development.json` na raiz de `CaixaDiario.API/` (este a
 ```bash
 dotnet ef database update
 ```
+
+Em produção (qualquer ambiente que não seja `Development`) a API também aplica sozinha, no start, qualquer migration pendente — antes de aceitar requisições, com log de cada uma (`Aplicando N migration(s) pendente(s): ...`). Se a migration falhar, o processo não sobe. Em `Development` isso fica desligado (o `.env` local pode apontar para o banco de produção); `Database__AplicarMigracoesNoStart=true|false` força um ou outro.
 
 **4. Inserir o usuário admin** (no SQL Editor do Supabase):
 
@@ -80,7 +83,8 @@ A API estará disponível em `http://localhost:5131`.
 | `Jwt__SecretKey` | Chave secreta para assinar tokens JWT (mínimo 32 chars) | `minha-chave-super-secreta-32chars` |
 | `Jwt__Issuer` | Emissor do token JWT | `CaixaDiario` |
 | `Jwt__Audience` | Audiência do token JWT | `CaixaDiario` |
-| `Jwt__ExpiresInHours` | Validade do token em horas | `24` |
+| `Jwt__AccessTokenMinutes` | Validade do access token (JWT) em minutos — a sessão é renovada sozinha pelo refresh token | `30` |
+| `Jwt__RefreshTokenDays` | Validade do refresh token (cookie HttpOnly), renovada a cada uso | `14` |
 | `Cors__AllowedOrigins` | URLs do frontend separadas por vírgula | `https://meusite.com` |
 
 ---

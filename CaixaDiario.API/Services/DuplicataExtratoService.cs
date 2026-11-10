@@ -37,10 +37,10 @@ public class DuplicataExtratoService : IDuplicataExtratoService
         var registros = (await _registroRepo.ListarPorContaAsync(contaBancariaId)).Where(r => !r.Excluido).ToList();
 
         var entradas = registros
-            .SelectMany(r => r.Entradas.Where(EhCandidata).Select(e => new Item(r.Data, e.Id, e.Descricao, e.Valor)))
+            .SelectMany(r => r.Entradas.Where(EhCandidata).Select(e => new Item(r.Data, e.Id, e.Descricao, e.Valor, e.FitId)))
             .ToList();
         var saidas = registros
-            .SelectMany(r => r.Saidas.Where(EhCandidata).Select(s => new Item(r.Data, s.Id, s.Descricao, s.Valor)))
+            .SelectMany(r => r.Saidas.Where(EhCandidata).Select(s => new Item(r.Data, s.Id, s.Descricao, s.Valor, s.FitId)))
             .ToList();
 
         var resultado = new List<DuplicataProvavelDto>();
@@ -88,10 +88,13 @@ public class DuplicataExtratoService : IDuplicataExtratoService
 
     // Transferências nunca entram: as duas pontas já têm par vinculado de verdade (TransferenciaId)
     // e vivem em contas/sentidos diferentes — nunca são a mesma transação duplicada na MESMA conta.
+    // Ajuste de saldo também não: não é transação do banco, é acerto (ver Conferir saldo).
     private static bool EhCandidata(ItemFinanceiro e) =>
-        e.Id != Guid.Empty && e.TransferenciaId == null && e.TipoCusto != "Transferencia" && !e.Provisoria;
+        e.Id != Guid.Empty && e.TransferenciaId == null && e.TipoCusto != "Transferencia" && !e.Provisoria
+        && !LancamentoFiltro.EhAjusteConciliacao(e.TipoCusto);
     private static bool EhCandidata(ItemFinanceiroSaida s) =>
-        s.Id != Guid.Empty && s.TransferenciaId == null && s.TipoCusto != "Transferencia" && !s.Provisoria;
+        s.Id != Guid.Empty && s.TransferenciaId == null && s.TipoCusto != "Transferencia" && !s.Provisoria
+        && !LancamentoFiltro.EhAjusteConciliacao(s.TipoCusto);
 
     // Pool em memória: cada lançamento só pode aparecer em UM par (o de maior score), pra não
     // sugerir o mesmo item pra duas suspeitas diferentes.
@@ -114,6 +117,9 @@ public class DuplicataExtratoService : IDuplicataExtratoService
                 var b = ordenados[j];
                 if (b.Data.DayNumber - a.Data.DayNumber > JanelaDias) break;
                 if (Math.Abs(a.Valor - b.Valor) > ToleranciaValor) continue;
+                // FITIDs diferentes: o próprio banco diz que são dois lançamentos (ex.: dois Pix
+                // iguais no mesmo dia) — nunca sugerir.
+                if (a.FitId != null && b.FitId != null && a.FitId != b.FitId) continue;
 
                 var score = CalcularScoreDescricao(a.Descricao, b.Descricao);
                 if (score < ScoreMinimo) continue;
@@ -159,5 +165,5 @@ public class DuplicataExtratoService : IDuplicataExtratoService
             .Where(t => t.Length >= 3)
             .ToHashSet();
 
-    private sealed record Item(DateOnly Data, Guid Id, string Descricao, decimal Valor);
+    private sealed record Item(DateOnly Data, Guid Id, string Descricao, decimal Valor, string? FitId);
 }

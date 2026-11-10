@@ -20,13 +20,15 @@ public class ContaBancariaService : IContaBancariaService
     private readonly IFaturaRepository _faturaRepo;
     private readonly IPagamentoFaturaRepository _pagamentoFaturaRepo;
     private readonly IConciliacaoSaldoService? _conciliacaoSaldo;
+    private readonly ILogger<ContaBancariaService>? _logger;
 
     public ContaBancariaService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, IMetaRepository metaRepo,
         ITransferenciaRepository transferenciaRepo, ITransacaoImportadaRepository transacaoImportadaRepo,
         IContaRecorrenteRepository contaRecorrenteRepo, IFaturaRepository faturaRepo, IPagamentoFaturaRepository pagamentoFaturaRepo,
-        IConciliacaoSaldoService? conciliacaoSaldo = null)
+        IConciliacaoSaldoService? conciliacaoSaldo = null, ILogger<ContaBancariaService>? logger = null)
     {
+        _logger = logger;
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _metaRepo = metaRepo;
@@ -67,9 +69,21 @@ public class ContaBancariaService : IContaBancariaService
         return dto;
     }
 
+    // "Extrato até / saldo no banco" é complemento: se falhar, a conta sai sem ele — nunca 500.
     private async Task<Dictionary<Guid, DTOs.ConciliacaoSaldo.StatusConciliacaoDto>> ObterConciliacaoPorContaAsync(
-        List<ContaBancaria> contas, List<RegistroDiario> registros) =>
-        _conciliacaoSaldo == null ? new() : await _conciliacaoSaldo.ObterStatusPorContaAsync(contas, registros);
+        List<ContaBancaria> contas, List<RegistroDiario> registros)
+    {
+        if (_conciliacaoSaldo == null) return new();
+        try
+        {
+            return await _conciliacaoSaldo.ObterStatusPorContaAsync(contas, registros);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Conciliação indisponível — {Quantidade} conta(s) listadas sem status.", contas.Count);
+            return new();
+        }
+    }
 
     // Money Vision: "card mostra R$ 0,00, mas a API e as faturas dizem outra coisa" (item 4) —
     // mesma fonte do botão "Pagar" na tela de Faturas (FaturaCartaoService.CalcularFaturas),

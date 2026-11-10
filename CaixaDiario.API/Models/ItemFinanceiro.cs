@@ -36,4 +36,6 @@ public class ItemFinanceiro
     // não foi confirmada pelo banco. A importação tenta casar essa provisória com a transação real
     // (mesmo valor, mesmo sentido, ±2 dias úteis) em vez de duplicar — ver ImportacaoService.
     public bool Provisoria { get; set; }
+    // Só pra ajuste de saldo — ver ItemFinanceiroSaida.AjusteConfirmado.
+    public bool AjusteConfirmado { get; set; }
 }

@@ -112,8 +112,6 @@ export interface Dre {
   receitaBruta: number
   gruposDespesa: DreLinha[]
   totalDespesas: number
-  resultado: number
-  margem: number | null
 
   // Análise vertical (base: Receita Bruta = 100%)
   receitaBrutaPercentual: number | null

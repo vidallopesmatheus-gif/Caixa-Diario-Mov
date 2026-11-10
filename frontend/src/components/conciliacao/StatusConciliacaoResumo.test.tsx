@@ -35,6 +35,14 @@ describe('StatusConciliacaoResumo', () => {
     expect(screen.getByRole('button', { name: 'importar extrato' })).toBeInTheDocument()
   })
 
+  it('should show extrato date, app balance and bank balance on the compact account card', () => {
+    render(<StatusConciliacaoResumo status={status({ saldoApp: 86.4 })} compacto />)
+
+    expect(screen.getByText(/Extrato até/)).toHaveTextContent('Extrato até 07/11')
+    expect(screen.getByText(/^App/)).toHaveTextContent(/App R\$\s86,40/)
+    expect(screen.getByText(/Banco em/)).toHaveTextContent(/R\$\s2\.400,00/)
+  })
+
   it('should say there is no extrato when nothing was imported yet', () => {
     render(<StatusConciliacaoResumo status={{ saldoApp: 0 }} compacto />)
 

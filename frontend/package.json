@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build --minify false",
+    "build": "tsc -b && vite build",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",

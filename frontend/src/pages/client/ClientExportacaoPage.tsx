@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { todayISO } from '../../utils/format'
+import { baixarArquivo, salvarNoDispositivo } from '../../api/exportacao'
 import './ClientExportacao.css'
 
 interface Props { clienteIdOverride?: string }
@@ -26,19 +27,8 @@ export default function ClientExportacaoPage({ clienteIdOverride }: Props) {
 
     setLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`/api/export/${clienteId}/${formato}?de=${de}&ate=${ate}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!res.ok) throw new Error(`Erro ${res.status}`)
-
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `relatorio_${de}_a_${ate}.${formato}`
-      a.click()
-      URL.revokeObjectURL(url)
+      const blob = await baixarArquivo(`/api/export/${clienteId}/${formato}?de=${de}&ate=${ate}`)
+      salvarNoDispositivo(blob, `relatorio_${de}_a_${ate}.${formato}`)
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Erro ao exportar')
     } finally {

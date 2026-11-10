@@ -7,3 +7,8 @@ export function login(nomeUsuario: string, senha: string) {
     body: JSON.stringify({ nomeUsuario, senha }),
   })
 }
+
+/** Revoga a sessão (refresh token) no servidor e apaga o cookie. */
+export function logout() {
+  return apiFetch<ApiResponse<null>>('/api/auth/logout', { method: 'POST' })
+}

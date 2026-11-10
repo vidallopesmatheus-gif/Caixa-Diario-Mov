@@ -1,6 +1,6 @@
 import { apiFetch } from './client'
 import type {
-  ApiResponse, CoberturaExtrato, DiagnosticoDiferenca, LinhaDiagnostico, PontoConciliacao, StatusConciliacao,
+  AjusteSaldo, ApiResponse, CoberturaExtrato, DiagnosticoDiferenca, LinhaDiagnostico, PontoConciliacao, StatusConciliacao,
 } from '../types'
 
 // Datas chegam como "yyyy-MM-dd" (DateOnly) — normaliza qualquer sufixo de hora por segurança.
@@ -54,7 +54,7 @@ export const diagnosticarSaldo = async (contaId: string, data: string, saldoBanc
   const res = await apiFetch<ApiResponse<any>>(`/api/contas-bancarias/${contaId}/diagnostico-saldo?${params}`)
   const d = res.dados ?? {}
   return {
-    data: dia(d.data), saldoBanco: d.saldoBanco ?? 0, saldoApp: d.saldoApp ?? 0, diferenca: d.diferenca ?? 0,
+    data: dia(d.data), saldoBanco: d.saldoBanco ?? undefined, saldoApp: d.saldoApp ?? 0, diferenca: d.diferenca ?? undefined,
     analisadoDesde: dia(d.analisadoDesde),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     lacunas: (d.lacunas ?? []).map((l: any) => ({ de: dia(l.de), ate: dia(l.ate) })),
@@ -63,8 +63,25 @@ export const diagnosticarSaldo = async (contaId: string, data: string, saldoBanc
     sinalSuspeito: (d.sinalSuspeito ?? []).map(mapLinhaDiagnostico),
     transferenciasSemPar: (d.transferenciasSemPar ?? []).map(mapLinhaDiagnostico),
     manuais: (d.manuais ?? []).map(mapLinhaDiagnostico),
+    ajustes: (d.ajustes ?? []).map(mapLinhaDiagnostico),
     combinacao: d.combinacao ? { resumo: d.combinacao.resumo ?? '', itens: (d.combinacao.itens ?? []).map(mapLinhaDiagnostico) } : undefined,
   }
+}
+
+/** "Conferir saldo": ajustes de saldo da conta (inclusive os da migração). */
+export const listarAjustesSaldo = async (contaId: string): Promise<AjusteSaldo[]> => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const res = await apiFetch<ApiResponse<any[]>>(`/api/contas-bancarias/${contaId}/ajustes-saldo`)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (res.dados ?? []).map((a: any) => ({
+    id: a.id, data: dia(a.data), descricao: a.descricao ?? '', valor: a.valor ?? 0,
+    saldoDoDiaSemAjuste: a.saldoDoDiaSemAjuste ?? 0, saldoDoDia: a.saldoDoDia ?? 0, confirmado: !!a.confirmado,
+  }))
+}
+
+/** "Está certo" — o ajuste sai da lista a revisar. Desfazer é a exclusão comum do lançamento. */
+export const confirmarAjusteSaldo = async (contaId: string, lancamentoId: string): Promise<void> => {
+  await apiFetch<ApiResponse<null>>(`/api/contas-bancarias/${contaId}/ajustes-saldo/${lancamentoId}/confirmar`, { method: 'POST' })
 }
 
 /** "Saldo no banco em 07/11" digitado — grava o ponto de conciliação, nunca cria ajuste. */

@@ -76,9 +76,11 @@ public class CombinacaoDiagnosticoDto
 public class DiagnosticoDiferencaDto
 {
     public DateOnly Data { get; set; }
-    public decimal SaldoBanco { get; set; }
+    // Nulos quando não há saldo do banco informado nem registrado nesta data — as causas
+    // (lacunas, duplicatas…) continuam listadas.
+    public decimal? SaldoBanco { get; set; }
     public decimal SaldoApp { get; set; }
-    public decimal Diferenca { get; set; }
+    public decimal? Diferenca { get; set; }
     // Período analisado: do dia seguinte ao último ponto conciliado até Data.
     public DateOnly AnalisadoDesde { get; set; }
     public List<PeriodoDto> Lacunas { get; set; } = new();
@@ -86,7 +88,24 @@ public class DiagnosticoDiferencaDto
     public List<LinhaDiagnosticoDto> SinalSuspeito { get; set; } = new();
     public List<LinhaDiagnosticoDto> TransferenciasSemPar { get; set; } = new();
     public List<LinhaDiagnosticoDto> Manuais { get; set; } = new();
+    // Ajustes de saldo no período — escondem dado faltando (mês sem extrato, transferência sem
+    // par); EfeitoSeCorrigir = desfazer o ajuste.
+    public List<LinhaDiagnosticoDto> Ajustes { get; set; } = new();
     public CombinacaoDiagnosticoDto? Combinacao { get; set; }
+}
+
+/// <summary>Um ajuste de saldo da conta, na tela "Conferir saldo" — pra confirmar ou desfazer.</summary>
+public class AjusteSaldoDto
+{
+    public Guid Id { get; set; }
+    public DateOnly Data { get; set; }
+    public string Descricao { get; set; } = string.Empty;
+    // Com sinal: entrada positiva, saída negativa.
+    public decimal Valor { get; set; }
+    // Saldo no fim do dia sem este ajuste e com ele — "levou o saldo de X para Y".
+    public decimal SaldoDoDiaSemAjuste { get; set; }
+    public decimal SaldoDoDia { get; set; }
+    public bool Confirmado { get; set; }
 }
 
 public class RegistrarSaldoBancoDto

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import { useRascunho } from '../../hooks/useRascunho'
+import { lerRascunho } from '../../utils/rascunhos'
 import {
   listarContasBancarias,
   obterExtratoConta,
@@ -33,6 +35,7 @@ import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import StatusConciliacaoResumo from '../../components/conciliacao/StatusConciliacaoResumo'
 import CoberturaTimeline from '../../components/conciliacao/CoberturaTimeline'
 import DiagnosticoDiferencaModal from '../../components/conciliacao/DiagnosticoDiferencaModal'
+import AjustesSaldoLista from '../../components/conciliacao/AjustesSaldoLista'
 import { obterCoberturaExtrato, registrarSaldoBanco } from '../../api/conciliacaoSaldo'
 import { ehAjusteConciliacao } from '../../utils/lancamentos'
 import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao, Categorias, CategoriaAdmin, CoberturaExtrato } from '../../types'
@@ -49,6 +52,9 @@ function parseBRLSimples(texto: string): number | undefined {
   const n = Number(limpo)
   return Number.isFinite(n) ? n : undefined
 }
+// Rascunho da importação (sem o arquivo — o navegador não deixa guardar um File).
+interface RascunhoImportacao { bancoFatura: string; dataVencimentoFatura: string; dataFechamentoFatura: string; competenciaFatura: string }
+const chaveRascunhoImportacao = (contaId?: string) => `importacao:${contaId ?? ''}`
 
 const TIPO_LABEL: Record<string, string> = {
   Caixa: '💵 Caixa',
@@ -67,7 +73,13 @@ export default function ClientContaDetalhePage() {
   const [conta, setConta] = useState<ContaBancaria | null>(null)
   const [loadingConta, setLoadingConta] = useState(true)
   const [aba, setAba] = useState<Aba>('extrato')
-  const [msg, setMsg] = useState('')
+  // Money Vision ("desloga toda hora"): importação aberta quando a sessão expirou — o arquivo não
+  // dá pra guardar, mas os dados da fatura voltam e o usuário só escolhe o arquivo de novo.
+  const [rascunhoImportacao] = useState(() => lerRascunho<RascunhoImportacao>(chaveRascunhoImportacao(contaId)))
+  const manterCamposFaturaRef = useRef(!!rascunhoImportacao)
+  const [msg, setMsg] = useState(rascunhoImportacao
+    ? 'Sua sessão expirou durante a importação — escolha o arquivo de novo; os dados da fatura foram mantidos.'
+    : '')
 
   const [de, setDe] = useState(addDays(todayISO(), -30))
   const [ate, setAte] = useState(todayISO())
@@ -114,12 +126,15 @@ export default function ClientContaDetalhePage() {
   // Cartão (Bloco 2, Money Vision): cada importação numa conta CartaoCredito é UMA fatura — pede
   // banco/vencimento (obrigatórios) e fechamento/competência (opcionais, competência é sugerida
   // pelo vencimento mas editável).
-  const [bancoFatura, setBancoFatura] = useState('')
+  const [bancoFatura, setBancoFatura] = useState(rascunhoImportacao?.bancoFatura ?? '')
   const [bancosDisponiveis, setBancosDisponiveis] = useState<string[]>([])
-  const [dataVencimentoFatura, setDataVencimentoFatura] = useState('')
-  const [dataFechamentoFatura, setDataFechamentoFatura] = useState('')
-  const [competenciaFatura, setCompetenciaFatura] = useState('')
+  const [dataVencimentoFatura, setDataVencimentoFatura] = useState(rascunhoImportacao?.dataVencimentoFatura ?? '')
+  const [dataFechamentoFatura, setDataFechamentoFatura] = useState(rascunhoImportacao?.dataFechamentoFatura ?? '')
+  const [competenciaFatura, setCompetenciaFatura] = useState(rascunhoImportacao?.competenciaFatura ?? '')
   const [competenciaEditadaManualmente, setCompetenciaEditadaManualmente] = useState(false)
+  useRascunho<RascunhoImportacao>(chaveRascunhoImportacao(contaId), modalImportar
+    ? { bancoFatura, dataVencimentoFatura, dataFechamentoFatura, competenciaFatura }
+    : null)
 
   // ── Fase 0.5: "Revisar duplicatas" — mesma conta/sentido/valor importados duas vezes ─────────
   const [modalDuplicatas, setModalDuplicatas] = useState(false)
@@ -272,12 +287,16 @@ export default function ClientContaDetalhePage() {
     setResultadoImportacao(null)
     setResolucoesDuplicatas({})
     setSugestoesConfirmadas(false)
-    // Cartão: cada arquivo é uma fatura nova — reseta os campos da fatura anterior.
-    setBancoFatura('')
-    setDataVencimentoFatura('')
-    setDataFechamentoFatura('')
-    setCompetenciaFatura('')
-    setCompetenciaEditadaManualmente(false)
+    // Cartão: cada arquivo é uma fatura nova — reseta os campos da fatura anterior. Exceção: o
+    // primeiro arquivo depois de uma sessão expirada mantém o que já estava digitado (rascunho).
+    if (!manterCamposFaturaRef.current) {
+      setBancoFatura('')
+      setDataVencimentoFatura('')
+      setDataFechamentoFatura('')
+      setCompetenciaFatura('')
+      setCompetenciaEditadaManualmente(false)
+    }
+    manterCamposFaturaRef.current = false
     setInverterSinaisManualmente(undefined)
     setAusentesExcluir(new Set())
     setSaldoBancoImportDisplay('')
@@ -1734,6 +1753,7 @@ export default function ClientContaDetalhePage() {
           <label>Data</label>
           <input type="date" value={conferirData} max={todayISO()} onChange={e => setConferirData(e.target.value)} />
         </div>
+        {contaId && <AjustesSaldoLista contaId={contaId} onAlterado={() => { carregarConta(); carregarExtrato() }} />}
       </Modal>
 
       {diagnosticoAlvo && contaId && (

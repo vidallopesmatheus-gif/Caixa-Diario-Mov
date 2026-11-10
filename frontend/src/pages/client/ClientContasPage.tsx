@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
+import { useRascunho } from '../../hooks/useRascunho'
+import { lerRascunho } from '../../utils/rascunhos'
 import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
 import {
   listarContasRecorrentes, criarContaRecorrente, atualizarContaRecorrente, desativarContaRecorrente,
@@ -67,25 +69,39 @@ function parseBRL(s: string): number {
   return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0
 }
 
+const CHAVE_RASCUNHO_NOVA_CONTA = 'nova-conta'
+interface RascunhoNovaConta {
+  tipo: 'receber' | 'pagar'; desc: string; valorDisplay: string; valor: number; venc: string
+  isRecorrente: boolean; recInicio: string; recFim: string; recPeriodicidade: string; recParcelas: string
+  recCategoria: string; recValorVariavel: boolean; recDiaVencimento: string
+}
+
 export default function ClientContasPage({ clienteIdOverride }: Props) {
   const { user } = useAuth()
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { registros, salvar, recarregar, loading } = useRegistros(clienteId)
 
+  // Money Vision ("desloga toda hora"): sessão que expirou com a conta nova pela metade — volta
+  // preenchida depois do login (ver hooks/useRascunho).
+  const [rascunho] = useState(() => lerRascunho<RascunhoNovaConta>(CHAVE_RASCUNHO_NOVA_CONTA))
+
   // Formulário unificado
-  const [tipo, setTipo] = useState<'receber' | 'pagar'>('receber')
-  const [desc, setDesc] = useState('')
-  const [valorDisplay, setValorDisplay] = useState('')
-  const [valor, setValor] = useState(0)
-  const [venc, setVenc] = useState(todayISO())
-  const [isRecorrente, setIsRecorrente] = useState(false)
-  const [recInicio, setRecInicio] = useState(todayISO())
-  const [recFim, setRecFim] = useState('')
-  const [recPeriodicidade, setRecPeriodicidade] = useState('Mensal')
-  const [recParcelas, setRecParcelas] = useState('')
-  const [recCategoria, setRecCategoria] = useState('')
-  const [recValorVariavel, setRecValorVariavel] = useState(false)
-  const [recDiaVencimento, setRecDiaVencimento] = useState('')
+  const [tipo, setTipo] = useState<'receber' | 'pagar'>(rascunho?.tipo ?? 'receber')
+  const [desc, setDesc] = useState(rascunho?.desc ?? '')
+  const [valorDisplay, setValorDisplay] = useState(rascunho?.valorDisplay ?? '')
+  const [valor, setValor] = useState(rascunho?.valor ?? 0)
+  const [venc, setVenc] = useState(rascunho?.venc ?? todayISO())
+  const [isRecorrente, setIsRecorrente] = useState(rascunho?.isRecorrente ?? false)
+  const [recInicio, setRecInicio] = useState(rascunho?.recInicio ?? todayISO())
+  const [recFim, setRecFim] = useState(rascunho?.recFim ?? '')
+  const [recPeriodicidade, setRecPeriodicidade] = useState(rascunho?.recPeriodicidade ?? 'Mensal')
+  const [recParcelas, setRecParcelas] = useState(rascunho?.recParcelas ?? '')
+  const [recCategoria, setRecCategoria] = useState(rascunho?.recCategoria ?? '')
+  const [recValorVariavel, setRecValorVariavel] = useState(rascunho?.recValorVariavel ?? false)
+  const [recDiaVencimento, setRecDiaVencimento] = useState(rascunho?.recDiaVencimento ?? '')
+  useRascunho<RascunhoNovaConta>(CHAVE_RASCUNHO_NOVA_CONTA, desc.trim() || valor
+    ? { tipo, desc, valorDisplay, valor, venc, isRecorrente, recInicio, recFim, recPeriodicidade, recParcelas, recCategoria, recValorVariavel, recDiaVencimento }
+    : null)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [msgOk, setMsgOk] = useState(true)
