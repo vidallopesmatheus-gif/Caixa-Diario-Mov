@@ -6,4 +6,5 @@ public interface IRecalculoSaldoService
 {
     Task<RecalculoSaldoResultDto> RecalcularTodasAsContasAsync(bool confirmar);
     Task<MigracaoAjustesConciliacaoResultDto> MigrarAjustesConciliacaoAsync(bool confirmar);
+    Task<ConsolidacaoAjustesResultDto> ConsolidarAjustesAsync(bool confirmar);
 }

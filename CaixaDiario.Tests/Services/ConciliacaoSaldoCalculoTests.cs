@@ -33,7 +33,7 @@ public class ConciliacaoSaldoCalculoTests
     public void Diagnosticar_DuplicataExplicaADiferenca_ApareceNaCombinacao()
     {
         var registros = Encadeados(
-            Dia(new DateOnly(2026, 11, 3), ("Pix enviado Joao", -342.03m, "F1"), ("Pix enviado João", -342.03m, "F2")),
+            Dia(new DateOnly(2026, 11, 3), ("Pix enviado Joao", -342.03m, "F1"), ("Pix enviado João", -342.03m, null)),
             Dia(new DateOnly(2026, 11, 5), ("Mercado", -100m, "F3")));
         var dias = new SortedSet<DateOnly>(new[] { new DateOnly(2026, 11, 3), new DateOnly(2026, 11, 5) });
 
@@ -45,6 +45,19 @@ public class ConciliacaoSaldoCalculoTests
         Assert.Equal(-342.03m, grupo.SomaExcedente);
         Assert.Equal("Excluir esta duplicata zera a diferença", d.Combinacao!.Resumo);
         Assert.Equal(grupo.Itens[1].Id, Assert.Single(d.Combinacao.Itens).Id);
+    }
+
+    // Money Vision: "Rafael Yan −590 duas vezes em 01/11" aconteceu de verdade — FITIDs diferentes
+    // no OFX são a prova do banco, nunca uma duplicata sugerida.
+    [Fact]
+    public void Diagnosticar_LinhasIguaisComFitIdsDiferentes_NaoSaoSugeridasComoDuplicata()
+    {
+        var registros = Encadeados(Dia(new DateOnly(2026, 11, 1), ("Pix enviado Rafael Yan", -590m, "F1"), ("Pix enviado Rafael Yan", -590m, "F2")));
+        var dias = new SortedSet<DateOnly>(new[] { new DateOnly(2026, 11, 1) });
+
+        var d = ConciliacaoSaldoCalculo.Diagnosticar(Conta, registros, new(), dias, NenhumaChave, new DateOnly(2026, 11, 1), -180m);
+
+        Assert.Empty(d.Duplicatas);
     }
 
     [Fact]

@@ -33,8 +33,6 @@ function mockDre(receitaBruta: number): Dre {
     receitaBruta,
     gruposDespesa: [],
     totalDespesas: 0,
-    resultado: receitaBruta,
-    margem: null,
     receitaBrutaPercentual: 100,
     deducoes: { total: 0, percentual: 0, categorias: [] },
     receitaLiquida: receitaBruta,

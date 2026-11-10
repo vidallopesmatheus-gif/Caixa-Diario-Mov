@@ -24,9 +24,10 @@ export default function StatusConciliacaoResumo({ status, compacto, onVerDiagnos
     <div className={`conc-status${compacto ? ' conc-status--compacto' : ''}`}>
       <div className="conc-status-linha">
         {status.extratoAte
-          ? <span>Extrato até <strong>{fmtDate(status.extratoAte)}</strong></span>
+          ? <span>Extrato até <strong>{compacto ? fmtDiaMes(status.extratoAte) : fmtDate(status.extratoAte)}</strong></span>
           : <span>Nenhum extrato importado ainda</span>}
-        {!compacto && <span>Saldo do app <strong>{fmtBRL(status.saldoApp)}</strong></span>}
+        {/* Card do Banco: "Extrato até 07/11 · App R$ X · Banco R$ X". */}
+        <span>{compacto ? 'App' : 'Saldo do app'} <strong>{fmtBRL(status.saldoApp)}</strong></span>
         {ponto && (
           <span className={ponto.conciliado ? 'conc-ok' : 'conc-alerta'}>
             Banco em {fmtDiaMes(ponto.data)} <strong>{fmtBRL(ponto.saldoBanco)}</strong> {ponto.conciliado ? '✅' : '⚠'}

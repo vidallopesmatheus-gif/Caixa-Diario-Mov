@@ -45,8 +45,8 @@ public class DreDto
     public decimal ReceitaBruta { get; set; }
     public List<DreLinhaDto> GruposDespesa { get; set; } = new();
     public decimal TotalDespesas { get; set; }
-    public decimal Resultado { get; set; }
-    public decimal? Margem { get; set; }
+    // Resultado/Margem antigos (receita − todas as saídas) saíram: davam um terceiro número
+    // diferente na mesma resposta. O resultado do DRE é um só — ResultadoLiquido(Percentual).
 
     // Análise vertical (base: Receita Bruta = 100%)
     public decimal? ReceitaBrutaPercentual { get; set; }

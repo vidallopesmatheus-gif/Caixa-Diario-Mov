@@ -235,6 +235,63 @@ public class ImportacaoServiceTests
         Assert.Equal(150m, resultado.TotalSaidas);
     }
 
+    // Money Vision ("CSV depois OFX do mesmo período"): Rafael Yan −590 aconteceu 2× em 01/11. O
+    // OFX descreve diferente do CSV e traz FITIDs novos — casa por contagem com o que veio do CSV.
+    [Theory]
+    [InlineData(0, 2)]
+    [InlineData(1, 1)]
+    [InlineData(2, 0)]
+    public async Task PreviewAsync_OfxDepoisDoCsvDoMesmoPeriodo_ImportaSoOQueFaltaPorContagem(int jaNoAppPeloCsv, int novasEsperadas)
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var dia = new DateOnly(2026, 11, 1);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        var saidas = Enumerable.Range(0, jaNoAppPeloCsv)
+            .Select(_ => new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Pix enviado - Rafael Yan", Valor = 590m }).ToList();
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>
+        {
+            new() { Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = dia, Entradas = new(), Saidas = saidas, ContasReceber = new(), ContasPagar = new() },
+        });
+        _importRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(Enumerable.Range(0, jaNoAppPeloCsv)
+            .Select(_ => new TransacaoImportada { ContaBancariaId = contaId, Data = dia, Tipo = "Saida", Valor = 590m, Descricao = "Pix enviado - Rafael Yan", Status = "Importada" })
+            .ToList());
+
+        var ofx = "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-590.00<DTPOSTED>20261101<FITID>A1<MEMO>PIX ENVIADO RAFAEL YAN</STMTTRN>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-590.00<DTPOSTED>20261101<FITID>A2<MEMO>PIX ENVIADO RAFAEL YAN</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", CriarArquivoTexto("extrato.ofx", ofx), null, null);
+
+        Assert.Equal((novasEsperadas, 2 - novasEsperadas), (resultado.TotalNovas, resultado.TotalJaImportadas));
+    }
+
+    [Fact]
+    public async Task PreviewAsync_OfxIgualAUmLancamentoDigitadoAMao_NaoCasaSozinhoEOfereceMesclar()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var manualId = Guid.NewGuid();
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId));
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = new DateOnly(2026, 11, 1), Entradas = new(),
+                Saidas = new() { new() { Id = manualId, Descricao = "Aluguel", Valor = 590m } }, ContasReceber = new(), ContasPagar = new(),
+            },
+        });
+
+        var ofx = "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-590.00<DTPOSTED>20261101<FITID>A1<MEMO>PIX ENVIADO IMOBILIARIA</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+
+        var resultado = await _sut.PreviewAsync(contaId, clienteId, "cliente", CriarArquivoTexto("extrato.ofx", ofx), null, null);
+
+        Assert.Equal(manualId, Assert.Single(resultado.DuplicatasManuais).LancamentoManualId);
+    }
+
     [Fact]
     public async Task PreviewAsync_ReimportacaoDoMesmoArquivoComDuplicataLegitima_AsDuasContamComoJaImportadas()
     {

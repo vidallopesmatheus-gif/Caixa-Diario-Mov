@@ -33,6 +33,7 @@ import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
 import StatusConciliacaoResumo from '../../components/conciliacao/StatusConciliacaoResumo'
 import CoberturaTimeline from '../../components/conciliacao/CoberturaTimeline'
 import DiagnosticoDiferencaModal from '../../components/conciliacao/DiagnosticoDiferencaModal'
+import AjustesSaldoLista from '../../components/conciliacao/AjustesSaldoLista'
 import { obterCoberturaExtrato, registrarSaldoBanco } from '../../api/conciliacaoSaldo'
 import { ehAjusteConciliacao } from '../../utils/lancamentos'
 import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao, Categorias, CategoriaAdmin, CoberturaExtrato } from '../../types'
@@ -1734,6 +1735,7 @@ export default function ClientContaDetalhePage() {
           <label>Data</label>
           <input type="date" value={conferirData} max={todayISO()} onChange={e => setConferirData(e.target.value)} />
         </div>
+        {contaId && <AjustesSaldoLista contaId={contaId} onAlterado={() => { carregarConta(); carregarExtrato() }} />}
       </Modal>
 
       {diagnosticoAlvo && contaId && (

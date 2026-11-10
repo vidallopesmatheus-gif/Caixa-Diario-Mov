@@ -32,6 +32,9 @@ public class ItemFinanceiroSaida
     // não foi confirmada pelo banco. A importação tenta casar essa provisória com a transação real
     // (mesmo valor, mesmo sentido, ±2 dias úteis) em vez de duplicar — ver ImportacaoService.
     public bool Provisoria { get; set; }
+    // Só pra ajuste de saldo (TipoCusto AjusteConciliacao): o usuário conferiu na tela "Conferir
+    // saldo" e disse que está certo — some da lista de ajustes a revisar.
+    public bool AjusteConfirmado { get; set; }
     // Item 9: compra parcelada no cartão — cada parcela é sua própria Saida, numa competência
     // futura diferente, ligadas por este Id compartilhado (ver FaturaCartaoService.
     // LancarComprasParceladaAsync). NumeroParcela/TotalParcelas são só pra exibição ("3/12").

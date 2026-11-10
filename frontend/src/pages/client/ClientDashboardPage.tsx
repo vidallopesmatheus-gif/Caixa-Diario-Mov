@@ -377,11 +377,10 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
         const remainingMonths = periodoMeses - idx
         const dre = dres[idx]
         const receitaReal = dre?.receitaBruta ?? 0
-        // Item 4 (rodada "Visão de Futuro"): resultadoLiquido inclui Atividades de Financiamento —
-        // um adiantamento de empréstimo (amortização extraordinária) entrava como "prejuízo" na
-        // Meta de Lucro, mesmo sem ser despesa nenhuma. resultadoOperacional é a mesma régua que a
-        // própria tela de DRE usa pra separar "resultado do negócio" de financiamento/investimento.
-        const lucroReal = dre?.resultadoOperacional ?? 0
+        // Money Vision ("três resultados na mesma resposta"): o DRE tem um resultado só, e toda tela
+        // mostra o mesmo — Resultado Líquido. Adiantamento de financiamento reduz o lucro da meta
+        // também (é como o DRE mostra o mês).
+        const lucroReal = dre?.resultadoLiquido ?? 0
 
         const isPassado = ano < anoAtual || (ano === anoAtual && mes < mesAtual)
         const isAtual = ano === anoAtual && mes === mesAtual
@@ -429,8 +428,8 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
   // gauges — não faz nenhuma chamada nova ao backend, só deriva o card de Lucro Líquido.
   const lucroComparativo = useMemo(() => {
     if (!dreAtual || !dreAnterior) return null
-    const atual = dreAtual.resultado
-    const anterior = dreAnterior.resultado
+    const atual = dreAtual.resultadoLiquido
+    const anterior = dreAnterior.resultadoLiquido
     const variacao = anterior !== 0 ? ((atual - anterior) / Math.abs(anterior)) * 100 : null
     return { atual, anterior, variacao }
   }, [dreAtual, dreAnterior])
@@ -698,7 +697,7 @@ export default function ClientDashboardPage({ clienteIdOverride }: Props) {
 
       {/* ══ Camada 4: saúde do negócio — gauges + margem do período ══ */}
       {clienteId && (
-        <SaudeNegocioBlock clienteId={clienteId} margem={dreLoading ? undefined : (dreAtual?.margem ?? null)} janela={janela} />
+        <SaudeNegocioBlock clienteId={clienteId} margem={dreLoading ? undefined : (dreAtual?.resultadoLiquidoPercentual ?? null)} janela={janela} />
       )}
 
       {/* Fase 6H: resumo de financiamentos/empréstimos/consórcios — some quando não há contrato ativo. */}

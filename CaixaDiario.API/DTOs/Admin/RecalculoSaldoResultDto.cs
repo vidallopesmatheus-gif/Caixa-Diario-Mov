@@ -42,3 +42,28 @@ public class AjusteConvertidoDto
     public string? TipoCustoAnterior { get; set; }
     public string? CategoriaAnterior { get; set; }
 }
+
+// Money Vision ("ajustes da migração que o usuário não entende"): pares de ajuste em 30/09 → 01/10
+// que zeravam e reabriam a conta viram um único ajuste líquido; os que se anulam saem.
+public class ConsolidacaoAjustesResultDto
+{
+    public bool Confirmado { get; set; }
+    public List<AjusteConsolidadoDto> Itens { get; set; } = new();
+}
+
+public class AjusteConsolidadoDto
+{
+    public Guid ClienteId { get; set; }
+    public Guid ContaBancariaId { get; set; }
+    public string ContaBancariaNome { get; set; } = string.Empty;
+    // "RemoverPar" (somam zero), "Consolidar" (vira um ajuste líquido) ou "Renomear" (descrição "saldo").
+    public string Acao { get; set; } = string.Empty;
+    public List<AjusteConvertidoDto> Originais { get; set; } = new();
+    // Nulo quando o par some inteiro.
+    public decimal? ValorFinal { get; set; }
+    public DateOnly? DataFinal { get; set; }
+    public string? DescricaoNova { get; set; }
+    // Sempre iguais — a consolidação nunca muda o saldo atual da conta.
+    public decimal SaldoAtualAntes { get; set; }
+    public decimal SaldoAtualDepois { get; set; }
+}

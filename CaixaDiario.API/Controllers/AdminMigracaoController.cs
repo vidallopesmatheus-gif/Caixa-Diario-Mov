@@ -102,6 +102,16 @@ public class AdminMigracaoController : ControllerBase
         return Ok(new ApiResponse<MigracaoAjustesConciliacaoResultDto> { Dados = resultado });
     }
 
+    // Money Vision ("ajustes da migração que o usuário não entende"): par de ajuste que se anula
+    // sai, par 30/09 → 01/10 vira um ajuste líquido com descrição clara. Sem "confirmar": só relatório.
+    [HttpPost("ajustes-saldo-consolidar")]
+    public async Task<IActionResult> ConsolidarAjustesSaldo([FromQuery] bool confirmar = false)
+    {
+        VerificarAdmin();
+        var resultado = await _recalculoSaldoService.ConsolidarAjustesAsync(confirmar);
+        return Ok(new ApiResponse<ConsolidacaoAjustesResultDto> { Dados = resultado });
+    }
+
     // Money Vision: "Pix recebido entrando como saída" (item 3) — só relatório, nunca corrige
     // sozinho (ver VerificacaoSinalTransferenciaService).
     [HttpGet("transferencias-sinal-suspeito")]

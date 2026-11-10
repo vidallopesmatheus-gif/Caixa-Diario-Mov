@@ -87,9 +87,12 @@ public static class ConciliacaoSaldoCalculo
     // "Diferença de R$ 684,06 em 07/11. Possíveis causas: …". chavesImportadas: (data, valor com
     // sinal, descrição normalizada) das linhas que vieram de arquivo sem FITID (CSV/XLSX) — o que
     // não é FITID nem está aqui foi lançado à mão.
+    // Sem saldoBanco (nenhum informado nem registrado na data): mesmas causas, só sem a diferença
+    // e sem a combinação que a zera. paresMantidos: "Manter os dois" do Revisar duplicatas.
     public static DiagnosticoDiferencaDto Diagnosticar(
         ContaBancaria conta, List<RegistroDiario> registrosCliente, List<PontoConciliacao> pontos, SortedSet<DateOnly> diasComExtrato,
-        HashSet<(DateOnly, decimal, string)> chavesImportadas, DateOnly data, decimal saldoBanco)
+        HashSet<(DateOnly, decimal, string)> chavesImportadas, DateOnly data, decimal? saldoBanco,
+        HashSet<(Guid, Guid)>? paresMantidos = null)
     {
         var registrosDaConta = registrosCliente.Where(r => r.ContaBancariaId == conta.Id && !r.Excluido).ToList();
         var saldoApp = SaldoEncadeamento.SaldoNoFimDe(conta, registrosDaConta, data);
@@ -104,10 +107,13 @@ public static class ConciliacaoSaldoCalculo
         var linhas = registrosDaConta.Where(r => r.Data >= desde && r.Data <= data)
             .SelectMany(r => r.Entradas.Select(e => (Linha: Linha(e.Id, r.Data, e.Descricao, e.Valor, e.Categoria), e.TipoCusto, e.FitId, e.TransferenciaId, Provisoria: false))
                 .Concat(r.Saidas.Select(s => (Linha: Linha(s.Id, r.Data, s.Descricao, -s.Valor, s.Categoria), s.TipoCusto, s.FitId, s.TransferenciaId, s.Provisoria))))
-            .Where(x => !LancamentoFiltro.EhAjusteConciliacao(x.TipoCusto))
             .ToList();
+        var ajustes = linhas.Where(x => LancamentoFiltro.EhAjusteConciliacao(x.TipoCusto))
+            .Select(x => ComEfeito(x.Linha, -x.Linha.Valor)).ToList();
+        linhas = linhas.Where(x => !LancamentoFiltro.EhAjusteConciliacao(x.TipoCusto)).ToList();
 
-        var duplicatas = AgruparDuplicatas(linhas.Select(x => x.Linha).ToList());
+        var fitIdPorLinha = linhas.Where(x => x.FitId != null).ToDictionary(x => x.Linha.Id, x => x.FitId!);
+        var duplicatas = AgruparDuplicatas(linhas.Select(x => x.Linha).ToList(), fitIdPorLinha, paresMantidos ?? new());
         var sinalSuspeito = linhas.Where(x => x.TransferenciaId == null && SinalSuspeito(x.Linha))
             .Select(x => ComEfeito(x.Linha, -2 * x.Linha.Valor)).ToList();
 
@@ -129,8 +135,9 @@ public static class ConciliacaoSaldoCalculo
             Data = data, SaldoBanco = saldoBanco, SaldoApp = saldoApp, Diferenca = diferenca, AnalisadoDesde = desde,
             Lacunas = Lacunas(diasComExtrato, desde, data),
             Duplicatas = duplicatas, SinalSuspeito = sinalSuspeito, TransferenciasSemPar = transferenciasSemPar, Manuais = manuais,
+            Ajustes = ajustes,
         };
-        diagnostico.Combinacao = BuscarCombinacao(diagnostico, diferenca);
+        if (diferenca.HasValue) diagnostico.Combinacao = BuscarCombinacao(diagnostico, diferenca.Value);
         return diagnostico;
     }
 
@@ -144,8 +151,11 @@ public static class ConciliacaoSaldoCalculo
         new() { Id = l.Id, Data = l.Data, Descricao = l.Descricao, Valor = l.Valor, Categoria = l.Categoria, EfeitoSeCorrigir = efeito };
 
     // Mesma data + mesmo valor + descrição ≥ 90% parecida. Duas linhas iguais podem ser legítimas
-    // (2 Ubers) — por isso é só "possível", quem decide é o usuário.
-    private static List<GrupoDuplicataDto> AgruparDuplicatas(List<LinhaDiagnosticoDto> linhas)
+    // (2 Ubers) — por isso é só "possível", quem decide é o usuário. Nunca sugere de novo um par
+    // que o usuário mandou manter, nem duas linhas com FITIDs diferentes: o próprio banco já disse
+    // que são dois lançamentos.
+    private static List<GrupoDuplicataDto> AgruparDuplicatas(
+        List<LinhaDiagnosticoDto> linhas, Dictionary<Guid, string> fitIdPorLinha, HashSet<(Guid, Guid)> paresMantidos)
     {
         var grupos = new List<GrupoDuplicataDto>();
         var usados = new HashSet<Guid>();
@@ -153,7 +163,8 @@ public static class ConciliacaoSaldoCalculo
         {
             if (usados.Contains(l.Id)) continue;
             var iguais = linhas.Where(o => o.Id != l.Id && !usados.Contains(o.Id) && o.Data == l.Data && o.Valor == l.Valor
-                && Similaridade(o.Descricao, l.Descricao) >= SimilaridadeMinimaDuplicata).ToList();
+                && Similaridade(o.Descricao, l.Descricao) >= SimilaridadeMinimaDuplicata
+                && !ParLegitimo(l.Id, o.Id, fitIdPorLinha, paresMantidos)).ToList();
             if (iguais.Count == 0) continue;
 
             usados.Add(l.Id);
@@ -167,6 +178,13 @@ public static class ConciliacaoSaldoCalculo
         }
         return grupos;
     }
+
+    public static bool ParLegitimo(Guid a, Guid b, Dictionary<Guid, string> fitIdPorLinha, HashSet<(Guid, Guid)> paresMantidos) =>
+        paresMantidos.Contains(ParOrdenado(a, b))
+        || (fitIdPorLinha.TryGetValue(a, out var fitA) && fitIdPorLinha.TryGetValue(b, out var fitB) && fitA != fitB);
+
+    // Mesma normalização de DuplicataDispensada (menor Guid primeiro).
+    public static (Guid, Guid) ParOrdenado(Guid a, Guid b) => a.CompareTo(b) <= 0 ? (a, b) : (b, a);
 
     private static bool SinalSuspeito(LinhaDiagnosticoDto l)
     {

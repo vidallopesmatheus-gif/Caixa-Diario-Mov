@@ -15,7 +15,7 @@ const duplicata: LinhaDiagnostico = { id: 'dup-2', data: '2026-11-03', descricao
 function diagnostico(overrides: Partial<DiagnosticoDiferenca> = {}): DiagnosticoDiferenca {
   return {
     data: '2026-11-07', saldoBanco: 557.97, saldoApp: 215.94, diferenca: 342.03, analisadoDesde: '2026-11-01',
-    lacunas: [], sinalSuspeito: [], transferenciasSemPar: [], manuais: [],
+    lacunas: [], sinalSuspeito: [], transferenciasSemPar: [], manuais: [], ajustes: [],
     duplicatas: [{ itens: [{ ...duplicata, id: 'dup-1', efeitoSeCorrigir: 0 }, duplicata], somaExcedente: -342.03 }],
     combinacao: { resumo: 'Excluir esta duplicata zera a diferença', itens: [duplicata] },
     ...overrides,
@@ -74,5 +74,16 @@ describe('DiagnosticoDiferencaModal', () => {
 
     expect(await screen.findByText(/corrija no extrato/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
+  })
+
+  it('should list the balance adjustments as a cause and let the user undo one', async () => {
+    const ajuste: LinhaDiagnostico = { id: 'aj-1', data: '2026-11-07', descricao: 'Ajuste de saldo', valor: 11809.52, efeitoSeCorrigir: -11809.52 }
+    vi.mocked(conciliacaoApi.diagnosticarSaldo).mockResolvedValue(diagnostico({ duplicatas: [], combinacao: undefined, ajustes: [ajuste] }))
+    renderModal()
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Desfazer ajuste' }))
+
+    expect(screen.getByText('Ajustes de saldo no período')).toBeInTheDocument()
+    expect(importacaoApi.excluirLancamento).toHaveBeenCalledWith('conta-1', { id: 'aj-1', data: '2026-11-07' })
   })
 })

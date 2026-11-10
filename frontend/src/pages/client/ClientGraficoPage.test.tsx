@@ -45,8 +45,6 @@ const mockIndicadores: IndicadoresDecisao = {
     receitaBruta: 1000,
     gruposDespesa: [{ grupo: 'Despesas Administrativas', total: 400, categorias: [{ nome: 'Aluguel', total: 400, percentual: 40 }] }],
     totalDespesas: 400,
-    resultado: 600,
-    margem: 60,
     receitaBrutaPercentual: 100,
     deducoes: { total: 0, percentual: 0, categorias: [] },
     receitaLiquida: 1000,

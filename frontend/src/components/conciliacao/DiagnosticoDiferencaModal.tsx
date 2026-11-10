@@ -71,7 +71,9 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
     }
   }
 
-  const bate = diagnostico !== null && Math.abs(diagnostico.diferenca) <= 0.01
+  // Este modal sempre recebe o saldo do banco — a diferença vem calculada.
+  const diferenca = diagnostico?.diferenca ?? 0
+  const bate = diagnostico !== null && Math.abs(diferenca) <= 0.01
   const sinais = diagnostico?.sinalSuspeito ?? []
 
   function Linha({ l, rotuloAcao = 'Excluir' }: { l: LinhaDiagnostico; rotuloAcao?: string }) {
@@ -100,7 +102,7 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
           <button className="btn-cancel" onClick={onClose} disabled={processando}>Fechar</button>
           {diagnostico && !bate && (
             <button className="btn-confirm" onClick={lancarAjuste} disabled={processando}>
-              Lançar ajuste da diferença restante ({fmtBRL(diagnostico.diferenca)})
+              Lançar ajuste da diferença restante ({fmtBRL(diferenca)})
             </button>
           )}
         </>
@@ -112,11 +114,11 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
       ) : diagnostico && (
         <>
           {bate ? (
-            <p className="conc-ok">✅ Agora o saldo do app bate com o banco em {fmtDate(diagnostico.data)} ({fmtBRL(diagnostico.saldoBanco)}).</p>
+            <p className="conc-ok">✅ Agora o saldo do app bate com o banco em {fmtDate(diagnostico.data)} ({fmtBRL(diagnostico.saldoBanco ?? saldoBanco)}).</p>
           ) : (
             <p>
-              Diferença de <strong>{fmtBRL(Math.abs(diagnostico.diferenca))}</strong> em {fmtDate(diagnostico.data)}
-              {' '}— banco {fmtBRL(diagnostico.saldoBanco)}, app {fmtBRL(diagnostico.saldoApp)}.
+              Diferença de <strong>{fmtBRL(Math.abs(diferenca))}</strong> em {fmtDate(diagnostico.data)}
+              {' '}— banco {fmtBRL(diagnostico.saldoBanco ?? saldoBanco)}, app {fmtBRL(diagnostico.saldoApp)}.
               <br /><span className="conc-dica">Analisado desde {fmtDate(diagnostico.analisadoDesde)}. Possíveis causas:</span>
             </p>
           )}
@@ -181,8 +183,19 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
             </section>
           )}
 
+          {diagnostico.ajustes.length > 0 && (
+            <section className="conc-diag-secao">
+              <h4>Ajustes de saldo no período</h4>
+              <p className="conc-dica">
+                Um ajuste esconde o que falta (mês sem extrato, transferência sem a outra ponta). Corrija as causas acima e desfaça o ajuste.
+              </p>
+              <ul>{diagnostico.ajustes.map(l => <Linha key={l.id} l={l} rotuloAcao="Desfazer ajuste" />)}</ul>
+            </section>
+          )}
+
           {!bate && !diagnostico.combinacao && diagnostico.lacunas.length === 0 && diagnostico.duplicatas.length === 0
-            && sinais.length === 0 && diagnostico.transferenciasSemPar.length === 0 && diagnostico.manuais.length === 0 && (
+            && sinais.length === 0 && diagnostico.transferenciasSemPar.length === 0 && diagnostico.manuais.length === 0
+            && diagnostico.ajustes.length === 0 && (
             <p className="conc-dica">Nenhuma causa provável encontrada no período — confira o saldo informado ou lance o ajuste.</p>
           )}
         </>

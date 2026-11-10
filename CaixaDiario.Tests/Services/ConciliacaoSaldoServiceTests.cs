@@ -70,10 +70,97 @@ public class ConciliacaoSaldoServiceTests
     }
 
     [Fact]
-    public async Task DiagnosticarAsync_SemSaldoInformadoNemPonto_PedeOSaldoDoBanco()
+    public async Task DiagnosticarAsync_SemSaldoInformadoNemPonto_ListaAsCausasSemDiferenca()
     {
-        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.DiagnosticarAsync(_conta.Id, new DateOnly(2026, 11, 7), null, _conta.ClienteId, "cliente"));
-        Assert.Equal("saldoBanco", ex.Campo);
+        var d = await _sut.DiagnosticarAsync(_conta.Id, new DateOnly(2026, 11, 7), null, _conta.ClienteId, "cliente");
+
+        Assert.Equal((null, null, 900m), (d.SaldoBanco, d.Diferenca, d.SaldoApp));
+    }
+
+    [Fact]
+    public async Task DiagnosticarAsync_ParQueOUsuarioMandouManter_NaoApareceComoDuplicata()
+    {
+        var uber1 = new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Uber", Valor = 7.95m };
+        var uber2 = new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Uber", Valor = 7.95m };
+        _dia.Saidas = new() { uber1, uber2 };
+        var dispensadaRepo = new Mock<IDuplicataDispensadaRepository>();
+        var (menor, maior) = ConciliacaoSaldoCalculo.ParOrdenado(uber1.Id, uber2.Id);
+        dispensadaRepo.Setup(r => r.ListarPorContaAsync(_conta.Id)).ReturnsAsync(new List<DuplicataDispensada>
+        {
+            new() { ContaBancariaId = _conta.Id, LancamentoMenorId = menor, LancamentoMaiorId = maior },
+        });
+        var sut = new ConciliacaoSaldoService(_contaRepo.Object, _registroRepo.Object, _importRepo.Object, _pontoRepo.Object,
+            _periodoRepo.Object, new RelogioFixo(Hoje), dispensadaRepo.Object);
+
+        var d = await sut.DiagnosticarAsync(_conta.Id, new DateOnly(2026, 11, 7), 984.10m, _conta.ClienteId, "cliente");
+
+        Assert.Empty(d.Duplicatas);
+    }
+
+    [Fact]
+    public async Task DiagnosticarAsync_AjusteDeSaldoNoPeriodo_ApareceComoCausaComEfeitoDeDesfazer()
+    {
+        _dia.Entradas = new() { new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Ajuste de saldo", Valor = 500m, TipoCusto = LancamentoFiltro.TipoAjusteConciliacao } };
+
+        var d = await _sut.DiagnosticarAsync(_conta.Id, new DateOnly(2026, 11, 7), 900m, _conta.ClienteId, "cliente");
+
+        Assert.Equal(-500m, Assert.Single(d.Ajustes).EfeitoSeCorrigir);
+    }
+
+    [Fact]
+    public async Task ListarAjustesAsync_MostraOSaldoDoDiaComESemOAjuste()
+    {
+        var ajuste = new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Ajuste de saldo", Valor = 300m, TipoCusto = LancamentoFiltro.TipoAjusteConciliacao };
+        _dia.Entradas = new() { ajuste };
+        _dia.SaldoFinal = 1200m;
+
+        var lista = await _sut.ListarAjustesAsync(_conta.Id, _conta.ClienteId, "cliente");
+
+        var item = Assert.Single(lista);
+        Assert.Equal((ajuste.Id, 300m, 900m, 1200m, false), (item.Id, item.Valor, item.SaldoDoDiaSemAjuste, item.SaldoDoDia, item.Confirmado));
+    }
+
+    [Fact]
+    public async Task ConfirmarAjusteAsync_MarcaOAjusteComoConferido()
+    {
+        var ajuste = new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "saldo", Valor = 50m, TipoCusto = LancamentoFiltro.TipoAjusteSaldo };
+        _dia.Saidas = new() { ajuste };
+
+        await _sut.ConfirmarAjusteAsync(_conta.Id, ajuste.Id, _conta.ClienteId, "cliente");
+
+        Assert.True(Assert.Single(_dia.Saidas).AjusteConfirmado);
+        _registroRepo.Verify(r => r.AtualizarAsync(_dia), Times.Once);
+    }
+
+    [Fact]
+    public async Task ConfirmarAjusteAsync_LancamentoQueNaoEAjuste_LancaNaoEncontrado()
+    {
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.ConfirmarAjusteAsync(_conta.Id, _dia.Saidas[0].Id, _conta.ClienteId, "cliente"));
+
+        Assert.Equal(404, ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task ObterStatusPorContaAsync_TabelaDeConciliacaoIndisponivel_DevolveVazioSemLancar()
+    {
+        _pontoRepo.Setup(r => r.ListarPorClienteAsync(_conta.ClienteId)).ThrowsAsync(new InvalidOperationException("relation \"pontos_conciliacao\" does not exist"));
+
+        var status = await _sut.ObterStatusPorContaAsync(new List<ContaBancaria> { _conta }, new List<RegistroDiario> { _dia });
+
+        Assert.Empty(status);
+    }
+
+    [Fact]
+    public async Task ObterStatusPorContaAsync_UmaContaFalha_AsOutrasContinuamComStatus()
+    {
+        var quebrada = new ContaBancaria { Id = Guid.NewGuid(), ClienteId = _conta.ClienteId, Nome = "Bradesco", Tipo = "ContaCorrente", Ativa = true };
+        _periodoRepo.Setup(r => r.ListarPorContaAsync(quebrada.Id)).ThrowsAsync(new InvalidOperationException("falha"));
+        _importRepo.Setup(r => r.ListarPorContaAsync(quebrada.Id)).ReturnsAsync(new List<TransacaoImportada>());
+
+        var status = await _sut.ObterStatusPorContaAsync(new List<ContaBancaria> { quebrada, _conta }, new List<RegistroDiario> { _dia });
+
+        Assert.Equal(new[] { _conta.Id }, status.Keys);
     }
 
     [Fact]

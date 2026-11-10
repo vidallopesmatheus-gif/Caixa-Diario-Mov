@@ -175,6 +175,8 @@ builder.Services.AddScoped<IChatService, ChatService>();
 
 var app = builder.Build();
 
+MigracoesNoStart.Aplicar(app);
+
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {

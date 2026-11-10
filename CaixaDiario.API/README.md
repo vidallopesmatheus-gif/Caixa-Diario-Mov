@@ -51,6 +51,8 @@ Salvar como `appsettings.Development.json` na raiz de `CaixaDiario.API/` (este a
 dotnet ef database update
 ```
 
+Em produção (qualquer ambiente que não seja `Development`) a API também aplica sozinha, no start, qualquer migration pendente — antes de aceitar requisições, com log de cada uma (`Aplicando N migration(s) pendente(s): ...`). Se a migration falhar, o processo não sobe. Em `Development` isso fica desligado (o `.env` local pode apontar para o banco de produção); `Database__AplicarMigracoesNoStart=true|false` força um ou outro.
+
 **4. Inserir o usuário admin** (no SQL Editor do Supabase):
 
 Primeiro, gere o hash bcrypt da senha desejada criando um projeto .NET temporário:

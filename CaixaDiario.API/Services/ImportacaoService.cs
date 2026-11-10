@@ -135,15 +135,14 @@ public class ImportacaoService : IImportacaoService
         var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
         var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
-        var (jaImportadas, casados) = CasarComRazao(parseadas, registrosAtivos);
+        var (jaImportadas, casados) = CasarComRazao(parseadas, registrosAtivos, historico);
         var periodos = _periodoExtratoRepo != null ? await _periodoExtratoRepo.ListarPorContaAsync(contaBancariaId) : new List<PeriodoExtrato>();
         var diasComExtratoAntes = ConciliacaoSaldoCalculo.DiasComExtrato(periodos, historico, registrosAtivos);
         var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
         var conciliaveis = IdentificarConciliaveis(novas, registrosAtivos);
-        var consumidoPelaHeuristica = ContarConsumidoPelaHeuristica(parseadas, jaImportadas);
 
         var candidatosDuplicata = IdentificarCandidatosDuplicata(
-            novas.Where(t => !conciliaveis.Contains(t.Indice)).ToList(), registrosAtivos, chavesImportadasAntes, consumidoPelaHeuristica);
+            novas.Where(t => !conciliaveis.Contains(t.Indice)).ToList(), registrosAtivos, chavesImportadasAntes, casados);
 
         return new PreviewImportacaoDto
         {
@@ -227,44 +226,21 @@ public class ImportacaoService : IImportacaoService
     //   provável duplicata ENTRE ARQUIVOS (ex.: CSV + OFX do mesmo banco) => só sinaliza, sempre importa.
     private sealed record ItemSemFitId(RegistroDiario Registro, string Tipo, Guid ItemId, decimal Valor, string Descricao, DateOnly Data);
 
-    // "consumidoPelaHeuristica" são as instâncias que IdentificarJaImportadas já casou com outra
-    // transação do PRÓPRIO arquivo via multiset exato (ver ChaveOcorrencia) — sem isso, o excedente
-    // de duas transações idênticas no arquivo (uma já no razão, outra genuinamente nova) acharia a
-    // mesma instância do razão como "duplicata manual" da segunda, quando ela já foi "gasta" pela
-    // primeira. Descontar aqui é o que impede a mescla indevida.
-    private static List<ItemSemFitId> ColetarItensSemFitId(
-        List<RegistroDiario> registros, Dictionary<(DateOnly, string, decimal, string), int> consumidoPelaHeuristica)
+    // "casados" são os lançamentos que CasarComRazao já deu a uma linha do PRÓPRIO arquivo — sem
+    // isso, o excedente de duas transações idênticas no arquivo (uma já no razão, outra
+    // genuinamente nova) acharia a mesma instância do razão como "duplicata manual" da segunda,
+    // quando ela já foi "gasta" pela primeira. Pular aqui é o que impede a mescla indevida.
+    private static List<ItemSemFitId> ColetarItensSemFitId(List<RegistroDiario> registros, HashSet<Guid> casados)
     {
-        var restante = new Dictionary<(DateOnly, string, decimal, string), int>(consumidoPelaHeuristica);
         var lista = new List<ItemSemFitId>();
         foreach (var r in registros)
         {
-            foreach (var e in r.Entradas.Where(e => e.FitId == null && !e.Provisoria))
-            {
-                var chave = ChaveOcorrencia(r.Data, "Entrada", e.Valor, e.Descricao);
-                if (restante.TryGetValue(chave, out var qtd) && qtd > 0) { restante[chave] = qtd - 1; continue; }
+            foreach (var e in r.Entradas.Where(e => e.FitId == null && !e.Provisoria && !casados.Contains(e.Id)))
                 lista.Add(new ItemSemFitId(r, "Entrada", e.Id, e.Valor, e.Descricao, r.Data));
-            }
-            foreach (var s in r.Saidas.Where(s => s.FitId == null && !s.Provisoria))
-            {
-                var chave = ChaveOcorrencia(r.Data, "Saida", s.Valor, s.Descricao);
-                if (restante.TryGetValue(chave, out var qtd) && qtd > 0) { restante[chave] = qtd - 1; continue; }
+            foreach (var s in r.Saidas.Where(s => s.FitId == null && !s.Provisoria && !casados.Contains(s.Id)))
                 lista.Add(new ItemSemFitId(r, "Saida", s.Id, s.Valor, s.Descricao, r.Data));
-            }
         }
         return lista;
-    }
-
-    private static Dictionary<(DateOnly, string, decimal, string), int> ContarConsumidoPelaHeuristica(
-        List<TransacaoParseada> parseadas, HashSet<int> jaImportadas)
-    {
-        var mapa = new Dictionary<(DateOnly, string, decimal, string), int>();
-        foreach (var t in parseadas.Where(t => t.FitId == null && jaImportadas.Contains(t.Indice)))
-        {
-            var chave = ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao);
-            mapa[chave] = mapa.GetValueOrDefault(chave) + 1;
-        }
-        return mapa;
     }
 
     private static HashSet<(DateOnly, string, decimal, string)> ColetarChavesImportadas(List<TransacaoImportada> historico) =>
@@ -277,10 +253,9 @@ public class ImportacaoService : IImportacaoService
     // de valor), pra não sugerir o mesmo manual pra duas linhas do arquivo.
     private static Dictionary<int, (ItemSemFitId Candidato, bool VeioDeImportacaoAnterior)> IdentificarCandidatosDuplicata(
         List<TransacaoParseada> transacoes, List<RegistroDiario> registros,
-        HashSet<(DateOnly, string, decimal, string)> chavesImportadasAntes,
-        Dictionary<(DateOnly, string, decimal, string), int> consumidoPelaHeuristica)
+        HashSet<(DateOnly, string, decimal, string)> chavesImportadasAntes, HashSet<Guid> casados)
     {
-        var disponiveis = ColetarItensSemFitId(registros, consumidoPelaHeuristica);
+        var disponiveis = ColetarItensSemFitId(registros, casados);
         var resultado = new Dictionary<int, (ItemSemFitId, bool)>();
 
         foreach (var t in transacoes.OrderBy(t => t.Indice))
@@ -444,7 +419,7 @@ public class ImportacaoService : IImportacaoService
         var historico = await _importRepo.ListarPorContaAsync(contaBancariaId);
         var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
-        var jaImportadas = IdentificarJaImportadas(parseadas, registros);
+        var (jaImportadas, casados) = CasarComRazao(parseadas, registros, historico);
         var aImportar = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
 
         // Money Vision ("período sobreposto"): reimportar um extrato que já está todo no app ainda
@@ -455,9 +430,8 @@ public class ImportacaoService : IImportacaoService
                 "Nenhuma transação nova para importar no intervalo selecionado — todas já foram importadas antes.");
 
         var conciliaveis = IdentificarConciliaveis(aImportar, registros);
-        var consumidoPelaHeuristica = ContarConsumidoPelaHeuristica(parseadas, jaImportadas);
         var candidatosDuplicata = IdentificarCandidatosDuplicata(
-            aImportar.Where(t => !conciliaveis.Contains(t.Indice)).ToList(), registros, chavesImportadasAntes, consumidoPelaHeuristica);
+            aImportar.Where(t => !conciliaveis.Contains(t.Indice)).ToList(), registros, chavesImportadasAntes, casados);
         var resolucoesPorIndice = (resolucoesDuplicatas ?? new List<ResolucaoDuplicataDto>())
             .ToDictionary(r => r.TransacaoIndice, r => r.Acao);
         var registrosTocadosPorMerge = new HashSet<RegistroDiario>();
@@ -1219,7 +1193,7 @@ public class ImportacaoService : IImportacaoService
             await _registroRepo.AtualizarAsync(r);
         }
 
-        // Excluir o lançamento libera a reimportação do mesmo arquivo (ver IdentificarJaImportadas)
+        // Excluir o lançamento libera a reimportação do mesmo arquivo (ver CasarComRazao)
         // — não marca mais nada como "Ignorada" no histórico de importação pra bloquear isso depois.
         if (saida != null)
         {
@@ -1243,7 +1217,7 @@ public class ImportacaoService : IImportacaoService
 
     // Só mantém o registro em TransacaoImportada marcado como histórico — "Ignorada" aqui é
     // puramente informativo (auditoria/suporte: "essa linha foi importada e depois excluída pelo
-    // usuário"), nunca mais lido por IdentificarJaImportadas pra bloquear reimportação (era isso
+    // usuário"), nunca mais lido por CasarComRazao pra bloquear reimportação (era isso
     // que deixava a exclusão de um lançamento importado errado — ex.: com o sinal trocado —
     // irreversível: tentar importar o arquivo certo de novo ficava bloqueado pra sempre).
     private async Task MarcarIgnoradaSeImportadaAsync(
@@ -1505,9 +1479,6 @@ public class ImportacaoService : IImportacaoService
     // como novas transações. Um `.Any()` simples (o que existia antes) marcaria a segunda
     // ocorrência legítima como duplicata só por ela parecer com a primeira — a diferença de
     // quantidade (multiset) é o que resolve isso sem precisar perguntar nada ao usuário.
-    private static HashSet<int> IdentificarJaImportadas(List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos) =>
-        CasarComRazao(parseadas, registrosAtivos).JaImportadas;
-
     // JaImportadas: índices do arquivo que já existem no razão. ItensCasados: Ids dos lançamentos do
     // razão que alguma linha do arquivo "reivindicou" — o que sobra de importado dentro do período
     // do arquivo é o que sumiu do extrato novo (ver AusentesNoArquivo).
@@ -1516,8 +1487,14 @@ public class ImportacaoService : IImportacaoService
     // casa por data + valor + descrição contra lançamentos que também vieram de OFX (o banco pode
     // renumerar o FITID entre um extrato parcial e o do mês inteiro) — nunca contra um manual sem
     // FITID, que continua indo pro fluxo de "mesclar com manual" (IdentificarCandidatosDuplicata).
+    //
+    // Money Vision ("CSV depois OFX do mesmo período"): linha que veio de planilha (sem FITID, mas
+    // registrada na auditoria de importação) também é "de extrato" — a linha OFX casa com ela, por
+    // contagem, primeiro pela chave completa e depois só por data + sentido + valor (o CSV e o OFX
+    // do mesmo banco descrevem a mesma transação com textos diferentes). 2 iguais no arquivo e 2 no
+    // app → importa 0; 1 no app → importa 1. Lançamento digitado à mão nunca entra aqui.
     private static (HashSet<int> JaImportadas, HashSet<Guid> ItensCasados) CasarComRazao(
-        List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos)
+        List<TransacaoParseada> parseadas, List<RegistroDiario> registrosAtivos, List<TransacaoImportada> historico)
     {
         var jaImportadas = new HashSet<int>();
         var casados = new HashSet<Guid>();
@@ -1525,6 +1502,7 @@ public class ImportacaoService : IImportacaoService
             .SelectMany(r => r.Entradas.Select(e => (r.Data, Tipo: "Entrada", e.Id, e.Valor, e.Descricao, e.FitId))
                 .Concat(r.Saidas.Select(s => (r.Data, Tipo: "Saida", s.Id, s.Valor, s.Descricao, s.FitId))))
             .ToList();
+        var deArquivoSemFitId = IdentificarItensDeArquivoSemFitId(itens.Where(i => i.FitId == null).Select(i => (i.Data, i.Tipo, i.Id, i.Valor, i.Descricao)), historico);
 
         var porFitId = itens.Where(i => i.FitId != null).GroupBy(i => (i.Tipo, i.FitId!)).ToDictionary(g => g.Key, g => g.Select(i => i.Id).ToList());
         foreach (var t in parseadas.Where(t => t.FitId != null))
@@ -1537,27 +1515,55 @@ public class ImportacaoService : IImportacaoService
         // Por CONTAGEM de ocorrências, não por existência: duas transações legítimas idênticas no
         // mesmo dia (dois Pix iguais, dois Ubers) só viram duplicata até o limite de quantas já
         // existem no razão; a partir daí, as extras do arquivo entram como novas.
-        Dictionary<(DateOnly, string, decimal, string), Queue<Guid>> Fila(Func<(DateOnly Data, string Tipo, Guid Id, decimal Valor, string Descricao, string? FitId), bool> filtro) =>
+        Dictionary<TChave, Queue<Guid>> Fila<TChave>(
+            Func<(DateOnly Data, string Tipo, Guid Id, decimal Valor, string Descricao, string? FitId), bool> filtro,
+            Func<(DateOnly Data, string Tipo, Guid Id, decimal Valor, string Descricao, string? FitId), TChave> chave) where TChave : notnull =>
             itens.Where(i => !casados.Contains(i.Id) && filtro(i))
-                .GroupBy(i => ChaveOcorrencia(i.Data, i.Tipo, i.Valor, i.Descricao))
+                .GroupBy(chave)
                 .ToDictionary(g => g.Key, g => new Queue<Guid>(g.Select(i => i.Id)));
-        var todos = Fila(_ => true);
-        var soDeOfx = Fila(i => i.FitId != null);
-
-        foreach (var t in parseadas.Where(t => !jaImportadas.Contains(t.Indice)))
+        // As filas apontam pros mesmos lançamentos — um já casado por outra fila é pulado.
+        bool Reivindicar<TChave>(Dictionary<TChave, Queue<Guid>> fila, TChave chave, TransacaoParseada t) where TChave : notnull
         {
-            var fila = t.FitId == null ? todos : soDeOfx;
-            if (!fila.TryGetValue(ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao), out var ids) || ids.Count == 0) continue;
-            var id = ids.Dequeue();
-            jaImportadas.Add(t.Indice);
-            casados.Add(id);
-            // As duas filas apontam pros mesmos lançamentos — tira da outra também.
-            var outra = t.FitId == null ? soDeOfx : todos;
-            if (outra.TryGetValue(ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao), out var idsOutra))
-                outra[ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao)] = new Queue<Guid>(idsOutra.Where(x => x != id));
+            if (!fila.TryGetValue(chave, out var ids)) return false;
+            while (ids.Count > 0)
+            {
+                var id = ids.Dequeue();
+                if (!casados.Add(id)) continue;
+                jaImportadas.Add(t.Indice);
+                return true;
+            }
+            return false;
         }
 
+        var todos = Fila(_ => true, i => ChaveOcorrencia(i.Data, i.Tipo, i.Valor, i.Descricao));
+        var deExtrato = Fila(i => i.FitId != null || deArquivoSemFitId.Contains(i.Id), i => ChaveOcorrencia(i.Data, i.Tipo, i.Valor, i.Descricao));
+        var deArquivoPorValor = Fila(i => deArquivoSemFitId.Contains(i.Id), i => (i.Data, i.Tipo, Math.Round(i.Valor, 2)));
+
+        foreach (var t in parseadas.Where(t => !jaImportadas.Contains(t.Indice)))
+            Reivindicar(t.FitId == null ? todos : deExtrato, ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao), t);
+        foreach (var t in parseadas.Where(t => t.FitId != null && !jaImportadas.Contains(t.Indice)))
+            Reivindicar(deArquivoPorValor, (t.Data, t.Tipo, Math.Round(t.Valor, 2)), t);
+
         return (jaImportadas, casados);
+    }
+
+    // Lançamentos sem FITID que vieram de planilha: cada linha da auditoria (não ignorada) "cobre"
+    // um lançamento com a mesma chave — por contagem, o excedente é digitado à mão.
+    private static HashSet<Guid> IdentificarItensDeArquivoSemFitId(
+        IEnumerable<(DateOnly Data, string Tipo, Guid Id, decimal Valor, string Descricao)> itensSemFitId, List<TransacaoImportada> historico)
+    {
+        var restante = historico.Where(t => t.FitId == null && t.Status != "Ignorada")
+            .GroupBy(t => ChaveOcorrencia(t.Data, t.Tipo, t.Valor, t.Descricao))
+            .ToDictionary(g => g.Key, g => g.Count());
+        var resultado = new HashSet<Guid>();
+        foreach (var i in itensSemFitId)
+        {
+            var chave = ChaveOcorrencia(i.Data, i.Tipo, i.Valor, i.Descricao);
+            if (!restante.TryGetValue(chave, out var qtd) || qtd == 0) continue;
+            restante[chave] = qtd - 1;
+            resultado.Add(i.Id);
+        }
+        return resultado;
     }
 
     // Lançamentos que vieram de extrato (FITID, ou linha de planilha registrada na auditoria) dentro

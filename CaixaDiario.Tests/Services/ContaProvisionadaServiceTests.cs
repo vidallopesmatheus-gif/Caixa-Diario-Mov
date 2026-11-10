@@ -227,6 +227,27 @@ public class ContaProvisionadaServiceTests
     }
 
     [Fact]
+    public async Task AtualizarAsync_BaixaDeContaAReceberVinculadaARecebimentoSemCategoria_RecebimentoHerdaACategoria()
+    {
+        var clienteId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var recebimento = new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Flavia", Valor = 2000m, TipoCusto = "Receita", PendenteCategorizacao = true };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, Data = new DateOnly(2026, 10, 30),
+            Saidas = new(), ContasPagar = new(), Entradas = new List<ItemFinanceiro> { recebimento },
+            ContasReceber = new List<ContaProvisionada> { new() { Id = itemId, Descricao = "Flavia", Valor = 1000m, Categoria = "Serviços Prestados" } },
+        };
+        _registroRepoMock.Setup(r => r.ListarPorClienteAsync(clienteId)).ReturnsAsync(new List<RegistroDiario> { registro });
+
+        await _sut.AtualizarAsync(clienteId, itemId,
+            new AtualizarContaProvisionadaDto { Pago = true, LancamentoVinculadoId = recebimento.Id }, clienteId, "cliente");
+
+        var entrada = Assert.Single(registro.Entradas);
+        Assert.Equal(("Serviços Prestados", false), (entrada.Categoria, entrada.PendenteCategorizacao));
+    }
+
+    [Fact]
     public async Task AtualizarAsync_BaixaVinculadaComValorRealizadoExplicito_NaoSobrescreveComOValorDoLancamento()
     {
         var clienteId = Guid.NewGuid();

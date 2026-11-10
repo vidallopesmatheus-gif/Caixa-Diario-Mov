@@ -121,6 +121,22 @@ public class ContasBancariasController : ControllerBase
         return Ok(new ApiResponse<DiagnosticoDiferencaDto> { Dados = resultado });
     }
 
+    // "Conferir saldo": ajustes de saldo da conta (inclusive os da migração) pra confirmar ou
+    // desfazer — desfazer é a exclusão comum do lançamento (excluir-lancamento).
+    [HttpGet("{contaId:guid}/ajustes-saldo")]
+    public async Task<IActionResult> ListarAjustesSaldo(Guid contaId)
+    {
+        var resultado = await _conciliacaoSaldoService.ListarAjustesAsync(contaId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<List<AjusteSaldoDto>> { Dados = resultado });
+    }
+
+    [HttpPost("{contaId:guid}/ajustes-saldo/{lancamentoId:guid}/confirmar")]
+    public async Task<IActionResult> ConfirmarAjusteSaldo(Guid contaId, Guid lancamentoId)
+    {
+        await _conciliacaoSaldoService.ConfirmarAjusteAsync(contaId, lancamentoId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
+
     // "Saldo no banco em 07/11" informado à mão — grava o ponto de conciliação (nunca cria ajuste).
     [HttpPost("{contaId:guid}/saldo-banco")]
     public async Task<IActionResult> RegistrarSaldoBanco(Guid contaId, [FromBody] RegistrarSaldoBancoDto dto)
