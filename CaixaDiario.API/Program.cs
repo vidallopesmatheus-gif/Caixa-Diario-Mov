@@ -96,6 +96,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
 builder.Services.AddScoped<IRegistroRepository, RegistroRepository>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUsuarioService, UsuarioService>();
 builder.Services.AddScoped<IRegistroService, RegistroService>();
@@ -177,14 +178,12 @@ var app = builder.Build();
 
 MigracoesNoStart.Aplicar(app);
 
+// Antes dos arquivos estáticos: HSTS/CSP/nosniff etc. precisam sair também no index.html e nos assets.
+app.UseMiddleware<CabecalhosSegurancaMiddleware>();
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
-    OnPrepareResponse = ctx =>
-    {
-        if (ctx.File.Name == "index.html")
-            ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
-    }
+    OnPrepareResponse = ctx => CacheArquivosEstaticos.Aplicar(ctx.Context, ctx.File.Name)
 });
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
@@ -192,10 +191,22 @@ app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+// Rota /api que não existe é erro de rota, nunca a SPA: sem isso o fallback abaixo devolvia o
+// index.html com 200, escondendo o erro do front e do monitoramento. Mais específico que o
+// fallback da SPA (segmento literal "api"), então ganha dele.
+app.MapFallback("api/{**rota}", async context =>
+{
+    context.Response.StatusCode = StatusCodes.Status404NotFound;
+    await context.Response.WriteAsJsonAsync(new ErroResponse
+    {
+        Status = 404,
+        Codigo = CodigoRetorno.NAO_ENCONTRADO.ToString(),
+        Mensagem = "Rota não encontrada.",
+    });
+});
 app.MapFallbackToFile("index.html", new StaticFileOptions
 {
-    OnPrepareResponse = ctx =>
-        ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate"
+    OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = CacheArquivosEstaticos.SemCache
 });
 
 app.Run();

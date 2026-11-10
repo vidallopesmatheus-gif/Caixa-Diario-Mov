@@ -35,9 +35,9 @@ public class AuthServiceTests
     {
         var usuario = CriarUsuarioAtivo("senha123");
         _repoMock.Setup(r => r.ObterPorNomeUsuarioAsync("joao")).ReturnsAsync(usuario);
-        _tokenMock.Setup(t => t.GerarToken(usuario)).Returns("token-gerado");
+        _tokenMock.Setup(t => t.GerarTokenAcesso(usuario)).Returns(new TokenAcesso("token-gerado", DateTime.UtcNow.AddMinutes(30)));
 
-        var resultado = await _sut.LoginAsync(new LoginRequestDto { NomeUsuario = "joao", Senha = "senha123" });
+        var resultado = (await _sut.LoginAsync(new LoginRequestDto { NomeUsuario = "joao", Senha = "senha123" })).Resposta;
 
         Assert.Equal("token-gerado", resultado.Token);
         Assert.Equal(usuario.Nome, resultado.NomeCompleto);

@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { apiFetch, apiFetchResposta } from './client'
 import type { Categorias, CategoriaAdmin, ApiResponse, Grupo, Bloco, TipoMovimento } from '../types'
 
 // Correção de integridade (Parte 1): categoria deixou de ser global — o cache agora é por
@@ -68,11 +68,7 @@ export interface ExclusaoCategoriaResultado {
 
 /** Tenta excluir; se a categoria estiver em uso, retorna a contagem em vez de lançar erro. */
 export async function excluirCategoria(clienteId: string, id: string): Promise<ExclusaoCategoriaResultado> {
-  const token = localStorage.getItem('token')
-  const res = await fetch(`/api/clientes/${clienteId}/categorias/${id}`, {
-    method: 'DELETE',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
+  const res = await apiFetchResposta(`/api/clientes/${clienteId}/categorias/${id}`, { method: 'DELETE' })
   if (res.status !== 200 && res.status !== 409) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err?.mensagem ?? `Erro ${res.status}`)

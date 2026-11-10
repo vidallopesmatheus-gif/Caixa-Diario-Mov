@@ -1,6 +1,7 @@
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { obterDre } from '../../api/metricas'
+import { baixarArquivo, salvarNoDispositivo } from '../../api/exportacao'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { editarCategoriaLancamento } from '../../api/registros'
 import { listarCategorias } from '../../api/categorias'
@@ -430,21 +431,10 @@ export default function ClientDrePage() {
     try {
       const referencia = periodosComDre[0].periodo.de
       const [anoRef, mesRef] = referencia.split('-')
-      const token = localStorage.getItem('token')
       const query = new URLSearchParams({ ano: anoRef, mes: String(Number(mesRef)) })
       if (contaFiltro) query.set('contaBancariaId', contaFiltro)
-      const res = await fetch(`/api/export/${clienteId}/dre-pdf?${query.toString()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!res.ok) throw new Error(`Erro ${res.status}`)
-
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `MoneyVision_DRE_${user?.nomeUsuario ?? clienteId}_${anoRef}-${mesRef}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
+      const blob = await baixarArquivo(`/api/export/${clienteId}/dre-pdf?${query.toString()}`)
+      salvarNoDispositivo(blob, `MoneyVision_DRE_${user?.nomeUsuario ?? clienteId}_${anoRef}-${mesRef}.pdf`)
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Erro ao exportar PDF.')
     } finally {

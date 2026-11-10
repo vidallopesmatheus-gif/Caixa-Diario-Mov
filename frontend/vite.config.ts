@@ -79,13 +79,18 @@ export default defineConfig({
   build: {
     outDir: '../CaixaDiario.API/wwwroot',
     emptyOutDir: true,
-    chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            return 'vendor';
-          }
+        // Money Vision (performance): recharts e o que ele puxa (d3, redux…) só são baixados
+        // quando uma tela com gráfico abre — antes iam todos no mesmo "vendor" da tela de login.
+        // Grupos com prioridade (Rolldown): sem isso o grupo de gráficos "puxava" o próprio React
+        // pra dentro dele, e o bundle inicial acabava baixando os gráficos de qualquer jeito.
+        codeSplitting: {
+          groups: [
+            { name: 'vendor', test: /node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler|cookie|set-cookie-parser)[\\/]/, priority: 20 },
+            { name: 'graficos', test: /node_modules[\\/](recharts|d3-[^\\/]+|victory-vendor|@reduxjs|react-redux|redux|immer|reselect|decimal\.js-light|es-toolkit|eventemitter3|internmap|use-sync-external-store|react-is|clsx|tiny-invariant)[\\/]/, priority: 10 },
+            { name: 'vendor', test: /node_modules/, priority: 0 },
+          ],
         },
       },
     },

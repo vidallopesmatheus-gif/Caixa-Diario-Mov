@@ -32,6 +32,7 @@ public class AppDbContext : DbContext
     public DbSet<Parcelamento> Parcelamentos { get; set; }
     public DbSet<PontoConciliacao> PontosConciliacao { get; set; }
     public DbSet<PeriodoExtrato> PeriodosExtrato { get; set; }
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -260,6 +261,23 @@ public class AppDbContext : DbContext
             entity.Property(e => e.AtualizadoEm).HasColumnName("atualizado_em").HasDefaultValueSql("NOW()");
             entity.HasIndex(e => new { e.ContaBancariaId, e.Data }).IsUnique();
             entity.HasIndex(e => e.ClienteId);
+        });
+
+        modelBuilder.Entity<RefreshToken>(entity =>
+        {
+            entity.ToTable("refresh_tokens");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UsuarioId).HasColumnName("usuario_id");
+            entity.Property(e => e.TokenHash).HasColumnName("token_hash").IsRequired().HasMaxLength(64);
+            entity.Property(e => e.FamiliaId).HasColumnName("familia_id");
+            entity.Property(e => e.CriadoEm).HasColumnName("criado_em");
+            entity.Property(e => e.ExpiraEm).HasColumnName("expira_em");
+            entity.Property(e => e.RevogadoEm).HasColumnName("revogado_em");
+            entity.Property(e => e.Substituido).HasColumnName("substituido");
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.HasIndex(e => e.UsuarioId);
+            entity.HasIndex(e => e.FamiliaId);
         });
 
         modelBuilder.Entity<Parcelamento>(entity =>

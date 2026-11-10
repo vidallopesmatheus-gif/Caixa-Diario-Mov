@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useRegistros } from '../../hooks/useRegistros'
+import { useRascunho } from '../../hooks/useRascunho'
+import { lerRascunho } from '../../utils/rascunhos'
 import StatCard from '../../components/shared/StatCard'
 import DayNav from '../../components/shared/DayNav'
 import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
@@ -54,6 +56,12 @@ function fmtNum(n: number) {
   if (!n) return ''
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
+const CHAVE_RASCUNHO_CAIXA = 'caixa-dia'
+interface RascunhoCaixa {
+  data: string; contaId: string
+  entradas: LinhaEntrada[]; saidas: LinhaSaida[]; entradaDisplays: string[]; saidaDisplays: string[]
+}
+
 function parseBRL(s: string): number {
   return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0
 }
@@ -63,7 +71,11 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   const clienteId = clienteIdOverride ?? user?.usuarioId ?? null
   const { loading, salvar, buscarPorData } = useRegistros(clienteId)
 
-  const [data, setData] = useState(todayISO())
+  // Money Vision ("desloga toda hora"): lançamentos digitados e não salvos quando a sessão expirou
+  // voltam depois do login — aplicados logo depois de carregar o dia (senão a carga os apagaria).
+  const [rascunhoCaixa] = useState(() => lerRascunho<RascunhoCaixa>(CHAVE_RASCUNHO_CAIXA))
+  const rascunhoPendenteRef = useRef(rascunhoCaixa)
+  const [data, setData] = useState(rascunhoCaixa?.data ?? todayISO())
   const [inicio, setInicio] = useState(0)
   const [entradas, setEntradas] = useState<LinhaEntrada[]>([novaEntrada()])
   const [saidas, setSaidas] = useState<LinhaSaida[]>([novaSaida()])
@@ -100,6 +112,10 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   }, [contaId])
   const entradaDescRefs = useRef<(HTMLInputElement | null)[]>([])
   const saidaDescRefs = useRef<(HTMLInputElement | null)[]>([])
+  const digitouAlgo = entradas.some(e => e.descricao || e.valor) || saidas.some(s => s.descricao || s.valor)
+  useRascunho<RascunhoCaixa>(CHAVE_RASCUNHO_CAIXA, digitouAlgo
+    ? { data, contaId, entradas, saidas, entradaDisplays, saidaDisplays }
+    : null)
 
   // Item 2.3: skeleton deve cobrir TODO o carregamento inicial (lista de registros + contas + o
   // registro do dia), não só o primeiro — senão a tela real aparece de passagem com "R$ 0,00" e
@@ -130,7 +146,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setContas(cs)
         const ativas = cs.filter(c => c.ativa)
         if (ativas.length > 0 && !contaId) {
-          const caixa = ativas.find(c => c.tipo === 'Caixa') ?? ativas[0]
+          const caixa = ativas.find(c => c.id === rascunhoPendenteRef.current?.contaId)
+            ?? ativas.find(c => c.tipo === 'Caixa') ?? ativas[0]
           setContaId(caixa.id)
         } else if (ativas.length === 0 && !primeiraCargaFeita.current) {
           // Cliente sem nenhuma conta ativa — não há registro-por-data a esperar, encerra a carga.
@@ -221,6 +238,16 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         setSaidaDisplays([''])
         setConfirmado('')
         calculadoAnteriorRef.current = reg?.saldoInicio ?? 0
+      }
+      // Rascunho de uma sessão que expirou: só vale pro mesmo dia + conta em que foi digitado.
+      const rascunho = rascunhoPendenteRef.current
+      if (rascunho && rascunho.data === data && rascunho.contaId === contaId) {
+        rascunhoPendenteRef.current = null
+        setEntradas(rascunho.entradas)
+        setSaidas(rascunho.saidas)
+        setEntradaDisplays(rascunho.entradaDisplays)
+        setSaidaDisplays(rascunho.saidaDisplays)
+        setMsg('Sua sessão expirou — recuperamos o que você tinha digitado. Confira e salve.')
       }
       if (!primeiraCargaFeita.current) {
         primeiraCargaFeita.current = true

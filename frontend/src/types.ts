@@ -366,6 +366,8 @@ export interface ParcelamentoDaMeta {
 
 export interface LoginResponse {
   token: string
+  /** Quando o access token vence (ISO, UTC) — só em memória, nunca salvo no navegador. */
+  expiraEm?: string
   perfil: 'admin' | 'cliente'
   nomeUsuario: string
   nomeCompleto: string

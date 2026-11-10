@@ -1,24 +1,33 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import LoginPage from './pages/LoginPage'
-import AdminOverviewPage from './pages/admin/AdminOverviewPage'
-import AdminClientsPage from './pages/admin/AdminClientsPage'
-import AdminCaixaPage from './pages/admin/AdminCaixaPage'
-import ClientCaixaPage from './pages/client/ClientCaixaPage'
-import ContasPage from './pages/client/ContasPage'
-import ClientDashboardPage from './pages/client/ClientDashboardPage'
-import ClientBancoPage from './pages/client/ClientBancoPage'
-import ClientContaDetalhePage from './pages/client/ClientContaDetalhePage'
-import ClientFaturasCartaoPage from './pages/client/ClientFaturasCartaoPage'
-import ClientExtratoRevisaoPage from './pages/client/ClientExtratoRevisaoPage'
-import ClientTransferenciasSemParPage from './pages/client/ClientTransferenciasSemParPage'
-import ResultadosPage from './pages/client/ResultadosPage'
-import RelatoriosPage from './pages/client/RelatoriosPage'
-import ConfiguracoesPage from './pages/client/ConfiguracoesPage'
 import Layout from './components/Layout/Layout'
 import InstallPrompt from './components/InstallPrompt'
 import PwaUpdateBanner from './components/PwaUpdateBanner'
-import PortalConciliacaoPage from './pages/portal/PortalConciliacaoPage'
+
+// Money Vision (performance): cada tela vira um chunk próprio, baixado só quando é aberta — antes
+// o app inteiro (~900 KB) vinha num arquivo só já na tela de login. Login e Layout ficam no
+// bundle inicial: são o que aparece primeiro.
+const AdminOverviewPage = lazy(() => import('./pages/admin/AdminOverviewPage'))
+const AdminClientsPage = lazy(() => import('./pages/admin/AdminClientsPage'))
+const AdminCaixaPage = lazy(() => import('./pages/admin/AdminCaixaPage'))
+const ClientCaixaPage = lazy(() => import('./pages/client/ClientCaixaPage'))
+const ContasPage = lazy(() => import('./pages/client/ContasPage'))
+const ClientDashboardPage = lazy(() => import('./pages/client/ClientDashboardPage'))
+const ClientBancoPage = lazy(() => import('./pages/client/ClientBancoPage'))
+const ClientContaDetalhePage = lazy(() => import('./pages/client/ClientContaDetalhePage'))
+const ClientFaturasCartaoPage = lazy(() => import('./pages/client/ClientFaturasCartaoPage'))
+const ClientExtratoRevisaoPage = lazy(() => import('./pages/client/ClientExtratoRevisaoPage'))
+const ClientTransferenciasSemParPage = lazy(() => import('./pages/client/ClientTransferenciasSemParPage'))
+const ResultadosPage = lazy(() => import('./pages/client/ResultadosPage'))
+const RelatoriosPage = lazy(() => import('./pages/client/RelatoriosPage'))
+const ConfiguracoesPage = lazy(() => import('./pages/client/ConfiguracoesPage'))
+const PortalConciliacaoPage = lazy(() => import('./pages/portal/PortalConciliacaoPage'))
+
+function CarregandoTela() {
+  return <p style={{ padding: 24, color: 'var(--tx3)' }} role="status">Carregando...</p>
+}
 
 /** Redireciona uma rota antiga com :contaId para o novo path equivalente sob /banco. */
 function RedirectContaId({ para }: { para: (contaId: string) => string }) {
@@ -33,18 +42,21 @@ function ProtectedRoutes() {
   if (user.perfil === 'admin') {
     return (
       <Layout>
+        <Suspense fallback={<CarregandoTela />}>
         <Routes>
           <Route path="/admin/overview" element={<AdminOverviewPage />} />
           <Route path="/admin/clientes" element={<AdminClientsPage />} />
           <Route path="/admin/caixa/:clienteId" element={<AdminCaixaPage />} />
           <Route path="*" element={<Navigate to="/admin/overview" replace />} />
         </Routes>
+        </Suspense>
       </Layout>
     )
   }
 
   return (
     <Layout>
+      <Suspense fallback={<CarregandoTela />}>
       <Routes>
         <Route path="/dashboard"  element={<ClientDashboardPage />} />
         <Route path="/caixa"      element={<ClientCaixaPage />} />
@@ -78,6 +90,7 @@ function ProtectedRoutes() {
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
+      </Suspense>
     </Layout>
   )
 }
@@ -87,12 +100,14 @@ export default function App() {
     <>
       <AuthProvider>
         <BrowserRouter>
+          <Suspense fallback={<CarregandoTela />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             {/* Portal público (sem login) — link que o cliente abre pra classificar pendentes */}
             <Route path="/portal/conciliacao/:token" element={<PortalConciliacaoPage />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </AuthProvider>
       <PwaUpdateBanner />

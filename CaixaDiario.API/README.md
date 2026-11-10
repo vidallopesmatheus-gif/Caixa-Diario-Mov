@@ -36,7 +36,8 @@ cd CaixaDiario.API
     "SecretKey": "<chave-secreta-minimo-32-caracteres>",
     "Issuer": "CaixaDiario",
     "Audience": "CaixaDiario",
-    "ExpiresInHours": "24"
+    "AccessTokenMinutes": "30",
+    "RefreshTokenDays": "14"
   },
   "Cors": {
     "AllowedOrigins": "http://localhost:5500,http://127.0.0.1:5500"
@@ -82,7 +83,8 @@ A API estará disponível em `http://localhost:5131`.
 | `Jwt__SecretKey` | Chave secreta para assinar tokens JWT (mínimo 32 chars) | `minha-chave-super-secreta-32chars` |
 | `Jwt__Issuer` | Emissor do token JWT | `CaixaDiario` |
 | `Jwt__Audience` | Audiência do token JWT | `CaixaDiario` |
-| `Jwt__ExpiresInHours` | Validade do token em horas | `24` |
+| `Jwt__AccessTokenMinutes` | Validade do access token (JWT) em minutos — a sessão é renovada sozinha pelo refresh token | `30` |
+| `Jwt__RefreshTokenDays` | Validade do refresh token (cookie HttpOnly), renovada a cada uso | `14` |
 | `Cors__AllowedOrigins` | URLs do frontend separadas por vírgula | `https://meusite.com` |
 
 ---
