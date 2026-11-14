@@ -9,6 +9,7 @@ import type { SugestaoTransferenciaSemPar } from '../../api/transferencias'
 import { limparDescricao } from '../../utils/descricaoExibicao'
 import { fmtBRL, fmtDate } from '../../utils/format'
 import type { ContaBancaria } from '../../types'
+import TransferenciasParaRevisar from '../../components/conciliacao/TransferenciasParaRevisar'
 import './configuracoes/Categorias.css'
 import './ClientContasBancarias.css'
 import './ClientContaDetalhe.css'
@@ -104,6 +105,8 @@ export default function ClientTransferenciasSemParPage() {
       </p>
 
       {msg && <div style={{ marginBottom: 12, fontSize: 13, fontWeight: 600, color: msgOk ? '#34c759' : '#ff6b6b' }}>{msg}</div>}
+
+      {clienteId && <TransferenciasParaRevisar clienteId={clienteId} onAlterado={carregar} />}
 
       {sugestoes.length === 0 ? (
         <p style={{ color: 'var(--tx3)', fontSize: 13 }}>Nenhuma sugestão pendente — tudo pareado.</p>

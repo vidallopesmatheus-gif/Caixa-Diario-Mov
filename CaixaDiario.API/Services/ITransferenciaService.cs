@@ -10,6 +10,9 @@ public interface ITransferenciaService
     // lançamentos em si, porque eles são dinheiro que realmente se moveu no banco.
     Task DesfazerClassificacaoAsync(Guid id, Guid usuarioLogadoId, string perfil);
     Task<TransferenciaDto> ConverterLancamentoAsync(ConverterLancamentoEmTransferenciaDto dto, Guid usuarioLogadoId, string perfil);
+    // Lançamentos reais da conta contrapartida que podem ser a outra ponta (a tela pergunta qual).
+    Task<CandidatosContrapartidaDto> ListarCandidatosContrapartidaAsync(
+        Guid contaId, Guid lancamentoId, DateOnly data, Guid contaContrapartidaId, Guid usuarioLogadoId, string perfil);
     // Ao contrário de DesfazerClassificacaoAsync, remove de verdade as duas pontas (origem e
     // destino) — usado quando o usuário pede pra EXCLUIR o lançamento, não só reclassificar.
     // As duas pontas são o mesmo evento financeiro: excluir só uma deixaria a outra órfã.

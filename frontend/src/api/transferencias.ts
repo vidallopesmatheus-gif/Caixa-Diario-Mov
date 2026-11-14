@@ -55,6 +55,8 @@ export const converterLancamentoEmTransferencia = async (dto: {
   contaContrapartidaId: string
   lancamentoContrapartidaId?: string
   dataContrapartida?: string
+  /** Sem par real e com o extrato da outra conta cobrindo a data: cria a contrapartida mesmo assim. */
+  criarMesmoAssim?: boolean
 }): Promise<Transferencia> => {
   const res = await apiFetch<ApiResponse<unknown>>('/api/transferencias/converter-lancamento', {
     method: 'POST',
@@ -66,6 +68,7 @@ export const converterLancamentoEmTransferencia = async (dto: {
       ContaContrapartidaId: dto.contaContrapartidaId,
       LancamentoContrapartidaId: dto.lancamentoContrapartidaId,
       DataContrapartida: dto.dataContrapartida,
+      CriarMesmoAssim: dto.criarMesmoAssim ?? false,
     }),
   })
   return mapTransferencia(res.dados)
@@ -112,4 +115,90 @@ export const descartarSugestaoTransferencia = async (dto: { contaId: string; lan
     method: 'POST',
     body: JSON.stringify({ ContaId: dto.contaId, LancamentoId: dto.lancamentoId, Data: dto.data }),
   })
+}
+
+// ── Money Vision ("transferência cria contrapartida falsa"): antes de converter, a tela mostra o
+// lançamento real da outra conta com que vai parear — ou avisa que o extrato dela não tem esse valor.
+
+export interface CandidatoContrapartida {
+  id: string
+  data: string
+  descricao: string
+  /** Com sinal: entrada positiva, saída negativa. */
+  valor: number
+}
+
+export interface CandidatosContrapartida {
+  contaContrapartidaNome: string
+  /** Sem candidato e com extrato cobrindo a data: "o extrato do C6 não tem esse recebimento". */
+  extratoCobreData: boolean
+  candidatos: CandidatoContrapartida[]
+}
+
+export const listarCandidatosContrapartida = async (params: {
+  contaId: string; lancamentoId: string; data: string; contaContrapartidaId: string
+}): Promise<CandidatosContrapartida> => {
+  const query = new URLSearchParams(params)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const res = await apiFetch<ApiResponse<any>>(`/api/transferencias/candidatos-contrapartida?${query}`)
+  const d = res.dados ?? {}
+  return {
+    contaContrapartidaNome: d.contaContrapartidaNome ?? '',
+    extratoCobreData: !!d.extratoCobreData,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    candidatos: (d.candidatos ?? []).map((c: any) => ({ id: c.id, data: String(c.data).slice(0, 10), descricao: c.descricao ?? '', valor: c.valor ?? 0 })),
+  }
+}
+
+// ── "Transferências para revisar" ─────────────────────────────────────────────────────────────
+
+export interface ItemCorrecaoTransferencia {
+  transferenciaId: string
+  tipo: 'DuplicadaComReal' | 'ParDuplicado' | 'AguardandoExtrato' | 'SemLancamentoNoExtrato'
+  acao: string
+  contaNome: string
+  data: string
+  valor: number
+  descricaoCriada: string
+  descricaoReal?: string
+}
+
+export interface TransferenciaParaRevisar {
+  transferenciaId: string
+  data: string
+  valor: number
+  contaCriadaNome: string
+  contaOutraNome: string
+  descricaoOriginal: string
+}
+
+export interface RevisaoTransferencias {
+  corrigiveis: ItemCorrecaoTransferencia[]
+  paraDecidir: TransferenciaParaRevisar[]
+}
+
+export const listarTransferenciasParaRevisar = async (clienteId: string): Promise<RevisaoTransferencias> => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const res = await apiFetch<ApiResponse<any>>(`/api/transferencias/${clienteId}/revisar`)
+  const d = res.dados ?? {}
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    corrigiveis: (d.corrigiveis ?? []).map((c: any) => ({ ...c, data: String(c.data).slice(0, 10), descricaoReal: c.descricaoReal ?? undefined })),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    paraDecidir: (d.paraDecidir ?? []).map((p: any) => ({ ...p, data: String(p.data).slice(0, 10) })),
+  }
+}
+
+export const corrigirContrapartidasTransferencia = async (clienteId: string): Promise<void> => {
+  await apiFetch<ApiResponse<unknown>>(`/api/transferencias/${clienteId}/revisar/corrigir`, { method: 'POST' })
+}
+
+/** "Foi para essa conta mesmo" — sai da revisão. */
+export const confirmarContrapartidaTransferencia = async (transferenciaId: string): Promise<void> => {
+  await apiFetch<ApiResponse<null>>(`/api/transferencias/${transferenciaId}/confirmar-contrapartida`, { method: 'POST' })
+}
+
+/** "Não foi para essa conta" — apaga a contrapartida inventada; o lançamento real volta a pendente. */
+export const descartarContrapartidaTransferencia = async (transferenciaId: string): Promise<void> => {
+  await apiFetch<ApiResponse<null>>(`/api/transferencias/${transferenciaId}/descartar-contrapartida`, { method: 'POST' })
 }

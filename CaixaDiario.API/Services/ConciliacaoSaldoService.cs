@@ -32,17 +32,19 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
     private readonly TimeProvider _timeProvider;
     private readonly IDuplicataDispensadaRepository? _dispensadaRepo;
     private readonly ILogger<ConciliacaoSaldoService>? _logger;
+    private readonly IRevisaoTransferenciasService? _revisaoTransferencias;
     private readonly IPeriodoConferidoService? _periodoConferido;
 
     public ConciliacaoSaldoService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, ITransacaoImportadaRepository importRepo,
         IPontoConciliacaoRepository pontoRepo, IPeriodoExtratoRepository periodoRepo, TimeProvider? timeProvider = null,
         IDuplicataDispensadaRepository? dispensadaRepo = null, ILogger<ConciliacaoSaldoService>? logger = null,
-        IPeriodoConferidoService? periodoConferido = null)
+        IRevisaoTransferenciasService? revisaoTransferencias = null, IPeriodoConferidoService? periodoConferido = null)
     {
         _periodoConferido = periodoConferido;
         _dispensadaRepo = dispensadaRepo;
         _logger = logger;
+        _revisaoTransferencias = revisaoTransferencias;
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _importRepo = importRepo;
@@ -88,7 +90,9 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
         var paresMantidos = _dispensadaRepo == null ? new HashSet<(Guid, Guid)>()
             : (await _dispensadaRepo.ListarPorContaAsync(contaId)).Select(d => (d.LancamentoMenorId, d.LancamentoMaiorId)).ToHashSet();
 
-        var diagnostico = ConciliacaoSaldoCalculo.Diagnosticar(conta, registrosCliente, pontos, dias, chaves, data, saldo, paresMantidos);
+        var contrapartidas = _revisaoTransferencias != null ? await _revisaoTransferencias.AnalisarAsync(conta.ClienteId) : null;
+
+        var diagnostico = ConciliacaoSaldoCalculo.Diagnosticar(conta, registrosCliente, pontos, dias, chaves, data, saldo, paresMantidos, contrapartidas);
         if (_periodoConferido != null && diagnostico.Diferenca is { } diferenca && Math.Abs(diferenca) >= 0.01m)
             diagnostico.MudancasDesdeConferencia = await _periodoConferido.MudancasDesdeConferenciaAsync(conta, registrosDaConta);
         return diagnostico;

@@ -619,6 +619,10 @@ export interface DiagnosticoDiferenca {
   manuais: LinhaDiagnostico[]
   /** Ajustes de saldo no período — escondem dado faltando; efeitoSeCorrigir = desfazer. */
   ajustes: LinhaDiagnostico[]
+  /** Contrapartida de transferência criada pelo app que o extrato desta conta não tem. */
+  contrapartidasSemLancamento: LinhaDiagnostico[]
+  /** Contrapartida criada pelo app que repete um lançamento real solto (conta 2×). */
+  contrapartidasDuplicadas: LinhaDiagnostico[]
   combinacao?: { resumo: string; itens: LinhaDiagnostico[] }
   /** O que foi criado, editado ou excluído desde a última conferência que bateu. */
   mudancasDesdeConferencia?: MudancaDesdeConferencia[]

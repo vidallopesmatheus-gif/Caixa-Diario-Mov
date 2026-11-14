@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import DiagnosticoDiferencaModal from './DiagnosticoDiferencaModal'
 import * as conciliacaoApi from '../../api/conciliacaoSaldo'
 import * as importacaoApi from '../../api/importacao'
@@ -15,7 +16,7 @@ const duplicata: LinhaDiagnostico = { id: 'dup-2', data: '2026-11-03', descricao
 function diagnostico(overrides: Partial<DiagnosticoDiferenca> = {}): DiagnosticoDiferenca {
   return {
     data: '2026-11-07', saldoBanco: 557.97, saldoApp: 215.94, diferenca: 342.03, analisadoDesde: '2026-11-01',
-    lacunas: [], sinalSuspeito: [], transferenciasSemPar: [], manuais: [], ajustes: [],
+    lacunas: [], sinalSuspeito: [], transferenciasSemPar: [], manuais: [], ajustes: [], contrapartidasSemLancamento: [], contrapartidasDuplicadas: [],
     duplicatas: [{ itens: [{ ...duplicata, id: 'dup-1', efeitoSeCorrigir: 0 }, duplicata], somaExcedente: -342.03 }],
     combinacao: { resumo: 'Excluir esta duplicata zera a diferença', itens: [duplicata] },
     ...overrides,
@@ -23,7 +24,7 @@ function diagnostico(overrides: Partial<DiagnosticoDiferenca> = {}): Diagnostico
 }
 
 function renderModal(onAlterado = vi.fn(), onClose = vi.fn()) {
-  render(<DiagnosticoDiferencaModal contaId="conta-1" data="2026-11-07" saldoBanco={557.97} onClose={onClose} onAlterado={onAlterado} />)
+  render(<MemoryRouter><DiagnosticoDiferencaModal contaId="conta-1" data="2026-11-07" saldoBanco={557.97} onClose={onClose} onAlterado={onAlterado} /></MemoryRouter>)
   return { onAlterado, onClose }
 }
 
@@ -85,5 +86,17 @@ describe('DiagnosticoDiferencaModal', () => {
 
     expect(screen.getByText('Ajustes de saldo no período')).toBeInTheDocument()
     expect(importacaoApi.excluirLancamento).toHaveBeenCalledWith('conta-1', { id: 'aj-1', data: '2026-11-07' })
+  })
+})
+
+describe('DiagnosticoDiferencaModal — contrapartidas de transferência', () => {
+  it('should send the user to the transfer review instead of deleting both ends when a counterpart has no bank entry', async () => {
+    const criada: LinhaDiagnostico = { id: 'c6-400', data: '2026-10-14', descricao: '↔ Transferência de Nubank', valor: 400, efeitoSeCorrigir: -400 }
+    vi.mocked(conciliacaoApi.diagnosticarSaldo).mockResolvedValue(diagnostico({ duplicatas: [], combinacao: undefined, contrapartidasSemLancamento: [criada] }))
+    renderModal()
+
+    expect(await screen.findByText('Transferências que o extrato não tem')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'revisar em Transferências' })).toHaveAttribute('href', '/banco/transferencias-sem-par')
+    expect(screen.queryByRole('button', { name: 'Excluir' })).not.toBeInTheDocument()
   })
 })

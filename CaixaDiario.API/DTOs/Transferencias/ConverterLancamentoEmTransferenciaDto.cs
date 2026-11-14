@@ -23,4 +23,9 @@ public class ConverterLancamentoEmTransferenciaDto
     // Preenchido só quando a conversão veio de uma RegraCategorizacao (importação automática ou
     // aplicação retroativa) — marca a origem no item, igual a categorização por regra comum.
     public Guid? RegraCategorizacaoId { get; set; }
+
+    // Money Vision ("contrapartida falsa"): sem a outra ponta, a conversão procura o lançamento real.
+    // Sem candidato e com o extrato da contrapartida cobrindo a data, só cria a ponta se o usuário
+    // confirmar ("criar mesmo assim") — senão responde 409 CONTRAPARTIDA_NAO_ENCONTRADA.
+    public bool CriarMesmoAssim { get; set; }
 }

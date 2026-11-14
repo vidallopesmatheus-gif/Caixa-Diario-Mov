@@ -1954,6 +1954,41 @@ public class ImportacaoServiceTests
         Assert.Equal(0, resultado.TotalPendentesCategorizacao);
     }
 
+    // Money Vision ("transferência cria contrapartida falsa", caso C): o Nubank de junho só tinha a
+    // contrapartida criada a partir do C6. Importar o extrato real troca ela pela linha do banco.
+    [Fact]
+    public async Task ImportarArquivoAsync_OfxDoMesQueSoTinhaContrapartidaProvisoria_SubstituiSemDuplicar()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        var data = new DateOnly(2026, 6, 4);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 5000m));
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 5000m, SaldoFinal = 1800m,
+            Saidas = new() { new ItemFinanceiroSaida
+            {
+                Id = Guid.NewGuid(), Descricao = "↔ Transferência para C6 Bank", Valor = 3200m,
+                Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId, Provisoria = true,
+            } },
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+
+        var ofx = "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-3200.00<DTPOSTED>20260604<FITID>N604<MEMO>Transferência enviada pelo Pix - Matheus Vidal Lopes</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", CriarArquivoTexto("nubank-jun.ofx", ofx), null, null);
+
+        var saida = Assert.Single(registro.Saidas);
+        Assert.Equal((transferenciaId, "N604", false), (saida.TransferenciaId!.Value, saida.FitId, saida.Provisoria));
+        Assert.Equal(1800m, registro.SaldoFinal);
+    }
+
     [Fact]
     public async Task ImportarArquivoAsync_DuasProvisoriasCandidatas_NaoDecideSozinhoEImportaComoPendente()
     {
