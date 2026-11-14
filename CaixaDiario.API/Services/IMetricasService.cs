@@ -14,6 +14,9 @@ public interface IMetricasService
         decimal multiplo = 3m, IReadOnlyList<Categoria>? categorias = null);
     List<EvolucaoMensalDto> CalcularEvolucao(List<RegistroDiario> registros, int meses, DateOnly? ateMesReferencia = null);
     DreDto CalcularDre(List<RegistroDiario> registros, IReadOnlyList<Categoria>? categorias = null);
+    // Detalhe de uma linha do DRE: a mesma classificação que gerou o total (bloco → grupo → categoria).
+    List<LancamentoDre> ListarLancamentosDre(
+        List<RegistroDiario> registros, IReadOnlyList<Categoria>? categorias, string bloco, string? grupo = null, string? categoria = null);
     // Item 10 do Bloco 5 ("Visão de Futuro"): mesReferencia (null = mês atual) permite que o
     // front caia pro último mês com dados quando o atual ainda está vazio — mesma lógica que já
     // existia na DRE (Item 1.11), agora disponível aqui também.

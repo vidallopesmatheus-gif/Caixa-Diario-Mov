@@ -196,6 +196,14 @@ export const registrarRendimento = async (
   return mapConta(res.dados)
 }
 
+// "Não é rendimento — foi acerto de saldo": o lançamento sai da receita do DRE, o saldo não muda.
+export const converterRendimentoEmAjuste = async (contaId: string, lancamentoId: string, data: string): Promise<void> => {
+  await apiFetch<ApiResponse<unknown>>(
+    `/api/contas-bancarias/${contaId}/rendimento/${lancamentoId}/converter-em-ajuste?data=${data}`,
+    { method: 'POST' },
+  )
+}
+
 // Money Vision: "Conferir saldo" (item 4) — acerta o saldo com o banco através de UM lançamento
 // visível (categoria "Ajuste de saldo"), nunca uma troca silenciosa do saldo inicial do dia.
 export const ajustarSaldo = async (

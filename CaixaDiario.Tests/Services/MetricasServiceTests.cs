@@ -1184,8 +1184,10 @@ public class MetricasServiceTests
             + dre.AtividadesInvestimento.Total + dre.AtividadesFinanciamento.Total - dre.RetiradasSocios.Total);
     }
 
+    // Money Vision ("Outras receitas sem lançamento"): categoria que não existe no plano não some
+    // num grupo-padrão — vai pra "Despesas a classificar" e entra no aviso de pendentes.
     [Fact]
-    public void CalcularDre_CategoriaNaoCadastradaNoPlanoDeContas_VaiParaDespesasFixas()
+    public void CalcularDre_CategoriaNaoCadastradaNoPlanoDeContas_VaiParaDespesasAClassificar()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 500m, "Vendas", "Receita") },
@@ -1194,8 +1196,10 @@ public class MetricasServiceTests
         var dre = _sut.CalcularDre(new() { reg }, _planoDeContasTeste);
 
         Assert.Equal(50m, dre.DespesasFixas.Total);
-        Assert.Equal("Categoria Removida", Assert.Single(dre.DespesasFixas.Categorias).Nome);
-        Assert.Equal(0, dre.QuantidadeNaoClassificados); // tem categoria, só não está cadastrada
+        var despesas = dre.Blocos.Single(b => b.Bloco == Blocos.DespesasOperacionais);
+        var grupo = Assert.Single(despesas.Grupos, g => g.Nome == DreClassificacao.DespesasAClassificar);
+        Assert.Equal("Categoria Removida", Assert.Single(grupo.Categorias).Nome);
+        Assert.Equal(1, dre.QuantidadeNaoClassificados);
     }
 
     [Fact]
@@ -1433,11 +1437,10 @@ public class MetricasServiceTests
         Assert.Equal(-40m, financiamento.Total);
     }
 
-    // Rodada de ajustes Money Vision, item 4: na árvore hierárquica, rendimento de investimento
-    // também passa a entrar em Receitas Operacionais (grupo "Outras receitas"), não mais num grupo
-    // próprio dentro de Atividades de Investimento.
+    // Rendimento de investimento entra em Receitas Operacionais, num grupo próprio ("Rendimentos de
+    // investimento") — nunca mais com o nome de uma categoria do plano ("Outras receitas").
     [Fact]
-    public void CalcularDre_Blocos_Rendimento_EntraEmReceitasOperacionaisComoOutrasReceitas()
+    public void CalcularDre_Blocos_Rendimento_EntraEmReceitasOperacionaisComoRendimentosDeInvestimento()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new()
@@ -1451,15 +1454,15 @@ public class MetricasServiceTests
 
         var receitas = dre.Blocos.Single(b => b.Bloco == Blocos.ReceitasOperacionais);
         Assert.Equal(1080m, receitas.Total); // 1000 (vendas) + 80 (rendimento líquido)
-        var grupoOutrasReceitas = Assert.Single(receitas.Grupos, g => g.Nome == "Outras receitas");
-        Assert.Equal(80m, grupoOutrasReceitas.Total);
+        var grupoRendimentos = Assert.Single(receitas.Grupos, g => g.Nome == DreClassificacao.GrupoRendimentos);
+        Assert.Equal(80m, grupoRendimentos.Total);
 
         var investimento = dre.Blocos.Single(b => b.Bloco == Blocos.AtividadesDeInvestimento);
         Assert.Equal(0m, investimento.Total); // rendimento não aparece mais aqui
     }
 
     [Fact]
-    public void CalcularDre_Blocos_LancamentoSemCategoria_VaiParaNaoClassificadoDentroDoBloco()
+    public void CalcularDre_Blocos_LancamentoSemCategoria_VaiParaDespesasAClassificarDentroDoBloco()
     {
         var reg = CriarRegistro(new DateOnly(2026, 6, 1),
             new() { Item("Venda", 500m, "Vendas", "Receita") },
@@ -1468,12 +1471,12 @@ public class MetricasServiceTests
         var dre = _sut.CalcularDre(new() { reg }, _planoComBlocos);
 
         var despesas = dre.Blocos.Single(b => b.Bloco == Blocos.DespesasOperacionais);
-        var grupoSemClasse = Assert.Single(despesas.Grupos, g => g.Nome == "Não Classificado");
+        var grupoSemClasse = Assert.Single(despesas.Grupos, g => g.Nome == DreClassificacao.DespesasAClassificar);
         Assert.Equal(-40m, grupoSemClasse.Total);
     }
 
     // A visão por blocos segue a mesma regra: a entrada sem categoria vira o grupo "Receitas a
-    // classificar" em Receitas Operacionais, e o "Não Classificado" de Despesas só tem saídas.
+    // classificar" em Receitas Operacionais, e o "Despesas a classificar" só tem saídas.
     [Fact]
     public void CalcularDre_Blocos_EntradaSemCategoria_ViraReceitasAClassificar()
     {
@@ -1488,7 +1491,7 @@ public class MetricasServiceTests
         Assert.Equal(100m, Assert.Single(receitas.Grupos, g => g.Nome == MetricasService.ReceitasAClassificar).Total);
 
         var despesas = dre.Blocos.Single(b => b.Bloco == Blocos.DespesasOperacionais);
-        Assert.Equal(-150m, Assert.Single(despesas.Grupos, g => g.Nome == "Não Classificado").Total);
+        Assert.Equal(-150m, Assert.Single(despesas.Grupos, g => g.Nome == DreClassificacao.DespesasAClassificar).Total);
         Assert.Equal(600m, dre.ReceitaBruta);
     }
 
