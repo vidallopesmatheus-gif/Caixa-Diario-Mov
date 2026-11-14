@@ -11,6 +11,7 @@ export function mapPonto(raw: any): PontoConciliacao {
   return {
     data: dia(raw.data), saldoBanco: raw.saldoBanco ?? 0, saldoApp: raw.saldoApp ?? 0,
     diferenca: raw.diferenca ?? 0, conciliado: !!raw.conciliado, origem: raw.origem ?? '',
+    travadoAte: raw.travadoAte ? dia(raw.travadoAte) : undefined,
   }
 }
 
@@ -65,6 +66,10 @@ export const diagnosticarSaldo = async (contaId: string, data: string, saldoBanc
     manuais: (d.manuais ?? []).map(mapLinhaDiagnostico),
     ajustes: (d.ajustes ?? []).map(mapLinhaDiagnostico),
     combinacao: d.combinacao ? { resumo: d.combinacao.resumo ?? '', itens: (d.combinacao.itens ?? []).map(mapLinhaDiagnostico) } : undefined,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mudancasDesdeConferencia: (d.mudancasDesdeConferencia ?? []).map((m: any) => ({
+      tipo: m.tipo, data: dia(m.data), descricao: m.descricao ?? '', valorAntes: m.valorAntes ?? undefined, valorDepois: m.valorDepois ?? undefined,
+    })),
   }
 }
 

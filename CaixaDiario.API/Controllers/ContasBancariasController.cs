@@ -19,11 +19,13 @@ public class ContasBancariasController : ControllerBase
     private readonly IImportacaoService _importacaoService;
     private readonly IDuplicataExtratoService _duplicataExtratoService;
     private readonly IConciliacaoSaldoService _conciliacaoSaldoService;
+    private readonly IPeriodoConferidoService? _periodoConferido;
 
     public ContasBancariasController(
         IContaBancariaService service, IImportacaoService importacaoService, IDuplicataExtratoService duplicataExtratoService,
-        IConciliacaoSaldoService conciliacaoSaldoService)
+        IConciliacaoSaldoService conciliacaoSaldoService, IPeriodoConferidoService? periodoConferido = null)
     {
+        _periodoConferido = periodoConferido;
         _service = service;
         _importacaoService = importacaoService;
         _duplicataExtratoService = duplicataExtratoService;
@@ -144,6 +146,25 @@ public class ContasBancariasController : ControllerBase
         var resultado = await _conciliacaoSaldoService.RegistrarSaldoBancoAsync(contaId, dto, ObterUsuarioId(), ObterPerfil());
         return Ok(new ApiResponse<PontoConciliacaoDto> { Dados = resultado });
     }
+
+    // Money Vision ("travar o período até o saldo conferido"): reabre a partir de uma data (ou tudo).
+    [HttpPost("{contaId:guid}/reabrir")]
+    public async Task<IActionResult> ReabrirPeriodo(Guid contaId, [FromBody] ReabrirPeriodoDto dto)
+    {
+        var resultado = await PeriodoConferidoService().ReabrirAsync(contaId, dto, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<TravaPeriodoDto> { Dados = resultado });
+    }
+
+    // Histórico de conferências e reaberturas da conta (auditoria).
+    [HttpGet("{contaId:guid}/conferencias")]
+    public async Task<IActionResult> ListarConferencias(Guid contaId)
+    {
+        var resultado = await PeriodoConferidoService().ListarHistoricoAsync(contaId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<List<ConferenciaSaldoDto>> { Dados = resultado });
+    }
+
+    private IPeriodoConferidoService PeriodoConferidoService() =>
+        _periodoConferido ?? throw new InvalidOperationException("IPeriodoConferidoService não registrado.");
 
     [HttpPost("{contaId:guid}/vincular-meta/{metaId:guid}")]
     public async Task<IActionResult> VincularMeta(Guid contaId, Guid metaId)

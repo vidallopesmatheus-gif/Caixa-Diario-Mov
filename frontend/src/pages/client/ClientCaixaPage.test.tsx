@@ -301,3 +301,14 @@ test('excluir um item salvo chama excluirLancamento e remove o selo', async () =
   await waitFor(() => expect(screen.queryByText(/Venda · R\$ 200,00/)).not.toBeInTheDocument())
   expect(importacaoApi.excluirLancamento).toHaveBeenCalledWith('conta1', { id: 'e1', data: todayISO() })
 })
+
+// Money Vision ("travar o período até o saldo conferido"): o dia conferido abre só para leitura.
+test('should open a day inside the checked period as read-only', async () => {
+  mockHooks()
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([{ ...contaCaixaPadrao, travadoAte: '2999-12-31' }])
+  await renderCaixa()
+
+  expect(await screen.findByText(/este dia abre só para leitura/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /Salvar e sincronizar/ })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /Adicionar saída/ })).toBeDisabled()
+})

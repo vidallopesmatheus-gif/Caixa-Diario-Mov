@@ -136,6 +136,25 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
             </div>
           )}
 
+          {/* Money Vision ("travar o período"): o que mudou desde a última conferência que bateu. */}
+          {!bate && (diagnostico.mudancasDesdeConferencia ?? []).length > 0 && (
+            <section className="conc-diag-secao">
+              <h4>Mudou desde a última conferência</h4>
+              <ul>
+                {diagnostico.mudancasDesdeConferencia!.map((m, i) => (
+                  <li key={i} className="conc-diag-linha">
+                    <span>
+                      {fmtDate(m.data)} · {m.descricao} ·{' '}
+                      {m.tipo === 'Criado' && <>criado ({fmtBRL(m.valorDepois ?? 0)})</>}
+                      {m.tipo === 'Excluido' && <>excluído ({fmtBRL(m.valorAntes ?? 0)})</>}
+                      {m.tipo === 'Editado' && <>editado ({fmtBRL(m.valorAntes ?? 0)} → {fmtBRL(m.valorDepois ?? 0)})</>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {diagnostico.lacunas.length > 0 && (
             <section className="conc-diag-secao">
               <h4>Dias sem extrato</h4>

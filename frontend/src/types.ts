@@ -144,6 +144,11 @@ export interface ContaBancaria {
   pagamentosMes?: number
   // Money Vision: "Extrato até 07/11 · Banco em 07/11 R$ X ✅".
   conciliacao?: StatusConciliacao
+  /** "🔒 Conferido até 07/11/2026": nada que mexa no saldo muda até esta data sem reabrir. */
+  travadoAte?: string
+  travaSaldoBanco?: number
+  /** Conferido pelo consultor — o cliente não reabre sozinho. */
+  travadoPorConsultor?: boolean
 }
 
 export interface LancamentoExtrato {
@@ -434,10 +439,14 @@ export interface ResumoImportacao {
   ausentesNoArquivo?: LinhaDiagnostico[]
   // Saldo que o próprio arquivo informa (OFX LEDGERBAL ou coluna "Saldo"). Sem ele, a prévia pergunta.
   saldoBancoArquivo?: { data: string; saldo: number }
+  /** Linhas novas com data no período conferido da conta — não entram na importação. */
+  travadoAte?: string
+  linhasEmPeriodoTravado?: LinhaDiagnostico[]
 }
 
 export interface ResultadoImportacao {
   totalImportadas: number
+  totalIgnoradasPeriodoConferido?: number
   totalPendentesCategorizacao: number
   totalCategorizadasPorRegra: number
   totalConciliadasTransferencia: number
@@ -554,6 +563,8 @@ export interface PontoConciliacao {
   diferenca: number
   conciliado: boolean
   origem: string
+  /** "Conferir saldo" que bateu: até onde a conta ficou travada. */
+  travadoAte?: string
 }
 
 export interface StatusConciliacao {
@@ -609,6 +620,28 @@ export interface DiagnosticoDiferenca {
   /** Ajustes de saldo no período — escondem dado faltando; efeitoSeCorrigir = desfazer. */
   ajustes: LinhaDiagnostico[]
   combinacao?: { resumo: string; itens: LinhaDiagnostico[] }
+  /** O que foi criado, editado ou excluído desde a última conferência que bateu. */
+  mudancasDesdeConferencia?: MudancaDesdeConferencia[]
+}
+
+export interface MudancaDesdeConferencia {
+  tipo: 'Criado' | 'Editado' | 'Excluido'
+  data: string
+  descricao: string
+  valorAntes?: number
+  valorDepois?: number
+}
+
+/** Uma linha do histórico de conferências e reaberturas da conta. */
+export interface ConferenciaSaldo {
+  tipo: 'Conferencia' | 'Reabertura'
+  data?: string
+  saldoBanco?: number
+  travadoAteAntes?: string
+  travadoAteDepois?: string
+  quem: 'Consultor' | 'Cliente'
+  motivo?: string
+  ocorridoEm: string
 }
 
 /** Ajuste de saldo da conta na tela "Conferir saldo" — confirmar ou desfazer. */

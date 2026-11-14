@@ -36,6 +36,8 @@ import StatusConciliacaoResumo from '../../components/conciliacao/StatusConcilia
 import CoberturaTimeline from '../../components/conciliacao/CoberturaTimeline'
 import DiagnosticoDiferencaModal from '../../components/conciliacao/DiagnosticoDiferencaModal'
 import AjustesSaldoLista from '../../components/conciliacao/AjustesSaldoLista'
+import ReabrirPeriodoModal, { AvisoPeriodoConferido, SeloPeriodoConferido } from '../../components/conciliacao/PeriodoConferido'
+import { diaTravado, erroPeriodoConferido, motivoDiaTravado, type ErroPeriodoConferido } from '../../utils/periodoConferido'
 import { obterCoberturaExtrato, registrarSaldoBanco } from '../../api/conciliacaoSaldo'
 import { ehAjusteConciliacao } from '../../utils/lancamentos'
 import type { ContaBancaria, LancamentoExtrato, ContaProvisionada, MetaAnual, ResumoImportacao, ResultadoImportacao, Categorias, CategoriaAdmin, CoberturaExtrato } from '../../types'
@@ -107,6 +109,9 @@ export default function ClientContaDetalhePage() {
   // ── Importação de extrato: escolhe arquivo + intervalo, vê resumo, confirma tudo de uma vez ──
   // (Sem seleção linha a linha — a deduplicação por FITID/heurística roda automaticamente.)
   const [arquivoImportar, setArquivoImportar] = useState<File | null>(null)
+  // Money Vision ("travar o período até o saldo conferido"): 409 do servidor e o modal de reabrir.
+  const [erroTrava, setErroTrava] = useState<ErroPeriodoConferido | null>(null)
+  const [reabrirAlvo, setReabrirAlvo] = useState<{ dataSugerida?: string } | null>(null)
   const [resumoImportacao, setResumoImportacao] = useState<ResumoImportacao | null>(null)
   const [previewCarregando, setPreviewCarregando] = useState(false)
   const [modalImportar, setModalImportar] = useState(false)
@@ -279,6 +284,12 @@ export default function ClientContaDetalhePage() {
 
   useEffect(() => { carregarPendencias() }, [carregarPendencias])
 
+  function mostrarErro(e: unknown, padrao: string) {
+    const trava = erroPeriodoConferido(e)
+    setErroTrava(trava)
+    setMsg(trava ? '' : e instanceof Error ? e.message : padrao)
+  }
+
   async function handleArquivoSelecionado(arquivo: File) {
     if (!contaId) return
     setMsg('')
@@ -310,7 +321,7 @@ export default function ClientContaDetalhePage() {
         listarBancosCartao(contaId).then(setBancosDisponiveis).catch(() => {})
       }
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao ler o arquivo.')
+      mostrarErro(e, 'Erro ao ler o arquivo.')
     } finally {
       setPreviewCarregando(false)
     }
@@ -334,7 +345,7 @@ export default function ClientContaDetalhePage() {
         dataInicio: novoInicio, dataFim: novoFim, inverterSinaisManualmente,
       }))
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao calcular resumo da importação.')
+      mostrarErro(e, 'Erro ao calcular resumo da importação.')
     } finally {
       setPreviewCarregando(false)
     }
@@ -349,7 +360,7 @@ export default function ClientContaDetalhePage() {
         dataInicio: dataInicioImport, dataFim: dataFimImport, inverterSinaisManualmente: valor,
       }))
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao recalcular o resumo da importação.')
+      mostrarErro(e, 'Erro ao recalcular o resumo da importação.')
     } finally {
       setPreviewCarregando(false)
     }
@@ -393,7 +404,7 @@ export default function ClientContaDetalhePage() {
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao importar extrato.')
+      mostrarErro(e, 'Erro ao importar extrato.')
     } finally {
       setImportando(false)
     }
@@ -425,7 +436,7 @@ export default function ClientContaDetalhePage() {
       carregarConta()
       carregarPendencias()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao confirmar as sugestões de vínculo.')
+      mostrarErro(e, 'Erro ao confirmar as sugestões de vínculo.')
     } finally {
       setConfirmandoTodasSugestoes(false)
     }
@@ -439,7 +450,7 @@ export default function ClientContaDetalhePage() {
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao desfazer classificação.')
+      mostrarErro(e, 'Erro ao desfazer classificação.')
     }
   }
 
@@ -450,7 +461,7 @@ export default function ClientContaDetalhePage() {
     try {
       setDuplicatas(await listarDuplicatas(contaId))
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao buscar duplicatas.')
+      mostrarErro(e, 'Erro ao buscar duplicatas.')
     } finally {
       setCarregandoDuplicatas(false)
     }
@@ -466,7 +477,7 @@ export default function ClientContaDetalhePage() {
       await manterDuplicata(contaId, dup.lancamentoAId, dup.lancamentoBId)
       setDuplicatas(prev => prev.filter(d => d !== dup))
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao gravar a decisão.')
+      mostrarErro(e, 'Erro ao gravar a decisão.')
     } finally {
       setExcluindoDuplicataId(null)
     }
@@ -488,7 +499,7 @@ export default function ClientContaDetalhePage() {
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao excluir lançamento.')
+      mostrarErro(e, 'Erro ao excluir lançamento.')
     } finally {
       setExcluindoDuplicataId(null)
     }
@@ -528,7 +539,7 @@ export default function ClientContaDetalhePage() {
       carregarPendencias()
       setExcluirConfirmacao(null)
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao excluir lançamento.')
+      mostrarErro(e, 'Erro ao excluir lançamento.')
     } finally {
       setExcluindoLancamento(false)
     }
@@ -612,7 +623,7 @@ export default function ClientContaDetalhePage() {
       setOfertaRegra(null)
       carregarExtrato()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao criar regra.')
+      mostrarErro(e, 'Erro ao criar regra.')
     } finally {
       setCriandoOfertaRegra(false)
     }
@@ -625,7 +636,7 @@ export default function ClientContaDetalhePage() {
       await aplicarNovaCategoria(lancamentoParaEditar, categoriaEdicao)
       setLancamentoParaEditar(null)
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao editar categoria.')
+      mostrarErro(e, 'Erro ao editar categoria.')
     } finally {
       setSalvandoEdicao(false)
     }
@@ -636,7 +647,7 @@ export default function ClientContaDetalhePage() {
     try {
       await aplicarNovaCategoria(lancamento, novaCategoria)
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao editar categoria.')
+      mostrarErro(e, 'Erro ao editar categoria.')
     } finally {
       setSalvandoChip(false)
       setChipAbertoKey(null)
@@ -677,7 +688,7 @@ export default function ClientContaDetalhePage() {
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao converter em transferência.')
+      mostrarErro(e, 'Erro ao converter em transferência.')
     } finally {
       setConvertendo(false)
     }
@@ -709,7 +720,7 @@ export default function ClientContaDetalhePage() {
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao registrar rendimento.')
+      mostrarErro(e, 'Erro ao registrar rendimento.')
     } finally {
       setSalvandoRendimento(false)
     }
@@ -728,11 +739,11 @@ export default function ClientContaDetalhePage() {
     try {
       const ponto = await registrarSaldoBanco(contaId, conferirData, conferirSaldoReal)
       setModalConferirSaldo(false)
-      if (ponto.conciliado) setMsg(`✅ Conciliado com o banco em ${fmtDate(ponto.data)}.`)
+      if (ponto.conciliado) setMsg(`✅ Conciliado com o banco em ${fmtDate(ponto.data)}.${ponto.travadoAte ? ` 🔒 Período conferido até ${fmtDate(ponto.travadoAte)}.` : ''}`)
       else setDiagnosticoAlvo({ data: ponto.data, saldoBanco: ponto.saldoBanco })
       carregarConta()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao conferir saldo.')
+      mostrarErro(e, 'Erro ao conferir saldo.')
     } finally {
       setSalvandoConferirSaldo(false)
     }
@@ -752,7 +763,7 @@ export default function ClientContaDetalhePage() {
       setModalVincular(false)
       carregarConta()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao vincular meta.')
+      mostrarErro(e, 'Erro ao vincular meta.')
     } finally {
       setSalvandoVinculo(false)
     }
@@ -772,7 +783,7 @@ export default function ClientContaDetalhePage() {
       setModalVincular(false)
       carregarConta()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao criar/vincular meta.')
+      mostrarErro(e, 'Erro ao criar/vincular meta.')
     } finally {
       setSalvandoVinculo(false)
     }
@@ -785,7 +796,7 @@ export default function ClientContaDetalhePage() {
       await desvincularMeta(contaId, metaId)
       carregarConta()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao desvincular meta.')
+      mostrarErro(e, 'Erro ao desvincular meta.')
     }
   }
 
@@ -930,7 +941,7 @@ export default function ClientContaDetalhePage() {
       setLoteCategoriaValor('')
       limparSelecao()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao aplicar categoria em lote.')
+      mostrarErro(e, 'Erro ao aplicar categoria em lote.')
     } finally {
       setProcessandoLote(false)
     }
@@ -956,7 +967,7 @@ export default function ClientContaDetalhePage() {
       carregarConta()
       carregarExtrato()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao marcar lote como transferência.')
+      mostrarErro(e, 'Erro ao marcar lote como transferência.')
     } finally {
       setProcessandoLote(false)
     }
@@ -979,7 +990,7 @@ export default function ClientContaDetalhePage() {
       carregarExtrato()
       carregarPendencias()
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Erro ao excluir em lote.')
+      mostrarErro(e, 'Erro ao excluir em lote.')
     } finally {
       setProcessandoLote(false)
     }
@@ -994,6 +1005,8 @@ export default function ClientContaDetalhePage() {
     // Bloco 3: ajuste de saldo não é uma transação de verdade — não faz sentido trocar categoria
     // nem virar transferência, só excluir (se foi lançado errado).
     const ehAjuste = ehAjusteConciliacao(l.tipoCusto)
+    const travado = diaTravado(conta, l.data)
+    const motivoTravado = travado ? motivoDiaTravado(conta!) : undefined
     return (
       <span className="cd-acoes-linha">
         <button
@@ -1011,8 +1024,9 @@ export default function ClientContaDetalhePage() {
             type="button"
             className="cd-acao-btn"
             aria-label={`Desfazer transferência de "${l.descricao}"`}
-            title="Desfazer classificação de transferência"
+            title={motivoTravado ?? 'Desfazer classificação de transferência'}
             onClick={() => l.transferenciaId && handleDesfazerTransferencia(l.transferenciaId)}
+            disabled={travado}
           >
             ↩
           </button>
@@ -1021,9 +1035,9 @@ export default function ClientContaDetalhePage() {
             type="button"
             className="cd-acao-btn"
             aria-label={`Marcar "${l.descricao}" como transferência`}
-            title={ehAjuste ? 'Ajuste de saldo não é reclassificável' : 'Marcar como transferência'}
+            title={motivoTravado ?? (ehAjuste ? 'Ajuste de saldo não é reclassificável' : 'Marcar como transferência')}
             onClick={() => abrirModalTransferencia(l)}
-            disabled={ehAjuste}
+            disabled={ehAjuste || travado}
           >
             ⇄
           </button>
@@ -1032,8 +1046,9 @@ export default function ClientContaDetalhePage() {
           type="button"
           className="cd-acao-btn cd-acao-excluir"
           aria-label={`Excluir lançamento ${l.descricao}`}
-          title="Excluir lançamento"
+          title={motivoTravado ?? 'Excluir lançamento'}
           onClick={() => abrirConfirmarExclusao(l)}
+          disabled={travado}
         >
           🗑
         </button>
@@ -1131,6 +1146,8 @@ export default function ClientContaDetalhePage() {
         />
       )}
 
+      <SeloPeriodoConferido conta={conta} onReabrir={() => setReabrirAlvo({})} />
+
       {conta.pendentesCategorizacao > 0 && (
         <div className="cd-msg cd-msg-aviso" style={{ cursor: 'pointer' }} onClick={() => navigate(`/banco/extrato/${contaId}`)}>
           🏷️ {conta.pendentesCategorizacao} lançamento(s) aguardando categoria — clique para categorizar
@@ -1176,6 +1193,9 @@ export default function ClientContaDetalhePage() {
         <div className="cd-msg cd-msg-sucesso">
           {resultadoImportacao.conciliacao?.conciliado && (
             <div><strong>✅ Conciliado com o banco até {fmtDate(resultadoImportacao.conciliacao.data)}</strong></div>
+          )}
+          {(resultadoImportacao.totalIgnoradasPeriodoConferido ?? 0) > 0 && (
+            <div>🔒 {resultadoImportacao.totalIgnoradasPeriodoConferido} linha(s) do período conferido ficaram de fora.</div>
           )}
           {(resultadoImportacao.totalAusentesExcluidos ?? 0) > 0 && (
             <div>{resultadoImportacao.totalAusentesExcluidos} lançamento(s) que não estavam no extrato novo excluído(s).</div>
@@ -1383,6 +1403,7 @@ export default function ClientContaDetalhePage() {
       )}
 
       {msg && <div className="cd-msg">{msg}</div>}
+      {erroTrava && <AvisoPeriodoConferido erro={erroTrava} onReabrir={() => setReabrirAlvo({})} />}
 
       <div className="cd-tabs">
         <button className={`cd-tab ${aba === 'extrato' ? 'active' : ''}`} onClick={() => setAba('extrato')}>
@@ -1456,7 +1477,9 @@ export default function ClientContaDetalhePage() {
               <span>{selecionados.size} selecionado(s)</span>
               <button type="button" className="cd-lote-btn" onClick={() => setLoteCategoriaAberta(true)}>Aplicar categoria</button>
               <button type="button" className="cd-lote-btn" onClick={() => setLoteTransferenciaAberta(true)}>Marcar como transferência</button>
-              <button type="button" className="cd-lote-btn cd-lote-btn-excluir" onClick={() => setLoteExcluirAberta(true)}>Excluir</button>
+              <button type="button" className="cd-lote-btn cd-lote-btn-excluir" onClick={() => setLoteExcluirAberta(true)}
+                disabled={itensSelecionados.some(l => diaTravado(conta, l.data))}
+                title={itensSelecionados.some(l => diaTravado(conta, l.data)) ? motivoDiaTravado(conta) : undefined}>Excluir</button>
               <button type="button" className="cd-lote-limpar" onClick={limparSelecao}>Limpar seleção</button>
             </div>
           )}
@@ -1471,7 +1494,12 @@ export default function ClientContaDetalhePage() {
             gruposPorDia.map(grupo => (
               <div key={grupo.data} className="cd-extrato-grupo-dia">
                 <div className="cd-extrato-dia-cabecalho">
-                  <span className="cd-extrato-dia-data">{fmtDate(grupo.data)}</span>
+                  <span className="cd-extrato-dia-data">
+                    {fmtDate(grupo.data)}
+                    {diaTravado(conta, grupo.data) && (
+                      <span className="conc-cadeado" title={motivoDiaTravado(conta)} aria-label="Dia conferido">🔒</span>
+                    )}
+                  </span>
                   <span className="cd-extrato-dia-resumo">
                     {grupo.entradas > 0 && <span className="val-green">Entradas +{fmtBRL(grupo.entradas)}</span>}
                     {grupo.saidas > 0 && <span className="val-red">Saídas −{fmtBRL(grupo.saidas)}</span>}
@@ -2002,6 +2030,24 @@ export default function ClientContaDetalhePage() {
           </div>
         )}
 
+        {!previewCarregando && resumoImportacao && (resumoImportacao.linhasEmPeriodoTravado ?? []).length > 0 && (
+          <div className="conc-trava" style={{ display: 'block' }} role="region" aria-label="Período conferido">
+            <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              🔒 Período conferido até {fmtDate(resumoImportacao.travadoAte!)} — {resumoImportacao.linhasEmPeriodoTravado!.length} linha(s) não serão importadas
+            </p>
+            <ul className="conc-dica" style={{ margin: '0 0 6px 16px' }}>
+              {resumoImportacao.linhasEmPeriodoTravado!.slice(0, 8).map((l, i) => (
+                <li key={i}>{fmtDate(l.data)} · {l.descricao} · {fmtBRL(l.valor)}</li>
+              ))}
+              {resumoImportacao.linhasEmPeriodoTravado!.length > 8 && <li>… e mais {resumoImportacao.linhasEmPeriodoTravado!.length - 8}</li>}
+            </ul>
+            <button type="button" className="conc-link"
+              onClick={() => setReabrirAlvo({ dataSugerida: resumoImportacao.linhasEmPeriodoTravado![0].data })}>
+              Reabrir para importar estas linhas
+            </button>
+          </div>
+        )}
+
         {/* Money Vision: importado antes, dentro do período do arquivo, mas sumiu do extrato novo
             (estornado ou duplicado no app) — padrão é manter; o usuário marca o que excluir. */}
         {!previewCarregando && resumoImportacao && (resumoImportacao.ausentesNoArquivo ?? []).length > 0 && (
@@ -2305,6 +2351,22 @@ export default function ClientContaDetalhePage() {
 
       {/* Item 9, Bloco 1: no mobile (<768px), tocar num card abre essa bottom sheet com as mesmas
           3 ações da coluna de ícones do desktop — nunca um menu separado com lógica própria. */}
+      {reabrirAlvo && conta.travadoAte && (
+        <ReabrirPeriodoModal
+          conta={conta}
+          dataSugerida={reabrirAlvo.dataSugerida}
+          onClose={() => setReabrirAlvo(null)}
+          onReaberto={() => {
+            setReabrirAlvo(null)
+            setErroTrava(null)
+            setMsg('🔓 Período reaberto. Depois de corrigir, confira o saldo de novo para travar.')
+            carregarConta()
+            carregarExtrato()
+            if (arquivoImportar) handleArquivoSelecionado(arquivoImportar)
+          }}
+        />
+      )}
+
       {acaoMobileLancamento && (
         <div className="cd-sheet-overlay" onClick={() => setAcaoMobileLancamento(null)}>
           <div className="cd-sheet" onClick={e => e.stopPropagation()}>
@@ -2324,6 +2386,7 @@ export default function ClientContaDetalhePage() {
                   <button
                     type="button"
                     className="cd-sheet-acao"
+                    disabled={diaTravado(conta, acaoMobileLancamento.data)}
                     onClick={() => {
                       if (acaoMobileLancamento.transferenciaId) handleDesfazerTransferencia(acaoMobileLancamento.transferenciaId)
                       setAcaoMobileLancamento(null)
@@ -2335,6 +2398,7 @@ export default function ClientContaDetalhePage() {
                   <button
                     type="button"
                     className="cd-sheet-acao"
+                    disabled={diaTravado(conta, acaoMobileLancamento.data)}
                     onClick={() => { abrirModalTransferencia(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
                   >
                     ⇄ Marcar como transferência
@@ -2345,10 +2409,14 @@ export default function ClientContaDetalhePage() {
             <button
               type="button"
               className="cd-sheet-acao cd-sheet-acao-excluir"
+              disabled={diaTravado(conta, acaoMobileLancamento.data)}
               onClick={() => { abrirConfirmarExclusao(acaoMobileLancamento); setAcaoMobileLancamento(null) }}
             >
               🗑 Excluir
             </button>
+            {diaTravado(conta, acaoMobileLancamento.data) && (
+              <div className="cd-sheet-aviso">{motivoDiaTravado(conta!)}</div>
+            )}
             <button type="button" className="cd-sheet-cancelar" onClick={() => setAcaoMobileLancamento(null)}>Cancelar</button>
           </div>
         </div>

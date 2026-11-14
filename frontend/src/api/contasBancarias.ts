@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { ApiResponse, ContaBancaria, LancamentoExtrato, PendenciasConta } from '../types'
+import type { ApiResponse, ConferenciaSaldo, ContaBancaria, LancamentoExtrato, PendenciasConta } from '../types'
 import { mapStatusConciliacao } from './conciliacaoSaldo'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,6 +41,9 @@ function mapConta(raw: any): ContaBancaria {
     comprasMes: raw.comprasMes ?? undefined,
     pagamentosMes: raw.pagamentosMes ?? undefined,
     conciliacao: raw.conciliacao ? mapStatusConciliacao(raw.conciliacao) : undefined,
+    travadoAte: raw.travadoAte ?? undefined,
+    travaSaldoBanco: raw.travaSaldoBanco ?? undefined,
+    travadoPorConsultor: raw.travadoPorConsultor ?? false,
   }
 }
 
@@ -233,4 +236,24 @@ export const obterHistoricoSaldoMensal = async (contaId: string, meses = 12): Pr
   const res = await apiFetch<ApiResponse<unknown[]>>(`/api/contas-bancarias/${contaId}/historico-saldo-mensal?meses=${meses}`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (res.dados ?? []).map((raw: any) => ({ mes: raw.mes, saldo: raw.saldo ?? 0 }))
+}
+
+// Money Vision ("travar o período até o saldo conferido"): reabre a partir de uma data (null = tudo).
+export const reabrirPeriodo = async (contaId: string, aPartirDe: string | null, motivo?: string): Promise<{ travadoAte?: string }> => {
+  const res = await apiFetch<ApiResponse<{ travadoAte?: string | null }>>(`/api/contas-bancarias/${contaId}/reabrir`, {
+    method: 'POST',
+    body: JSON.stringify({ aPartirDe, motivo: motivo || undefined }),
+  })
+  return { travadoAte: res.dados?.travadoAte ?? undefined }
+}
+
+export const listarConferencias = async (contaId: string): Promise<ConferenciaSaldo[]> => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const res = await apiFetch<ApiResponse<any[]>>(`/api/contas-bancarias/${contaId}/conferencias`)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (res.dados ?? []).map((c: any) => ({
+    tipo: c.tipo, data: c.data ?? undefined, saldoBanco: c.saldoBanco ?? undefined,
+    travadoAteAntes: c.travadoAteAntes ?? undefined, travadoAteDepois: c.travadoAteDepois ?? undefined,
+    quem: c.quem, motivo: c.motivo ?? undefined, ocorridoEm: c.ocorridoEm,
+  }))
 }

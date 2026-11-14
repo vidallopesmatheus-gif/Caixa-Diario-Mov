@@ -31,6 +31,7 @@ public class AppDbContext : DbContext
     public DbSet<Financiamento> Financiamentos { get; set; }
     public DbSet<Parcelamento> Parcelamentos { get; set; }
     public DbSet<PontoConciliacao> PontosConciliacao { get; set; }
+    public DbSet<ConferenciaSaldo> ConferenciasSaldo { get; set; }
     public DbSet<PeriodoExtrato> PeriodosExtrato { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
 
@@ -246,6 +247,26 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.ContaBancariaId);
         });
 
+        modelBuilder.Entity<ConferenciaSaldo>(entity =>
+        {
+            entity.ToTable("conferencias_saldo");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClienteId).HasColumnName("cliente_id");
+            entity.Property(e => e.ContaBancariaId).HasColumnName("conta_bancaria_id");
+            entity.Property(e => e.Tipo).HasColumnName("tipo").IsRequired();
+            entity.Property(e => e.Data).HasColumnName("data");
+            entity.Property(e => e.SaldoBanco).HasColumnName("saldo_banco").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TravadoAteAntes).HasColumnName("travado_ate_antes");
+            entity.Property(e => e.TravadoAteDepois).HasColumnName("travado_ate_depois");
+            entity.Property(e => e.UsuarioId).HasColumnName("usuario_id");
+            entity.Property(e => e.Perfil).HasColumnName("perfil").IsRequired();
+            entity.Property(e => e.Motivo).HasColumnName("motivo");
+            entity.Property(e => e.Retrato).HasColumnName("retrato").HasColumnType("jsonb");
+            entity.Property(e => e.OcorridoEm).HasColumnName("ocorrido_em").HasDefaultValueSql("NOW()");
+            entity.HasIndex(e => new { e.ContaBancariaId, e.OcorridoEm });
+        });
+
         modelBuilder.Entity<PontoConciliacao>(entity =>
         {
             entity.ToTable("pontos_conciliacao");
@@ -351,6 +372,9 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Limite).HasColumnName("limite").HasColumnType("decimal(18,2)");
             entity.Property(e => e.DiaFechamento).HasColumnName("dia_fechamento");
             entity.Property(e => e.DiaVencimento).HasColumnName("dia_vencimento");
+            entity.Property(e => e.TravadoAte).HasColumnName("travado_ate");
+            entity.Property(e => e.TravaSaldoBanco).HasColumnName("trava_saldo_banco").HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TravadoPorConsultor).HasColumnName("travado_por_consultor").HasDefaultValue(false);
 
             entity.HasOne(e => e.Cliente)
                 .WithMany(u => u.ContasBancarias)

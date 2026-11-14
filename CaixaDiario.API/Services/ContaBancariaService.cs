@@ -136,6 +136,9 @@ public class ContaBancariaService : IContaBancariaService
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, $"Tipo inválido. Use: {string.Join(", ", TiposValidos)}");
 
         var saldoInicialMudou = conta.SaldoInicial != dto.SaldoInicial;
+        // O saldo inicial move o saldo de todos os dias, inclusive os conferidos.
+        if (saldoInicialMudou && conta.TravadoAte != null)
+            throw PeriodoConferido.Erro(conta);
         conta.Nome = dto.Nome.Trim();
         conta.Tipo = dto.Tipo;
         conta.SaldoInicial = dto.SaldoInicial;
@@ -341,6 +344,7 @@ public class ContaBancariaService : IContaBancariaService
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Rendimento só pode ser registrado em conta do tipo Investimento.");
         if (dto.Valor == 0)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Valor do rendimento não pode ser zero.");
+        PeriodoConferido.Garantir(conta, dto.Data);
         if (dto.Data > DataLocalHelper.Hoje())
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
 
@@ -386,6 +390,8 @@ public class ContaBancariaService : IContaBancariaService
         VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
         if (dto.Data > DataLocalHelper.Hoje())
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível registrar data futura.", "data");
+        // Ajuste de saldo não existe dentro do período conferido.
+        PeriodoConferido.Garantir(conta, dto.Data);
 
         var (registro, novo) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, conta, dto.Data);
         var saldoApp = registro.SaldoFinal;
@@ -562,6 +568,9 @@ public class ContaBancariaService : IContaBancariaService
                 r.Entradas.Count(e => e.PendenteCategorizacao) + r.Saidas.Count(s => s.PendenteCategorizacao)),
             Ativa = c.Ativa,
             DataCriacao = c.DataCriacao,
+            TravadoAte = c.TravadoAte,
+            TravaSaldoBanco = c.TravaSaldoBanco,
+            TravadoPorConsultor = c.TravadoPorConsultor,
         };
 
         if (c.Tipo == "Investimento")

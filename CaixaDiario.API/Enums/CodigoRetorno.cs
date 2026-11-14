@@ -39,4 +39,5 @@ public enum CodigoRetorno
     PARCELA_NAO_ENCONTRADA,
     SESSAO_EXPIRADA,
     NAO_ENCONTRADO,
+    PERIODO_CONFERIDO,
 }

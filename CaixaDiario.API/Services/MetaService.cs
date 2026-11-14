@@ -465,6 +465,7 @@ public class MetaService : IMetaService
             var tipoCusto = (await _categoriaRepository.ListarTodasPorClienteAsync(meta.ClienteId))
                 .ToDictionary(c => c.Nome, c => c.Tipo)
                 .GetValueOrDefault(dto.Categoria);
+            PeriodoConferido.Garantir(contaPagamento, dto.Data);
 
             var (registro, novo) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepository, contaPagamento, dto.Data);
             registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas)
@@ -586,6 +587,10 @@ public class MetaService : IMetaService
         var faturasPorConta = new Dictionary<Guid, List<FaturaCartaoDto>>();
         var faturasTocadas = new HashSet<(Guid ContaId, Guid FaturaId)>();
         var registros = await _registroRepository.ListarPorClienteAsync(meta.ClienteId);
+        // Período conferido: confere todos os dias com lançamento da meta antes de mexer em qualquer um.
+        foreach (var registro in registros.Where(r => r.Saidas.Any(s => s.OrigemMetaId == meta.Id && s.FitId == null)))
+            if (contas.FirstOrDefault(c => c.Id == registro.ContaBancariaId) is { } contaDaMeta)
+                PeriodoConferido.Garantir(contaDaMeta, registro.Data);
 
         async Task<List<FaturaCartaoDto>> FaturasDaContaAsync(Guid contaId)
         {

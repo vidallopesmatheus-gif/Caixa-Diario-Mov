@@ -500,3 +500,36 @@ test('conta ContaCorrente: modal de importação não pede campos de fatura', as
   await screen.findByRole('button', { name: /Importar 2 transação/ })
   expect(screen.queryByText('Cartão / banco')).not.toBeInTheDocument()
 })
+
+// ── Money Vision: período conferido até o saldo bater com o banco ──────────────────────────────
+
+const contaConferida: ContaBancaria = { ...conta, travadoAte: '2026-10-08', travaSaldoBanco: 132.66 }
+
+test('should lock deleting but keep category editing on a day inside the checked period', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaConferida])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([lancamento({})])
+  renderPagina()
+
+  expect(await screen.findByText('🔒 Conferido até 08/10/2026', { exact: false })).toBeInTheDocument()
+  const excluir = await screen.findByRole('button', { name: 'Excluir lançamento Compra no débito - PADARIA CASA MOSTRA' })
+  expect(excluir).toBeDisabled()
+  expect(excluir).toHaveAttribute('title', 'Período conferido até 08/10/2026 — reabra para editar')
+  expect(screen.getByRole('button', { name: 'Editar categoria de "Compra no débito - PADARIA CASA MOSTRA"' })).toBeEnabled()
+})
+
+test('should show the preview lines in the checked period and offer to reopen it', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaConferida])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+  vi.mocked(contasBancariasApi.listarConferencias).mockResolvedValue([])
+  vi.mocked(importacaoApi.previewExtrato).mockResolvedValue(mockResumoImportacao({
+    travadoAte: '2026-10-08',
+    linhasEmPeriodoTravado: [{ id: '', data: '2026-10-03', descricao: 'Pix Ana', valor: 100, efeitoSeCorrigir: 0 }],
+  }))
+  renderPagina()
+
+  await selecionarArquivo(new File(['conteudo'], 'extrato.csv', { type: 'text/csv' }))
+
+  expect(await screen.findByText('🔒 Período conferido até 08/10/2026 — 1 linha(s) não serão importadas')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Reabrir para importar estas linhas' }))
+  expect(await screen.findByLabelText('Reabrir a partir de')).toHaveValue('2026-10-03')
+})

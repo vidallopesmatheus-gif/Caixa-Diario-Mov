@@ -4,6 +4,8 @@ namespace CaixaDiario.API.DTOs.Importacao;
 public class ResultadoImportacaoDto
 {
     public int TotalImportadas { get; set; }
+    // Linhas novas que ficaram de fora por estarem no período conferido da conta.
+    public int TotalIgnoradasPeriodoConferido { get; set; }
     public int TotalPendentesCategorizacao { get; set; }
     public int TotalCategorizadasPorRegra { get; set; }
     // Transações do arquivo que casaram com uma contrapartida PROVISÓRIA de Transferência (criada

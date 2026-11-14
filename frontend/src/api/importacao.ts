@@ -70,6 +70,8 @@ function mapResumo(raw: any): ResumoImportacao {
     saldoBancoArquivo: raw.saldoBancoArquivo
       ? { data: String(raw.saldoBancoArquivo.data).slice(0, 10), saldo: raw.saldoBancoArquivo.saldo ?? 0 }
       : undefined,
+    travadoAte: raw.travadoAte ?? undefined,
+    linhasEmPeriodoTravado: (raw.linhasEmPeriodoTravado ?? []).map(mapLinhaDiagnostico),
   }
 }
 
@@ -159,6 +161,7 @@ export const importarExtrato = async (
   const d = res.dados as Record<string, unknown>
   return {
     totalImportadas: Number(d.totalImportadas ?? 0),
+    totalIgnoradasPeriodoConferido: Number(d.totalIgnoradasPeriodoConferido ?? 0),
     totalPendentesCategorizacao: Number(d.totalPendentesCategorizacao ?? 0),
     totalCategorizadasPorRegra: Number(d.totalCategorizadasPorRegra ?? 0),
     totalConciliadasTransferencia: Number(d.totalConciliadasTransferencia ?? 0),

@@ -190,4 +190,20 @@ public class ConciliacaoSaldoServiceTests
 
         Assert.Equal(900m, status[_conta.Id].SaldoApp);
     }
+
+    // Money Vision ("travar o período até o saldo conferido"): só trava quando bate com o banco.
+    [Theory]
+    [InlineData(900, true)]
+    [InlineData(950, false)]
+    public async Task RegistrarSaldoBancoAsync_TravaOPeriodoSoQuandoOSaldoBate(double saldoBanco, bool trava)
+    {
+        var periodo = new Mock<IPeriodoConferidoService>();
+        var sut = new ConciliacaoSaldoService(_contaRepo.Object, _registroRepo.Object, _importRepo.Object, _pontoRepo.Object,
+            _periodoRepo.Object, new RelogioFixo(Hoje), periodoConferido: periodo.Object);
+        var data = new DateOnly(2026, 11, 7);
+
+        await sut.RegistrarSaldoBancoAsync(_conta.Id, new RegistrarSaldoBancoDto { Data = data, SaldoBanco = (decimal)saldoBanco }, _conta.ClienteId, "cliente");
+
+        periodo.Verify(p => p.TravarAsync(_conta, data, (decimal)saldoBanco, _conta.ClienteId, "cliente"), trava ? Times.Once() : Times.Never());
+    }
 }

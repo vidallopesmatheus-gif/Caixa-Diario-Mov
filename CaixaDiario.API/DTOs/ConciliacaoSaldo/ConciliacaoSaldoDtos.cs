@@ -10,6 +10,8 @@ public class PontoConciliacaoDto
     public decimal Diferenca { get; set; }
     public bool Conciliado { get; set; }
     public string Origem { get; set; } = string.Empty;
+    // Preenchido pelo "Conferir saldo": até onde a conta ficou travada (só quando bateu).
+    public DateOnly? TravadoAte { get; set; }
 }
 
 /// <summary>"Extrato até 07/11/2026 · Saldo do app R$ X · Banco em 07/11 R$ X ✅".</summary>
@@ -92,6 +94,8 @@ public class DiagnosticoDiferencaDto
     // par); EfeitoSeCorrigir = desfazer o ajuste.
     public List<LinhaDiagnosticoDto> Ajustes { get; set; } = new();
     public CombinacaoDiagnosticoDto? Combinacao { get; set; }
+    // "O que mudou desde a última conferência" — criado, editado ou excluído depois de reabrir.
+    public List<MudancaDesdeConferenciaDto> MudancasDesdeConferencia { get; set; } = new();
 }
 
 /// <summary>Um ajuste de saldo da conta, na tela "Conferir saldo" — pra confirmar ou desfazer.</summary>

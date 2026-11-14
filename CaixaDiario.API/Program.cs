@@ -147,6 +147,8 @@ builder.Services.AddScoped<IFaturaRepository, FaturaRepository>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IParcelamentoRepository, ParcelamentoRepository>();
 builder.Services.AddScoped<IPontoConciliacaoRepository, PontoConciliacaoRepository>();
+builder.Services.AddScoped<IConferenciaSaldoRepository, ConferenciaSaldoRepository>();
+builder.Services.AddScoped<IPeriodoConferidoService, PeriodoConferidoService>();
 builder.Services.AddScoped<IPeriodoExtratoRepository, PeriodoExtratoRepository>();
 builder.Services.AddScoped<IConciliacaoSaldoService, ConciliacaoSaldoService>();
 builder.Services.AddScoped<IParcelamentoDeteccaoService, ParcelamentoDeteccaoService>();

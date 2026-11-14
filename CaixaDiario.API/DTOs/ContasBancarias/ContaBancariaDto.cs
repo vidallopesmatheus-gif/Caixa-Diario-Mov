@@ -45,6 +45,10 @@ public class ContaBancariaDto
     // Money Vision: "Extrato até 07/11 · Banco em 07/11 R$ X ✅" — cobertura do extrato e último
     // saldo informado pelo banco. Null só em caminhos que não carregam isso (criar conta).
     public CaixaDiario.API.DTOs.ConciliacaoSaldo.StatusConciliacaoDto? Conciliacao { get; set; }
+    // "🔒 Conferido até 07/11/2026 · Banco R$ 86,40 ✅" — ver PeriodoConferido.
+    public DateOnly? TravadoAte { get; set; }
+    public decimal? TravaSaldoBanco { get; set; }
+    public bool TravadoPorConsultor { get; set; }
     // Money Vision: "card mostra R$ 0,00, mas a API e as faturas dizem outra coisa" (item 4) — a
     // soma do saldoDevedor de cada Fatura real não paga, a mesma fonte do botão "Pagar" na tela de
     // Faturas. Diferente de SaldoDevedor (ledger inteiro da conta): aqui é só o que ainda falta
