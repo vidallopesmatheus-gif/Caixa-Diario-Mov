@@ -96,6 +96,14 @@ public class ContasBancariasController : ControllerBase
         return Ok(new ApiResponse<ContaBancariaDto> { Dados = conta });
     }
 
+    // "Não é rendimento — foi acerto de saldo": tira a diferença do "Atualizar saldo" da receita do DRE.
+    [HttpPost("{contaId:guid}/rendimento/{lancamentoId:guid}/converter-em-ajuste")]
+    public async Task<IActionResult> ConverterRendimentoEmAjuste(Guid contaId, Guid lancamentoId, [FromQuery] DateOnly data)
+    {
+        await _service.ConverterRendimentoEmAjusteAsync(contaId, data, lancamentoId, ObterUsuarioId(), ObterPerfil());
+        return Ok(new ApiResponse<object> { Dados = null });
+    }
+
     // Item 4 (Money Vision "saldo não fecha com o extrato") — "Conferir saldo": acerta o saldo da
     // conta com o banco através de um lançamento visível, nunca uma troca silenciosa do Inicio.
     [HttpPost("{contaId:guid}/ajustar-saldo")]

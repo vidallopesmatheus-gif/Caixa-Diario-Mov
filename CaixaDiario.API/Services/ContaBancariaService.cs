@@ -435,6 +435,39 @@ public class ContaBancariaService : IContaBancariaService
         return await ObterPorIdAsync(contaId, usuarioLogadoId, perfil);
     }
 
+    // Money Vision ("Outras receitas R$ 8.659,99"): o "Atualizar saldo" do investimento grava a
+    // diferença como Rendimento — quando ela era aporte/resgate não lançado, é acerto de saldo e não
+    // pode ficar na receita. Mesmo valor e sentido: o saldo não muda, só sai do resultado do DRE.
+    public async Task ConverterRendimentoEmAjusteAsync(Guid contaId, DateOnly data, Guid lancamentoId, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+        var registro = await _registroRepo.ObterPorContaEDataAsync(contaId, data)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+
+        var entrada = registro.Entradas.FirstOrDefault(e => e.Id == lancamentoId && e.TipoCusto == LancamentoFiltro.TipoRendimento);
+        var saida = registro.Saidas.FirstOrDefault(s => s.Id == lancamentoId && s.TipoCusto == LancamentoFiltro.TipoRendimento);
+        if (entrada != null)
+        {
+            entrada.TipoCusto = LancamentoFiltro.TipoAjusteConciliacao;
+            entrada.Categoria = LancamentoFiltro.CategoriaAjusteSaldo;
+            registro.Entradas = new List<ItemFinanceiro>(registro.Entradas);
+        }
+        else if (saida != null)
+        {
+            saida.TipoCusto = LancamentoFiltro.TipoAjusteConciliacao;
+            saida.Categoria = LancamentoFiltro.CategoriaAjusteSaldo;
+            registro.Saidas = new List<ItemFinanceiroSaida>(registro.Saidas);
+        }
+        else
+        {
+            throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Rendimento não encontrado nesta data.");
+        }
+        registro.SalvoEm = DateTime.UtcNow;
+        await _registroRepo.AtualizarAsync(registro);
+    }
+
     public async Task<ContaBancariaDto> VincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil)
     {
         var conta = await _contaRepo.ObterPorIdAsync(contaId)

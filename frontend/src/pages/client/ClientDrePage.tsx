@@ -1,16 +1,17 @@
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { obterDre } from '../../api/metricas'
+import { obterDre, listarLancamentosDre, BLOCO_AJUSTES, GRUPOS_A_CLASSIFICAR } from '../../api/metricas'
 import { baixarArquivo, salvarNoDispositivo } from '../../api/exportacao'
-import { listarContasBancarias } from '../../api/contasBancarias'
+import { listarContasBancarias, converterRendimentoEmAjuste } from '../../api/contasBancarias'
 import { editarCategoriaLancamento } from '../../api/registros'
 import { listarCategorias } from '../../api/categorias'
 import { useRegistros } from '../../hooks/useRegistros'
+import { invalidarCache } from '../../utils/requestCache'
 import { fmtBRL, fmtPct, fmtDate, todayISO } from '../../utils/format'
 import Modal from '../../components/shared/Modal'
 import DreKpisPanel from './dre/DreKpisPanel'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
-import type { Dre, DreBloco } from '../../api/metricas'
+import type { Dre, DreBloco, DreLancamento } from '../../api/metricas'
 import type { ContaBancaria, Bloco, Categorias, CategoriaAdmin } from '../../types'
 import './ClientDre.css'
 
@@ -92,12 +93,22 @@ interface Periodo {
   ate: string
 }
 
+// Money Vision ("Outras receitas sem lançamento"): o detalhe identifica a LINHA do DRE (bloco,
+// grupo, categoria) e pede ao backend a mesma lista que gerou o total — nunca refiltra por nome.
 interface Drill {
   periodoLabel: string
   de: string
   ate: string
-  categoriaNome: string
+  bloco: string
+  grupo?: string
+  categoria?: string
+  titulo: string
 }
+
+type LinhaDrill = DreLancamento
+
+const GUID_VAZIO = '00000000-0000-0000-0000-000000000000'
+const ehAClassificar = (grupo: string) => GRUPOS_A_CLASSIFICAR.includes(grupo)
 
 type LinhaTipo = 'bloco' | 'subtotal'
 interface LinhaDre {
@@ -110,7 +121,7 @@ interface LinhaDre {
 
 // Rodada de ajustes Money Vision, item 4 (DRE mais enxuta): Receita Financeira, Despesas Não
 // Operacionais e Não Classificados deixaram de ser linhas próprias — a primeira soma em Receitas
-// Operacionais (como "Outras receitas"), as outras duas em Despesas Operacionais. O aviso de
+// Operacionais (como "Rendimentos de investimento"), as outras duas em Despesas Operacionais. O aviso de
 // lançamentos sem categoria (dre.quantidadeNaoClassificados) cobre o alerta ao usuário sem
 // precisar de uma linha no demonstrativo.
 const LINHAS: LinhaDre[] = [
@@ -236,6 +247,8 @@ export default function ClientDrePage() {
   const [blocosExpandidos, setBlocosExpandidos] = useState<Set<Bloco>>(new Set())
   const [gruposExpandidos, setGruposExpandidos] = useState<Set<string>>(new Set())
   const [drill, setDrill] = useState<Drill | null>(null)
+  const [lancamentosDrill, setLancamentosDrill] = useState<LinhaDrill[]>([])
+  const [carregandoDrill, setCarregandoDrill] = useState(false)
 
   useEffect(() => {
     if (!clienteId) return
@@ -320,47 +333,36 @@ export default function ClientDrePage() {
     })
   }
 
-  function abrirLancamentos(periodo: Periodo, categoriaNome: string) {
-    setDrill({ periodoLabel: periodo.label, de: periodo.de, ate: periodo.ate, categoriaNome })
-  }
-
-  interface LinhaDrill {
-    id?: string
-    contaBancariaId?: string
-    tipo: 'Entrada' | 'Saida'
-    data: string
-    descricao: string
-    valor: number
-    categoria: string
-  }
-
-  const lancamentosDrill = useMemo(() => {
-    if (!drill) return []
-    const linhas: LinhaDrill[] = []
-    for (const r of registros) {
-      if (r.data < drill.de || r.data > drill.ate) continue
-      if (contaFiltro && r.contaBancariaId !== contaFiltro) continue
-      for (const e of r.entradas) {
-        const nomeEfetivo = e.categoria && e.categoria.trim() ? e.categoria : 'Não Classificado'
-        if (nomeEfetivo === drill.categoriaNome) {
-          linhas.push({
-            id: e.id, contaBancariaId: r.contaBancariaId, tipo: 'Entrada', data: r.data,
-            descricao: e.descricao, valor: e.valor, categoria: e.categoria ?? '',
-          })
-        }
-      }
-      for (const s of r.saidas) {
-        const nomeEfetivo = s.categoria && s.categoria.trim() ? s.categoria : 'Não Classificado'
-        if (nomeEfetivo === drill.categoriaNome) {
-          linhas.push({
-            id: s.id, contaBancariaId: r.contaBancariaId, tipo: 'Saida', data: r.data,
-            descricao: s.descricao, valor: -s.valor, categoria: s.categoria ?? '',
-          })
-        }
-      }
+  const carregarDrill = useCallback(async (d: Drill) => {
+    setCarregandoDrill(true)
+    try {
+      setLancamentosDrill(await listarLancamentosDre(clienteId, {
+        de: d.de, ate: d.ate, bloco: d.bloco, grupo: d.grupo, categoria: d.categoria, contaBancariaId: contaFiltro || undefined,
+      }))
+    } catch (e: unknown) {
+      setLancamentosDrill([])
+      setMsgCategoria(e instanceof Error ? e.message : 'Erro ao carregar os lançamentos.')
+    } finally {
+      setCarregandoDrill(false)
     }
-    return linhas.sort((a, b) => a.data.localeCompare(b.data))
-  }, [drill, registros, contaFiltro])
+  }, [clienteId, contaFiltro])
+
+  const abrirLancamentos = useCallback((periodo: Periodo, bloco: string, grupo?: string, categoria?: string, titulo?: string) => {
+    const d: Drill = {
+      periodoLabel: periodo.label, de: periodo.de, ate: periodo.ate, bloco, grupo, categoria,
+      titulo: titulo ?? categoria ?? grupo ?? bloco,
+    }
+    setDrill(d)
+    setMsgCategoria('')
+    setLancamentosDrill([])
+    carregarDrill(d)
+  }, [carregarDrill])
+
+  // Depois de mexer num lançamento: DRE (sem o cache de 30s), registros e o próprio detalhe.
+  async function recarregarDepoisDeAlterar() {
+    invalidarCache('dre:')
+    await Promise.all([carregar(), recarregarRegistros(), drill ? carregarDrill(drill) : Promise.resolve()])
+  }
 
   // Item E2: mesma normalização usada pelo backend (DescricaoMatcher.NormalizarExata) — conta
   // "quantos lançamentos parecidos" existem ANTES de perguntar, usando os registros já carregados
@@ -391,7 +393,7 @@ export default function ClientDrePage() {
   }
 
   async function handleAlterarCategoria(linha: LinhaDrill, categoriaNova: string) {
-    if (!linha.id || !linha.contaBancariaId || categoriaNova === linha.categoria) return
+    if (!linha.id || !linha.contaBancariaId || categoriaNova === (linha.categoria ?? '')) return
     setMsgCategoria('')
 
     const descNorm = normalizar(linha.descricao)
@@ -412,11 +414,26 @@ export default function ClientDrePage() {
       setMsgCategoria(
         `Categoria atualizada.${resultado.similaresAtualizados > 0 ? ` ${resultado.similaresAtualizados} lançamento(s) parecido(s) também foram atualizados.` : ''}`,
       )
-      // "Recalcule a DRE sem recarregar a página" — busca de novo o DRE e os registros (a lista do
-      // drill-down em si lê de `registros`), em vez de um reload de verdade.
-      await Promise.all([carregar(), recarregarRegistros()])
+      // "Recalcule a DRE sem recarregar a página" — busca de novo o DRE, os registros e o detalhe.
+      await recarregarDepoisDeAlterar()
     } catch (e: unknown) {
       setMsgCategoria(e instanceof Error ? e.message : 'Erro ao atualizar categoria.')
+    } finally {
+      setSalvandoCategoriaId(null)
+    }
+  }
+
+  // "Atualizar saldo" do investimento que era aporte/resgate não lançado: sai da receita.
+  async function handleConverterEmAjuste(linha: LinhaDrill) {
+    if (!linha.contaBancariaId) return
+    setSalvandoCategoriaId(linha.id)
+    setMsgCategoria('')
+    try {
+      await converterRendimentoEmAjuste(linha.contaBancariaId, linha.id, linha.data)
+      setMsgCategoria('Movido para "(±) Ajustes de conciliação" — não conta mais como receita.')
+      await recarregarDepoisDeAlterar()
+    } catch (e: unknown) {
+      setMsgCategoria(e instanceof Error ? e.message : 'Erro ao mover o lançamento.')
     } finally {
       setSalvandoCategoriaId(null)
     }
@@ -495,14 +512,14 @@ export default function ClientDrePage() {
           })
           linhas.push({
             key: `${chaveGrupo}::${nomeCat}`, nivel: 2, label: nomeCat, expandavel: false, expandido: false, vazio: false,
-            destaqueAlerta: nomeCat === 'Não Classificado', valores,
-            onClickCelula: idx => abrirLancamentos(periodosComDre[idx].periodo, nomeCat),
+            destaqueAlerta: ehAClassificar(nomeGrupo), valores,
+            onClickCelula: idx => abrirLancamentos(periodosComDre[idx].periodo, bloco, nomeGrupo, nomeCat),
           })
         }
       }
     }
     return linhas
-  }, [modoComparativo, todasCarregadas, periodosComDre, blocosExpandidos, gruposExpandidos])
+  }, [modoComparativo, todasCarregadas, periodosComDre, blocosExpandidos, gruposExpandidos, abrirLancamentos])
 
   // Mobile (item 3): só 2 períodos de cada vez, com setas pra navegar — a tabela inteira (todas
   // as colunas) continua existindo, só a JANELA visível de colunas muda.
@@ -596,7 +613,7 @@ export default function ClientDrePage() {
 
       {todasCarregadas && !loading && quantidadeNaoClassificados > 0 && (
         <div className="dre-alerta-global">
-          ⚠ {quantidadeNaoClassificados} lançamento{quantidadeNaoClassificados === 1 ? '' : 's'} sem categoria no período · Categorize-o{quantidadeNaoClassificados === 1 ? '' : 's'} em "Categorizar Lançamentos" (dentro de cada conta, em Banco) para um DRE mais preciso.
+          ⚠ {quantidadeNaoClassificados} lançamento{quantidadeNaoClassificados === 1 ? '' : 's'} sem categoria válida — classificar · Estão em "Receitas a classificar" / "Despesas a classificar"; clique na linha para categorizar.
         </div>
       )}
 
@@ -720,7 +737,10 @@ export default function ClientDrePage() {
                   {/* Money Vision ("ajuste mexeu no DRE"): visível, mas DEPOIS do Resultado
                       Líquido e fora dele — não distorce margem, ponto de equilíbrio nem indicadores. */}
                   {linha.key === 'resultadoLiquido' && (dreAtual.quantidadeAjustesConciliacao ?? 0) > 0 && (
-                    <div className="dre-linha dre-linha-ajuste-conciliacao">
+                    <div
+                      className="dre-linha dre-linha-ajuste-conciliacao" role="button"
+                      onClick={() => abrirLancamentos(periodosComDre[0].periodo, BLOCO_AJUSTES, undefined, undefined, '(±) Ajustes de conciliação')}
+                    >
                       <span className="dre-linha-label">
                         (±) Ajustes de conciliação de saldo
                         <span className="dre-linha-pct" style={{ marginLeft: 6 }}>⚖️ não afeta o resultado</span>
@@ -780,8 +800,8 @@ export default function ClientDrePage() {
                               {grupo.categorias.map(cat => (
                                 <button
                                   key={cat.nome}
-                                  className={`dre-cat-btn${cat.nome === 'Não Classificado' ? ' dre-cat-btn-alerta' : ''}`}
-                                  onClick={() => abrirLancamentos(periodosComDre[0].periodo, cat.nome)}
+                                  className={`dre-cat-btn${ehAClassificar(grupo.nome) ? ' dre-cat-btn-alerta' : ''}`}
+                                  onClick={() => abrirLancamentos(periodosComDre[0].periodo, bloco, grupo.nome, cat.nome)}
                                 >
                                   <span className="dre-cat-nome">{cat.nome}</span>
                                   <span className="dre-cat-valor">{fmtBRL(cat.total)}</span>
@@ -813,30 +833,48 @@ export default function ClientDrePage() {
 
       <Modal
         open={!!drill}
-        title={drill ? `${drill.categoriaNome} · ${drill.periodoLabel}` : ''}
+        title={drill ? `${drill.titulo} · ${drill.periodoLabel}` : ''}
         onClose={() => setDrill(null)}
       >
         {msgCategoria && <p className="dre-drill-msg">{msgCategoria}</p>}
-        {lancamentosDrill.length === 0 ? (
+        {carregandoDrill ? (
+          <p className="dre-vazio-inline">Carregando...</p>
+        ) : lancamentosDrill.length === 0 ? (
           <p className="dre-vazio-inline">Nenhum lançamento encontrado.</p>
         ) : (
           <div className="dre-drill-lista">
             {lancamentosDrill.map((l, i) => {
               const opcoes = l.tipo === 'Entrada' ? categorias.entradas : categorias.saidas
               const sugestao = !l.categoria ? sugerirCategoriaPara(l) : null
+              const temId = !!l.id && l.id !== GUID_VAZIO && !!l.contaBancariaId
               return (
                 <div key={i} className="dre-drill-item-wrap">
                   <div className="dre-drill-item">
                     <span className="dre-drill-data">{fmtDate(l.data)}</span>
-                    <span className="dre-drill-desc">{l.descricao}</span>
+                    <span className="dre-drill-desc">{l.descricao}{l.contaNome && <span className="dre-drill-conta"> · {l.contaNome}</span>}</span>
                     <span className="dre-drill-valor" style={{ color: l.valor >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtBRL(l.valor)}</span>
                   </div>
-                  {l.id && l.contaBancariaId ? (
+                  {drill?.bloco === BLOCO_AJUSTES ? (
+                    <span className="dre-drill-cat-readonly">Ajuste de saldo · não afeta o resultado</span>
+                  ) : l.tipoCusto === 'Rendimento' ? (
+                    <>
+                      <span className="dre-drill-cat-readonly">Rendimento de investimento</span>
+                      {temId && (
+                        <button
+                          type="button" className="dre-drill-sugerir-link"
+                          disabled={salvandoCategoriaId === l.id}
+                          onClick={() => handleConverterEmAjuste(l)}
+                        >
+                          Não é rendimento — foi acerto de saldo
+                        </button>
+                      )}
+                    </>
+                  ) : temId ? (
                     <>
                       <CategoriaCombobox
                         clienteId={clienteId}
                         categorias={opcoes}
-                        value={l.categoria}
+                        value={l.categoria ?? ''}
                         onChange={nome => handleAlterarCategoria(l, nome)}
                         onCategoriaCriada={handleCategoriaCriada}
                         blocoPadraoNovaCategoria={l.tipo === 'Entrada' ? 'RECEITAS OPERACIONAIS' : 'DESPESAS OPERACIONAIS'}
@@ -860,6 +898,10 @@ export default function ClientDrePage() {
                 </div>
               )
             })}
+            <div className="dre-drill-item dre-drill-total">
+              <span className="dre-drill-desc">Total ({lancamentosDrill.length})</span>
+              <span className="dre-drill-valor">{fmtBRL(lancamentosDrill.reduce((soma, l) => soma + l.valor, 0))}</span>
+            </div>
           </div>
         )}
       </Modal>

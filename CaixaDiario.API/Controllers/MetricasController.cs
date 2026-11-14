@@ -86,13 +86,7 @@ public class MetricasController : ControllerBase
     {
         VerificarAcesso(clienteId);
         var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
-        var filtrados = todos
-            .Where(r => r.Data >= de && r.Data <= ate && !r.Excluido)
-            .ToList();
-
-        if (contaBancariaId.HasValue && contaBancariaId.Value != Guid.Empty)
-            filtrados = filtrados.Where(r => r.ContaBancariaId == contaBancariaId).ToList();
-
+        var filtrados = FiltrarParaDre(todos, de, ate, contaBancariaId);
         var categorias = await _categoriaRepo.ListarTodasPorClienteAsync(clienteId);
         var resultado = _metricasService.CalcularDre(filtrados, categorias);
 
@@ -105,6 +99,39 @@ public class MetricasController : ControllerBase
 
         return Ok(new ApiResponse<DreDto> { Dados = resultado });
     }
+
+    // Detalhe de uma linha do DRE (Bloco → Grupo → Categoria): mesmos registros e mesma
+    // classificação do total — a soma do detalhe é sempre o valor da linha.
+    [HttpGet("{clienteId:guid}/dre/lancamentos")]
+    public async Task<IActionResult> ListarLancamentosDre(
+        Guid clienteId,
+        [FromQuery] DateOnly de,
+        [FromQuery] DateOnly ate,
+        [FromQuery] string bloco,
+        [FromQuery] string? grupo = null,
+        [FromQuery] string? categoria = null,
+        [FromQuery] Guid? contaBancariaId = null)
+    {
+        VerificarAcesso(clienteId);
+        var todos = await _registroRepo.ListarPorClienteAsync(clienteId);
+        var categorias = await _categoriaRepo.ListarTodasPorClienteAsync(clienteId);
+        var nomesConta = (await _contaBancariaRepo.ListarPorClienteAsync(clienteId)).ToDictionary(c => c.Id, c => c.Nome);
+        var lancamentos = _metricasService.ListarLancamentosDre(
+            FiltrarParaDre(todos, de, ate, contaBancariaId), categorias, bloco, grupo, categoria);
+        var resultado = lancamentos.Select(l => new DreLancamentoDto
+        {
+            Id = l.LancamentoId, ContaBancariaId = l.ContaBancariaId,
+            ContaNome = l.ContaBancariaId is { } id && nomesConta.TryGetValue(id, out var nome) ? nome : null,
+            Data = l.Data, Tipo = l.Tipo, Descricao = l.Descricao, Valor = l.Valor,
+            Categoria = l.CategoriaOriginal, TipoCusto = l.TipoCusto,
+        }).ToList();
+        return Ok(new ApiResponse<List<DreLancamentoDto>> { Dados = resultado });
+    }
+
+    private static List<RegistroDiario> FiltrarParaDre(List<RegistroDiario> todos, DateOnly de, DateOnly ate, Guid? contaBancariaId) =>
+        todos.Where(r => r.Data >= de && r.Data <= ate && !r.Excluido
+                && (contaBancariaId is not { } conta || conta == Guid.Empty || r.ContaBancariaId == conta))
+            .ToList();
 
     // Item 10 do Bloco 5 ("Visão de Futuro"): mesReferencia opcional ("yyyy-MM") — o front manda
     // isso quando detecta que o mês atual está vazio e já achou o último mês com dados (mesma

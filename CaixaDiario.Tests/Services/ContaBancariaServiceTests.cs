@@ -896,6 +896,54 @@ public class ContaBancariaServiceTests
         Assert.Equal(1050m, adicionado.SaldoFinal);
     }
 
+    // Money Vision ("Outras receitas R$ 8.659,99"): a diferença do "Atualizar saldo" que era acerto
+    // de saldo sai da receita — vira ajuste de conciliação, com o mesmo valor (saldo não muda).
+    [Fact]
+    public async Task ConverterRendimentoEmAjusteAsync_RendimentoDoAtualizarSaldo_ViraAjusteDeConciliacaoSemMudarSaldo()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId);
+        conta.Tipo = "Investimento";
+        var data = new DateOnly(2026, 11, 12);
+        var rendimento = new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Rendimento", Valor = 8659.99m, Categoria = "Rendimento", TipoCusto = "Rendimento" };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data, Inicio = 0m, SaldoFinal = 8659.99m,
+            Entradas = new() { rendimento }, Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(registro);
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+
+        await _sut.ConverterRendimentoEmAjusteAsync(conta.Id, data, rendimento.Id, clienteId, "cliente");
+
+        var item = Assert.Single(registro.Entradas);
+        Assert.Equal((LancamentoFiltro.TipoAjusteConciliacao, LancamentoFiltro.CategoriaAjusteSaldo, 8659.99m), (item.TipoCusto, item.Categoria, item.Valor));
+        Assert.Equal(8659.99m, registro.SaldoFinal);
+        _registroRepoMock.Verify(r => r.AtualizarAsync(registro), Times.Once);
+    }
+
+    [Fact]
+    public async Task ConverterRendimentoEmAjusteAsync_LancamentoQueNaoERendimento_LancaNaoEncontrado()
+    {
+        var clienteId = Guid.NewGuid();
+        var conta = CriarConta(Guid.NewGuid(), clienteId);
+        var data = new DateOnly(2026, 11, 12);
+        var venda = new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Venda", Valor = 100m, Categoria = "Vendas", TipoCusto = "Receita" };
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = conta.Id, Data = data,
+            Entradas = new() { venda }, Saidas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(conta.Id)).ReturnsAsync(conta);
+        _registroRepoMock.Setup(r => r.ObterPorContaEDataAsync(conta.Id, data)).ReturnsAsync(registro);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ConverterRendimentoEmAjusteAsync(conta.Id, data, venda.Id, clienteId, "cliente"));
+
+        Assert.Equal(404, ex.StatusCode);
+        Assert.Equal("Receita", venda.TipoCusto);
+    }
+
     // Money Vision: "saldo não fecha com o extrato" — registrar rendimento nunca cascateava; um dia
     // futuro já materializado (ex.: recorrência) ficava com Inicio desatualizado pra sempre.
     [Fact]
