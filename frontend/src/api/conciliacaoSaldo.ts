@@ -64,6 +64,8 @@ export const diagnosticarSaldo = async (contaId: string, data: string, saldoBanc
     transferenciasSemPar: (d.transferenciasSemPar ?? []).map(mapLinhaDiagnostico),
     manuais: (d.manuais ?? []).map(mapLinhaDiagnostico),
     ajustes: (d.ajustes ?? []).map(mapLinhaDiagnostico),
+    contrapartidasSemLancamento: (d.contrapartidasSemLancamento ?? []).map(mapLinhaDiagnostico),
+    contrapartidasDuplicadas: (d.contrapartidasDuplicadas ?? []).map(mapLinhaDiagnostico),
     combinacao: d.combinacao ? { resumo: d.combinacao.resumo ?? '', itens: (d.combinacao.itens ?? []).map(mapLinhaDiagnostico) } : undefined,
   }
 }

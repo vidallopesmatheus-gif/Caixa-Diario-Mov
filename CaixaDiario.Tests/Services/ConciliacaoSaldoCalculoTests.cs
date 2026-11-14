@@ -164,4 +164,30 @@ public class ConciliacaoSaldoCalculoTests
 
         Assert.Equal(new[] { new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 2), new DateOnly(2026, 10, 3) }, dias);
     }
+
+    // Money Vision ("contrapartida falsa", caso B): o app criou +400 no C6 a partir do Nubank, mas
+    // o extrato do C6 cobre 14/10 e não tem esse recebimento — é a causa da diferença.
+    [Fact]
+    public void Diagnosticar_ContrapartidaCriadaSemLancamentoNoExtrato_ApareceComoCausaEZeraADiferenca()
+    {
+        var outraConta = Guid.NewGuid();
+        var transferencia = new Transferencia { Id = Guid.NewGuid(), ClienteId = Conta.ClienteId, ContaOrigemId = outraConta, ContaDestinoId = Conta.Id, Data = new DateOnly(2026, 10, 14), Valor = 400m };
+        var diaC6 = Dia(new DateOnly(2026, 10, 14), ("Venda", 100m, "F1"));
+        diaC6.Entradas.Add(new ItemFinanceiro { Id = Guid.NewGuid(), Descricao = "Transferência enviada pelo Pix - Matheus", Valor = 400m, TransferenciaId = transferencia.Id, TipoCusto = "Transferencia" });
+        var diaNubank = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = Conta.ClienteId, ContaBancariaId = outraConta, Data = new DateOnly(2026, 10, 14), Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+            Saidas = new() { new ItemFinanceiroSaida { Id = Guid.NewGuid(), Descricao = "Transferência enviada pelo Pix - Matheus", Valor = 400m, TransferenciaId = transferencia.Id, FitId = "N1" } },
+        };
+        var registros = Encadeados(diaC6).Append(diaNubank).ToList();
+        var dias = new SortedSet<DateOnly>(new[] { new DateOnly(2026, 10, 14) });
+        var achados = RevisaoContrapartidas.Analisar(registros, new List<Transferencia> { transferencia },
+            new Dictionary<Guid, SortedSet<DateOnly>> { [Conta.Id] = dias }, new Dictionary<Guid, HashSet<(DateOnly, decimal, string)>>());
+
+        // App: 1000 + 100 + 400 = 1500; banco: 1100 (o +400 nunca entrou no C6).
+        var d = ConciliacaoSaldoCalculo.Diagnosticar(Conta, registros, new(), dias, NenhumaChave, new DateOnly(2026, 10, 14), 1100m, contrapartidas: achados);
+
+        Assert.Equal(-400m, Assert.Single(d.ContrapartidasSemLancamento).EfeitoSeCorrigir);
+        Assert.Equal("Corrigir esta contrapartida de transferência zera a diferença", d.Combinacao!.Resumo);
+    }
 }

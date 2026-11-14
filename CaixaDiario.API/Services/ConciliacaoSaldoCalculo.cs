@@ -92,7 +92,7 @@ public static class ConciliacaoSaldoCalculo
     public static DiagnosticoDiferencaDto Diagnosticar(
         ContaBancaria conta, List<RegistroDiario> registrosCliente, List<PontoConciliacao> pontos, SortedSet<DateOnly> diasComExtrato,
         HashSet<(DateOnly, decimal, string)> chavesImportadas, DateOnly data, decimal? saldoBanco,
-        HashSet<(Guid, Guid)>? paresMantidos = null)
+        HashSet<(Guid, Guid)>? paresMantidos = null, IReadOnlyList<AchadoContrapartida>? contrapartidas = null)
     {
         var registrosDaConta = registrosCliente.Where(r => r.ContaBancariaId == conta.Id && !r.Excluido).ToList();
         var saldoApp = SaldoEncadeamento.SaldoNoFimDe(conta, registrosDaConta, data);
@@ -129,6 +129,15 @@ public static class ConciliacaoSaldoCalculo
                 && !chavesImportadas.Contains(ChaveImportada(x.Linha.Data, x.Linha.Valor, x.Linha.Descricao)))
             .Select(x => ComEfeito(x.Linha, -x.Linha.Valor)).ToList();
 
+        // Money Vision ("contrapartida falsa"): pontas que o app inventou nesta conta — sem o
+        // lançamento real no extrato, ou repetindo um lançamento real solto. Corrigir = tirar a inventada.
+        List<LinhaDiagnosticoDto> Contrapartidas(Func<AchadoContrapartida, bool> filtro) =>
+            (contrapartidas ?? Array.Empty<AchadoContrapartida>()).Where(filtro)
+                .SelectMany(a => new[] { a.Criada, a.OutraCriada! }.Where(p => p != null && p.ContaId == conta.Id))
+                .Where(p => p.Data >= desde && p.Data <= data)
+                .Select(p => ComEfeito(Linha(p.ItemId, p.Data, p.Descricao, p.ValorComSinal, "Transferência"), -p.ValorComSinal))
+                .ToList();
+
         var diferenca = saldoBanco - saldoApp;
         var diagnostico = new DiagnosticoDiferencaDto
         {
@@ -136,6 +145,8 @@ public static class ConciliacaoSaldoCalculo
             Lacunas = Lacunas(diasComExtrato, desde, data),
             Duplicatas = duplicatas, SinalSuspeito = sinalSuspeito, TransferenciasSemPar = transferenciasSemPar, Manuais = manuais,
             Ajustes = ajustes,
+            ContrapartidasSemLancamento = Contrapartidas(a => a.Tipo == TipoAchadoContrapartida.SemLancamentoNoExtrato),
+            ContrapartidasDuplicadas = Contrapartidas(a => a.Tipo is TipoAchadoContrapartida.DuplicadaComReal or TipoAchadoContrapartida.ParDuplicado),
         };
         if (diferenca.HasValue) diagnostico.Combinacao = BuscarCombinacao(diagnostico, diferenca.Value);
         return diagnostico;
@@ -201,6 +212,7 @@ public static class ConciliacaoSaldoCalculo
         var candidatos = d.Duplicatas.SelectMany(g => g.Itens.Skip(1)).Select(l => (Linha: l, Tipo: "duplicata"))
             .Concat(d.SinalSuspeito.Select(l => (Linha: l, Tipo: "sinal")))
             .Concat(d.TransferenciasSemPar.Select(l => (Linha: l, Tipo: "transferencia")))
+            .Concat(d.ContrapartidasDuplicadas.Concat(d.ContrapartidasSemLancamento).Select(l => (Linha: l, Tipo: "contrapartida")))
             .Concat(d.Manuais.Select(l => (Linha: l, Tipo: "manual")))
             .GroupBy(c => (c.Linha.Id, c.Tipo)).Select(g => g.First())
             .Take(MaxCandidatosCombinacao)
@@ -244,6 +256,8 @@ public static class ConciliacaoSaldoCalculo
             ("sinal", var n) => $"inverter o sinal destes {n} lançamentos",
             ("transferencia", 1) => "excluir esta transferência sem par",
             ("transferencia", var n) => $"excluir estas {n} transferências sem par",
+            ("contrapartida", 1) => "corrigir esta contrapartida de transferência",
+            ("contrapartida", var n) => $"corrigir estas {n} contrapartidas de transferência",
             (_, 1) => "excluir este lançamento manual",
             (_, var n) => $"excluir estes {n} lançamentos manuais",
         });

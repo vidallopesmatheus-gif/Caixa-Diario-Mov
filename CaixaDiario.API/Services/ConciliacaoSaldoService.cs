@@ -32,14 +32,17 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
     private readonly TimeProvider _timeProvider;
     private readonly IDuplicataDispensadaRepository? _dispensadaRepo;
     private readonly ILogger<ConciliacaoSaldoService>? _logger;
+    private readonly IRevisaoTransferenciasService? _revisaoTransferencias;
 
     public ConciliacaoSaldoService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, ITransacaoImportadaRepository importRepo,
         IPontoConciliacaoRepository pontoRepo, IPeriodoExtratoRepository periodoRepo, TimeProvider? timeProvider = null,
-        IDuplicataDispensadaRepository? dispensadaRepo = null, ILogger<ConciliacaoSaldoService>? logger = null)
+        IDuplicataDispensadaRepository? dispensadaRepo = null, ILogger<ConciliacaoSaldoService>? logger = null,
+        IRevisaoTransferenciasService? revisaoTransferencias = null)
     {
         _dispensadaRepo = dispensadaRepo;
         _logger = logger;
+        _revisaoTransferencias = revisaoTransferencias;
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _importRepo = importRepo;
@@ -85,7 +88,9 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
         var paresMantidos = _dispensadaRepo == null ? new HashSet<(Guid, Guid)>()
             : (await _dispensadaRepo.ListarPorContaAsync(contaId)).Select(d => (d.LancamentoMenorId, d.LancamentoMaiorId)).ToHashSet();
 
-        return ConciliacaoSaldoCalculo.Diagnosticar(conta, registrosCliente, pontos, dias, chaves, data, saldo, paresMantidos);
+        var contrapartidas = _revisaoTransferencias != null ? await _revisaoTransferencias.AnalisarAsync(conta.ClienteId) : null;
+
+        return ConciliacaoSaldoCalculo.Diagnosticar(conta, registrosCliente, pontos, dias, chaves, data, saldo, paresMantidos, contrapartidas);
     }
 
     public async Task<PontoConciliacaoDto> RegistrarSaldoBancoAsync(Guid contaId, RegistrarSaldoBancoDto dto, Guid usuarioLogadoId, string perfil)

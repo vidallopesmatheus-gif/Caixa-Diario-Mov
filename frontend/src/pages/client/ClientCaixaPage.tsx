@@ -10,6 +10,7 @@ import { obterCoberturaExtrato } from '../../api/conciliacaoSaldo'
 import { listarCategorias } from '../../api/categorias'
 import { listarContasBancarias } from '../../api/contasBancarias'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
+import { ApiError } from '../../api/client'
 import { excluirLancamento } from '../../api/importacao'
 import { lancarCompraParcelada } from '../../api/faturasCartao'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
@@ -441,6 +442,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       // Item 3.3: o motor de vínculo roda depois de salvar — soma as sugestões encontradas em
       // cada conta/dia afetado pra avisar o usuário de uma vez, sem precisar ir a Contas conferir.
       let totalSugestoesVinculo = 0
+      const avisosTransferencia: string[] = []
 
       for (const grupoContaId of contasEnvolvidas) {
         const entradasGrupo = gruposEntrada.get(grupoContaId) ?? []
@@ -471,25 +473,30 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         // Linhas marcadas como transferência: só dá pra criar o par vinculado depois que a linha
         // existe de verdade (salva acima). Sequencial, não Promise.all — evita duas chamadas
         // lendo/escrevendo o mesmo RegistroDiario ao mesmo tempo e uma perder a alteração da outra.
-        for (const item of entradasGrupo.filter(e => e.transferenciaContaId && e.id)) {
-          await converterLancamentoEmTransferencia({
-            contaId: grupoContaId, lancamentoId: item.id!, data, tipo: 'Entrada',
-            contaContrapartidaId: item.transferenciaContaId!,
-          })
-        }
-        for (const item of saidasGrupo.filter(s => s.transferenciaContaId && s.id)) {
-          await converterLancamentoEmTransferencia({
-            contaId: grupoContaId, lancamentoId: item.id!, data, tipo: 'Saida',
-            contaContrapartidaId: item.transferenciaContaId!,
-          })
+        // Money Vision ("contrapartida falsa"): sem o par real na outra conta e com o extrato dela
+        // cobrindo o dia, o backend avisa em vez de inventar o lançamento — a linha fica salva como
+        // lançamento comum e o aviso aparece; as outras linhas seguem.
+        const marcadas = [
+          ...entradasGrupo.filter(e => e.transferenciaContaId && e.id).map(e => ({ item: e, tipo: 'Entrada' as const })),
+          ...saidasGrupo.filter(s => s.transferenciaContaId && s.id).map(s => ({ item: s, tipo: 'Saida' as const })),
+        ]
+        for (const { item, tipo } of marcadas) {
+          try {
+            await converterLancamentoEmTransferencia({
+              contaId: grupoContaId, lancamentoId: item.id!, data, tipo, contaContrapartidaId: item.transferenciaContaId!,
+            })
+          } catch (e: unknown) {
+            if (!(e instanceof ApiError) || !e.codigo.startsWith('CONTRAPARTIDA_')) throw e
+            avisosTransferencia.push(`"${item.descricao}": ${e.message} Classifique pelo extrato da conta.`)
+          }
         }
       }
 
       await recarregarRegistroAtual()
       setSaveSuccess(true)
-      setMsg(totalSugestoesVinculo > 0
+      setMsg((totalSugestoesVinculo > 0
         ? `Salvo com sucesso! 💡 ${totalSugestoesVinculo} conta(s) prevista(s) encontrada(s) no extrato — reveja em Contas.`
-        : 'Salvo com sucesso!')
+        : 'Salvo com sucesso!') + avisosTransferencia.map(a => ` ⚠ ${a}`).join(''))
     } catch (e: unknown) {
       setSaveSuccess(false)
       setMsg(e instanceof Error ? e.message : String(e))

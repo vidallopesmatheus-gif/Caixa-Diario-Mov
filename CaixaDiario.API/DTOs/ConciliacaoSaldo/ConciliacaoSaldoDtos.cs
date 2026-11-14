@@ -91,6 +91,11 @@ public class DiagnosticoDiferencaDto
     // Ajustes de saldo no período — escondem dado faltando (mês sem extrato, transferência sem
     // par); EfeitoSeCorrigir = desfazer o ajuste.
     public List<LinhaDiagnosticoDto> Ajustes { get; set; } = new();
+    // Contrapartida de transferência que o app criou numa data que o extrato desta conta cobre, sem
+    // o lançamento real (ex.: "+400 do Nubank" que nunca entrou no C6).
+    public List<LinhaDiagnosticoDto> ContrapartidasSemLancamento { get; set; } = new();
+    // Contrapartida criada pelo app que repete um lançamento real solto (a transferência conta 2×).
+    public List<LinhaDiagnosticoDto> ContrapartidasDuplicadas { get; set; } = new();
     public CombinacaoDiagnosticoDto? Combinacao { get; set; }
 }
 

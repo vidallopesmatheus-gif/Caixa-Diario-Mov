@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import Modal from '../shared/Modal'
 import { diagnosticarSaldo } from '../../api/conciliacaoSaldo'
 import { excluirLancamento, excluirLote } from '../../api/importacao'
@@ -74,13 +75,19 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
   // Este modal sempre recebe o saldo do banco — a diferença vem calculada.
   const diferenca = diagnostico?.diferenca ?? 0
   const bate = diagnostico !== null && Math.abs(diferenca) <= 0.01
+  // Contrapartida de transferência: excluir apagaria as DUAS pontas, inclusive a real — corrige na revisão.
+  const contrapartidas = [...(diagnostico?.contrapartidasSemLancamento ?? []), ...(diagnostico?.contrapartidasDuplicadas ?? [])]
   const sinais = diagnostico?.sinalSuspeito ?? []
+  const naoExcluiveis = [...sinais, ...contrapartidas]
+  const ehContrapartida = (l: LinhaDiagnostico) => contrapartidas.some(c => c.id === l.id)
 
   function Linha({ l, rotuloAcao = 'Excluir' }: { l: LinhaDiagnostico; rotuloAcao?: string }) {
     return (
       <li className="conc-diag-linha">
         <span>{fmtDate(l.data)} · {l.descricao} · <strong className={l.valor >= 0 ? 'val-green' : 'val-red'}>{fmtBRL(l.valor)}</strong></span>
-        {ehLinhaExcluivel(sinais, l) ? (
+        {ehContrapartida(l) ? (
+          <Link to="/banco/transferencias-sem-par" className="conc-link" onClick={onClose}>revisar em Transferências</Link>
+        ) : ehLinhaExcluivel(naoExcluiveis, l) ? (
           <button type="button" className="conc-link" disabled={processando}
             onClick={() => executar(() => excluirLancamento(contaId, { id: l.id, data: l.data }))}>
             {rotuloAcao}
@@ -127,7 +134,7 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
             <div className="conc-diag-destaque">
               <strong>💡 {diagnostico.combinacao.resumo}</strong>
               <ul>{diagnostico.combinacao.itens.map(l => <Linha key={l.id} l={l} />)}</ul>
-              {diagnostico.combinacao.itens.every(l => ehLinhaExcluivel(sinais, l)) && diagnostico.combinacao.itens.length > 1 && (
+              {diagnostico.combinacao.itens.every(l => ehLinhaExcluivel(naoExcluiveis, l)) && diagnostico.combinacao.itens.length > 1 && (
                 <button type="button" className="btn-confirm" disabled={processando}
                   onClick={() => executar(() => excluirLote(contaId, diagnostico.combinacao!.itens.map(l => ({ id: l.id, data: l.data }))))}>
                   Excluir os {diagnostico.combinacao.itens.length}
@@ -183,6 +190,22 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
             </section>
           )}
 
+          {diagnostico.contrapartidasDuplicadas.length > 0 && (
+            <section className="conc-diag-secao">
+              <h4>Transferência contada duas vezes</h4>
+              <p className="conc-dica">O app criou a contrapartida e o lançamento real do extrato também está aqui, solto.</p>
+              <ul>{diagnostico.contrapartidasDuplicadas.map(l => <Linha key={l.id} l={l} />)}</ul>
+            </section>
+          )}
+
+          {diagnostico.contrapartidasSemLancamento.length > 0 && (
+            <section className="conc-diag-secao">
+              <h4>Transferências que o extrato não tem</h4>
+              <p className="conc-dica">O app criou a contrapartida, mas o extrato desta conta cobre a data e não tem esse lançamento.</p>
+              <ul>{diagnostico.contrapartidasSemLancamento.map(l => <Linha key={l.id} l={l} />)}</ul>
+            </section>
+          )}
+
           {diagnostico.ajustes.length > 0 && (
             <section className="conc-diag-secao">
               <h4>Ajustes de saldo no período</h4>
@@ -195,7 +218,7 @@ export default function DiagnosticoDiferencaModal({ contaId, data, saldoBanco, o
 
           {!bate && !diagnostico.combinacao && diagnostico.lacunas.length === 0 && diagnostico.duplicatas.length === 0
             && sinais.length === 0 && diagnostico.transferenciasSemPar.length === 0 && diagnostico.manuais.length === 0
-            && diagnostico.ajustes.length === 0 && (
+            && diagnostico.ajustes.length === 0 && contrapartidas.length === 0 && (
             <p className="conc-dica">Nenhuma causa provável encontrada no período — confira o saldo informado ou lance o ajuste.</p>
           )}
         </>

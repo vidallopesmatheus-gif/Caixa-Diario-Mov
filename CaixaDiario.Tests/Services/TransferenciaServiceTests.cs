@@ -349,7 +349,9 @@ public class TransferenciaServiceTests
         // Provisória: ainda não confirmada pelo extrato real da conta de destino (ver Bloco 3C —
         // é o que permite a importação casar com ela em vez de duplicar).
         Assert.True(entradaDestino.Provisoria);
-        Assert.Equal("Aplicação RDB", entradaDestino.Descricao); // mesma descrição do lançamento original
+        // Nunca copia a descrição do outro banco — a original fica na Transferencia.
+        Assert.Equal("↔ Transferência de Conta Corrente", entradaDestino.Descricao);
+        Assert.Equal("Aplicação RDB", resultado.Descricao);
 
         Assert.Equal(contaCorrente.Id, resultado.ContaOrigemId);
         Assert.Equal(contaInvestimento.Id, resultado.ContaDestinoId);
@@ -460,7 +462,8 @@ public class TransferenciaServiceTests
         Assert.NotNull(saidaDestino.TransferenciaId);
         Assert.Equal(entradaOriginal.TransferenciaId, saidaDestino.TransferenciaId);
         Assert.True(saidaDestino.Provisoria);
-        Assert.Equal("Resgate RDB", saidaDestino.Descricao); // mesma descrição do lançamento original
+        Assert.Equal("↔ Transferência para Conta Corrente", saidaDestino.Descricao);
+        Assert.Equal("Resgate RDB", resultado.Descricao);
 
         Assert.Equal(contaInvestimento.Id, resultado.ContaOrigemId);
         Assert.Equal(contaCorrente.Id, resultado.ContaDestinoId);
