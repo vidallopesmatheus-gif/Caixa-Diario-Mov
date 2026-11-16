@@ -7,6 +7,20 @@ public class DreCategoriaDto
     public decimal? Percentual { get; set; }
 }
 
+/// <summary>Um lançamento do detalhe de uma linha do DRE. Valor com o sinal da linha (entrada +, saída −).</summary>
+public class DreLancamentoDto
+{
+    public Guid Id { get; set; }
+    public Guid? ContaBancariaId { get; set; }
+    public string? ContaNome { get; set; }
+    public DateOnly Data { get; set; }
+    public string Tipo { get; set; } = string.Empty;
+    public string Descricao { get; set; } = string.Empty;
+    public decimal Valor { get; set; }
+    public string? Categoria { get; set; }
+    public string? TipoCusto { get; set; }
+}
+
 public class DreLinhaDto
 {
     public string Grupo { get; set; } = string.Empty;
@@ -61,7 +75,7 @@ public class DreDto
     public decimal? ResultadoOperacionalPercentual { get; set; }
     // Rodada de ajustes Money Vision, item 4 (DRE mais enxuta): Receita Financeira (rendimento de
     // investimento) e Despesas Não Operacionais deixaram de ser linhas próprias — a primeira soma
-    // em ReceitaBruta como "Outras receitas", a segunda soma em DespesasFixas, ambas antes do
+    // em ReceitaBruta como "Rendimentos de investimento", a segunda soma em DespesasFixas, ambas antes do
     // Resultado Operacional. "Não Classificado" também deixou de ter linha própria (some dentro de
     // DespesasFixas) — QuantidadeNaoClassificados alimenta o aviso "N lançamentos sem categoria" no
     // topo da tela, sem precisar de uma linha no demonstrativo.

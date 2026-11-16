@@ -371,6 +371,25 @@ test('"Atualizar saldo" com diferença negativa usa a descrição "Ajuste negati
   })))
 })
 
+// Money Vision ("Outras receitas R$ 8.659,99"): aporte/resgate não lançado não pode virar receita.
+test('should record a balance adjustment instead of income when the difference was money not yet recorded', async () => {
+  vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaInvestimento])
+  vi.mocked(contasBancariasApi.obterExtratoConta).mockResolvedValue([])
+  vi.mocked(contasBancariasApi.ajustarSaldo).mockResolvedValue(contaInvestimento)
+  const user = userEvent.setup()
+  renderPagina()
+
+  await user.click(await screen.findByRole('button', { name: '📈 Atualizar saldo' }))
+  const grupoSaldo = (await screen.findByText('Saldo atual no app do banco')).closest('.inp-group') as HTMLElement
+  await user.type(within(grupoSaldo).getByPlaceholderText('0,00'), '12706,67')
+  expect(screen.getByRole('button', { name: 'Confirmar' })).toBeDisabled()
+  await user.click(screen.getByLabelText(/Dinheiro aplicado ou resgatado que não estava lançado/))
+  await user.click(screen.getByRole('button', { name: 'Confirmar' }))
+
+  await waitFor(() => expect(contasBancariasApi.ajustarSaldo).toHaveBeenCalledWith('conta-1', expect.objectContaining({ saldoReal: 12706.67 })))
+  expect(contasBancariasApi.registrarRendimento).not.toHaveBeenCalled()
+})
+
 // ── Parte 3 (Money Vision): seletor de mês nas abas Recebíveis/Pagamentos ──────────────────────
 
 function pendencia(overrides: Partial<ContaProvisionada>): ContaProvisionada {

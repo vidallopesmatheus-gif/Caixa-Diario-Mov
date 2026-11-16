@@ -8,6 +8,7 @@ import {
   obterExtratoConta,
   obterPendenciasConta,
   registrarRendimento,
+  ajustarSaldo,
   vincularMeta,
   desvincularMeta,
   listarDuplicatas,
@@ -156,6 +157,8 @@ export default function ClientContaDetalhePage() {
   const [rendData, setRendData] = useState(todayISO())
   const [rendDescricao, setRendDescricao] = useState('')
   const [salvandoRendimento, setSalvandoRendimento] = useState(false)
+  // Diferença grande demais pra ser rendimento: o usuário diz se é rendimento ou acerto de saldo.
+  const [naturezaDiferenca, setNaturezaDiferenca] = useState<'rendimento' | 'acerto' | null>(null)
   const [historicoSaldo, setHistoricoSaldo] = useState<SaldoMensal[]>([])
 
   // ── "Conferir saldo" (Money Vision, item 4): acerta o saldo com o banco através de UM
@@ -687,12 +690,18 @@ export default function ClientContaDetalhePage() {
     setModoSaldo(true)
     setSaldoBancoDisplay(''); setSaldoBanco(0)
     setRendValorDisplay(''); setRendValor(0); setRendPositivo(true); setRendData(todayISO()); setRendDescricao('')
+    setNaturezaDiferenca(null)
     setModalRendimento(true)
   }
 
   // Bloco 5 (Money Vision): no modo "saldo", a diferença entre o que o cliente digitou e o saldo
   // atual É o rendimento (ou perda) — o cliente nunca precisa calcular isso de cabeça.
   const diferencaSaldo = modoSaldo ? saldoBanco - (conta?.saldoAtual ?? 0) : null
+  // Money Vision ("Outras receitas R$ 8.659,99"): aporte ou resgate não lançado aparecia aqui como
+  // "rendimento" e virava receita no DRE. Acima de 5% do saldo, pergunta antes.
+  const saldoAtualInvestimento = conta?.saldoAtual ?? 0
+  const diferencaSuspeita = !!diferencaSaldo
+    && (saldoAtualInvestimento <= 0 || Math.abs(diferencaSaldo) > saldoAtualInvestimento * 0.05)
 
   async function handleSalvarRendimento() {
     if (!contaId) return
@@ -700,11 +709,15 @@ export default function ClientContaDetalhePage() {
     if (!valorFinal) return
     setSalvandoRendimento(true)
     try {
-      await registrarRendimento(contaId, {
-        data: rendData,
-        valor: valorFinal,
-        descricao: rendDescricao || (valorFinal < 0 ? 'Ajuste negativo (IR/IOF/oscilação)' : undefined),
-      })
+      if (modoSaldo && diferencaSuspeita && naturezaDiferenca === 'acerto') {
+        await ajustarSaldo(contaId, { data: rendData, saldoReal: saldoBanco, descricao: rendDescricao || undefined })
+      } else {
+        await registrarRendimento(contaId, {
+          data: rendData,
+          valor: valorFinal,
+          descricao: rendDescricao || (valorFinal < 0 ? 'Ajuste negativo (IR/IOF/oscilação)' : undefined),
+        })
+      }
       setModalRendimento(false)
       carregarConta()
       carregarExtrato()
@@ -1612,7 +1625,7 @@ export default function ClientContaDetalhePage() {
             <button
               className="btn-confirm"
               onClick={handleSalvarRendimento}
-              disabled={salvandoRendimento || (modoSaldo ? !diferencaSaldo : rendValor <= 0)}
+              disabled={salvandoRendimento || (modoSaldo ? !diferencaSaldo || (diferencaSuspeita && !naturezaDiferenca) : rendValor <= 0)}
             >
               {salvandoRendimento ? 'Salvando...' : 'Confirmar'}
             </button>
@@ -1648,6 +1661,23 @@ export default function ClientContaDetalhePage() {
                   ? `Rendimento de ${fmtBRL(diferencaSaldo)} a lançar.`
                   : `Ajuste negativo de ${fmtBRL(-diferencaSaldo)} (IR/IOF/oscilação).`}
               </p>
+            )}
+            {saldoBancoDisplay && diferencaSuspeita && (
+              <fieldset className="inp-group" style={{ border: 'none', padding: 0, marginTop: 8 }}>
+                <legend style={{ fontSize: 13, marginBottom: 6 }}>
+                  {fmtBRL(Math.abs(diferencaSaldo!))} é muito para rendimento. O que é essa diferença?
+                </legend>
+                <label style={{ display: 'block', fontSize: 13 }}>
+                  <input type="radio" name="natureza-diferenca" checked={naturezaDiferenca === 'rendimento'}
+                    onChange={() => setNaturezaDiferenca('rendimento')} />
+                  {' '}Rendimento (entra como receita no DRE)
+                </label>
+                <label style={{ display: 'block', fontSize: 13 }}>
+                  <input type="radio" name="natureza-diferenca" checked={naturezaDiferenca === 'acerto'}
+                    onChange={() => setNaturezaDiferenca('acerto')} />
+                  {' '}Dinheiro aplicado ou resgatado que não estava lançado (acerto de saldo, fora do DRE)
+                </label>
+              </fieldset>
             )}
           </div>
         ) : (

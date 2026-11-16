@@ -15,11 +15,11 @@ vi.mock('../../contexts/AuthContext', async (importOriginal) => {
 })
 vi.mock('../../api/metricas', async (importOriginal) => {
   const actual = await importOriginal<typeof metricasApi>()
-  return { ...actual, obterDre: vi.fn() }
+  return { ...actual, obterDre: vi.fn(), listarLancamentosDre: vi.fn() }
 })
 vi.mock('../../api/contasBancarias', async (importOriginal) => {
   const actual = await importOriginal<typeof contasBancariasApi>()
-  return { ...actual, listarContasBancarias: vi.fn() }
+  return { ...actual, listarContasBancarias: vi.fn(), converterRendimentoEmAjuste: vi.fn() }
 })
 vi.mock('../../hooks/useRegistros', async (importOriginal) => {
   const actual = await importOriginal<typeof useRegistrosModule>()
@@ -252,6 +252,54 @@ test('com lançamento sem categoria: mostra o aviso com a contagem, sem linha pr
 
   render(<ClientDrePage />)
 
-  expect(await screen.findByText(/3 lançamentos sem categoria no período/)).toBeInTheDocument()
+  expect(await screen.findByText(/3 lançamentos sem categoria válida — classificar/)).toBeInTheDocument()
   expect(screen.queryByText(/NÃO CLASSIFICADOS/)).not.toBeInTheDocument()
+})
+
+// Money Vision ("Outras receitas R$ 8.659,99 — Nenhum lançamento encontrado"): o detalhe pede ao
+// backend a própria linha (bloco/grupo/categoria), nunca refiltra os registros por nome.
+function mesAtualIso() {
+  const hoje = new Date()
+  return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+const blocoComRendimento: DreBloco = {
+  bloco: 'RECEITAS OPERACIONAIS', total: 8659.99, percentual: 100,
+  grupos: [{ nome: 'Rendimentos de investimento', total: 8659.99, percentual: 100, categorias: [{ nome: 'Rendimento', total: 8659.99, percentual: 100 }] }],
+}
+
+const rendimentoDaCaixinha: metricasApi.DreLancamento = {
+  id: 'r-1', contaBancariaId: 'caixinha', contaNome: 'Caixinha', data: '2026-11-12', tipo: 'Entrada',
+  descricao: 'Atualização de saldo', valor: 8659.99, categoria: 'Rendimento', tipoCusto: 'Rendimento',
+}
+
+async function abrirDetalheDoRendimento() {
+  mockHooks([registro(mesAtualIso())])
+  vi.mocked(metricasApi.obterDre).mockResolvedValue(mockDreComBloco(8659.99, blocoComRendimento))
+  vi.mocked(metricasApi.listarLancamentosDre).mockResolvedValue([rendimentoDaCaixinha])
+  render(<ClientDrePage />)
+
+  await userEvent.click(await screen.findByText('RECEITAS OPERACIONAIS'))
+  await userEvent.click(screen.getByRole('button', { name: /Rendimentos de investimento/ }))
+  await userEvent.click(screen.getByRole('button', { name: /^Rendimento(?!s)/ }))
+}
+
+test('should load the detail of the exact DRE line when the user clicks a category', async () => {
+  await abrirDetalheDoRendimento()
+
+  expect(await screen.findByText('Atualização de saldo')).toBeInTheDocument()
+  expect(metricasApi.listarLancamentosDre).toHaveBeenCalledWith('u1', expect.objectContaining({
+    bloco: 'RECEITAS OPERACIONAIS', grupo: 'Rendimentos de investimento', categoria: 'Rendimento',
+  }))
+  expect(screen.getByText('Total (1)')).toBeInTheDocument()
+})
+
+test('should move the entry to the reconciliation adjustments when it was a balance correction, not income', async () => {
+  vi.mocked(contasBancariasApi.converterRendimentoEmAjuste).mockResolvedValue()
+  await abrirDetalheDoRendimento()
+
+  await userEvent.click(await screen.findByRole('button', { name: 'Não é rendimento — foi acerto de saldo' }))
+
+  expect(contasBancariasApi.converterRendimentoEmAjuste).toHaveBeenCalledWith('caixinha', 'r-1', '2026-11-12')
+  expect(await screen.findByText(/não conta mais como receita/)).toBeInTheDocument()
 })

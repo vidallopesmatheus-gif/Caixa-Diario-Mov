@@ -387,6 +387,8 @@
   flex: 1;
   color: var(--tx1);
 }
+.dre-drill-conta { color: var(--tx3); font-size: 12px; }
+.dre-drill-total { font-weight: 600; border-top: 1px solid var(--bd); border-bottom: none; }
 
 .dre-drill-valor {
   font-weight: 600;
@@ -599,6 +601,7 @@
 
 /* Money Vision: (±) ajustes de conciliação de saldo — depois do Resultado Líquido, discreto. */
 .dre-linha-ajuste-conciliacao {
+  cursor: pointer;
   opacity: .8;
   font-style: italic;
   border-top: 1px dashed var(--bd);

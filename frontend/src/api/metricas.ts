@@ -124,9 +124,8 @@ export interface Dre {
   despesasFixas: DreLinhaVertical
   resultadoOperacional: number
   resultadoOperacionalPercentual: number | null
-  /** Quantidade de lançamentos (entradas + saídas) sem categoria no período — alimenta o aviso
-   * "N lançamentos sem categoria" no topo da tela; "Não Classificado" não tem mais linha própria
-   * no DRE (soma dentro de Despesas Fixas). */
+  /** Lançamentos sem categoria válida (vazia ou fora do plano de contas) — ficam nos grupos
+   * "Receitas a classificar" / "Despesas a classificar" e alimentam o aviso no topo da tela. */
   quantidadeNaoClassificados: number
   atividadesInvestimento: DreLinhaVertical
   atividadesFinanciamento: DreLinhaVertical
@@ -175,6 +174,36 @@ export async function obterDre(
     const res = await apiFetch<ApiResponse<Dre>>(`/api/metricas/${clienteId}/dre?${params}`)
     return res.dados
   })
+}
+
+/** Bloco do "(±) Ajustes de conciliação" — fora do resultado, só pro detalhe da linha. */
+export const BLOCO_AJUSTES = 'AJUSTES DE CONCILIAÇÃO'
+export const GRUPOS_A_CLASSIFICAR = ['Receitas a classificar', 'Despesas a classificar']
+
+/** Um lançamento do detalhe de uma linha do DRE — valor com o sinal da linha (entrada +, saída −). */
+export interface DreLancamento {
+  id: string
+  contaBancariaId: string | null
+  contaNome: string | null
+  data: string
+  tipo: 'Entrada' | 'Saida'
+  descricao: string
+  valor: number
+  categoria: string | null
+  tipoCusto: string | null
+}
+
+/** Detalhe de uma linha do DRE pela própria linha (bloco/grupo/categoria) — o mesmo filtro que gerou o total. */
+export async function listarLancamentosDre(
+  clienteId: string,
+  filtro: { de: string; ate: string; bloco: string; grupo?: string; categoria?: string; contaBancariaId?: string },
+): Promise<DreLancamento[]> {
+  const params = new URLSearchParams({ de: filtro.de, ate: filtro.ate, bloco: filtro.bloco })
+  if (filtro.grupo) params.set('grupo', filtro.grupo)
+  if (filtro.categoria) params.set('categoria', filtro.categoria)
+  if (filtro.contaBancariaId) params.set('contaBancariaId', filtro.contaBancariaId)
+  const res = await apiFetch<ApiResponse<DreLancamento[]>>(`/api/metricas/${clienteId}/dre/lancamentos?${params}`)
+  return res.dados
 }
 
 export interface CategoriaIndicador {

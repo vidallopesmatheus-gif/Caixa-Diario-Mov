@@ -15,6 +15,7 @@ public interface IContaBancariaService
     // Item 4 (Money Vision "saldo não fecha com o extrato"): acerta o saldo da conta com o banco
     // através de UM lançamento visível, nunca trocando o Inicio em silêncio.
     Task<ContaBancariaDto> AjustarSaldoAsync(Guid contaId, AjustarSaldoDto dto, Guid usuarioLogadoId, string perfil);
+    Task ConverterRendimentoEmAjusteAsync(Guid contaId, DateOnly data, Guid lancamentoId, Guid usuarioLogadoId, string perfil);
     Task<ContaBancariaDto> VincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil);
     Task<ContaBancariaDto> DesvincularMetaAsync(Guid contaId, Guid metaId, Guid usuarioLogadoId, string perfil);
 
