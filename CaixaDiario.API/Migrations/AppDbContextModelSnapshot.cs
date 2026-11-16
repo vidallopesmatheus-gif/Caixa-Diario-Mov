@@ -148,6 +148,72 @@ namespace CaixaDiario.API.Migrations
                     b.ToTable("categorias", (string)null);
                 });
 
+            modelBuilder.Entity("CaixaDiario.API.Models.ConferenciaSaldo", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClienteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cliente_id");
+
+                    b.Property<Guid>("ContaBancariaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conta_bancaria_id");
+
+                    b.Property<DateOnly?>("Data")
+                        .HasColumnType("date")
+                        .HasColumnName("data");
+
+                    b.Property<string>("Motivo")
+                        .HasColumnType("text")
+                        .HasColumnName("motivo");
+
+                    b.Property<DateTime>("OcorridoEm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ocorrido_em")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("Perfil")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("perfil");
+
+                    b.Property<string>("Retrato")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("retrato");
+
+                    b.Property<decimal?>("SaldoBanco")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("saldo_banco");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tipo");
+
+                    b.Property<DateOnly?>("TravadoAteAntes")
+                        .HasColumnType("date")
+                        .HasColumnName("travado_ate_antes");
+
+                    b.Property<DateOnly?>("TravadoAteDepois")
+                        .HasColumnType("date")
+                        .HasColumnName("travado_ate_depois");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContaBancariaId", "OcorridoEm");
+
+                    b.ToTable("conferencias_saldo", (string)null);
+                });
+
             modelBuilder.Entity("CaixaDiario.API.Models.ContaBancaria", b =>
                 {
                     b.Property<Guid>("Id")
@@ -200,6 +266,20 @@ namespace CaixaDiario.API.Migrations
                         .HasColumnType("text")
                         .HasDefaultValue("Caixa")
                         .HasColumnName("tipo");
+
+                    b.Property<decimal?>("TravaSaldoBanco")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("trava_saldo_banco");
+
+                    b.Property<DateOnly?>("TravadoAte")
+                        .HasColumnType("date")
+                        .HasColumnName("travado_ate");
+
+                    b.Property<bool>("TravadoPorConsultor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("travado_por_consultor");
 
                     b.HasKey("Id");
 

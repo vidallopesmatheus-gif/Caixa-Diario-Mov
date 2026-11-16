@@ -17,7 +17,7 @@ public class AdminMigracaoControllerTests
     private AdminMigracaoController Criar(string perfil) => new(
         new Mock<IMigracaoRecorrenciasService>().Object, new Mock<IReclassificacaoCategoriasService>().Object,
         new Mock<ILimpezaTransferenciasService>().Object, _recalculo.Object, new Mock<IVerificacaoSinalTransferenciaService>().Object,
-        new Mock<ICorrigirDataParcelasService>().Object, new Mock<ICorrigirFaturasService>().Object)
+        new Mock<ICorrigirDataParcelasService>().Object, new Mock<ICorrigirFaturasService>().Object, new Mock<IRevisaoTransferenciasService>().Object)
     {
         ControllerContext = new ControllerContext
         {

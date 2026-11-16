@@ -160,6 +160,7 @@ public class ContaProvisionadaService : IContaProvisionadaService
         var contaDestinoId = item.ContaBancariaId
             ?? throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Conta bancária é obrigatória para dar baixa.", "contaBancariaId");
         var contaDestino = await ObterContaDoClienteAsync(contaDestinoId, clienteId);
+        PeriodoConferido.Garantir(contaDestino, dataPagamento);
         var (regDestino, novoDestino) = await RegistroDiaHelper.ResolverOuCriarAsync(_registroRepo, contaDestino, dataPagamento);
         var novoLancamentoId = Guid.NewGuid();
 

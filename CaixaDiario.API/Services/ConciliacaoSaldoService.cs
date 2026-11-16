@@ -32,14 +32,19 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
     private readonly TimeProvider _timeProvider;
     private readonly IDuplicataDispensadaRepository? _dispensadaRepo;
     private readonly ILogger<ConciliacaoSaldoService>? _logger;
+    private readonly IRevisaoTransferenciasService? _revisaoTransferencias;
+    private readonly IPeriodoConferidoService? _periodoConferido;
 
     public ConciliacaoSaldoService(
         IContaBancariaRepository contaRepo, IRegistroRepository registroRepo, ITransacaoImportadaRepository importRepo,
         IPontoConciliacaoRepository pontoRepo, IPeriodoExtratoRepository periodoRepo, TimeProvider? timeProvider = null,
-        IDuplicataDispensadaRepository? dispensadaRepo = null, ILogger<ConciliacaoSaldoService>? logger = null)
+        IDuplicataDispensadaRepository? dispensadaRepo = null, ILogger<ConciliacaoSaldoService>? logger = null,
+        IRevisaoTransferenciasService? revisaoTransferencias = null, IPeriodoConferidoService? periodoConferido = null)
     {
+        _periodoConferido = periodoConferido;
         _dispensadaRepo = dispensadaRepo;
         _logger = logger;
+        _revisaoTransferencias = revisaoTransferencias;
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _importRepo = importRepo;
@@ -85,7 +90,12 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
         var paresMantidos = _dispensadaRepo == null ? new HashSet<(Guid, Guid)>()
             : (await _dispensadaRepo.ListarPorContaAsync(contaId)).Select(d => (d.LancamentoMenorId, d.LancamentoMaiorId)).ToHashSet();
 
-        return ConciliacaoSaldoCalculo.Diagnosticar(conta, registrosCliente, pontos, dias, chaves, data, saldo, paresMantidos);
+        var contrapartidas = _revisaoTransferencias != null ? await _revisaoTransferencias.AnalisarAsync(conta.ClienteId) : null;
+
+        var diagnostico = ConciliacaoSaldoCalculo.Diagnosticar(conta, registrosCliente, pontos, dias, chaves, data, saldo, paresMantidos, contrapartidas);
+        if (_periodoConferido != null && diagnostico.Diferenca is { } diferenca && Math.Abs(diferenca) >= 0.01m)
+            diagnostico.MudancasDesdeConferencia = await _periodoConferido.MudancasDesdeConferenciaAsync(conta, registrosDaConta);
+        return diagnostico;
     }
 
     public async Task<PontoConciliacaoDto> RegistrarSaldoBancoAsync(Guid contaId, RegistrarSaldoBancoDto dto, Guid usuarioLogadoId, string perfil)
@@ -93,7 +103,14 @@ public class ConciliacaoSaldoService : IConciliacaoSaldoService
         var conta = await ObterContaComAcessoAsync(contaId, usuarioLogadoId, perfil);
         if (dto.Data > Hoje())
             throw new ApiException(400, CodigoRetorno.DATA_FUTURA, "Não é possível informar saldo de data futura.", "data");
-        return await RegistrarPontoAsync(conta, dto.Data, dto.SaldoBanco, "Informado");
+        var ponto = await RegistrarPontoAsync(conta, dto.Data, dto.SaldoBanco, "Informado");
+        // Money Vision ("travar o período até o saldo conferido"): bateu com o banco → trava até a data.
+        if (ponto.Conciliado && _periodoConferido != null)
+        {
+            await _periodoConferido.TravarAsync(conta, dto.Data, dto.SaldoBanco, usuarioLogadoId, perfil);
+            ponto.TravadoAte = conta.TravadoAte;
+        }
+        return ponto;
     }
 
     public async Task<PontoConciliacaoDto> RegistrarPontoAsync(ContaBancaria conta, DateOnly data, decimal saldoBanco, string origem)

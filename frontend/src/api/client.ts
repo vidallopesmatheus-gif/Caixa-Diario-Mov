@@ -8,10 +8,13 @@ const BASE = import.meta.env.VITE_API_URL ?? ''
 export class ApiError extends Error {
   codigo: string
   campo?: string
-  constructor(codigo: string, mensagem: string, campo?: string) {
+  /** Dados extras pra tela agir sobre o erro (ex.: PERIODO_CONFERIDO → conta e data da trava). */
+  detalhes?: Record<string, unknown>
+  constructor(codigo: string, mensagem: string, campo?: string, detalhes?: Record<string, unknown>) {
     super(mensagem)
     this.codigo = codigo
     this.campo = campo
+    this.detalhes = detalhes
   }
 }
 
@@ -123,7 +126,7 @@ export async function apiFetch<T>(
   const res = await apiFetchResposta(path, options)
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new ApiError(err?.codigo ?? 'ERRO_DESCONHECIDO', err?.mensagem ?? `Erro ${res.status}`, err?.campo)
+    throw new ApiError(err?.codigo ?? 'ERRO_DESCONHECIDO', err?.mensagem ?? `Erro ${res.status}`, err?.campo, err?.detalhes)
   }
   return res.json()
 }

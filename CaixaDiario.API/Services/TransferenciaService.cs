@@ -16,19 +16,91 @@ public class TransferenciaService : ITransferenciaService
     private readonly IRegistroRepository _registroRepo;
     private readonly IAuditService _auditService;
     private readonly AppDbContext _context;
+    private readonly ITransacaoImportadaRepository? _importRepo;
+    private static readonly System.Globalization.CultureInfo PtBr = new("pt-BR");
+    private readonly IPeriodoExtratoRepository? _periodoRepo;
 
     public TransferenciaService(
         ITransferenciaRepository transferenciaRepo,
         IContaBancariaRepository contaRepo,
         IRegistroRepository registroRepo,
         IAuditService auditService,
-        AppDbContext context)
+        AppDbContext context,
+        ITransacaoImportadaRepository? importRepo = null,
+        IPeriodoExtratoRepository? periodoRepo = null)
     {
         _transferenciaRepo = transferenciaRepo;
         _contaRepo = contaRepo;
         _registroRepo = registroRepo;
         _auditService = auditService;
         _context = context;
+        _importRepo = importRepo;
+        _periodoRepo = periodoRepo;
+    }
+
+    // Money Vision ("transferência cria contrapartida falsa"): antes de inventar a outra ponta,
+    // procura o lançamento real na conta contrapartida e diz se o extrato dela já cobre a data.
+    private async Task<(List<PontaLancamento> Candidatos, bool ExtratoCobreData)> ProcurarContrapartidaAsync(
+        ContaBancaria contrapartida, string tipoNaContrapartida, decimal valor, DateOnly data)
+    {
+        var registros = (await _registroRepo.ListarPorContaAsync(contrapartida.Id) ?? new()).Where(r => !r.Excluido).ToList();
+        var candidatos = ContrapartidaAnalise.CandidatosPar(ContrapartidaAnalise.Pontas(registros), tipoNaContrapartida, valor, data);
+        var periodos = _periodoRepo != null ? await _periodoRepo.ListarPorContaAsync(contrapartida.Id) : new List<PeriodoExtrato>();
+        var importadas = _importRepo != null ? await _importRepo.ListarPorContaAsync(contrapartida.Id) : new List<TransacaoImportada>();
+        var dias = ConciliacaoSaldoCalculo.DiasComExtrato(periodos ?? new(), importadas ?? new(), registros);
+        return (candidatos, dias.Contains(data));
+    }
+
+    public async Task<CandidatosContrapartidaDto> ListarCandidatosContrapartidaAsync(
+        Guid contaId, Guid lancamentoId, DateOnly data, Guid contaContrapartidaId, Guid usuarioLogadoId, string perfil)
+    {
+        var conta = await _contaRepo.ObterPorIdAsync(contaId)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Conta bancária não encontrada.");
+        VerificarAcesso(conta.ClienteId, usuarioLogadoId, perfil);
+        var contrapartida = await ObterContaDoClienteAsync(contaContrapartidaId, conta.ClienteId);
+        var registro = await _registroRepo.ObterPorContaEDataAsync(contaId, data)
+            ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+        var (tipo, valor, _) = LerLancamento(registro, lancamentoId);
+
+        var (candidatos, cobre) = await ProcurarContrapartidaAsync(contrapartida, tipo == "Saida" ? "Entrada" : "Saida", valor, data);
+        return new CandidatosContrapartidaDto
+        {
+            ContaContrapartidaNome = contrapartida.Nome,
+            ExtratoCobreData = cobre,
+            Candidatos = candidatos.Select(c => new CandidatoContrapartidaDto
+            {
+                Id = c.ItemId, Data = c.Data, Descricao = c.Descricao, Valor = c.ValorComSinal,
+            }).ToList(),
+        };
+    }
+
+    // Tipo, valor e descrição do lançamento, com as mesmas validações da conversão.
+    private static (string Tipo, decimal Valor, string Descricao) LerLancamento(RegistroDiario registro, Guid lancamentoId)
+    {
+        var saida = registro.Saidas.FirstOrDefault(s => s.Id == lancamentoId);
+        var entrada = saida == null ? registro.Entradas.FirstOrDefault(e => e.Id == lancamentoId) : null;
+        if (saida == null && entrada == null)
+            throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+        if ((saida != null ? saida.TransferenciaId : entrada!.TransferenciaId).HasValue)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Este lançamento já foi classificado como transferência.");
+        // Money Vision: "Pix recebido entrando como saída" — nunca propaga um valor corrompido pra
+        // uma contrapartida. Saidas/Entradas sempre guardam magnitude positiva.
+        var valor = saida != null ? saida.Valor : entrada!.Valor;
+        if (valor <= 0)
+            throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Este lançamento tem um valor inválido e não pode ser convertido em transferência.", "lancamentoId");
+        return saida != null ? ("Saida", valor, saida.Descricao) : ("Entrada", valor, entrada!.Descricao);
+    }
+
+    // A ponta pode estar até 2 dias longe da data da Transferencia (par com o lançamento real de outro
+    // dia) — procura pelo TransferenciaId, primeiro no dia, depois na conta.
+    private async Task<RegistroDiario?> RegistroDaPontaAsync(Guid contaId, Guid transferenciaId, DateOnly data, bool saida)
+    {
+        bool Contem(RegistroDiario r) => saida
+            ? r.Saidas.Any(s => s.TransferenciaId == transferenciaId)
+            : r.Entradas.Any(e => e.TransferenciaId == transferenciaId);
+        var doDia = await _registroRepo.ObterPorContaEDataAsync(contaId, data);
+        if (doDia != null && Contem(doDia)) return doDia;
+        return (await _registroRepo.ListarPorContaAsync(contaId) ?? new()).FirstOrDefault(r => !r.Excluido && Contem(r)) ?? doDia;
     }
 
     public async Task<List<TransferenciaDto>> ListarPorClienteAsync(Guid clienteId, Guid usuarioLogadoId, string perfil)
@@ -66,7 +138,7 @@ public class TransferenciaService : ITransferenciaService
             ? await _context.Database.BeginTransactionAsync()
             : null;
 
-        var regOrigem = await _registroRepo.ObterPorContaEDataAsync(transferencia.ContaOrigemId, transferencia.Data);
+        var regOrigem = await RegistroDaPontaAsync(transferencia.ContaOrigemId, transferencia.Id, transferencia.Data, saida: true);
         var itemOrigem = regOrigem?.Saidas.FirstOrDefault(s => s.TransferenciaId == transferencia.Id);
         if (regOrigem != null && itemOrigem != null)
         {
@@ -89,7 +161,7 @@ public class TransferenciaService : ITransferenciaService
             await _registroRepo.AtualizarAsync(regOrigem);
         }
 
-        var regDestino = await _registroRepo.ObterPorContaEDataAsync(transferencia.ContaDestinoId, transferencia.Data);
+        var regDestino = await RegistroDaPontaAsync(transferencia.ContaDestinoId, transferencia.Id, transferencia.Data, saida: false);
         var itemDestino = regDestino?.Entradas.FirstOrDefault(e => e.TransferenciaId == transferencia.Id);
         if (regDestino != null && itemDestino != null)
         {
@@ -119,12 +191,12 @@ public class TransferenciaService : ITransferenciaService
         if (regOrigem != null && itemOrigem != null)
         {
             var registrosOrigem = await _registroRepo.ListarPorContaAsync(transferencia.ContaOrigemId);
-            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaOrigemId, transferencia.Data, regOrigem.SaldoFinal, registrosOrigem);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaOrigemId, regOrigem.Data, regOrigem.SaldoFinal, registrosOrigem);
         }
         if (regDestino != null && itemDestino != null)
         {
             var registrosDestino = await _registroRepo.ListarPorContaAsync(transferencia.ContaDestinoId);
-            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaDestinoId, transferencia.Data, regDestino.SaldoFinal, registrosDestino);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaDestinoId, regDestino.Data, regDestino.SaldoFinal, registrosDestino);
         }
 
         await _auditService.LogAsync(transferencia.ClienteId, usuarioLogadoId, "Transferencia", "DesfazerClassificacao",
@@ -143,7 +215,7 @@ public class TransferenciaService : ITransferenciaService
             ? await _context.Database.BeginTransactionAsync()
             : null;
 
-        var regOrigem = await _registroRepo.ObterPorContaEDataAsync(transferencia.ContaOrigemId, transferencia.Data);
+        var regOrigem = await RegistroDaPontaAsync(transferencia.ContaOrigemId, transferencia.Id, transferencia.Data, saida: true);
         var itemOrigem = regOrigem?.Saidas.FirstOrDefault(s => s.TransferenciaId == transferencia.Id);
         if (regOrigem != null && itemOrigem != null)
         {
@@ -153,7 +225,7 @@ public class TransferenciaService : ITransferenciaService
             await _registroRepo.AtualizarAsync(regOrigem);
         }
 
-        var regDestino = await _registroRepo.ObterPorContaEDataAsync(transferencia.ContaDestinoId, transferencia.Data);
+        var regDestino = await RegistroDaPontaAsync(transferencia.ContaDestinoId, transferencia.Id, transferencia.Data, saida: false);
         var itemDestino = regDestino?.Entradas.FirstOrDefault(e => e.TransferenciaId == transferencia.Id);
         if (regDestino != null && itemDestino != null)
         {
@@ -172,12 +244,12 @@ public class TransferenciaService : ITransferenciaService
         if (regOrigem != null && itemOrigem != null)
         {
             var registrosOrigem = await _registroRepo.ListarPorContaAsync(transferencia.ContaOrigemId);
-            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaOrigemId, transferencia.Data, regOrigem.SaldoFinal, registrosOrigem);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaOrigemId, regOrigem.Data, regOrigem.SaldoFinal, registrosOrigem);
         }
         if (regDestino != null && itemDestino != null)
         {
             var registrosDestino = await _registroRepo.ListarPorContaAsync(transferencia.ContaDestinoId);
-            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaDestinoId, transferencia.Data, regDestino.SaldoFinal, registrosDestino);
+            await RegistroService.RecalcularDiasSeguintesAsync(_registroRepo, transferencia.ContaDestinoId, regDestino.Data, regDestino.SaldoFinal, registrosDestino);
         }
 
         await _auditService.LogAsync(transferencia.ClienteId, usuarioLogadoId, "Transferencia", "Exclusao",
@@ -206,6 +278,30 @@ public class TransferenciaService : ITransferenciaService
 
         var registro = await _registroRepo.ObterPorContaEDataAsync(dto.ContaId, dto.Data)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
+
+        // Money Vision ("contrapartida falsa"): sem a outra ponta escolhida, procura o lançamento real
+        // ANTES de mexer em qualquer coisa — um erro aqui não pode deixar o item alterado em memória
+        // (a importação captura o erro e segue salvando). 1 candidato: pareia, não cria nada.
+        if (!dto.LancamentoContrapartidaId.HasValue)
+        {
+            var (_, valorLancamento, _) = LerLancamento(registro, dto.LancamentoId);
+            var (candidatos, extratoCobre) = await ProcurarContrapartidaAsync(
+                contrapartida, dto.Tipo == "Saida" ? "Entrada" : "Saida", valorLancamento, dto.Data);
+            var oQue = dto.Tipo == "Saida" ? "esse recebimento" : "esse envio";
+            if (candidatos.Count == 1)
+            {
+                dto.LancamentoContrapartidaId = candidatos[0].ItemId;
+                dto.DataContrapartida = candidatos[0].Data;
+            }
+            else if (candidatos.Count > 1 && !dto.CriarMesmoAssim)
+                throw new ApiException(409, CodigoRetorno.CONTRAPARTIDA_AMBIGUA,
+                    $"Há {candidatos.Count} lançamentos de {valorLancamento.ToString("C", PtBr)} no {contrapartida.Nome} perto de {dto.Data:dd/MM} — escolha qual é a outra ponta.",
+                    "lancamentoContrapartidaId");
+            else if (candidatos.Count == 0 && extratoCobre && !dto.CriarMesmoAssim)
+                throw new ApiException(409, CodigoRetorno.CONTRAPARTIDA_NAO_ENCONTRADA,
+                    $"O extrato do {contrapartida.Nome} não tem {oQue} em {dto.Data:dd/MM}. Tem certeza que foi {(dto.Tipo == "Saida" ? "para o" : "do")} {contrapartida.Nome}?",
+                    "contaContrapartidaId");
+        }
 
         var transferenciaId = Guid.NewGuid();
         decimal valor;
@@ -265,10 +361,10 @@ public class TransferenciaService : ITransferenciaService
                 {
                     new()
                     {
-                        // Mesma descrição do lançamento original — Provisoria=true já sinaliza que é
-                        // provisório; trocar a descrição por um rótulo genérico só dificultava
-                        // reconhecer de qual movimentação essa contrapartida veio.
-                        Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor,
+                        // Nunca copia a descrição do outro banco ("Pix recebido de…" numa conta que
+                        // enviou parecia sinal trocado) — a original fica em Transferencia.Descricao.
+                        // Provisória: a importação do extrato desta conta troca pela linha real.
+                        Id = Guid.NewGuid(), Descricao = ContrapartidaAnalise.DescricaoContrapartida("Entrada", conta.Nome), Valor = valor,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
                         RegraCategorizacaoId = dto.RegraCategorizacaoId, Provisoria = true,
                     },
@@ -326,9 +422,8 @@ public class TransferenciaService : ITransferenciaService
                 {
                     new()
                     {
-                        // Mesma descrição do lançamento original — ver comentário equivalente no
-                        // ramo de Saída acima.
-                        Id = Guid.NewGuid(), Descricao = descricaoOriginal, Valor = valor, Subcategoria = string.Empty,
+                        // Ver comentário equivalente no ramo de Saída acima.
+                        Id = Guid.NewGuid(), Descricao = ContrapartidaAnalise.DescricaoContrapartida("Saida", conta.Nome), Valor = valor, Subcategoria = string.Empty,
                         Categoria = "Transferência", TipoCusto = LancamentoFiltro.TipoTransferencia, TransferenciaId = transferenciaId,
                         RegraCategorizacaoId = dto.RegraCategorizacaoId, Provisoria = true,
                     },

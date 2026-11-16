@@ -38,4 +38,6 @@ public class ItemFinanceiro
     public bool Provisoria { get; set; }
     // Só pra ajuste de saldo — ver ItemFinanceiroSaida.AjusteConfirmado.
     public bool AjusteConfirmado { get; set; }
+    // Só pra contrapartida de Transferência criada pelo app — ver ItemFinanceiroSaida.ContrapartidaConfirmada.
+    public bool ContrapartidaConfirmada { get; set; }
 }

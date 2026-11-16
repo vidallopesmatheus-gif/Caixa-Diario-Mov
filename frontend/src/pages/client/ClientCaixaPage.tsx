@@ -9,7 +9,9 @@ import { fmtBRL, fmtDate, todayISO, addDays } from '../../utils/format'
 import { obterCoberturaExtrato } from '../../api/conciliacaoSaldo'
 import { listarCategorias } from '../../api/categorias'
 import { listarContasBancarias } from '../../api/contasBancarias'
+import { diaTravado } from '../../utils/periodoConferido'
 import { converterLancamentoEmTransferencia } from '../../api/transferencias'
+import { ApiError } from '../../api/client'
 import { excluirLancamento } from '../../api/importacao'
 import { lancarCompraParcelada } from '../../api/faturasCartao'
 import CategoriaCombobox from '../../components/shared/CategoriaCombobox'
@@ -183,6 +185,8 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
   // Rascunhos que o usuário moveu pra outra conta (via o select por item) não entram no total do
   // card — ele é só da conta exibida agora. savedEntradas/savedSaidas já são só dela (vêm de
   // buscarPorData(data, contaId)).
+  const contaAtual = contas.find(c => c.id === contaId)
+  const somenteLeitura = diaTravado(contaAtual, data)
   const totalEntradas = [...entradas.filter(e => e.contaId === contaId), ...savedEntradas].reduce((s, x) => s + (Number(x.valor) || 0), 0)
   const totalSaidas = [...saidas.filter(s => s.contaId === contaId), ...savedSaidas].reduce((s, x) => s + (Number(x.valor) || 0), 0)
   const calculado = inicio + totalEntradas - totalSaidas
@@ -441,6 +445,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
       // Item 3.3: o motor de vínculo roda depois de salvar — soma as sugestões encontradas em
       // cada conta/dia afetado pra avisar o usuário de uma vez, sem precisar ir a Contas conferir.
       let totalSugestoesVinculo = 0
+      const avisosTransferencia: string[] = []
 
       for (const grupoContaId of contasEnvolvidas) {
         const entradasGrupo = gruposEntrada.get(grupoContaId) ?? []
@@ -471,25 +476,30 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         // Linhas marcadas como transferência: só dá pra criar o par vinculado depois que a linha
         // existe de verdade (salva acima). Sequencial, não Promise.all — evita duas chamadas
         // lendo/escrevendo o mesmo RegistroDiario ao mesmo tempo e uma perder a alteração da outra.
-        for (const item of entradasGrupo.filter(e => e.transferenciaContaId && e.id)) {
-          await converterLancamentoEmTransferencia({
-            contaId: grupoContaId, lancamentoId: item.id!, data, tipo: 'Entrada',
-            contaContrapartidaId: item.transferenciaContaId!,
-          })
-        }
-        for (const item of saidasGrupo.filter(s => s.transferenciaContaId && s.id)) {
-          await converterLancamentoEmTransferencia({
-            contaId: grupoContaId, lancamentoId: item.id!, data, tipo: 'Saida',
-            contaContrapartidaId: item.transferenciaContaId!,
-          })
+        // Money Vision ("contrapartida falsa"): sem o par real na outra conta e com o extrato dela
+        // cobrindo o dia, o backend avisa em vez de inventar o lançamento — a linha fica salva como
+        // lançamento comum e o aviso aparece; as outras linhas seguem.
+        const marcadas = [
+          ...entradasGrupo.filter(e => e.transferenciaContaId && e.id).map(e => ({ item: e, tipo: 'Entrada' as const })),
+          ...saidasGrupo.filter(s => s.transferenciaContaId && s.id).map(s => ({ item: s, tipo: 'Saida' as const })),
+        ]
+        for (const { item, tipo } of marcadas) {
+          try {
+            await converterLancamentoEmTransferencia({
+              contaId: grupoContaId, lancamentoId: item.id!, data, tipo, contaContrapartidaId: item.transferenciaContaId!,
+            })
+          } catch (e: unknown) {
+            if (!(e instanceof ApiError) || !e.codigo.startsWith('CONTRAPARTIDA_')) throw e
+            avisosTransferencia.push(`"${item.descricao}": ${e.message} Classifique pelo extrato da conta.`)
+          }
         }
       }
 
       await recarregarRegistroAtual()
       setSaveSuccess(true)
-      setMsg(totalSugestoesVinculo > 0
+      setMsg((totalSugestoesVinculo > 0
         ? `Salvo com sucesso! 💡 ${totalSugestoesVinculo} conta(s) prevista(s) encontrada(s) no extrato — reveja em Contas.`
-        : 'Salvo com sucesso!')
+        : 'Salvo com sucesso!') + avisosTransferencia.map(a => ` ⚠ ${a}`).join(''))
     } catch (e: unknown) {
       setSaveSuccess(false)
       setMsg(e instanceof Error ? e.message : String(e))
@@ -648,7 +658,15 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         </div>
       )}
 
+      {/* Money Vision ("travar o período até o saldo conferido"): dia conferido abre só para leitura. */}
+      {somenteLeitura && (
+        <div className="conc-trava" role="status">
+          🔒 Período conferido até {fmtDate(contaAtual!.travadoAte!)} nesta conta — este dia abre só para leitura. Para corrigir, reabra o período na conta (Banco).
+        </div>
+      )}
+
       <div className="form-card">
+        <fieldset disabled={somenteLeitura} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <h3>📋 Registro do dia</h3>
         <div className="inp-group">
           <label>Saldo início (preenchido automaticamente)</label>
@@ -905,6 +923,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
             setSaidaDisplays(d => [...d, ''])
           }}>＋ Adicionar saída</button>
         </div>
+        </fieldset>
       </div>
 
       <div className="saldo-box">
@@ -928,7 +947,7 @@ export default function ClientCaixaPage({ clienteIdOverride }: Props) {
         </div>
       )}
       {msg && <div style={{ marginTop: 8, fontWeight: 600, color: saveSuccess ? '#34c759' : '#ff6b6b' }}>{msg}</div>}
-      <button className="btn-save" onClick={handleSave} disabled={saving}>
+      <button className="btn-save" onClick={handleSave} disabled={saving || somenteLeitura}>
         {saving ? 'Salvando...' : '☁️ Salvar e sincronizar'}
       </button>
     </>

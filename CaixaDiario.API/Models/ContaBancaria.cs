@@ -18,6 +18,13 @@ public class ContaBancaria
     public int? DiaFechamento { get; set; }
     public int? DiaVencimento { get; set; }
 
+    // Money Vision ("travar o período até o saldo conferido"): nada que mexa no saldo muda até esta
+    // data (inclusive) sem reabrir. Histórico em ConferenciaSaldo.
+    public DateOnly? TravadoAte { get; set; }
+    public decimal? TravaSaldoBanco { get; set; }
+    // Conferido pelo consultor (admin): o cliente não reabre sozinho.
+    public bool TravadoPorConsultor { get; set; }
+
     public Usuario Cliente { get; set; } = null!;
     public ICollection<RegistroDiario> Registros { get; set; } = new List<RegistroDiario>();
 }

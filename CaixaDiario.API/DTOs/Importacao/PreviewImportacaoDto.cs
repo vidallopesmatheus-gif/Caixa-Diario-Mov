@@ -42,6 +42,10 @@ public class PreviewImportacaoDto
     // Saldo que o próprio arquivo informa (OFX <LEDGERBAL>, ou coluna "Saldo") — sem ele, a tela
     // pergunta "Saldo no banco em <data> (opcional)".
     public SaldoBancoArquivoDto? SaldoBancoArquivo { get; set; }
+    // Money Vision ("travar o período até o saldo conferido"): linhas novas com data no período
+    // conferido da conta — não entram (fora de TotalNovas); a tela oferece "Reabrir".
+    public DateOnly? TravadoAte { get; set; }
+    public List<CaixaDiario.API.DTOs.ConciliacaoSaldo.LinhaDiagnosticoDto> LinhasEmPeriodoTravado { get; set; } = new();
 }
 
 public class CoberturaImportacaoDto

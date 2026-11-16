@@ -1954,6 +1954,41 @@ public class ImportacaoServiceTests
         Assert.Equal(0, resultado.TotalPendentesCategorizacao);
     }
 
+    // Money Vision ("transferência cria contrapartida falsa", caso C): o Nubank de junho só tinha a
+    // contrapartida criada a partir do C6. Importar o extrato real troca ela pela linha do banco.
+    [Fact]
+    public async Task ImportarArquivoAsync_OfxDoMesQueSoTinhaContrapartidaProvisoria_SubstituiSemDuplicar()
+    {
+        var contaId = Guid.NewGuid();
+        var clienteId = Guid.NewGuid();
+        var transferenciaId = Guid.NewGuid();
+        var data = new DateOnly(2026, 6, 4);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(CriarConta(contaId, clienteId, saldoInicial: 5000m));
+        var registro = new RegistroDiario
+        {
+            Id = Guid.NewGuid(), ClienteId = clienteId, ContaBancariaId = contaId, Data = data, Inicio = 5000m, SaldoFinal = 1800m,
+            Saidas = new() { new ItemFinanceiroSaida
+            {
+                Id = Guid.NewGuid(), Descricao = "↔ Transferência para C6 Bank", Valor = 3200m,
+                Categoria = "Transferência", TipoCusto = "Transferencia", TransferenciaId = transferenciaId, Provisoria = true,
+            } },
+            Entradas = new(), ContasReceber = new(), ContasPagar = new(),
+        };
+        _registroRepoMock.Setup(r => r.ListarPorContaAsync(contaId)).ReturnsAsync(new List<RegistroDiario> { registro });
+        _registroRepoMock.Setup(r => r.AtualizarAsync(It.IsAny<RegistroDiario>())).ReturnsAsync((RegistroDiario r) => r);
+        _importRepoMock.Setup(r => r.AdicionarLoteAsync(It.IsAny<IEnumerable<TransacaoImportada>>())).Returns(Task.CompletedTask);
+
+        var ofx = "<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>" +
+            "<STMTTRN><TRNTYPE>DEBIT<TRNAMT>-3200.00<DTPOSTED>20260604<FITID>N604<MEMO>Transferência enviada pelo Pix - Matheus Vidal Lopes</STMTTRN>" +
+            "</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+
+        await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", CriarArquivoTexto("nubank-jun.ofx", ofx), null, null);
+
+        var saida = Assert.Single(registro.Saidas);
+        Assert.Equal((transferenciaId, "N604", false), (saida.TransferenciaId!.Value, saida.FitId, saida.Provisoria));
+        Assert.Equal(1800m, registro.SaldoFinal);
+    }
+
     [Fact]
     public async Task ImportarArquivoAsync_DuasProvisoriasCandidatas_NaoDecideSozinhoEImportaComoPendente()
     {
@@ -2330,5 +2365,78 @@ public class ImportacaoServiceTests
         var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", arquivo, null, null);
 
         Assert.Equal(2, resultado.TotalSugestoesVinculo);
+    }
+
+    // ── Money Vision: período conferido até o saldo bater com o banco ─────────────────────────
+
+    private ContaBancaria ContaConferidaAte0711(Guid contaId, Guid clienteId)
+    {
+        var conta = CriarConta(contaId, clienteId);
+        conta.Nome = "Nubank";
+        conta.TravadoAte = new DateOnly(2026, 11, 7);
+        _contaRepoMock.Setup(r => r.ObterPorIdAsync(contaId)).ReturnsAsync(conta);
+        return conta;
+    }
+
+    private const string ExtratoDe0511a1011 =
+        "Data;Descricao;Valor\n05/11/2026;Pix Ana;100,00\n07/11/2026;Mercado;-30,00\n08/11/2026;Pix Bia;50,00\n10/11/2026;Posto;-20,00\n";
+
+    [Fact]
+    public async Task PreviewAsync_ContaConferidaAte0711_SeparaAsLinhasDoPeriodoConferido()
+    {
+        var (contaId, clienteId) = (Guid.NewGuid(), Guid.NewGuid());
+        ContaConferidaAte0711(contaId, clienteId);
+        ConfigurarSemHistoricoOuRegistros(contaId);
+
+        var preview = await _sut.PreviewAsync(contaId, clienteId, "cliente", CriarArquivoTexto("extrato.csv", ExtratoDe0511a1011), null, null);
+
+        Assert.Equal(2, preview.TotalNovas);
+        Assert.Equal(new DateOnly(2026, 11, 7), preview.TravadoAte);
+        Assert.Equal(new[] { new DateOnly(2026, 11, 5), new DateOnly(2026, 11, 7) }, preview.LinhasEmPeriodoTravado.Select(l => l.Data));
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_ContaConferidaAte0711_SoImportaDepoisDaTrava()
+    {
+        var (contaId, clienteId) = (Guid.NewGuid(), Guid.NewGuid());
+        ContaConferidaAte0711(contaId, clienteId);
+        ConfigurarSemHistoricoOuRegistros(contaId);
+        var criados = new List<RegistroDiario>();
+        _registroRepoMock.Setup(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()))
+            .Callback<RegistroDiario>(criados.Add).ReturnsAsync((RegistroDiario r) => r);
+
+        var resultado = await _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", CriarArquivoTexto("extrato.csv", ExtratoDe0511a1011), null, null);
+
+        Assert.Equal(new[] { new DateOnly(2026, 11, 8), new DateOnly(2026, 11, 10) }, criados.Select(r => r.Data).Order());
+        Assert.Equal((2, 2), (resultado.TotalImportadas, resultado.TotalIgnoradasPeriodoConferido));
+    }
+
+    [Fact]
+    public async Task ImportarArquivoAsync_TodasAsLinhasNoPeriodoConferido_Lanca409SemGravar()
+    {
+        var (contaId, clienteId) = (Guid.NewGuid(), Guid.NewGuid());
+        ContaConferidaAte0711(contaId, clienteId);
+        ConfigurarSemHistoricoOuRegistros(contaId);
+        var csv = "Data;Descricao;Valor\n05/11/2026;Pix Ana;100,00\n";
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            _sut.ImportarArquivoAsync(contaId, clienteId, "cliente", CriarArquivoTexto("extrato.csv", csv), null, null));
+
+        Assert.Equal(409, ex.StatusCode);
+        _registroRepoMock.Verify(r => r.AdicionarAsync(It.IsAny<RegistroDiario>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExcluirLancamentoAsync_LancamentoDe0511NoPeriodoConferido_Lanca409SemGravar()
+    {
+        var (contaId, clienteId) = (Guid.NewGuid(), Guid.NewGuid());
+        ContaConferidaAte0711(contaId, clienteId);
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _sut.ExcluirLancamentoAsync(contaId, clienteId, "cliente",
+            new ExcluirLancamentoDto { Id = Guid.NewGuid(), Data = "2026-11-05" }));
+
+        Assert.Equal(CaixaDiario.API.Enums.CodigoRetorno.PERIODO_CONFERIDO, ex.Codigo);
+        Assert.IsType<PeriodoConferidoErroDto>(ex.Detalhes);
+        _registroRepoMock.Verify(r => r.AtualizarAsync(It.IsAny<RegistroDiario>()), Times.Never);
     }
 }

@@ -35,6 +35,9 @@ public class ItemFinanceiroSaida
     // Só pra ajuste de saldo (TipoCusto AjusteConciliacao): o usuário conferiu na tela "Conferir
     // saldo" e disse que está certo — some da lista de ajustes a revisar.
     public bool AjusteConfirmado { get; set; }
+    // Só pra contrapartida de Transferência criada pelo app numa data que o extrato da conta já
+    // cobre sem o lançamento real: o usuário confirmou na revisão que o dinheiro foi mesmo pra cá.
+    public bool ContrapartidaConfirmada { get; set; }
     // Item 9: compra parcelada no cartão — cada parcela é sua própria Saida, numa competência
     // futura diferente, ligadas por este Id compartilhado (ver FaturaCartaoService.
     // LancarComprasParceladaAsync). NumeroParcela/TotalParcelas são só pra exibição ("3/12").

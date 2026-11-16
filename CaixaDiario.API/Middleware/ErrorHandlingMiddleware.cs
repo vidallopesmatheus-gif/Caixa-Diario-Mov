@@ -30,7 +30,8 @@ public class ErrorHandlingMiddleware
                 Status = ex.StatusCode,
                 Codigo = ex.Codigo.ToString(),
                 Mensagem = ex.Message,
-                Campo = ex.Campo
+                Campo = ex.Campo,
+                Detalhes = ex.Detalhes,
             });
         }
         catch (Exception ex)

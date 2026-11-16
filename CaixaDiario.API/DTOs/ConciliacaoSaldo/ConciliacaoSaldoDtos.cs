@@ -10,6 +10,8 @@ public class PontoConciliacaoDto
     public decimal Diferenca { get; set; }
     public bool Conciliado { get; set; }
     public string Origem { get; set; } = string.Empty;
+    // Preenchido pelo "Conferir saldo": até onde a conta ficou travada (só quando bateu).
+    public DateOnly? TravadoAte { get; set; }
 }
 
 /// <summary>"Extrato até 07/11/2026 · Saldo do app R$ X · Banco em 07/11 R$ X ✅".</summary>
@@ -91,7 +93,14 @@ public class DiagnosticoDiferencaDto
     // Ajustes de saldo no período — escondem dado faltando (mês sem extrato, transferência sem
     // par); EfeitoSeCorrigir = desfazer o ajuste.
     public List<LinhaDiagnosticoDto> Ajustes { get; set; } = new();
+    // Contrapartida de transferência que o app criou numa data que o extrato desta conta cobre, sem
+    // o lançamento real (ex.: "+400 do Nubank" que nunca entrou no C6).
+    public List<LinhaDiagnosticoDto> ContrapartidasSemLancamento { get; set; } = new();
+    // Contrapartida criada pelo app que repete um lançamento real solto (a transferência conta 2×).
+    public List<LinhaDiagnosticoDto> ContrapartidasDuplicadas { get; set; } = new();
     public CombinacaoDiagnosticoDto? Combinacao { get; set; }
+    // "O que mudou desde a última conferência" — criado, editado ou excluído depois de reabrir.
+    public List<MudancaDesdeConferenciaDto> MudancasDesdeConferencia { get; set; } = new();
 }
 
 /// <summary>Um ajuste de saldo da conta, na tela "Conferir saldo" — pra confirmar ou desfazer.</summary>

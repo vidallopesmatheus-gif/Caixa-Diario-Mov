@@ -138,7 +138,9 @@ public class ImportacaoService : IImportacaoService
         var (jaImportadas, casados) = CasarComRazao(parseadas, registrosAtivos, historico);
         var periodos = _periodoExtratoRepo != null ? await _periodoExtratoRepo.ListarPorContaAsync(contaBancariaId) : new List<PeriodoExtrato>();
         var diasComExtratoAntes = ConciliacaoSaldoCalculo.DiasComExtrato(periodos, historico, registrosAtivos);
-        var novas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
+        var todasNovas = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
+        var emPeriodoTravado = todasNovas.Where(t => PeriodoConferido.Travado(conta, t.Data)).ToList();
+        var novas = todasNovas.Except(emPeriodoTravado).ToList();
         var conciliaveis = IdentificarConciliaveis(novas, registrosAtivos);
 
         var candidatosDuplicata = IdentificarCandidatosDuplicata(
@@ -160,8 +162,14 @@ public class ImportacaoService : IImportacaoService
             DuplicatasManuais = MapearDuplicatasManuais(novas, candidatosDuplicata),
             DuplicatasEntreArquivos = MapearDuplicatasEntreArquivos(novas, candidatosDuplicata),
             Cobertura = CalcularCobertura(parseadas.Count > 0 ? parseadas : todasParseadas, diasComExtratoAntes),
-            AusentesNoArquivo = AusentesNoArquivo(conta, parseadas, registrosAtivos, casados, chavesImportadasAntes),
+            AusentesNoArquivo = AusentesNoArquivo(conta, parseadas, registrosAtivos, casados, chavesImportadasAntes)
+                .Where(a => !PeriodoConferido.Travado(conta, a.Data)).ToList(),
             SaldoBancoArquivo = saldosBanco.LastOrDefault(),
+            TravadoAte = conta.TravadoAte,
+            LinhasEmPeriodoTravado = emPeriodoTravado.OrderBy(t => t.Data).Select(t => new CaixaDiario.API.DTOs.ConciliacaoSaldo.LinhaDiagnosticoDto
+            {
+                Data = t.Data, Descricao = t.Descricao, Valor = t.Tipo == "Saida" ? -t.Valor : t.Valor,
+            }).ToList(),
         };
     }
 
@@ -420,7 +428,14 @@ public class ImportacaoService : IImportacaoService
         var chavesImportadasAntes = ColetarChavesImportadas(historico);
 
         var (jaImportadas, casados) = CasarComRazao(parseadas, registros, historico);
-        var aImportar = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
+        // Período conferido da conta: as linhas novas de lá não entram (a prévia já mostrou quais).
+        var novasNoArquivo = parseadas.Where(t => !jaImportadas.Contains(t.Indice)).ToList();
+        var aImportar = novasNoArquivo.Where(t => !PeriodoConferido.Travado(conta, t.Data)).ToList();
+        var ignoradasPeriodoConferido = novasNoArquivo.Count - aImportar.Count;
+        if (aImportar.Count == 0 && ignoradasPeriodoConferido > 0 && opcoesConciliacao.ExcluirAusentes.Count == 0)
+            throw new ApiException(409, CodigoRetorno.PERIODO_CONFERIDO,
+                $"Todas as linhas novas estão no período conferido até {conta.TravadoAte:dd/MM/yyyy} — reabra o período para importá-las.",
+                detalhes: new PeriodoConferidoErroDto(conta.Id, conta.Nome, conta.TravadoAte!.Value, conta.TravadoPorConsultor));
 
         // Money Vision ("período sobreposto"): reimportar um extrato que já está todo no app ainda
         // serve pra conciliar o saldo e pra excluir o que sumiu dele — só não há o que lançar.
@@ -839,6 +854,7 @@ public class ImportacaoService : IImportacaoService
 
         return new ResultadoImportacaoDto
         {
+            TotalIgnoradasPeriodoConferido = ignoradasPeriodoConferido,
             Conciliacao = conciliacao,
             TotalAusentesExcluidos = totalAusentesExcluidos,
             TotalImportadas = aImportar.Count - conciliadasTransferencia - totalMescladasComManual - totalDuplicatasEntreArquivosIgnoradas,
@@ -1063,6 +1079,7 @@ public class ImportacaoService : IImportacaoService
         var conta = await ObterContaComAcesso(contaBancariaId, usuarioLogadoId, perfil);
         if (!DateOnly.TryParse(dto.Data, out var data))
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Data inválida.", "data");
+        PeriodoConferido.Garantir(conta, data);
 
         var item = await ExcluirUmLancamentoInternoAsync(conta, dto.Id, data, usuarioLogadoId, perfil)
             ?? throw new ApiException(404, CodigoRetorno.REGISTRO_NAO_ENCONTRADO, "Lançamento não encontrado.");
@@ -1094,6 +1111,8 @@ public class ImportacaoService : IImportacaoService
         var datasInvalidas = dto.Itens.Where(i => !DateOnly.TryParse(i.Data, out _)).ToList();
         if (datasInvalidas.Count > 0)
             throw new ApiException(400, CodigoRetorno.DADOS_INVALIDOS, "Data inválida.", "data");
+        // Tudo ou nada: um item no período conferido barra o lote antes de excluir qualquer um.
+        PeriodoConferido.Garantir(conta, dto.Itens.Select(i => DateOnly.Parse(i.Data)));
 
         await using var transacao = _context.Database.IsRelational()
             ? await _context.Database.BeginTransactionAsync()

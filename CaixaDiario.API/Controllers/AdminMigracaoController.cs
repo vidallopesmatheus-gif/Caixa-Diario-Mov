@@ -21,6 +21,7 @@ public class AdminMigracaoController : ControllerBase
     private readonly IVerificacaoSinalTransferenciaService _verificacaoSinalTransferenciaService;
     private readonly ICorrigirDataParcelasService _corrigirDataParcelasService;
     private readonly ICorrigirFaturasService _corrigirFaturasService;
+    private readonly IRevisaoTransferenciasService _revisaoTransferenciasService;
 
     public AdminMigracaoController(
         IMigracaoRecorrenciasService migracaoRecorrenciasService,
@@ -29,7 +30,8 @@ public class AdminMigracaoController : ControllerBase
         IRecalculoSaldoService recalculoSaldoService,
         IVerificacaoSinalTransferenciaService verificacaoSinalTransferenciaService,
         ICorrigirDataParcelasService corrigirDataParcelasService,
-        ICorrigirFaturasService corrigirFaturasService)
+        ICorrigirFaturasService corrigirFaturasService,
+        IRevisaoTransferenciasService revisaoTransferenciasService)
     {
         _migracaoRecorrenciasService = migracaoRecorrenciasService;
         _reclassificacaoCategoriasService = reclassificacaoCategoriasService;
@@ -38,6 +40,7 @@ public class AdminMigracaoController : ControllerBase
         _verificacaoSinalTransferenciaService = verificacaoSinalTransferenciaService;
         _corrigirDataParcelasService = corrigirDataParcelasService;
         _corrigirFaturasService = corrigirFaturasService;
+        _revisaoTransferenciasService = revisaoTransferenciasService;
     }
 
     private void VerificarAdmin()
@@ -110,6 +113,17 @@ public class AdminMigracaoController : ControllerBase
         VerificarAdmin();
         var resultado = await _recalculoSaldoService.ConsolidarAjustesAsync(confirmar);
         return Ok(new ApiResponse<ConsolidacaoAjustesResultDto> { Dados = resultado });
+    }
+
+    // Money Vision ("transferência cria contrapartida falsa"): troca contrapartida inventada pelo
+    // lançamento real solto, junta par duplicado e marca como provisória o que não tem extrato.
+    // Sem "confirmar": só relatório.
+    [HttpPost("transferencias-contrapartida-corrigir")]
+    public async Task<IActionResult> CorrigirContrapartidasTransferencia([FromQuery] bool confirmar = false)
+    {
+        VerificarAdmin();
+        var resultado = await _revisaoTransferenciasService.CorrigirAsync(null, confirmar);
+        return Ok(new ApiResponse<CorrecaoTransferenciasResultDto> { Dados = resultado });
     }
 
     // Money Vision: "Pix recebido entrando como saída" (item 3) — só relatório, nunca corrige

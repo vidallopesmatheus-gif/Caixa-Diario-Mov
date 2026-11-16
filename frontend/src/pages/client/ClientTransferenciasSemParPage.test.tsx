@@ -50,6 +50,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(AuthContextModule.useAuth).mockReturnValue({ user: mockUser, login: vi.fn(), logout: vi.fn() } as never)
   vi.mocked(contasBancariasApi.listarContasBancarias).mockResolvedValue([contaCorrente, contaInvestimento])
+  // "Transferências para revisar" fica fora destes testes (ver TransferenciasParaRevisar.test).
+  vi.mocked(transferenciasApi.listarTransferenciasParaRevisar).mockResolvedValue({ corrigiveis: [], paraDecidir: [] })
 })
 
 test('mostra "nenhuma sugestão" quando a fila está vazia', async () => {
